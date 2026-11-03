@@ -4,7 +4,13 @@
 // to the Claude plan. POST fixes a missing piece from the browser: `install`
 // installs Claude Code and `sign-in` starts its login (or a switch to another
 // account), each streaming the command's output a line at a time.
-import { spawn } from 'node:child_process';
+//
+// A sign-in waits for the owner on the page it opens. Closing that page leaves
+// it waiting, so a second `sign-in` stops the first and starts over, and
+// DELETE stops it outright. GET says when one is waiting, so a refreshed page
+// still shows it. An install runs to the end: stopping one halfway can leave
+// Claude Code half installed.
+import { spawn, type ChildProcess } from 'node:child_process';
 import { error, json } from '@sveltejs/kit';
 import {
   claudeAccount,
@@ -21,7 +27,8 @@ const withAccount = async () => {
   return { ...settings, account: settings.auth === 'plan' ? await claudeAccount() : undefined };
 };
 
-export const GET: RequestHandler = async () => json(await withAccount());
+export const GET: RequestHandler = async () =>
+  json({ ...(await withAccount()), signingIn: current?.action === 'sign-in' });
 
 export const PUT: RequestHandler = async ({ request }) => {
   const b = (await request.json().catch(() => ({}))) as {
@@ -45,14 +52,33 @@ const COMMANDS = {
   'sign-in': ['claude', ['auth', 'login', '--claudeai']]
 } as const;
 
-let running = false;
+type Action = keyof typeof COMMANDS;
+
+/** The command running now, with the way to end its answer. */
+let current:
+  { action: Action; child: ChildProcess; finish: (ok: boolean, line?: string) => void } | undefined;
+
+/** Stop a command: politely, then for sure. */
+function stop(child: ChildProcess) {
+  child.kill();
+  setTimeout(() => child.kill('SIGKILL'), 3000).unref();
+}
+
+// A command outlives the server unless the server stops it on the way out.
+process.once('exit', () => current?.child.kill());
 
 export const POST: RequestHandler = async ({ request }) => {
   const b = (await request.json().catch(() => ({}))) as { action?: unknown };
-  const command = COMMANDS[b.action as keyof typeof COMMANDS];
+  const action = b.action as Action;
+  const command = COMMANDS[action];
   if (!command) error(400, 'Say install or sign-in');
-  if (running) error(409, 'One is already running');
-  running = true;
+  if (current?.action === 'install') error(409, 'Claude Code is still installing');
+  if (current) {
+    // Signing in again: the owner closed the page or wants a fresh one.
+    const old = current;
+    old.finish(false, 'Started over.');
+    stop(old.child);
+  }
   const [cmd, args] = command;
   const encoder = new TextEncoder();
   // The page can leave before the command ends; the command still finishes.
@@ -73,18 +99,20 @@ export const POST: RequestHandler = async ({ request }) => {
       child.stdout.on('data', lines);
       child.stderr.on('data', lines);
       // Five minutes is long enough for a slow install or for the owner to sign in.
-      const timer = setTimeout(() => child.kill(), 5 * 60_000);
+      const timer = setTimeout(() => stop(child), 5 * 60_000);
       let finished = false;
       const finish = (ok: boolean, line?: string) => {
         if (finished) return;
         finished = true;
         clearTimeout(timer);
-        running = false;
+        if (current === entry) current = undefined;
         if (line) send({ line });
         send({ done: true, ok });
         if (open) out.close();
         open = false;
       };
+      const entry = { action, child, finish };
+      current = entry;
       child.on('error', (e) => finish(false, e.message));
       child.on('close', (code) => finish(code === 0));
     },
@@ -93,4 +121,13 @@ export const POST: RequestHandler = async ({ request }) => {
     }
   });
   return new Response(body, { headers: { 'content-type': 'application/x-ndjson' } });
+};
+
+/** Stop a sign-in that is waiting. An install is left to finish. */
+export const DELETE: RequestHandler = async () => {
+  const old = current;
+  if (old?.action !== 'sign-in') return json({ stopped: false });
+  old.finish(false, 'Cancelled.');
+  stop(old.child);
+  return json({ stopped: true });
 };

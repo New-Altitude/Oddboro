@@ -10,6 +10,8 @@
     auth: 'plan' | 'key';
     model: Model;
     account?: { email?: string; org?: string; plan?: string };
+    /** A sign-in is waiting on its page, maybe from before this page loaded. */
+    signingIn?: boolean;
   };
   type Props = {
     onnext: () => void;
@@ -25,7 +27,10 @@
   let key = $state('');
   let saving = $state(false);
   let switching = $state(false);
+  /** Counts sign-ins, so one that was started over or cancelled no longer changes the card. */
+  let attempt = 0;
   let problem = $state('');
+  const waiting = $derived(switching || !!settings?.signingIn);
 
   const load = async () => {
     settings = await call<Settings>('/api/setup/claude');
@@ -49,18 +54,37 @@
     }
   }
 
-  /** Sign Claude Code in to another account; the page that opens finishes it. */
+  /**
+   * Sign Claude Code in to another account; the page that opens finishes it.
+   * Pressed again while one waits, it starts over with a fresh page.
+   */
   async function switchAccount() {
     problem = '';
+    const mine = ++attempt;
     switching = true;
     try {
       await stream<{ done?: boolean }>('/api/setup/claude', { action: 'sign-in' }, () => {});
-      await load();
+    } catch (e) {
+      if (mine === attempt) problem = e instanceof Error ? e.message : String(e);
+    } finally {
+      if (mine === attempt) {
+        switching = false;
+        await load();
+      }
+    }
+  }
+
+  /** Stop a sign-in that is waiting, from this page or one before a refresh. */
+  async function cancelSignIn() {
+    attempt++;
+    switching = false;
+    problem = '';
+    try {
+      await call('/api/setup/claude', undefined, 'DELETE');
     } catch (e) {
       problem = e instanceof Error ? e.message : String(e);
-    } finally {
-      switching = false;
     }
+    await load();
   }
 
   const MODELS = [
@@ -115,6 +139,9 @@
   </div>
 {/snippet}
 
+<!-- A sign-in finished on its own page shows here when the owner comes back. -->
+<svelte:window onfocus={() => waiting && !switching && void load()} />
+
 <p class="text-lg font-semibold">How your Odds think.</p>
 
 <div
@@ -140,7 +167,7 @@
   {#if tab === 'plan'}
     <div class="p-3">
       <div class="text-[10px] tracking-[0.14em] text-muted uppercase">Signed in as</div>
-      {#if switching}
+      {#if waiting}
         <p class="mt-1 text-sm text-muted">Finish signing in on the page that opened.</p>
       {:else if settings?.account}
         <p class="mt-1 font-medium break-all">{settings.account.email ?? 'Your account'}</p>
@@ -158,10 +185,11 @@
       <button class="wide" disabled={saving} onclick={() => save({ auth: 'plan' })}>
         Use my Claude plan instead of the key
       </button>
+    {:else if waiting}
+      <button class="wide" onclick={switchAccount}>Open the sign-in page again</button>
+      <button class="wide" onclick={cancelSignIn}>Cancel signing in</button>
     {:else}
-      <button class="wide" disabled={switching} onclick={switchAccount}>
-        {switching ? 'Signing in' : 'Switch account'}
-      </button>
+      <button class="wide" onclick={switchAccount}>Switch account</button>
     {/if}
   {:else}
     <form

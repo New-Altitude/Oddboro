@@ -16,6 +16,8 @@
   let app = $state(false);
   let problem = $state('');
   let fixing = $state<'install' | 'sign-in' | undefined>();
+  /** Counts fixes, so a sign-in that was started over or cancelled no longer changes the card. */
+  let attempt = 0;
   let log = $state<string[]>([]);
 
   async function load() {
@@ -33,23 +35,41 @@
     void load();
   });
 
+  /** Install Claude Code, or sign it in. Signing in again while one waits starts over. */
   async function fix(action: 'install' | 'sign-in') {
+    const mine = ++attempt;
     fixing = action;
+    problem = '';
     log = [];
     try {
       await stream<{ line?: string; done?: boolean; ok?: boolean }>(
         '/api/setup/claude',
         { action },
         (l) => {
-          if (l.line) log = [...log.slice(-2), l.line];
+          if (l.line && mine === attempt) log = [...log.slice(-2), l.line];
         }
       );
     } catch (e) {
-      problem = e instanceof Error ? e.message : String(e);
+      if (mine === attempt) problem = e instanceof Error ? e.message : String(e);
     } finally {
-      fixing = undefined;
-      await load();
+      if (mine === attempt) {
+        fixing = undefined;
+        await load();
+      }
     }
+  }
+
+  /** Stop a sign-in that is waiting on its page. */
+  async function cancelSignIn() {
+    attempt++;
+    fixing = undefined;
+    log = [];
+    try {
+      await call('/api/setup/claude', undefined, 'DELETE');
+    } catch (e) {
+      problem = e instanceof Error ? e.message : String(e);
+    }
+    await load();
   }
 
   const missing = $derived(checks?.filter((c) => c.state === 'missing').length ?? 0);
@@ -146,12 +166,12 @@
   </ul>
   {#if claude?.state === 'missing'}
     <div class="mt-3 flex flex-wrap items-center gap-2 text-sm">
-      {#if fixing}
-        <span class="text-muted">
-          {fixing === 'install'
-            ? 'Installing Claude Code.'
-            : 'Finish signing in on the page that opened.'}
-        </span>
+      {#if fixing === 'install'}
+        <span class="text-muted">Installing Claude Code.</span>
+      {:else if fixing}
+        <span class="text-muted">Finish signing in on the page that opened.</span>
+        <button class="link" onclick={() => fix('sign-in')}>Open it again</button>
+        <button class="link" onclick={cancelSignIn}>Cancel</button>
       {:else if claude.found === 'Not installed'}
         <button class="btn" onclick={() => fix('install')}>Install Claude Code</button>
       {:else}
