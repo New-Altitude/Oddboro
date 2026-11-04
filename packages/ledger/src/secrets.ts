@@ -3,11 +3,11 @@
 // through the tool it ships with: the Keychain on a Mac through `security`,
 // and on Linux the desktop keyring through `secret-tool` (libsecret), which
 // talks to any keyring that speaks the Secret Service (GNOME Keyring,
-// KWallet, KeePassXC). Windows has none yet: its entry is the place to add
-// the Credential Manager. Every secret sits under the service "oddboro",
-// named "<connector>:<NAME>".
+// KWallet, KeePassXC). On Windows it is the Credential Manager, through the
+// PasswordVault that Windows PowerShell can reach with nothing to install.
+// Every secret sits under the service "oddboro", named "<connector>:<NAME>".
 import { execFileSync } from 'node:child_process';
-import { SYSTEM, type System } from './platform.ts';
+import { SYSTEM, powershellSync, type System } from './platform.ts';
 
 const SERVICE = 'oddboro';
 
@@ -53,15 +53,41 @@ const secretService: Store = {
   check: () => quiet('secret-tool', ['search', 'service', SERVICE])
 };
 
+// The names reach the script as environment variables and the value on
+// stdin, so nothing needs quoting and the value never shows in the process
+// list. Retrieve fails when there is no such secret.
+const VAULT =
+  '[void][Windows.Security.Credentials.PasswordVault,Windows.Security.Credentials,ContentType=WindowsRuntime];' +
+  '$v = New-Object Windows.Security.Credentials.PasswordVault;';
+const vault = (script: string, account: string, input?: string) =>
+  powershellSync(VAULT + script, { ODDBORO_SERVICE: SERVICE, ODDBORO_ACCOUNT: account }, input);
+const credentialManager: Store = {
+  // Add replaces a credential already under the same names.
+  set: (account, value) =>
+    void vault(
+      '$v.Add((New-Object Windows.Security.Credentials.PasswordCredential($env:ODDBORO_SERVICE, $env:ODDBORO_ACCOUNT, [Console]::In.ReadToEnd())))',
+      account,
+      value
+    ),
+  get: (account) =>
+    vault(
+      '$c = $v.Retrieve($env:ODDBORO_SERVICE, $env:ODDBORO_ACCOUNT); $c.RetrievePassword(); [Console]::Out.Write($c.Password)',
+      account
+    ),
+  remove: (account) =>
+    void vault('$v.Remove($v.Retrieve($env:ODDBORO_SERVICE, $env:ODDBORO_ACCOUNT))', account),
+  check: () => void vault('[void]$v', '')
+};
+
 const STORES: Record<System, Store | undefined> = {
   mac: keychain,
   linux: secretService,
-  windows: undefined
+  windows: credentialManager
 };
 const store = SYSTEM && STORES[SYSTEM];
 
 export function setSecret(connector: string, name: string, value: string): void {
-  if (!store) throw new Error('This system has no secret store the office can use yet.');
+  if (!store) throw new Error('This system has no secret store the office can use.');
   store.set(`${connector}:${name}`, value);
 }
 
@@ -85,7 +111,7 @@ export function deleteSecret(connector: string, name: string): boolean {
 
 /** Whether this computer has a secret store the office can use, and why not when it has none. */
 export function secretStore(): { ok: true } | { ok: false; problem: string } {
-  if (!store) return { ok: false, problem: 'Windows is not ready yet' };
+  if (!store) return { ok: false, problem: `not known on ${process.platform}` };
   try {
     store.check();
     return { ok: true };

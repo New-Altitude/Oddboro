@@ -2,14 +2,15 @@
 
 A virtual office for one person, the owner. AI workers called Odds work on a
 pixel-art floor, and where each one stands tells you what it is doing. The office runs on your
-computer, a Mac or Linux, and its first Odd is the Office Manager you pick.
+computer, a Mac, Linux or Windows, and its first Odd is the Office Manager you pick.
 
 ## Get started
 
 The quickest way is the app: the Mac app or the Linux AppImage from
 [oddboro.com/releases](https://oddboro.com/releases/). To run it from source
-instead, you need a Mac or Linux, [Node](https://nodejs.org) 24 or later, and a Claude
-plan or an Anthropic API key.
+instead, you need a Mac, Linux or Windows 10 or later, [Node](https://nodejs.org) 24 or
+later, and a Claude plan or an Anthropic API key. On Windows, Git for Windows brings
+`git`, and the steps below work the same in PowerShell.
 
 1. Clone the repo:
 

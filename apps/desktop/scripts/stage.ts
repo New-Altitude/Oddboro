@@ -9,6 +9,7 @@
 // It also fetches the Node binary the app carries, checked against nodejs.org's
 // published sums. `--smoke` then starts the staged office on a spare port and
 // home, and stops it once it answers.
+import { fileURLToPath } from 'node:url';
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
@@ -26,7 +27,7 @@ import { stripTypeScriptTypes } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const ROOT = new URL('../../..', import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 const DESKTOP = join(ROOT, 'apps', 'desktop');
 const STAGE = join(DESKTOP, 'stage');
 /** This machine as Rust names it (the sidecar's suffix) and as nodejs.org does. */

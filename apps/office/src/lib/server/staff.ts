@@ -10,7 +10,6 @@
 // tasks, the ledger), plus whatever access the owner granted: servers at read
 // level (the tools the owner ticked as read-only) or at write level (every
 // tool). Hosted servers get a fresh OAuth token per run.
-import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
   appendFileSync,
@@ -21,7 +20,7 @@ import {
   writeFileSync
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import {
   DATABASE_URL,
   goalsFor,
@@ -61,13 +60,14 @@ import {
   zone,
   zoneName,
   STAFF_SERVER,
+  serverCommand,
   home
 } from '@oddboro/ledger';
 import { emit } from './events.ts';
 import type { Work } from '../staff/work.ts';
 import { getSecret, headerSecret } from './keychain.ts';
 import { bearer } from './oauth.ts';
-import { apiKey, claudeSettings, cleanEnv, modelArgs } from './claude.ts';
+import { apiKey, claudeSettings, cleanEnv, modelArgs, spawnClaude } from './claude.ts';
 import { notifyMac } from './notify.ts';
 import { downtime, installsAt } from './update.ts';
 
@@ -310,7 +310,7 @@ async function access(who: StaffRow) {
     servers[c.id] =
       c.kind === 'http'
         ? { type: 'http', url: c.config.url, headers }
-        : { command: c.config.command, args: c.config.args, env };
+        : { ...serverCommand(c.config.command!, c.config.args), env };
     if (a.level === 'act') allowed.push(`mcp__${c.id}`);
     else allowed.push(...c.readTools.map((t) => `mcp__${c.id}__${t}`));
   }
@@ -458,6 +458,17 @@ function readable(dir: string): string[] {
   return [dir, DATA, join(homedir(), '.claude', 'projects', sessionsOf(dir))];
 }
 
+/**
+ * A path as a permission rule names it, without the rule's leading slash.
+ * Claude Code matches Windows paths in POSIX form, C:\Users\x as /c/Users/x,
+ * so a rule written with the Windows path would match nothing, and a deny
+ * rule that matches nothing lets everything through.
+ */
+function rulePath(p: string): string {
+  const m = /^([A-Za-z]):[\\/](.*)$/.exec(p);
+  return m ? `/${m[1].toLowerCase()}/${m[2].replaceAll('\\', '/')}` : p;
+}
+
 /** Claude Code names a working folder's sessions folder after its path. */
 function sessionsOf(dir: string): string {
   return dir.replace(/[^a-zA-Z0-9]/g, '-');
@@ -482,7 +493,8 @@ function unreadable(id: string, dir: string): string[] {
     }
   };
   // Secret stores in the home folder, including the sign-ins other apps on this
-  // Mac keep there, like the Google Workspace MCP server's.
+  // computer keep there, like the Google Workspace MCP server's. AppData is
+  // Windows' Library.
   const paths = [
     ...[
       '.ssh',
@@ -490,6 +502,7 @@ function unreadable(id: string, dir: string): string[] {
       '.gnupg',
       '.config',
       'Library',
+      'AppData',
       '.claude.json',
       '.google_workspace_mcp'
     ].map((p) => join(homedir(), p)),
@@ -499,8 +512,8 @@ function unreadable(id: string, dir: string): string[] {
     ...besides(join(claude, 'projects'), [sessionsOf(dir)])
   ];
   // Never deny a folder a staffer must read, such as an office kept under ~/Library.
-  const covers = (p: string) => reads.some((r) => r === p || r.startsWith(`${p}/`));
-  return [...new Set(paths)].filter((p) => !covers(p)).map((p) => `Read(/${p})`);
+  const covers = (p: string) => reads.some((r) => r === p || r.startsWith(`${p}${sep}`));
+  return [...new Set(paths)].filter((p) => !covers(p)).map((p) => `Read(/${rulePath(p)})`);
 }
 
 /** One headless Claude Code run. `session` resumes a saved session file, or starts fresh. */
@@ -549,16 +562,16 @@ async function run(
     '--tools',
     'Read,Glob,Grep,Write,Edit',
     '--allowedTools',
-    ...readable(dir).map((p) => `Read(/${p}/**)`),
+    ...readable(dir).map((p) => `Read(/${rulePath(p)}/**)`),
     // Edit rules cover every file-writing tool; Claude Code ignores Write(path).
-    `Edit(/${dir}/**)`,
+    `Edit(/${rulePath(dir)}/**)`,
     ...allowed,
     '--disallowedTools',
     ...unreadable(who.id, dir),
     // Claude Code loads these on every run: a staffer may not rewrite its own instructions or hooks.
     ...['CLAUDE.md', 'CLAUDE.local.md', '.claude/**'].flatMap((f) => [
-      `Edit(/${dir}/${f})`,
-      `Edit(/${dir}/**/${f})`
+      `Edit(/${rulePath(dir)}/${f})`,
+      `Edit(/${rulePath(dir)}/**/${f})`
     ]),
     '--permission-mode',
     'dontAsk',
@@ -579,7 +592,7 @@ async function run(
   ];
 
   return new Promise((done) => {
-    const child = spawn('claude', args, { cwd: dir, env: staffEnv() });
+    const child = spawnClaude(args, { cwd: dir, env: staffEnv() });
     let buffer = '';
     let reply = '';
     let session: string | undefined;

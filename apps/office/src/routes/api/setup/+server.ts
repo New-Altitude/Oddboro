@@ -17,6 +17,7 @@ import {
   welcomed,
   zone,
   SYSTEM,
+  WINDOWS,
   zoneName
 } from '@oddboro/ledger';
 import { checkDatabase, checkMachine, type Check } from '@oddboro/ledger/checks';
@@ -39,7 +40,8 @@ export const GET: RequestHandler = async () => {
   ]);
   const name = await ownerName();
   // The computer's own name for its owner, to offer before they type one: the
-  // Mac's full name, or the real-name field of the account on Linux.
+  // Mac's full name, the real-name field of the account on Linux, or the
+  // account's display name on Windows (local, domain or work account alike).
   const full = await new Promise<string>((done) =>
     MAC
       ? execFile('id', ['-F'], (_e, out) => done(String(out ?? '').trim()))
@@ -52,7 +54,19 @@ export const GET: RequestHandler = async () => {
                 ?.trim() ?? ''
             )
           )
-        : done('')
+        : WINDOWS
+          ? execFile(
+              'powershell.exe',
+              [
+                '-NoProfile',
+                '-NonInteractive',
+                '-Command',
+                'Add-Type -AssemblyName System.DirectoryServices.AccountManagement; [System.DirectoryServices.AccountManagement.UserPrincipal]::Current.DisplayName'
+              ],
+              { windowsHide: true, timeout: 10_000 },
+              (_e, out) => done(String(out ?? '').trim())
+            )
+          : done('')
   );
   return json({
     app: IN_APP,

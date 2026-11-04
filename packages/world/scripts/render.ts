@@ -10,6 +10,7 @@
 //
 // Writes out/<name>[-h<hour>].png and lists any sprite the space asks for that
 // does not exist yet.
+import { fileURLToPath } from 'node:url';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadSprites } from '@oddboro/sprites/load';
@@ -30,7 +31,7 @@ import {
 } from '../src/light.ts';
 import { loadSpaces } from '../src/load.ts';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const args = process.argv.slice(2);
 const target = args.find((a) => !a.startsWith('--') && !/^-?\d+$/.test(a)) ?? 'main-street';
 const flag = (name: string, fallback: number) =>

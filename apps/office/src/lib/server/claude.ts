@@ -1,10 +1,29 @@
 // How staff reach Claude: the owner's Claude plan (their `claude` login) or an
 // API key, and which model: Opus unless the owner picks Sonnet. The owner picks in the browser. The choice lives in
-// .env (OFFICE_AUTH, OFFICE_MODEL) and the key in the macOS keychain, never in
-// a file. A change applies to the next run, with no restart.
-import { execFile, spawn } from 'node:child_process';
+// .env (OFFICE_AUTH, OFFICE_MODEL) and the key in the system's secret store,
+// never in a file. A change applies to the next run, with no restart.
+import {
+  execFile,
+  spawn,
+  type ChildProcess,
+  type ChildProcessWithoutNullStreams,
+  type SpawnOptions,
+  type SpawnOptionsWithoutStdio
+} from 'node:child_process';
 import { writeEnv } from '@oddboro/ledger/env';
+import { claudeCommand } from '@oddboro/ledger/platform';
 import { getSecret, setSecret } from './keychain.ts';
+
+/** Start Claude Code with these arguments, wherever this system keeps it. */
+export function spawnClaude(
+  args: string[],
+  opts: SpawnOptionsWithoutStdio
+): ChildProcessWithoutNullStreams;
+export function spawnClaude(args: string[], opts: SpawnOptions): ChildProcess;
+export function spawnClaude(args: string[], opts: SpawnOptions): ChildProcess {
+  const [cmd, before] = claudeCommand();
+  return spawn(cmd, [...before, ...args], { windowsHide: true, ...opts });
+}
 
 export const MODELS = ['opus', 'sonnet'] as const;
 export type Model = (typeof MODELS)[number];
@@ -44,20 +63,28 @@ export type ClaudeAccount = { email?: string; org?: string; plan?: string };
  * owner's plan. Nothing when it is signed out or too old to say.
  */
 export function claudeAccount(): Promise<ClaudeAccount | undefined> {
+  const [cmd, before] = claudeCommand();
   return new Promise((done) =>
-    execFile('claude', ['auth', 'status'], { env: cleanEnv(), timeout: 15_000 }, (_e, out) => {
-      try {
-        const s = JSON.parse(String(out)) as {
-          loggedIn?: boolean;
-          email?: string;
-          orgName?: string;
-          subscriptionType?: string;
-        };
-        done(s.loggedIn ? { email: s.email, org: s.orgName, plan: s.subscriptionType } : undefined);
-      } catch {
-        done(undefined);
+    execFile(
+      cmd,
+      [...before, 'auth', 'status'],
+      { env: cleanEnv(), timeout: 15_000, windowsHide: true },
+      (_e, out) => {
+        try {
+          const s = JSON.parse(String(out)) as {
+            loggedIn?: boolean;
+            email?: string;
+            orgName?: string;
+            subscriptionType?: string;
+          };
+          done(
+            s.loggedIn ? { email: s.email, org: s.orgName, plan: s.subscriptionType } : undefined
+          );
+        } catch {
+          done(undefined);
+        }
       }
-    })
+    )
   );
 }
 
@@ -97,7 +124,7 @@ function set(name: string, value: string): void {
 function keyWorks(value: string): Promise<boolean> {
   return new Promise((done) => {
     const env: NodeJS.ProcessEnv = { ...cleanEnv(), ANTHROPIC_API_KEY: value };
-    const child = spawn('claude', ['-p', '--tools', '', 'Say ok.'], { env, stdio: 'ignore' });
+    const child = spawnClaude(['-p', '--tools', '', 'Say ok.'], { env, stdio: 'ignore' });
     const timer = setTimeout(() => child.kill(), 60_000);
     child.on('close', (code) => {
       clearTimeout(timer);

@@ -1,10 +1,11 @@
 // Reads room templates and floor plans from disk. Server-side only; the
 // office composes the world on the server and sends the result to the page.
+import { fileURLToPath } from 'node:url';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { FloorPlan, RoomTemplate } from './types.ts';
 
-export const WORLD_ROOT = new URL('..', import.meta.url).pathname;
+export const WORLD_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 function readDir<T extends { id: string }>(dir: string): Record<string, T> {
   return Object.fromEntries(

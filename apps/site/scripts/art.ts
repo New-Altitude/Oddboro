@@ -13,6 +13,7 @@
 // that depends on the hour is rendered twice, at night (lamps on) and at
 // midday (lamps off), and the page picks a set by theme. Portraits, walks and
 // the Open Graph card are rendered once.
+import { fileURLToPath } from 'node:url';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import * as prettier from 'prettier';
 import { join } from 'node:path';
@@ -53,7 +54,7 @@ import {
   type World
 } from '@oddboro/world';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const ART = join(ROOT, 'static', 'art');
 const NIGHT = 21;
 const DAY = 13;

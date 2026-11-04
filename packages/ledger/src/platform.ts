@@ -1,13 +1,13 @@
 // What differs between operating systems, in one place: where logs go, how a
 // page opens in the browser, and how a login service runs. Each system gets
-// one entry in the tables below. A Mac uses launchd and ~/Library/Logs, and
-// Linux a systemd user unit and the XDG state folder. Windows has its paths
-// and browser opener, and no login service yet: its entry is the one place to
-// add Task Scheduler. Everything else in the office is the same code on each.
+// one entry in the tables below. A Mac uses launchd and ~/Library/Logs, Linux
+// a systemd user unit and the XDG state folder, and Windows a Task Scheduler
+// task and %LOCALAPPDATA%\Oddboro. Everything else in the office is the same
+// code on each.
 import { execFile, execFileSync } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 
 export type System = 'mac' | 'linux' | 'windows';
 
@@ -40,6 +40,43 @@ export const OFFICE_LOG = join(
 const run = (cmd: string, args: string[]) =>
   new Promise<boolean>((done) => execFile(cmd, args, (e) => done(!e)));
 
+// Windows PowerShell 5.1 ships with every Windows, so the office reaches the
+// Credential Manager, toasts and Task Scheduler through it with nothing to
+// install. Values go in as environment variables, never pasted into the
+// script, so nothing a caller passes needs quoting. Output is UTF-8 both ways.
+const POWERSHELL = ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass'];
+const psScript = (script: string) =>
+  '$ErrorActionPreference = "Stop"; [Console]::InputEncoding = [Console]::OutputEncoding = [Text.Encoding]::UTF8; ' +
+  script;
+
+/** Run a PowerShell script and return what it prints. Throws when it fails. */
+export function powershellSync(script: string, env: Record<string, string> = {}, input?: string) {
+  return execFileSync('powershell.exe', [...POWERSHELL, '-Command', psScript(script)], {
+    encoding: 'utf8',
+    env: { ...process.env, ...env },
+    input,
+    stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+    windowsHide: true
+  });
+}
+
+/** Run a PowerShell script: whether it succeeded, and what it printed. */
+export function powershell(
+  script: string,
+  env: Record<string, string> = {}
+): Promise<{ ok: boolean; out: string }> {
+  return new Promise((done) =>
+    execFile(
+      'powershell.exe',
+      [...POWERSHELL, '-Command', psScript(script)],
+      { env: { ...process.env, ...env }, windowsHide: true, timeout: 120_000 },
+      (e, out) => done({ ok: !e, out: String(out ?? '').trim() })
+    )
+  );
+}
+const ps = async (script: string, env: Record<string, string> = {}) =>
+  (await powershell(script, env)).ok;
+
 /**
  * Open a URL in the owner's browser. Windows goes through rundll32, not
  * `cmd /c start`, so the & in a query string is not read as a command.
@@ -48,6 +85,49 @@ export function openUrl(url: string): Promise<boolean> {
   if (MAC) return run('open', [url]);
   if (WINDOWS) return run('rundll32', ['url.dll,FileProtocolHandler', url]);
   return run('xdg-open', [url]);
+}
+
+/**
+ * How to start Claude Code: the program, and any arguments that go before
+ * Claude's own. A Mac and Linux find `claude` on the PATH. Windows needs more:
+ * npm installs a .cmd shim, which Node will not start without a shell, so the
+ * shim's script runs under this Node instead; and Claude's own installer puts
+ * claude.exe in ~/.local/bin, which a server started before the install does
+ * not have on its PATH. Looked up on each run, so an install mid-session counts.
+ */
+export function claudeCommand(): [string, string[]] {
+  if (!WINDOWS) return ['claude', []];
+  const dirs = [
+    ...(process.env.PATH ?? '').split(delimiter).filter(Boolean),
+    join(homedir(), '.local', 'bin')
+  ];
+  for (const dir of dirs) {
+    const exe = join(dir, 'claude.exe');
+    if (existsSync(exe)) return [exe, []];
+    if (!existsSync(join(dir, 'claude.cmd'))) continue;
+    const pkg = join(dir, 'node_modules', '@anthropic-ai', 'claude-code');
+    try {
+      const { bin } = JSON.parse(readFileSync(join(pkg, 'package.json'), 'utf8')) as {
+        bin?: string | Record<string, string>;
+      };
+      const entry = join(pkg, typeof bin === 'string' ? bin : (bin?.claude ?? 'cli.js'));
+      return /\.[cm]?js$/.test(entry) ? [process.execPath, [entry]] : [entry, []];
+    } catch {
+      // A shim with no package beside it: keep looking.
+    }
+  }
+  return ['claude', []];
+}
+
+/**
+ * A local tool server's command as Claude Code should start it. On Windows,
+ * npx and most other launchers are .cmd files, which Claude Code starts only
+ * through cmd /c; a plain .exe or a full path needs nothing.
+ */
+export function serverCommand(command: string, args: string[] = []) {
+  return WINDOWS && !/\.exe$/i.test(command) && !/[\\/]/.test(command) && command !== 'uvx'
+    ? { command: 'cmd', args: ['/c', command, ...args] }
+    : { command, args };
 }
 
 /** A program kept running at login, with its output in one log file. */
@@ -183,11 +263,78 @@ const systemd: ServiceManager = {
   stopSync: (label) => quietly('systemctl', ['--user', 'stop', `${label}.service`])
 };
 
-/** Each system's login services. Windows (Task Scheduler) is not written yet. */
+// Task Scheduler starts a task at logon but neither restarts a program that
+// stops nor keeps its output, so the task runs a small batch file that does
+// both: it runs the program with its output added to the log, waits, and runs
+// it again. conhost --headless keeps any window from showing, even where
+// Windows Terminal is the default terminal and would ignore a hidden style.
+// The task runs as the owner, signed in, so it reaches their Credential
+// Manager and shows their notifications. Registering one needs no admin.
+const batch = (s: string) => s.replaceAll('%', '%%');
+export function windowsLoop(s: Service): string {
+  const lines = ['@echo off', 'chcp 65001 >nul'];
+  if (s.cwd) lines.push(`cd /d "${batch(s.cwd)}"`);
+  for (const [k, v] of Object.entries(s.env ?? {})) lines.push(`set "${k}=${batch(v)}"`);
+  lines.push(
+    ':run',
+    `${s.args.map((a) => `"${batch(a)}"`).join(' ')} >> "${batch(s.log)}" 2>&1`,
+    // ping waits without a console to read keys from, which timeout needs.
+    `ping -n ${(s.throttle ?? 5) + 1} 127.0.0.1 >nul`,
+    'goto run',
+    ''
+  );
+  return lines.join('\r\n');
+}
+
+const taskFolder = () =>
+  join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'Oddboro', 'services');
+const taskFile = (label: string) => join(taskFolder(), `${label}.cmd`);
+const TASK = { ODDBORO_TASK_PATH: '\\Oddboro\\' };
+const task = (label: string) => ({ ...TASK, ODDBORO_TASK: label });
+const findTask =
+  'Get-ScheduledTask -TaskPath $env:ODDBORO_TASK_PATH -TaskName $env:ODDBORO_TASK -ErrorAction Stop';
+const stopTask = `${findTask} | Stop-ScheduledTask;`;
+const taskScheduler: ServiceManager = {
+  async install(s) {
+    mkdirSync(taskFolder(), { recursive: true });
+    writeFileSync(taskFile(s.label), windowsLoop(s));
+    return ps(
+      `
+$me = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+$cmd = '/d /c "' + $env:ODDBORO_TASK_FILE + '"'
+$action = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument ('--headless cmd.exe ' + $cmd)
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User $me
+$principal = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0 -MultipleInstances IgnoreNew -StartWhenAvailable
+Get-ScheduledTask -TaskPath $env:ODDBORO_TASK_PATH -TaskName $env:ODDBORO_TASK -ErrorAction SilentlyContinue | Stop-ScheduledTask
+Register-ScheduledTask -TaskPath $env:ODDBORO_TASK_PATH -TaskName $env:ODDBORO_TASK -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+Start-ScheduledTask -TaskPath $env:ODDBORO_TASK_PATH -TaskName $env:ODDBORO_TASK`,
+      { ...task(s.label), ODDBORO_TASK_FILE: taskFile(s.label) }
+    );
+  },
+  async remove(label) {
+    await powershell(
+      `${stopTask} Unregister-ScheduledTask -TaskPath $env:ODDBORO_TASK_PATH -TaskName $env:ODDBORO_TASK -Confirm:$false`,
+      task(label)
+    );
+    rmSync(taskFile(label), { force: true });
+  },
+  installed: (label) => ps(`${findTask} | Out-Null`, task(label)),
+  restart: (label) => ps(`${stopTask} ${findTask} | Start-ScheduledTask`, task(label)),
+  stopSync(label) {
+    try {
+      powershellSync(stopTask, task(label));
+    } catch {
+      // Not running.
+    }
+  }
+};
+
+/** Each system's login services. */
 const SERVICES: Record<System, ServiceManager | undefined> = {
   mac: launchd,
   linux: systemd,
-  windows: undefined
+  windows: taskScheduler
 };
 const services = SYSTEM && SERVICES[SYSTEM];
 

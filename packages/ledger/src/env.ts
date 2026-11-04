@@ -3,12 +3,13 @@
 // setting in the browser. ODDBORO_ENV names another file, to try an office
 // out beside the real one. In the app it lives in the office's home, since
 // the app's own folder is signed and every update replaces it.
+import { fileURLToPath } from 'node:url';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { home, IN_APP } from './home.ts';
 
 export const ENV_FILE =
   process.env.ODDBORO_ENV ??
-  (IN_APP ? home('.env') : new URL('../../../.env', import.meta.url).pathname);
+  (IN_APP ? home('.env') : fileURLToPath(new URL('../../../.env', import.meta.url)));
 
 export function readEnv(file = ENV_FILE): Record<string, string> {
   if (!existsSync(file)) return {};

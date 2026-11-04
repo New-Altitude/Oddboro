@@ -7,10 +7,22 @@
 // repo, each system has its own way, in the table below: osascript on a Mac
 // (which macOS shows as Script Editor's, so Script Editor has to be allowed in
 // System Settings, Notifications), and notify-send on Linux, which every
-// desktop that follows the freedesktop notification spec shows. Windows has
-// none yet: its entry is the place to add a toast.
+// desktop that follows the freedesktop notification spec shows, and a toast
+// on Windows through PowerShell. A toast has to name an app Windows knows, and
+// the repo installs none, so it shows as Windows PowerShell's, the way a Mac
+// shows Script Editor's.
 import { execFile } from 'node:child_process';
-import { IN_APP, SYSTEM, openUrl, type System } from '@oddboro/ledger';
+import { IN_APP, SYSTEM, openUrl, powershell, type System } from '@oddboro/ledger';
+
+// The words come in as environment variables and are escaped for XML inside.
+const TOAST = `
+[void][Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]
+[void][Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime]
+$e = [Security.SecurityElement]
+$xml = New-Object Windows.Data.Xml.Dom.XmlDocument
+$xml.LoadXml('<toast><visual><binding template="ToastGeneric"><text>' + $e::Escape($env:ODDBORO_TITLE) + '</text><text>' + $e::Escape($env:ODDBORO_MESSAGE) + '</text></binding></visual></toast>')
+$app = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe'
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($app).Show((New-Object Windows.UI.Notifications.ToastNotification $xml))`;
 
 /** One line: no tab or line break may reach the app inside the words. */
 const flat = (s: string) => s.replace(/[\t\r\n]+/g, ' ');
@@ -32,7 +44,8 @@ const NOTIFY: Record<System, ((title: string, message: string) => Promise<boolea
       title
     ]),
   linux: (title, message) => run('notify-send', ['--app-name', 'Oddboro', title, message]),
-  windows: undefined
+  windows: async (title, message) =>
+    (await powershell(TOAST, { ODDBORO_TITLE: title, ODDBORO_MESSAGE: message })).ok
 };
 
 /** Where each system lets the owner allow notifications. Linux has no one place, so none. */

@@ -1,10 +1,11 @@
 // Reads every .px file and the palette from disk. Used by the compiler and by
 // the room renderer in @oddboro/world, so both see the same sprites.
+import { fileURLToPath } from 'node:url';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { parsePx, PxError, type Palette, type SpriteDef } from './px.ts';
 
-export const SPRITES_ROOT = new URL('..', import.meta.url).pathname;
+export const SPRITES_ROOT = fileURLToPath(new URL('..', import.meta.url));
 export const SRC = join(SPRITES_ROOT, 'src');
 export const DIST = join(SPRITES_ROOT, 'dist');
 

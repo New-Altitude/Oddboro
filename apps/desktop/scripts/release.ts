@@ -27,6 +27,7 @@
 // build only, and puts the files back after. `--test` is for trying updates
 // on this machine: no notarizing, and the app accepts an http latest.json
 // from ODDBORO_UPDATE_URL. Never ship a --test build.
+import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
@@ -43,7 +44,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 const RELEASES = 'https://github.com/New-Altitude/Oddboro/releases';
-const DESKTOP = new URL('..', import.meta.url).pathname;
+const DESKTOP = fileURLToPath(new URL('..', import.meta.url));
 const TAURI = join(DESKTOP, 'src-tauri');
 const args = process.argv.slice(2);
 const flag = (name: string) => {

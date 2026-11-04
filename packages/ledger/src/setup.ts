@@ -1,4 +1,4 @@
-// Sets up an office on this computer (a Mac or Linux) and opens it in the
+// Sets up an office on this computer (a Mac, Linux or Windows) and opens it in the
 // browser, where the owner meets it. Asks nothing: it checks the computer, starts the office (now and at
 // every login) and opens it at its best address. The office keeps its own
 // database unless .env names one, and brings its tables up to date as it
@@ -9,13 +9,14 @@
 //   npm run setup                  check, start and open the office
 //   npm run setup -- --check       check everything, change nothing
 //   npm run setup -- --env <file>  check against a different .env, to try one out
+import { fileURLToPath } from 'node:url';
 import { execFile, spawn } from 'node:child_process';
 import { checkDatabase, checkMachine, type Check } from './checks.ts';
 import { OFFICE_LOG, openUrl, restartService, serviceInstalled } from './platform.ts';
 import { ENV_FILE, readEnv } from './env.ts';
 import { OFFICE_PORT, OFFICE_URL } from './home.ts';
 
-const REPO = new URL('../../../', import.meta.url).pathname;
+const REPO = fileURLToPath(new URL('../../../', import.meta.url));
 const args = process.argv.slice(2);
 const CHECK_ONLY = args.includes('--check');
 const ENV = args.includes('--env') ? args[args.indexOf('--env') + 1] : ENV_FILE;
@@ -33,10 +34,17 @@ function show(c: Check) {
   if (c.fix && c.state !== 'ok') console.log(`    ${dim(c.fix)}`);
 }
 
-const sh = (cmd: string, cmdArgs: string[]) =>
-  new Promise<boolean>((done) =>
-    spawn(cmd, cmdArgs, { cwd: REPO, stdio: 'inherit' }).on('close', (code) => done(code === 0))
+// npm through its own script under this Node, which `npm run` names in
+// npm_execpath: on Windows npm is a .cmd that Node will not start without a shell.
+const npm = (npmArgs: string[]) => {
+  const script = process.env.npm_execpath;
+  const [cmd, all] = script ? [process.execPath, [script, ...npmArgs]] : ['npm', npmArgs];
+  return new Promise<boolean>((done) =>
+    spawn(cmd, all, { cwd: REPO, stdio: 'inherit' })
+      .on('error', () => done(false))
+      .on('close', (code) => done(code === 0))
   );
+};
 const quiet = (cmd: string, cmdArgs: string[]) =>
   new Promise<string>((done) =>
     execFile(cmd, cmdArgs, { cwd: REPO }, (_e, stdout) => done(stdout.trim()))
@@ -80,14 +88,14 @@ if (ENV !== ENV_FILE) {
 
 // The art is compiled, not kept in git: a fresh clone has none until this runs.
 console.log(`\n${dim('Drawing the office.')}`);
-if (!(await sh('npm', ['run', 'sprites', '--silent']))) {
+if (!(await npm(['run', 'sprites', '--silent']))) {
   console.log(`${MARK.missing} The art did not compile. The error is above.`);
   process.exit(1);
 }
 
 console.log(`\n${dim('Starting the office.')}`);
 if (await serviceInstalled('com.oddboro.office')) await restartService('com.oddboro.office');
-else if (!(await sh('npm', ['run', 'service:install', '-w', 'apps/office']))) {
+else if (!(await npm(['run', 'service:install', '-w', 'apps/office']))) {
   console.log(`${MARK.missing} The office did not start. The error is above.`);
   process.exit(1);
 }

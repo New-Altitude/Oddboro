@@ -4,11 +4,10 @@
 // still hire its first staffer. Usage is recorded with no staffer. Images go
 // in the message itself, so the run still needs no file tools. Claude Code
 // keeps no transcript of an office run, so a headshot never lands on disk.
-import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { ownerName, recordUsage, type ModelUsage, type UsageKind, home } from '@oddboro/ledger';
 import { notePlan, pluginsOff, staffEnv } from './staff.ts';
-import { modelArgs } from './claude.ts';
+import { modelArgs, spawnClaude } from './claude.ts';
 
 const HOME = home('office');
 
@@ -58,7 +57,7 @@ function run(message: string, opts: OfficeRunOpts): Promise<OfficeRun> {
     ...(opts.images?.length ? ['--input-format', 'stream-json'] : [])
   ];
   return new Promise((done) => {
-    const child = spawn('claude', args, { cwd: HOME, env: staffEnv() });
+    const child = spawnClaude(args, { cwd: HOME, env: staffEnv() });
     let buffer = '';
     let finished = false;
     const finish = (r: OfficeRun) => {

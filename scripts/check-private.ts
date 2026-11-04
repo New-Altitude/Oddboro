@@ -8,12 +8,12 @@
 // file. CI cannot hold a gitignored file, so with CI set it skips and says so.
 // ODDBORO_PRIVATE_WORDS points the guard at a different list.
 import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { read, repoFiles, report, ROOT } from './lib/files.ts';
 
 const LIST = process.env.ODDBORO_PRIVATE_WORDS
   ? resolve(process.env.ODDBORO_PRIVATE_WORDS)
-  : new URL('data/private-words.txt', `file://${ROOT}`).pathname;
+  : join(ROOT, 'data', 'private-words.txt');
 
 if (!existsSync(LIST)) {
   if (process.env.CI) {

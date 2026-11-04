@@ -1,10 +1,11 @@
 // Brings the database up to date: pgvector, then every migration.
 // `npm run db:migrate` runs it, and so does the office server on start.
+import { fileURLToPath } from 'node:url';
 import { readMigrationFiles } from 'drizzle-orm/migrator';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { db, sql } from './db.ts';
 
-const MIGRATIONS = new URL('../migrations', import.meta.url).pathname;
+const MIGRATIONS = fileURLToPath(new URL('../migrations', import.meta.url));
 
 export async function bringUpToDate(): Promise<void> {
   await sql`create extension if not exists vector`;

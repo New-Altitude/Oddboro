@@ -25,6 +25,12 @@
 // runs as a systemd user unit, the owner's password comes through pkexec's
 // dialog, and binding ports 80 and 443 needs a kernel that lets ordinary users
 // do it (net.ipv4.ip_unprivileged_port_start at 80 or lower).
+//
+// So does Windows: the office's own Caddy runs as a Task Scheduler task and
+// listens on 127.0.0.1 only, so the firewall has nothing to ask about; trust
+// goes in the owner's own list of authorities, which Windows confirms in its
+// own dialog with no admin. Windows' own web server (http.sys, behind IIS and
+// some other services) often holds port 80, and then the office stays at its port.
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
@@ -32,7 +38,17 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { request } from 'node:https';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { IN_APP, LINUX, LOGS, MAC, OFFICE_PORT, home, installService } from '@oddboro/ledger';
+import {
+  IN_APP,
+  LINUX,
+  LOGS,
+  MAC,
+  OFFICE_PORT,
+  WINDOWS,
+  home,
+  installService,
+  powershell
+} from '@oddboro/ledger';
 import { writeEnv } from '@oddboro/ledger/env';
 
 /** The names Caddy answers to, best first. The first one is served over HTTPS too. */
@@ -46,13 +62,15 @@ const HTTPS_ROUTE = 'oddboro-https';
 const TLS_POLICY = 'oddboro-tls';
 const LABEL = 'com.oddboro.caddy';
 const HOME = home();
-const OWN_CADDY = join(HOME, 'bin', 'caddy');
+const OWN_CADDY = join(HOME, 'bin', WINDOWS ? 'caddy.exe' : 'caddy');
 const CADDYFILE = join(HOME, 'caddy', 'Caddyfile');
 /** Where a Caddy run by this user keeps its own authority's root certificate. */
 const OWN_ROOT = join(
   MAC
     ? join(homedir(), 'Library', 'Application Support', 'Caddy')
-    : join(process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share'), 'caddy'),
+    : WINDOWS
+      ? join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'Caddy')
+      : join(process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share'), 'caddy'),
   'pki',
   'authorities',
   'local',
@@ -175,6 +193,14 @@ async function trusted(): Promise<boolean> {
   const root = await rootCert();
   if (!root) return false;
   if (MAC) return (await run('security', ['verify-cert', '-c', root])).ok;
+  // Trusted when the owner's or the computer's list of authorities holds it.
+  if (WINDOWS)
+    return (
+      await powershell(
+        '$t = (New-Object Security.Cryptography.X509Certificates.X509Certificate2($env:ODDBORO_ROOT)).Thumbprint; if (-not (Get-ChildItem Cert:\\CurrentUser\\Root, Cert:\\LocalMachine\\Root | Where-Object Thumbprint -eq $t)) { exit 1 }',
+        { ODDBORO_ROOT: root }
+      )
+    ).ok;
   const bundle = LINUX_BUNDLES.find((b) => existsSync(b));
   return !!bundle && (await run('openssl', ['verify', '-CAfile', bundle, root])).ok;
 }
@@ -191,6 +217,13 @@ function lowPortsAllowed(): boolean {
 
 /** What holds port 80, by program name, if anything. */
 async function port80(): Promise<string | undefined> {
+  if (WINDOWS) {
+    const r = await powershell(
+      'Get-NetTCPConnection -LocalPort 80 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 | ForEach-Object { (Get-Process -Id $_.OwningProcess).ProcessName }'
+    );
+    // Process 4, "System", is http.sys, Windows' own web server.
+    return r.out === 'System' ? "Windows' own web server (http.sys)" : r.out || undefined;
+  }
   const r = await run('lsof', ['-nP', '-iTCP:80', '-sTCP:LISTEN', '-Fc']);
   return r.out
     .split('\n')
@@ -200,16 +233,17 @@ async function port80(): Promise<string | undefined> {
 
 /** A Caddy already on this Mac: Homebrew's or anyone's on the PATH, else the office's own. */
 async function caddyBinary(): Promise<string | undefined> {
-  const found = (await run('which', ['caddy'])).out.trim();
-  if (found) return found;
+  const found = (await run(WINDOWS ? 'where.exe' : 'which', ['caddy'])).out.split(/\r?\n/)[0];
+  if (found?.trim()) return found.trim();
   return existsSync(OWN_CADDY) ? OWN_CADDY : undefined;
 }
 
 export async function address(): Promise<Address> {
   const name = await host();
-  // Caddy, its login service and certificate trust are written for a Mac and
-  // Linux; elsewhere the office stays at its port, which needs nothing.
-  if (!MAC && !LINUX) return { host: name, state: 'blocked', holder: 'this system for now' };
+  // Caddy, its login service and certificate trust are written for a Mac,
+  // Linux and Windows; elsewhere the office stays at its port, which needs nothing.
+  if (!MAC && !LINUX && !WINDOWS)
+    return { host: name, state: 'blocked', holder: 'this system for now' };
   if (await answers(`http://${name}`)) {
     const https = name === SECURE && (await answersSecurely(name));
     const secure = https && (await trusted());
@@ -236,7 +270,9 @@ async function download(): Promise<string> {
   ).json()) as { tag_name: string; assets: { name: string; browser_download_url: string }[] };
   const version = release.tag_name.replace(/^v/, '');
   const arch = process.arch === 'arm64' ? 'arm64' : 'amd64';
-  const archive = `caddy_${version}_${MAC ? 'mac' : 'linux'}_${arch}.tar.gz`;
+  const archive = WINDOWS
+    ? `caddy_${version}_windows_${arch}.zip`
+    : `caddy_${version}_${MAC ? 'mac' : 'linux'}_${arch}.tar.gz`;
   const url = (name: string) => release.assets.find((a) => a.name === name)?.browser_download_url;
   const tarUrl = url(archive);
   const sumsUrl = url(`caddy_${version}_checksums.txt`);
@@ -252,9 +288,12 @@ async function download(): Promise<string> {
   mkdirSync(join(HOME, 'bin'), { recursive: true });
   const file = join(HOME, 'bin', archive);
   writeFileSync(file, tar);
-  if (!(await run('tar', ['-xzf', file, '-C', join(HOME, 'bin'), 'caddy'])).ok)
-    throw new Error('The Caddy download would not unpack.');
-  chmodSync(OWN_CADDY, 0o755);
+  // Windows 10 and later ship bsdtar, which reads a zip as well.
+  const unpack = WINDOWS
+    ? ['-xf', file, '-C', join(HOME, 'bin'), 'caddy.exe']
+    : ['-xzf', file, '-C', join(HOME, 'bin'), 'caddy'];
+  if (!(await run('tar', unpack)).ok) throw new Error('The Caddy download would not unpack.');
+  if (!WINDOWS) chmodSync(OWN_CADDY, 0o755);
   return OWN_CADDY;
 }
 
@@ -273,6 +312,8 @@ async function startOwn(): Promise<void> {
       '\tadmin off',
       '\tpersist_config off',
       '\tskip_install_trust',
+      // On Windows a server on every address makes the firewall ask the owner.
+      ...(WINDOWS ? ['\tdefault_bind 127.0.0.1'] : []),
       '}',
       '',
       `${SECURE} {`,
@@ -384,23 +425,26 @@ export async function secureAddress(): Promise<Address> {
   const root = await rootCert();
   if (!root) throw new Error('Caddy has not made its certificate yet. Try again in a moment.');
   const q = (p: string) => `'${p.replaceAll("'", "'\\''")}'`;
-  const r = MAC
-    ? await run('osascript', [
-        '-e',
-        'on run argv',
-        '-e',
-        'do shell script (item 1 of argv) with prompt "Oddboro wants to trust its own certificate, so your browser opens the office securely." with administrator privileges',
-        '-e',
-        'end run',
-        `security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ${q(root)}`
-      ])
-    : // pkexec shows the desktop's own password dialog. p11-kit's trust (Arch,
-      // Fedora) adds it to the system list; Debian and Ubuntu use update-ca-certificates.
-      await run('pkexec', [
-        'sh',
-        '-c',
-        `if command -v trust >/dev/null; then trust anchor --store ${q(root)}; else cp ${q(root)} /usr/local/share/ca-certificates/oddboro-caddy.crt && update-ca-certificates; fi`
-      ]);
+  // Windows adds it to the owner's own list after its own dialog asks them, with no admin.
+  const r = WINDOWS
+    ? await run('certutil.exe', ['-user', '-addstore', 'Root', root])
+    : MAC
+      ? await run('osascript', [
+          '-e',
+          'on run argv',
+          '-e',
+          'do shell script (item 1 of argv) with prompt "Oddboro wants to trust its own certificate, so your browser opens the office securely." with administrator privileges',
+          '-e',
+          'end run',
+          `security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ${q(root)}`
+        ])
+      : // pkexec shows the desktop's own password dialog. p11-kit's trust (Arch,
+        // Fedora) adds it to the system list; Debian and Ubuntu use update-ca-certificates.
+        await run('pkexec', [
+          'sh',
+          '-c',
+          `if command -v trust >/dev/null; then trust anchor --store ${q(root)}; else cp ${q(root)} /usr/local/share/ca-certificates/oddboro-caddy.crt && update-ca-certificates; fi`
+        ]);
   if (!r.ok)
     throw new Error('The certificate was not trusted. Try again, and enter your password.');
   return address();

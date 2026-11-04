@@ -4,8 +4,9 @@
 // imports db.ts, so it runs before there is a database to connect to.
 import { execFile } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { release } from 'node:os';
 import postgres from 'postgres';
-import { LINUX, MAC, SYSTEM, WINDOWS, serviceInstalled } from './platform.ts';
+import { LINUX, MAC, WINDOWS, claudeCommand, serviceInstalled } from './platform.ts';
 import { secretStore } from './secrets.ts';
 
 export type Check = {
@@ -28,8 +29,7 @@ const run = (cmd: string, args: string[], timeout = 8000) =>
 
 /**
  * The system the office runs on. It keeps its id "mac" because the setup card
- * and older installs look for that id. Windows is known but not ready: it has
- * no login service or office address yet.
+ * and older installs look for that id.
  */
 export async function checkMac(): Promise<Check> {
   if (MAC) {
@@ -45,18 +45,25 @@ export async function checkMac(): Promise<Check> {
     }
     return { id: 'mac', name: 'Linux', state: 'ok', found: name };
   }
+  if (WINDOWS) {
+    // Windows 11 still calls itself 10 in its version; its builds start at 22000.
+    const build = Number(release().split('.')[2]);
+    const name = build >= 22000 ? 'Windows 11' : 'Windows 10';
+    return { id: 'mac', name: 'Windows', state: 'ok', found: `${name}, build ${build}` };
+  }
   return {
     id: 'mac',
-    name: WINDOWS ? 'Windows' : 'System',
+    name: 'System',
     state: 'missing',
-    found: SYSTEM ? 'Windows is not ready yet' : `This is ${process.platform}`,
-    fix: 'Oddboro runs on a Mac or Linux for now.'
+    found: `This is ${process.platform}`,
+    fix: 'Oddboro runs on a Mac, Linux or Windows.'
   };
 }
 
 /**
  * The secret store that holds the keys and sign-ins the owner connects: the
- * Keychain on a Mac, the desktop keyring on Linux. Windows has none yet.
+ * Keychain on a Mac, the desktop keyring on Linux, the Credential Manager on
+ * Windows.
  */
 export function checkKeyring(): Check {
   const r = secretStore();
@@ -65,7 +72,11 @@ export function checkKeyring(): Check {
       id: 'keyring',
       name: 'Keyring',
       state: 'ok',
-      found: MAC ? 'The Mac keychain' : 'The desktop keyring, through secret-tool'
+      found: MAC
+        ? 'The Mac keychain'
+        : WINDOWS
+          ? 'The Windows Credential Manager'
+          : 'The desktop keyring, through secret-tool'
     };
   return {
     id: 'keyring',
@@ -94,16 +105,22 @@ export function checkNode(): Check {
 
 /** Claude Code, signed in to a Claude plan or given an API key. Staff runs use it. */
 export async function checkClaude(): Promise<Check> {
-  const version = await run('claude', ['--version']);
+  const claude = (args: string[]) => {
+    const [cmd, before] = claudeCommand();
+    return run(cmd, [...before, ...args]);
+  };
+  const version = await claude(['--version']);
   if (!version.ok)
     return {
       id: 'claude',
       name: 'Claude Code',
       state: 'missing',
       found: 'Not installed',
-      fix: 'Install it: `npm install -g @anthropic-ai/claude-code`. Then run `claude` once and sign in.'
+      fix: WINDOWS
+        ? 'Install it in PowerShell: `irm https://claude.ai/install.ps1 | iex`. Then run `claude` once and sign in.'
+        : 'Install it: `npm install -g @anthropic-ai/claude-code`. Then run `claude` once and sign in.'
     };
-  const status = await run('claude', ['auth', 'status']);
+  const status = await claude(['auth', 'status']);
   let signedIn = false;
   let method = '';
   try {

@@ -27,6 +27,7 @@
   let canNotify = $state(true);
   /** What the owner calls this computer. */
   const computer = $derived(system === 'mac' ? 'Your Mac' : 'This computer');
+  const thisComputer = $derived(system === 'mac' ? 'this Mac' : 'this computer');
   let problem = $state('');
   let fixing = $state<'install' | 'sign-in' | undefined>();
   /** Counts fixes, so a sign-in that was started over or cancelled no longer changes the card. */
@@ -125,7 +126,8 @@
 
   // Notifications. The Mac's come from the office itself, so they reach the
   // owner with the page closed. In the app macOS shows them as Oddboro's; from
-  // the repo, as Script Editor's. Either has to be allowed. The browser's tell
+  // the repo, as Script Editor's. Either has to be allowed. On Windows they come
+  // as Windows PowerShell's, and on Linux from notify-send. The browser's tell
   // the owner about their desk while the tab is in the background; the app has
   // no tab, so it skips them. Neither holds up Next.
   let mac = $state<'idle' | 'sent' | 'shown' | 'missing'>('idle');
@@ -211,12 +213,13 @@
           {addr.state === 'blocked' ? `${addr.host}:4500` : addr.host}
           <span class="block text-xs text-muted">
             {#if addr.state === 'ready' && addr.secure}
-              The office's address on this Mac, secure. No port to remember.
+              The office's address on {thisComputer}, secure. No port to remember.
             {:else if addr.state === 'ready' && addr.canSecure}
-              Make it secure so your browser can show notifications. It takes your Mac's password,
-              once.
+              Make it secure so your browser can show notifications. {system === 'windows'
+                ? 'Windows asks you to confirm it, once.'
+                : `It takes your ${system === 'mac' ? 'Mac' : 'computer'}'s password, once.`}
             {:else if addr.state === 'ready'}
-              The office's address on this Mac. No port to remember.
+              The office's address on {thisComputer}. No port to remember.
             {:else if addr.state === 'own'}
               {addr.installed
                 ? 'Caddy answers at this address and hands it to the office, from every login on.'
@@ -232,7 +235,11 @@
         {#if addr.state === 'ready'}
           {#if addr.canSecure}
             <button class="btn" disabled={addrBusy} onclick={() => setUpAddress('secure')}
-              >{addrBusy ? 'Waiting for your password' : 'Make it secure'}</button
+              >{addrBusy
+                ? system === 'windows'
+                  ? 'Waiting for you to confirm'
+                  : 'Waiting for your password'
+                : 'Make it secure'}</button
             >
           {:else if here === addr.url}
             <span class="text-xs text-moss">✓ {addr.secure ? 'Secure' : 'On'}</span>
@@ -255,8 +262,11 @@
       {#if firefox && addr.host === 'local.oddboro.com'}
         <p class="mt-2 rounded-md bg-ember/15 px-2.5 py-1.5 text-xs text-ember">
           Firefox keeps its own list of trusted certificates, so it may warn about this address even
-          after your Mac trusts it. To fix it, open <code>about:config</code> in Firefox and set
-          <code>security.enterprise_roots.enabled</code> to true, or use Safari or Chrome for the office.
+          after {thisComputer} trusts it. To fix it, open <code>about:config</code> in Firefox and
+          set
+          <code>security.enterprise_roots.enabled</code> to true, or use {system === 'mac'
+            ? 'Safari or Chrome'
+            : 'Chrome or Edge'} for the office.
         </p>
       {/if}
     </div>
@@ -267,7 +277,6 @@
   <div class="mt-4">
     <div class="text-[10px] tracking-[0.14em] text-muted uppercase">Notifications</div>
     <div class="mt-2 grid gap-1">
-      <!-- Windows has no way to show the office's own notifications yet; the browser's still work. -->
       {#if canNotify}
         <div class="rounded-lg bg-raise px-3 py-2 text-sm">
           <div class="flex items-center gap-3">
@@ -307,6 +316,12 @@
                 <li>
                   Oddboro sends them with notify-send, so your desktop needs a notification service.
                   GNOME, KDE and most desktops have one built in.
+                </li>
+              {:else if system === 'windows'}
+                <li>
+                  They arrive as Windows PowerShell's. In Settings, Notifications, check that
+                  Windows PowerShell is allowed.
+                  <button class="link" onclick={openSettings}>Open it</button>
                 </li>
               {/if}
               <li><button class="link" onclick={testMac}>Send another test</button>.</li>

@@ -2,8 +2,11 @@
 // CLAUDE.md a context file names exists. An unindexed context file is one no
 // session is told about.
 import { existsSync } from 'node:fs';
-import { dirname, join, normalize } from 'node:path';
+import { join as joinOnDisk, posix } from 'node:path';
 import { read, repoFiles, report, ROOT } from './lib/files.ts';
+
+// Repo paths use forward slashes, as git prints them, on every system.
+const { dirname, join, normalize } = posix;
 
 const files = repoFiles().filter((f) => f === 'CLAUDE.md' || f.endsWith('/CLAUDE.md'));
 const set = new Set(files);
@@ -44,7 +47,7 @@ for (const file of files) {
     if (ref.startsWith('/') || ref.startsWith('~')) continue;
     const local = normalize(join(dir, ref));
     const fromRoot = normalize(ref);
-    if (!existsSync(join(ROOT, local)) && !existsSync(join(ROOT, fromRoot)))
+    if (!existsSync(joinOnDisk(ROOT, local)) && !existsSync(joinOnDisk(ROOT, fromRoot)))
       failures.push(`${file}: names ${ref}, which does not exist`);
   }
 }
