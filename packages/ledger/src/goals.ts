@@ -4,6 +4,7 @@
 // is linked to, sees only those, and says how each is going.
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import { db } from './db.ts';
+import { fixedError } from './errors.ts';
 import {
   addJob,
   ask,
@@ -186,7 +187,7 @@ export async function updateGoal(
 /** Link a staffer to a goal, with its part in it. A staffer sees only goals it serves. */
 export async function serveGoal(staffId: string, goalId: number, part: string): Promise<void> {
   const [who, g] = await Promise.all([staffer(staffId), goal(goalId)]);
-  if (!who || !g) throw new Error('No such Odd or goal');
+  if (!who || !g) throw fixedError('No such Odd or goal');
   const words = part.trim().slice(0, 400);
   if (!words) throw new Error(`Say what ${who.name} does for it`);
   await db
@@ -238,7 +239,7 @@ export async function logProgress(
 export async function approveGoal(askId: number, reason: string | null): Promise<GoalRow> {
   const a = await ask(askId);
   if (a?.kind !== 'goal' || !a.goal || a.status !== 'open')
-    throw new Error('That goal is no longer open');
+    throw fixedError('That goal is no longer open');
   await decideAsk(askId, 'approve', reason);
   return addGoal(a.goal, askId);
 }
@@ -258,11 +259,11 @@ export async function approvePlan(
 ): Promise<{ hires: AskRow[] }> {
   const a = await ask(askId);
   if (a?.kind !== 'plan' || !a.plan || a.status !== 'open')
-    throw new Error('That plan is no longer open');
+    throw fixedError('That plan is no longer open');
   const g = await goal(a.plan.goalId);
-  if (!g) throw new Error('The goal this plan is for is gone');
+  if (!g) throw fixedError('The goal this plan is for is gone');
   const picked = a.plan.items.filter((_, i) => picks.includes(i));
-  if (!picked.length) throw new Error('Tick at least one part of the plan, or deny it');
+  if (!picked.length) throw fixedError('Tick at least one part of the plan, or deny it');
   const left = a.plan.items.filter((_, i) => !picks.includes(i));
   const note =
     [reason, left.length && `Left out: ${left.map(itemLabel).join('; ')}.`]

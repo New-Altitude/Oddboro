@@ -24,7 +24,7 @@
     },
     {
       q: 'What leaves my computer?',
-      a: 'Only what the work needs. Odds send their work to Claude under your own account, and an Odd talks to the tools you connected for it. The app checks GitHub for new versions of itself. Nothing goes to New Altitude.'
+      a: 'Only what the work needs. Odds send their work to Claude under your own account, and an Odd talks to the tools you connected for it. The app checks GitHub for new versions of itself. Error reports go to New Altitude only if you say yes.'
     },
     {
       q: 'Can an Odd act without asking me?',

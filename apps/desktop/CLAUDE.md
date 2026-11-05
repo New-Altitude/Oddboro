@@ -74,6 +74,25 @@ an update (`update.rs`).
 10. Keeps links to the office's own origin in the window. Links to any other
     origin, `mailto:` and `tel:`, and every `target="_blank"` or
     `window.open`, open in the default browser.
+11. Reports a panic, giving up on the office (step 4's timeout, step 6's
+    limit, or Node not starting) and a broken install (no Node, no server
+    code), only when it found a report address and the office's `.env`
+    says `OFFICE_DIAGNOSTICS=yes`, read at send time (`diagnostics.rs`). The
+    address is `ODDBORO_DIAGNOSTICS_DSN` from the shell's environment, else
+    the one the release was built with (`build.rs`), else the office's
+    `.env`. A report carries a fixed text and Node's exit code when it has
+    one, or for a panic its place in the code with the message withheld, never the log.
+    It leaves with only the fields an allow list names and the computer's
+    name replaced. Its file paths follow the office's rule (`report_path`):
+    in a release, the shell's own code relative to the repo, which its build
+    maps to `/oddboro` (`PATH_MAPS` in `scripts/release.ts`, most specific
+    folder last, since the compilers apply the last match); any other file
+    under the home folder as its name alone; and files outside it whole. A
+    loaded file (a debug image) is named by its file name alone, and of the
+    device only the chip's architecture is kept. Each report sends on its
+    own thread and holds up the dialog or the panic 2 seconds at most; a run
+    sends one panic report. With no address the shell sets no panic hook and
+    runs no thread for reports.
 
 The page gets no Tauri IPC: there are no capability files, and remote pages
 never get IPC without one.
@@ -90,18 +109,19 @@ never get IPC without one.
   `ODDBORO_TARGET`, so a debug build finds its copy.
 - Env Node gets:
 
-| Variable               | Value                                                     |
-| ---------------------- | --------------------------------------------------------- |
-| `PORT`                 | the port, 4500 unless the shell's env sets `ODDBORO_PORT` |
-| `ODDBORO_PORT`         | the same                                                  |
-| `HOST`                 | `127.0.0.1`                                               |
-| `ORIGIN`               | `http://127.0.0.1:<port>`                                 |
-| `ODDBORO_HOME`         | `~/.oddboro` (`%USERPROFILE%\.oddboro`), unless set       |
-| `ODDBORO_CODE`         | `<resources>/server`                                      |
-| `ODDBORO_DB_PORT`      | passed through when the shell's env sets it               |
-| `PATH`                 | the login-shell PATH from step 3                          |
-| `ODDBORO_VERSION`      | the app's version, like `0.0.4`                           |
-| `ODDBORO_UPDATE_TOKEN` | a fresh secret per run, release builds only               |
+| Variable                  | Value                                                     |
+| ------------------------- | --------------------------------------------------------- |
+| `PORT`                    | the port, 4500 unless the shell's env sets `ODDBORO_PORT` |
+| `ODDBORO_PORT`            | the same                                                  |
+| `HOST`                    | `127.0.0.1`                                               |
+| `ORIGIN`                  | `http://127.0.0.1:<port>`                                 |
+| `ODDBORO_HOME`            | `~/.oddboro` (`%USERPROFILE%\.oddboro`), unless set       |
+| `ODDBORO_CODE`            | `<resources>/server`                                      |
+| `ODDBORO_DB_PORT`         | passed through when the shell's env sets it               |
+| `PATH`                    | the login-shell PATH from step 3                          |
+| `ODDBORO_VERSION`         | the app's version, like `0.0.4`                           |
+| `ODDBORO_UPDATE_TOKEN`    | a fresh secret per run, release builds only               |
+| `ODDBORO_DIAGNOSTICS_DSN` | the report address from step 11, when the shell found one |
 
 - `ODDBORO_APP=1`. With it the server quits on SIGTERM once its HTTP server
   closes, and when its stdin closes (`apps/office/src/hooks.server.ts`). It
@@ -166,7 +186,9 @@ Every update is required. `src-tauri/src/update.rs` runs them with
 - `src-tauri/src/main.rs`. Windows, the menu bar item, links, and the
   startup steps.
 - `src-tauri/build.rs`. Tauri's build, and the target triple as
-  `ODDBORO_TARGET`.
+  `ODDBORO_TARGET`. It rebuilds when `ODDBORO_DIAGNOSTICS_DSN` changes.
+- `src-tauri/src/diagnostics.rs`. The shell's error reports: the address,
+  the owner's answer, the allow list and the sending.
 - `src-tauri/src/server.rs`. Starting, watching, restarting and stopping Node.
 - `src-tauri/src/env.rs`. Port, home, log path and the login-shell PATH.
 - `src-tauri/src/update.rs`. Checking, downloading and installing updates,
@@ -196,13 +218,13 @@ Every update is required. `src-tauri/src/update.rs` runs them with
   installed in the repo, and the ledger, sprites and world as plain
   JavaScript (types stripped, `.ts` imports rewritten) in
   `node_modules/@oddboro/`, with their files beside them. Packages' test
-  folders (`__screenshots__`, `__tests__`) stay out, and a staged path
+  folders (`__screenshots__`, `__tests__`) and every source map stay out, and a staged path
   longer than 180 characters fails the stage: the Windows installer's
   builder stops at 260, and GitHub's runner puts the stage 60 deep. It fetches the Node
   binary for this machine's Node version, system and chip, and checks it
   against nodejs.org's sums (Windows's comes as a zip, unpacked with
   Windows's own `tar`). `--smoke` starts the stage on port 4590 with a
-  throwaway home, waits for it to answer, and checks it quits when asked
+  throwaway home and a report address on port 9 (so Sentry starts, with no yes), waits for it to answer, and checks it quits when asked
   (SIGTERM, or a closed stdin on Windows):
   `node apps/desktop/scripts/stage.ts --smoke`.
 - `stage/` must hold no folder symlinks. The bundler walks it without
@@ -262,6 +284,14 @@ lockfile-only update, so run it by hand for one that should ship. Five jobs:
    their next check, and the next build takes the next version. Until then,
    each merge replaces the draft, so it always holds the newest `main`.
 
+Each build job also passes `ODDBORO_DIAGNOSTICS_DSN` and Sentry's
+`SENTRY_AUTH_TOKEN`, with `SENTRY_ORG` and `SENTRY_PROJECT` from the release
+environment's variables. With the token, `release.ts` builds the shell with line
+tables (inside the binary on Linux, a `.dSYM` or `.pdb` beside it on the
+Mac and Windows) and uploads them, and the office's build uploads its source
+maps. Without it the release profile stays stripped and nothing goes to
+Sentry. A `--test` build uploads nothing.
+
 The repo must be public for installed apps to reach the release. While it is
 private, `latest.json` answers 404 to them.
 
@@ -273,16 +303,23 @@ environment, so a workflow run from any other branch, or a pull request, never
 sees the keys. Set one with `gh secret set <NAME> -R New-Altitude/Oddboro --env
 release`. Never commit a value.
 
-| Secret                               | What it is                                                  | How to make it                                                                                                                                         |
-| ------------------------------------ | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `APPLE_CERTIFICATE`                  | The Developer ID Application certificate and key, as base64 | Keychain Access, export "Developer ID Application: New Altitude, Inc." as `cert.p12` with a password, then `base64 -i cert.p12 \| pbcopy`              |
-| `APPLE_CERTIFICATE_PASSWORD`         | The password set on that export                             | Chosen at export                                                                                                                                       |
-| `APPLE_API_KEY`                      | The App Store Connect API key, the `.p8` file's contents    | App Store Connect, Users and Access, Integrations, Team Keys, a key with Developer access. Download `AuthKey_<id>.p8`, then `pbcopy < AuthKey_<id>.p8` |
-| `APPLE_API_KEY_ID`                   | That key's ID                                               | The Key ID column on the same page                                                                                                                     |
-| `APPLE_API_ISSUER`                   | The team's issuer ID                                        | The Issuer ID above the keys on the same page                                                                                                          |
-| `TAURI_SIGNING_PRIVATE_KEY`          | The updater signing key, for every build                    | `pbcopy < ~/.tauri/oddboro-updater.key`                                                                                                                |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Its password                                                | `security find-generic-password -s oddboro-updater-key -a password -w \| pbcopy`                                                                       |
-| `KEYCHAIN_PASSWORD`                  | Any random string, for the runner's temporary keychain      | `openssl rand -hex 24 \| pbcopy`                                                                                                                       |
+| Secret                               | What it is                                                                                                                     | How to make it                                                                                                                                         |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `APPLE_CERTIFICATE`                  | The Developer ID Application certificate and key, as base64                                                                    | Keychain Access, export "Developer ID Application: New Altitude, Inc." as `cert.p12` with a password, then `base64 -i cert.p12 \| pbcopy`              |
+| `APPLE_CERTIFICATE_PASSWORD`         | The password set on that export                                                                                                | Chosen at export                                                                                                                                       |
+| `APPLE_API_KEY`                      | The App Store Connect API key, the `.p8` file's contents                                                                       | App Store Connect, Users and Access, Integrations, Team Keys, a key with Developer access. Download `AuthKey_<id>.p8`, then `pbcopy < AuthKey_<id>.p8` |
+| `APPLE_API_KEY_ID`                   | That key's ID                                                                                                                  | The Key ID column on the same page                                                                                                                     |
+| `APPLE_API_ISSUER`                   | The team's issuer ID                                                                                                           | The Issuer ID above the keys on the same page                                                                                                          |
+| `TAURI_SIGNING_PRIVATE_KEY`          | The updater signing key, for every build                                                                                       | `pbcopy < ~/.tauri/oddboro-updater.key`                                                                                                                |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Its password                                                                                                                   | `security find-generic-password -s oddboro-updater-key -a password -w \| pbcopy`                                                                       |
+| `KEYCHAIN_PASSWORD`                  | Any random string, for the runner's temporary keychain                                                                         | `openssl rand -hex 24 \| pbcopy`                                                                                                                       |
+| `SENTRY_AUTH_TOKEN`                  | A Sentry auth token for the project the release uploads to, which uploads the shell's debug files and the office's source maps | An organization auth token from the organization's settings in Sentry                                                                                  |
+
+Three variables too, none of them secret: `ODDBORO_DIAGNOSTICS_DSN`, the
+relay's address the app sends reports to, and `SENTRY_ORG` and
+`SENTRY_PROJECT`, the Sentry organization and project the uploads go to. Set
+each with `gh variable set <NAME> -R New-Altitude/Oddboro --env release`.
+Without the address a release sends no reports.
 
 ### A test build
 
@@ -354,11 +391,13 @@ ODDBORO_PORT=4510 ODDBORO_DB_PORT=54510 ODDBORO_HOME=/tmp/oddboro-test-home \
 
 ## Pinned versions
 
-- `@tauri-apps/cli` 2.12.4
+- `@tauri-apps/cli` 2.12.4, and the npm `sentry` CLI 0.45.0, for the
+  release's debug files
 - `tauri` 2.12.5, `tauri-build` 2.7.4
 - `tauri-plugin-autostart` 2.7.0, `tauri-plugin-dialog` 2.8.4
 - `tauri-plugin-updater` 2.14.1, `serde_json` 1.0.154
 - `getrandom` 0.3.4, for the update token
+- `sentry` 0.49.5, and `rustls` 0.23.46 with `ring`, for error reports
 - `libc` 0.2.191 (Mac and Linux)
 - `mac-notification-sys` 0.6.15 (Mac only)
 - `tauri-plugin-single-instance` 2.5.3 (Linux and Windows)

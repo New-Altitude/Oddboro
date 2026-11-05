@@ -7,6 +7,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { home, IN_APP } from './home.ts';
 
+// The app's shell finds this file the same way, in apps/desktop/src-tauri/src/diagnostics.rs.
 export const ENV_FILE =
   process.env.ODDBORO_ENV ??
   (IN_APP ? home('.env') : fileURLToPath(new URL('../../../.env', import.meta.url)));

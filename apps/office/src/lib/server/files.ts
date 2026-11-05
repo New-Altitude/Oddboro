@@ -4,6 +4,7 @@
 import { mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { record, staffer, home } from '@oddboro/ledger';
+import { fixedError } from '@oddboro/ledger/errors';
 
 const HOMES = home('staff');
 const MAX_BYTES = 1_000_000;
@@ -12,7 +13,7 @@ export type StaffFile = { staff: string; path: string; content: string; mtime: n
 
 /** The real path of a staffer's file, or an error saying why not. */
 async function locate(staff: string, path: string): Promise<string> {
-  if (!/^[a-z0-9-]+$/.test(staff) || !(await staffer(staff))) throw new Error('No such Odd');
+  if (!/^[a-z0-9-]+$/.test(staff) || !(await staffer(staff))) throw fixedError('No such Odd');
   const root = realpathSync(join(HOMES, staff));
   let file: string;
   try {
@@ -48,7 +49,7 @@ export async function writeStaffFile(
 ): Promise<StaffFile> {
   const file = await locate(staff, path);
   if (Math.abs(statSync(file).mtimeMs - mtime) > 1)
-    throw new Error('The Odd changed this file since you opened it. Reopen it to see.');
+    throw fixedError('The Odd changed this file since you opened it. Reopen it to see.');
   writeFileSync(file, content);
   const who = await staffer(staff);
   const saved = await readStaffFile(staff, path);

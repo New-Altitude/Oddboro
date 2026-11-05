@@ -361,7 +361,7 @@ sample stay in the window to move back to.
 
 `npm run setup` asks nothing and opens the browser. Until the owner is
 welcomed, the page loads the sample's empty lot (`currentOffice({ lot: true })`,
-`lotOf` from `@oddboro/world`), and `Onboarding.svelte` runs six cards in
+`lotOf` from `@oddboro/world`), and `Onboarding.svelte` runs seven cards in
 the start panel, titled "{name}'s Lot" until the office stands on it. The
 command center's buttons and tabs appear there once the first run is over, so
 the owner meets the panel first. The cards: Your computer (`MacCard`, the checks
@@ -371,8 +371,10 @@ or an API key kept in the keychain; `src/lib/server/claude.ts` passes both to
 every run), the Office Manager (`ManagerCard`: four ready-made ones from
 `GET /api/onboarding`, or one described and drawn by `/api/looks` while the
 owner carries on), the space (`SpaceCard`: Quick is Main Street, the default; Custom (1-2 minutes) is
-a description or a chip, and starts the design job), and
-Open the office. `POST /api/onboarding` keeps the time zone, finishes the
+a description or a chip, and starts the design job), Help fix Oddboro
+(`DiagnosticsCard`, only when the office has somewhere to send reports: Send
+reports or Don't send, each kept at once; Next works without an answer, and the
+Desk asks once the office is open), and Open the office. `POST /api/onboarding` keeps the time zone, finishes the
 welcome, hires the manager (`hireManager`), writes their hello into their chat
 (each ready-made manager's `hello` in `managers.ts`, in their own voice, asks
 for goals and lets the owner skip them; a described one gets `customHello`),
@@ -418,14 +420,14 @@ address when it answers and is trusted.
 ## Who the office answers
 
 Other pages open in the owner's browser can send requests to the office too,
-so `guardOffice` (`src/lib/server/owner-page.ts`, the server's `handle` in
-`hooks.server.ts`) checks every route and API request before the route sees
+so `guardOffice` (`src/lib/server/owner-page.ts`, the first step of the
+server's `handle` in `hooks.server.ts`, before Sentry's) checks every route and API request before the route sees
 it, in every mode. SvelteKit's own check covers form posts only. Files built
 into the page (scripts, styles, images) are served before the check.
 
 1. The Host must be one of the office's names, whatever the port: 127.0.0.1,
    [::1], localhost, the addresses through Caddy (`HOSTS` in
-   `src/lib/server/address.ts`) and the app's `ORIGIN`. A site that points its
+   `src/lib/server/hosts.ts`) and the app's `ORIGIN`. A site that points its
    own name at 127.0.0.1 looks same-origin to the browser, so only the name
    gives it away. A route asked by any other name gets 403.
 2. Anything but GET, HEAD and OPTIONS must come from the owner's page
@@ -438,6 +440,58 @@ into the page (scripts, styles, images) are served before the check.
 4. Vite's dev server has its own route, `/__open-in-editor`, that opens a file
    in an editor and runs before the handle. `noEditorLaunch` in
    `vite.config.ts` refuses it with 403, always: nothing in the office uses it.
+
+## Diagnostics
+
+Error and trace reports go to Sentry only after the owner's yes.
+
+1. The address is `ODDBORO_DIAGNOSTICS_DSN`, from the environment or `.env`.
+   The app's shell passes its own (`apps/desktop/CLAUDE.md`). With none,
+   `serverOptions` (`src/lib/server/diagnostics.ts`) returns nothing: the SDK
+   never starts, the office never asks, and the relay drops what it gets.
+2. The answer is `OFFICE_DIAGNOSTICS` in `.env`: `yes`, `no`, or unasked for
+   anything else. `PUT /api/diagnostics` writes it, from the first visit's
+   card, the Desk's From Oddboro item and the Setup switch
+   (`DiagnosticsSection`). It holds from the next report, with no restart.
+   `npm run reset` clears it.
+3. The gate: `gated` wraps the SDK's transport and asks `diagnosticsOn()` on
+   every send. What leaves has passed the one allow list in
+   `src/lib/diagnostics.ts` (`scrubEvent`, `scrubSpan`):
+   - An error's message only in a shape code writes (`keptMessage`): an
+     engine template with any property key as `[key]`, a system error's code
+     and call (`ENOENT open`), a Postgres error's SQLSTATE with its table,
+     column and constraint names, or a message Oddboro's code wrote
+     (`fixedError` in `@oddboro/ledger/errors`). Every other text leaves as
+     `[withheld]`.
+   - No address the office reaches. Every outgoing request, to the office
+     itself or another service, is named by its method alone, and no span
+     keeps `server.address`. A page frame from the office (the host and port
+     the page reached the relay on, whatever the scheme, or `HOSTS` on its
+     default port) keeps its origin, and its path under `/_app/`; any other
+     URL (another loopback port, a host, a browser extension, `file:`,
+     `blob:`) keeps its file name alone. Not the scheme: the built office
+     sees its own URL as https, since adapter-node reads no `ORIGIN`, while
+     the desktop window loads it over http.
+   - File paths by `reportPath`: relative to Oddboro's own code, from
+     `node_modules/` on inside a package, the file name alone anywhere else
+     under the home folder, and whole outside it. The shell's `report_path`
+     is the same rule.
+   - None of what the SDK collects by default (`DATA_COLLECTION`).
+
+   Every span container tells Sentry never to infer an address
+   (`infer_ip: 'never'`), and `fitDoor` cuts an envelope to the door's size
+   limit.
+
+4. The relay: the page's SDK (`hooks.client.ts`) posts to
+   `/api/diagnostics/envelope`, never to Sentry. The route scrubs each event
+   and span again and sends them through the office's own transport, so the
+   gate applies to them too.
+5. Traces: about one in ten (`TRACE_SAMPLE_RATE`). `QUIET_ROUTES` are never
+   traced: `/api/events` stays open as long as the page, `/api/update` is the
+   shell's poll, and the relay would trace itself.
+6. `instrumentation.server.ts` loads before the server, so
+   `src/lib/server/diagnostics.ts` and `src/lib/server/hosts.ts` import
+   nothing that brings in Postgres.
 
 ## Running it always
 
@@ -461,19 +515,22 @@ into the page (scripts, styles, images) are served before the check.
 
 ## Where things live
 
-| Path                              | What it holds                                                       |
-| --------------------------------- | ------------------------------------------------------------------- |
-| `src/lib/floor/`                  | The PixiJS floor and the Odds on it                                 |
-| `src/lib/staff/roster.ts`         | The Odd shape, hiring looks, and the label for each activity        |
-| `src/lib/ui/`                     | The card and its tabs, the Desk, the Ledger, hiring, chat           |
-| `src/lib/server/`                 | Staff runs, office runs, looks, the job clock, events, keychain     |
-| `src/routes/api/`                 | One folder per thing the page reads or changes                      |
-| `src/lib/server/office-design.ts` | Drawing an office from the owner's words, and where Odds move to    |
-| `src/lib/server/design-job.ts`    | The drawing as a job on the server, which pages follow              |
-| `src/lib/ui/onboarding/`          | A new owner's first visit: the cards, the reveal's story, the music |
-| `src/lib/floor/reveal.ts`         | The office going up beat by beat, and the bus                       |
-| `scripts/office-service.ts`       | The login service                                                   |
-| `src/app.css`                     | Tokens. Every colour in the chrome reads these.                     |
+| Path                              | What it holds                                                                                         |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `src/lib/floor/`                  | The PixiJS floor and the Odds on it                                                                   |
+| `src/lib/staff/roster.ts`         | The Odd shape, hiring looks, and the label for each activity                                          |
+| `src/lib/ui/`                     | The card and its tabs, the Desk, the Ledger, hiring, chat                                             |
+| `src/lib/server/`                 | Staff runs, office runs, looks, the job clock, events, keychain                                       |
+| `src/routes/api/`                 | One folder per thing the page reads or changes                                                        |
+| `src/lib/server/office-design.ts` | Drawing an office from the owner's words, and where Odds move to                                      |
+| `src/lib/server/design-job.ts`    | The drawing as a job on the server, which pages follow                                                |
+| `src/lib/ui/onboarding/`          | A new owner's first visit: the cards, the reveal's story, the music                                   |
+| `src/lib/floor/reveal.ts`         | The office going up beat by beat, and the bus                                                         |
+| `src/lib/diagnostics.ts`          | What a report may carry, and when a trace is taken: the server's, the relay's and the page's one rule |
+| `src/lib/server/diagnostics.ts`   | The SDK's options and the gate every report passes, with the owner's answer                           |
+| `src/lib/server/hosts.ts`         | The office's names through Caddy (`HOSTS`), alone so reporting loads before Postgres                  |
+| `scripts/office-service.ts`       | The login service                                                                                     |
+| `src/app.css`                     | Tokens. Every colour in the chrome reads these.                                                       |
 
 ## Rules for this app
 

@@ -21,6 +21,10 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(10);
 const BACKOFF: [u64; 3] = [1, 5, 30];
 const MAX_RESTARTS: usize = 5;
 const RESTART_WINDOW: Duration = Duration::from_secs(600);
+// `GaveUp`'s texts say these numbers in words.
+const _: () = assert!(READY_TIMEOUT.as_secs() == 90);
+const _: () = assert!(MAX_RESTARTS == 5);
+const _: () = assert!(RESTART_WINDOW.as_secs() == 600);
 /// A line Node writes to ask for a notification: the prefix, then the title,
 /// a tab, and the text (`apps/office/src/lib/server/notify.ts`).
 const NOTIFY: &str = "oddboro:notify ";
@@ -52,6 +56,44 @@ pub struct Server {
     /// The secret the server checks on the shell's update requests. Empty
     /// when this build does not update itself.
     pub update_token: String,
+    /// Where error reports go, passed as `ODDBORO_DIAGNOSTICS_DSN` so the
+    /// office and the shell agree. None when this build has no address.
+    pub diagnostics_dsn: Option<String>,
+}
+
+/// Why the shell stopped running the office.
+pub enum GaveUp {
+    CouldNotStart(io::Error),
+    NoAnswer,
+    /// `code` is Node's last exit code, when it exited with one.
+    KeptStopping {
+        code: Option<i32>,
+    },
+}
+
+impl GaveUp {
+    /// What the owner is shown. `log_tail` is the end of the office's log.
+    pub fn message(&self, log_tail: &str) -> String {
+        match self {
+            GaveUp::CouldNotStart(e) => format!("Oddboro could not start its server: {e}"),
+            GaveUp::NoAnswer => {
+                format!("The office did not answer within 90 seconds.\n\n{log_tail}")
+            }
+            GaveUp::KeptStopping { .. } => format!(
+                "The office stopped {MAX_RESTARTS} times in 10 minutes, so Oddboro gave up.\n\n{log_tail}"
+            ),
+        }
+    }
+
+    /// What an error report says: a fixed text, never the log, which names
+    /// the owner's home folder and holds the office's own lines.
+    pub fn report(&self) -> &'static str {
+        match self {
+            GaveUp::CouldNotStart(_) => "The office could not start",
+            GaveUp::NoAnswer => "The office did not answer within 90 seconds",
+            GaveUp::KeptStopping { .. } => "The office stopped 5 times in 10 minutes",
+        }
+    }
 }
 
 enum Ready {
@@ -66,9 +108,9 @@ impl Server {
     }
 
     /// Runs Node until the shell quits. Calls `on_ready` each time the server
-    /// answers, the first time and after every restart. Returns the message
-    /// to show the owner when it gives up.
-    pub fn supervise(&self, on_ready: impl Fn()) -> Result<(), String> {
+    /// answers, the first time and after every restart. Returns why when it
+    /// gives up.
+    pub fn supervise(&self, on_ready: impl Fn()) -> Result<(), GaveUp> {
         let mut restarts: VecDeque<Instant> = VecDeque::new();
         loop {
             let mut child = {
@@ -76,8 +118,7 @@ impl Server {
                 if QUITTING.load(SeqCst) {
                     return Ok(());
                 }
-                self.spawn()
-                    .map_err(|e| format!("Oddboro could not start its server: {e}"))?
+                self.spawn().map_err(GaveUp::CouldNotStart)?
             };
             note(&self.log, &format!("started node, pid {}", child.id()));
             // Hold Node's stdin apart, open until Node is gone: `Child::wait`
@@ -94,25 +135,20 @@ impl Server {
                 Ready::TimedOut => {
                     terminate(&mut child);
                     mark_gone();
-                    return Err(format!(
-                        "The office did not answer within 90 seconds.\n\n{}",
-                        self.log_tail()
-                    ));
+                    return Err(GaveUp::NoAnswer);
                 }
             };
             mark_gone();
             if QUITTING.load(SeqCst) {
                 return Ok(());
             }
+            let code = status.as_ref().ok().and_then(ExitStatus::code);
             let status = status.map_or_else(|e| e.to_string(), |s| s.to_string());
             note(&self.log, &format!("node stopped: {status}"));
 
             restarts.retain(|t| t.elapsed() < RESTART_WINDOW);
             if restarts.len() >= MAX_RESTARTS {
-                return Err(format!(
-                    "The office stopped {MAX_RESTARTS} times in 10 minutes, so Oddboro gave up.\n\n{}",
-                    self.log_tail()
-                ));
+                return Err(GaveUp::KeptStopping { code });
             }
             let delay = BACKOFF[restarts.len().min(BACKOFF.len() - 1)];
             restarts.push_back(Instant::now());
@@ -149,6 +185,11 @@ impl Server {
             .envs(
                 (!self.update_token.is_empty())
                     .then_some(("ODDBORO_UPDATE_TOKEN", self.update_token.as_str())),
+            )
+            .envs(
+                self.diagnostics_dsn
+                    .as_deref()
+                    .map(|dsn| ("ODDBORO_DIAGNOSTICS_DSN", dsn)),
             );
         // Node is a console program. Without this, Windows opens a console
         // window for it, and for every program it starts.
@@ -163,7 +204,7 @@ impl Server {
         Ok(child)
     }
 
-    fn log_tail(&self) -> String {
+    pub fn log_tail(&self) -> String {
         format!(
             "The last lines of {}:\n\n{}",
             self.log.display(),
