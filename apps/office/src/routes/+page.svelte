@@ -16,8 +16,11 @@
   import StaffCard from '#lib/ui/StaffCard.svelte';
   import { chatRequest, type Delivered } from '#lib/ui/chat-about.svelte.ts';
   import AgentsPanel from '#lib/ui/AgentsPanel.svelte';
+  import type { AccountStatus } from '#lib/account.ts';
   import type { Work } from '#lib/staff/work.ts';
   import DeskDrawer from '#lib/ui/DeskDrawer.svelte';
+  import { account } from '#lib/ui/account.svelte.ts';
+  import { diagnostics } from '#lib/ui/diagnostics.svelte.ts';
   import LedgerPanel from '#lib/ui/LedgerPanel.svelte';
   import GoalsPanel from '#lib/ui/GoalsPanel.svelte';
   import OfficeDesigner from '#lib/ui/OfficeDesigner.svelte';
@@ -38,6 +41,14 @@
   // Every time on the page is in the office's zone, which only the server knows.
   // It is fixed for the life of the page: a new zone takes a restart.
   setZone(untrack(() => data.zone));
+  // Whether the office can send reports, and the owner's answer. Answering
+  // updates it from then on.
+  Object.assign(
+    diagnostics,
+    untrack(() => data.diagnostics)
+  );
+  // The New Altitude sign-in. The live line keeps it current from then on.
+  account.status = untrack(() => data.account);
 
   /** `heading` is the room a walking staffer is on its way to. */
   type Tag = {
@@ -218,7 +229,13 @@
   }
   const status = $derived(Object.fromEntries(tags.map((t) => [t.id, statusOf(t)])));
 
-  const deskCount = $derived(desk.asks.length + desk.tasks.length + desk.reports.length);
+  /** The Desk asks about reports once the office is open, until the owner answers. */
+  const askDiagnostics = $derived(
+    diagnostics.possible && diagnostics.answer === 'unasked' && welcomed
+  );
+  const deskCount = $derived(
+    desk.asks.length + desk.tasks.length + desk.reports.length + Number(askDiagnostics)
+  );
 
   /** Rooms a new hire can work in: any with a place to work, read or sort mail. */
   const hireRooms = $derived.by(() => {
@@ -510,7 +527,12 @@
     events.onmessage = (m) => {
       const e = JSON.parse(m.data) as
         | { type: 'change'; table: string }
-        | { type: 'working'; working: Record<string, string>; inProgress: Record<string, Work[]> };
+        | { type: 'working'; working: Record<string, string>; inProgress: Record<string, Work[]> }
+        | { type: 'account'; status: AccountStatus };
+      if (e.type === 'account') {
+        account.status = e.status;
+        return;
+      }
       if (e.type === 'working') {
         // Every tool call a staffer makes updates its work in progress; only
         // work starting or ending reloads the card's tabs.
@@ -1114,6 +1136,7 @@
               {:else if w.kind === 'desk'}
                 <DeskDrawer
                   {desk}
+                  {askDiagnostics}
                   {staff}
                   focus={deskFocus}
                   {notify}

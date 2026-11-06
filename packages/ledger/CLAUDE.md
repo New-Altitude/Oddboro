@@ -39,7 +39,9 @@ and `data/`, the folder every Odd may read. `CODE` is the code
    keeps the 3 newest copies. Development (no `ODDBORO_VERSION`) never copies.
 5. `npm run reset` starts the office over: it moves `~/.oddboro/db`, the
    Odds' homes and the office's notes into `~/.oddboro/backups/<time>/`
-   and clears the office's keys from `.env`. It never touches `data/`.
+   and clears the office's keys from `.env`, the owner's answer about
+   error reports among them, so the next visit asks again. It never
+   touches `data/`.
 
 `ODDBORO_ENV` names another `.env`, to try an office out beside the real
 one (with its own `HOME`, so its own `~/.oddboro`). In the app the `.env`
@@ -66,6 +68,7 @@ window, the hold, the install decision and a poke's grace.
 | `src/platform.ts`      | What differs between systems: log folder, login service (launchd, systemd, Task Scheduler), opening a URL, finding Claude Code, and Windows PowerShell for Windows           |
 | `src/secrets.ts`       | Secrets in the system's own store, one entry per system: `security` (Mac), `secret-tool` (Linux), the Credential Manager through `@napi-rs/keyring` (Windows)                |
 | `src/env.ts`           | `.env` read and written a key at a time, by setup and by the office                                                                                                          |
+| `src/errors.ts`        | `fixedError`, the one way office code says a fixed message an error report may keep                                                                                          |
 | `src/local-db.ts`      | The office's own Postgres (PGlite), its socket, and NOTIFY from other processes                                                                                              |
 | `src/upgrade.ts`       | Brings the tables up to date: pgvector, then migrations. `markBaseline()` moves an install made before the baseline onto it, once, and takes out the Google connector it had |
 | `src/managers.ts`      | The Office Manager: the four ready-made ones, their job description, and hiring one                                                                                          |

@@ -3,6 +3,7 @@
   import Pixel from './Pixel.svelte';
   import Markdown from './Markdown.svelte';
   import Attachments from './Attachments.svelte';
+  import DiagnosticsAsk from './DiagnosticsAsk.svelte';
   import SelectToChat from './SelectToChat.svelte';
   import { call } from './api.ts';
   import { ago, when } from './format.ts';
@@ -18,6 +19,8 @@
   type Props = {
     desk: Desk;
     staff: StaffProfile[];
+    /** Ask about error and trace reports, first, until the owner answers. */
+    askDiagnostics: boolean;
     /** Open on this item when set, e.g. after clicking a waiting staffer. */
     focus?: string;
     notify: boolean;
@@ -29,7 +32,8 @@
     /** Open a staffer's card, from the name on an item. */
     onstaff: (id: string) => void;
   };
-  let { desk, staff, focus, notify, onnotify, onhire, onplan, onstaff }: Props = $props();
+  let { desk, staff, askDiagnostics, focus, notify, onnotify, onhire, onplan, onstaff }: Props =
+    $props();
 
   type Item =
     | { key: string; kind: 'ask'; at: string; row: AskRow }
@@ -58,6 +62,8 @@
       }))
     ].sort((a, b) => a.at.localeCompare(b.at))
   );
+
+  const waiting = $derived(items.length + Number(askDiagnostics));
 
   let openKey = $state<string | undefined>();
   /** An attached file with edits the owner has not saved. */
@@ -202,7 +208,7 @@
     <div class="flex-1">
       <div class="font-pixel text-lg leading-none">Your desk</div>
       <div class="mt-1 text-xs text-muted">
-        {items.length ? `${items.length} waiting on you` : 'Nothing waiting on you'}
+        {waiting ? `${waiting} waiting on you` : 'Nothing waiting on you'}
       </div>
     </div>
     <label
@@ -230,12 +236,20 @@
 
   <div class="flex-1 overflow-y-auto p-3">
     {#if !open}
-      {#if !items.length}
+      {#if !waiting}
         <p class="py-10 text-center text-sm text-muted">
           Desk clear. Your Odds will bring you anything that needs you.
         </p>
       {/if}
       <ul class="flex flex-col gap-1.5">
+        {#if askDiagnostics}
+          <li class="rounded-xl bg-raise px-3 py-2.5" aria-label="From Oddboro">
+            <span class="block text-[10px] tracking-[0.16em] text-ember uppercase"
+              >From Oddboro</span
+            >
+            <div class="mt-1"><DiagnosticsAsk /></div>
+          </li>
+        {/if}
         {#each items as i (i.key)}
           {@const from = who(i.row.staffId)}
           <li>

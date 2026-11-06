@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { createServer } from 'vite';
-import config, { noEditorLaunch } from '../vite.config.ts';
+import config, { buildOptions, noEditorLaunch } from '../vite.config.ts';
 
 const folder = mkdtempSync(join(tmpdir(), 'oddboro-vite-'));
 const launched = join(folder, 'launched.log');
@@ -42,6 +42,17 @@ after(async () => {
 test("the office's dev config refuses the editor route before any other plugin", () => {
   const { plugins } = config({ command: 'serve', mode: 'development' });
   assert.equal((plugins?.[0] as { name?: string }).name, noEditorLaunch().name);
+});
+
+test('the Sentry build plugin never reports the build and uploads only with a token', () => {
+  const without = buildOptions({});
+  const withToken = buildOptions({ SENTRY_AUTH_TOKEN: 'x' });
+  for (const options of [without, withToken]) {
+    assert.equal(options.telemetry, false);
+    assert.equal(options.release.inject, false);
+  }
+  assert.equal(without.autoUploadSourceMaps, false);
+  assert.equal(withToken.autoUploadSourceMaps, true);
 });
 
 test('a page asking the dev server to open a file in an editor is refused, and no editor starts', async () => {

@@ -16,6 +16,7 @@ import {
 } from 'drizzle-orm';
 import { db, sql as pg } from './db.ts';
 import { embed } from './embed.ts';
+import { fixedError } from './errors.ts';
 import {
   asks,
   attachments,
@@ -162,7 +163,7 @@ export async function setLook(
   newParts?: DrawnPart[]
 ): Promise<void> {
   const who = await staffer(id);
-  if (!who) throw new Error('No such Odd');
+  if (!who) throw fixedError('No such Odd');
   const twin = await lookTaken(look, id);
   if (twin) throw new Error(`${twin.name} already looks exactly like that`);
   await saveParts(newParts, id);
@@ -352,7 +353,7 @@ export async function decideAsk(
   reason: string | null,
   reportWhenDone = false
 ): Promise<void> {
-  if (decision === 'iterate' && !reason) throw new Error('Say what to change');
+  if (decision === 'iterate' && !reason) throw fixedError('Say what to change');
   const status = decision === 'approve' ? 'approved' : decision === 'deny' ? 'denied' : 'revise';
   const [ask] = await db
     .update(asks)
@@ -382,7 +383,7 @@ export async function decideAsk(
  */
 export async function replyToReport(id: number, note: string): Promise<ReportRow> {
   const r = await report(id);
-  if (!r) throw new Error('No such report');
+  if (!r) throw fixedError('No such report');
   if (!r.readAt) await readReport(id);
   await record({
     kind: 'decision',
@@ -543,7 +544,7 @@ export async function grantAccess(
 ): Promise<void> {
   const who = await staffer(staffId);
   const conn = await connector(req.connector);
-  if (!who || !conn) throw new Error('No such Odd or connector');
+  if (!who || !conn) throw fixedError('No such Odd or connector');
   if (req.level === 'draft') throw new Error(`${conn.name} connects to read, or to read and write`);
   if (!levelAtMost(req.level, who.permission))
     throw new Error(`${who.name} holds ${who.permission}, so it cannot be given ${req.level}`);
@@ -1038,9 +1039,9 @@ export async function setDescription(
   by: { owner: true; was: string } | { go: GoAhead }
 ): Promise<boolean> {
   const who = await staffer(staffId);
-  if (!who) throw new Error('No such Odd');
+  if (!who) throw fixedError('No such Odd');
   const desk = text.trim();
-  if (!desk) throw new Error('A job description cannot be empty');
+  if (!desk) throw fixedError('A job description cannot be empty');
   if ('owner' in by && by.was.trim() !== who.desk.trim())
     throw new Error(`${who.name}'s job description changed since you opened it. Reopen it to see.`);
   if (desk === who.desk.trim()) return false;
@@ -1059,7 +1060,7 @@ export async function setDescription(
 /** Remove a job that never ran. One that ran stays, paused, so its runs keep their record. */
 export async function deleteJob(id: number): Promise<void> {
   const [ran] = await db.select({ id: runs.id }).from(runs).where(eq(runs.jobId, id)).limit(1);
-  if (ran) throw new Error('This job has run before, so it stays paused to keep its record.');
+  if (ran) throw fixedError('This job has run before, so it stays paused to keep its record.');
   await db.delete(jobs).where(eq(jobs.id, id));
 }
 
@@ -1275,7 +1276,7 @@ export async function finishWelcome(name: string): Promise<void> {
 /** Set the owner's name. */
 export async function setOwnerName(name: string): Promise<void> {
   const n = name.trim().slice(0, 30);
-  if (!n) throw new Error('Say a name');
+  if (!n) throw fixedError('Say a name');
   await db
     .insert(owner)
     .values({ id: 'owner', name: n, updatedAt: new Date() })
@@ -1357,9 +1358,9 @@ const POKE_HORIZON_MS = 7 * 24 * 3_600_000;
 export async function schedulePoke(staffId: string, at: Date, message: string): Promise<PokeRow> {
   const minute = new Date(Math.floor(at.getTime() / 60_000) * 60_000);
   // The minute under way still counts: a poke for it goes out right away.
-  if (minute.getTime() + 60_000 <= Date.now()) throw new Error('That time has passed.');
+  if (minute.getTime() + 60_000 <= Date.now()) throw fixedError('That time has passed.');
   if (minute.getTime() > Date.now() + POKE_HORIZON_MS)
-    throw new Error('A poke can be at most 7 days ahead.');
+    throw fixedError('A poke can be at most 7 days ahead.');
   const [same] = await db
     .select()
     .from(pokes)
@@ -1475,7 +1476,7 @@ export async function renameRoom(
   names: { was: string; start: string }
 ): Promise<string> {
   const next = name.trim().replace(/\s+/g, ' ') || names.start;
-  if (next.length > 40) throw new Error('Keep a room name to 40 characters');
+  if (next.length > 40) throw fixedError('Keep a room name to 40 characters');
   if (next === names.was) return next;
   if (next === names.start)
     await db.delete(roomNames).where(and(eq(roomNames.office, office), eq(roomNames.room, room)));

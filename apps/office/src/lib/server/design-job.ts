@@ -7,6 +7,7 @@
 import { EventEmitter } from 'node:events';
 import type { DrawnArt } from '@oddboro/sprites/art';
 import type { OfficeSpec } from '@oddboro/world';
+import { fixedError } from '@oddboro/ledger/errors';
 import { drawOffice, type DrawnOffice, type Progress } from './office-design.ts';
 import { moveInto } from './move-in.ts';
 
@@ -44,7 +45,7 @@ export const currentDesign = (): Job | undefined => g.designJob;
 /** Start drawing. Throws while another drawing is still running. */
 export function startDesign(req: DesignRequest, moveIn = false): Job {
   if (g.designJob && !g.designJob.finished)
-    throw new Error('The office is already drawing one. Wait for it to finish.');
+    throw fixedError('The office is already drawing one. Wait for it to finish.');
   const job: Job = {
     id: (g.designJobs = (g.designJobs ?? 0) + 1),
     description: req.description,

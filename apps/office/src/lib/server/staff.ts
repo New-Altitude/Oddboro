@@ -64,6 +64,7 @@ import {
   rulePath,
   toolCommand
 } from '@oddboro/ledger';
+import { fixedError } from '@oddboro/ledger/errors';
 import { emit } from './events.ts';
 import type { Work } from '../staff/work.ts';
 import { getSecret, headerSecret } from './keychain.ts';
@@ -211,7 +212,7 @@ async function replyBrief(
 ): Promise<{ ref: ChatRef; brief: string }> {
   if (re.kind === 'ask') {
     const a = await askById(re.id);
-    if (a?.staffId !== id) throw new Error('No such ask from this Odd');
+    if (a?.staffId !== id) throw fixedError('No such ask from this Odd');
     return {
       ref: { kind: 'ask', id: a.id, title: a.title },
       brief: [
@@ -225,7 +226,7 @@ async function replyBrief(
   }
   if (re.kind === 'task') {
     const t = await taskById(re.id);
-    if (t?.staffId !== id) throw new Error('No such task from this Odd');
+    if (t?.staffId !== id) throw fixedError('No such task from this Odd');
     return {
       ref: { kind: 'task', id: t.id, title: t.title },
       brief: [
@@ -241,7 +242,7 @@ async function replyBrief(
     };
   }
   const r = await reportById(re.id);
-  if (r?.staffId !== id) throw new Error('No such report from this Odd');
+  if (r?.staffId !== id) throw fixedError('No such report from this Odd');
   return {
     ref: { kind: 'report', id: r.id, title: r.title },
     brief: [

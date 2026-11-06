@@ -1,14 +1,17 @@
 // One bus for everything the page should hear about: a table changed (from
-// Postgres NOTIFY, whichever process wrote it) or a staffer started or stopped
-// working. /api/events streams it to the page. Nothing polls.
+// Postgres NOTIFY, whichever process wrote it), a staffer started or stopped
+// working, or the New Altitude sign-in changed. /api/events streams it to the
+// page. Nothing polls.
 import { EventEmitter } from 'node:events';
 import { LOCAL, pg } from '@oddboro/ledger';
 import { listenLocal } from '@oddboro/ledger/local-db';
+import type { AccountStatus } from '../account.ts';
 import type { Work } from '../staff/work.ts';
 
 export type OfficeEvent =
   | { type: 'change'; table: string }
-  | { type: 'working'; working: Record<string, string>; inProgress: Record<string, Work[]> };
+  | { type: 'working'; working: Record<string, string>; inProgress: Record<string, Work[]> }
+  | { type: 'account'; status: AccountStatus };
 
 type Bus = EventEmitter & { listening?: Promise<unknown> };
 const g = globalThis as unknown as { officeBus?: Bus };

@@ -162,7 +162,12 @@ the app ships them whole (`apps/desktop/scripts/stage.ts`). In the app
    working. Hosted servers sign in with
    OAuth (`src/lib/server/oauth.ts`): the task's Sign in opens the service, it
    returns to `/connect/callback`, the tokens go in the keychain, and each run
-   gets a fresh access token as a header. When a tool an Odd holds stops working, it calls
+   gets a fresh access token as a header. A token is refreshed one at a time
+   per sign-in (`once`), since a service may end a sign-in whose refresh token
+   arrives twice. For the same reason `steadyFetch` retries only a request
+   that never left this computer; one whose answer was lost is not retried
+   within one request. The same provider signs the owner in to New Altitude (see
+   "A New Altitude account"). When a tool an Odd holds stops working, it calls
    `reconnect_access` (every Odd has it): the office puts its own connect
    steps on the desk again (`reconnectTask`), after the Odd's steps for
    getting a new key, with no ask, one open per tool. Odds never write
@@ -361,7 +366,7 @@ sample stay in the window to move back to.
 
 `npm run setup` asks nothing and opens the browser. Until the owner is
 welcomed, the page loads the sample's empty lot (`currentOffice({ lot: true })`,
-`lotOf` from `@oddboro/world`), and `Onboarding.svelte` runs six cards in
+`lotOf` from `@oddboro/world`), and `Onboarding.svelte` runs eight cards in
 the start panel, titled "{name}'s Lot" until the office stands on it. The
 command center's buttons and tabs appear there once the first run is over, so
 the owner meets the panel first. The cards: Your computer (`MacCard`, the checks
@@ -371,8 +376,12 @@ or an API key kept in the keychain; `src/lib/server/claude.ts` passes both to
 every run), the Office Manager (`ManagerCard`: four ready-made ones from
 `GET /api/onboarding`, or one described and drawn by `/api/looks` while the
 owner carries on), the space (`SpaceCard`: Quick is Main Street, the default; Custom (1-2 minutes) is
-a description or a chip, and starts the design job), and
-Open the office. `POST /api/onboarding` keeps the time zone, finishes the
+a description or a chip, and starts the design job), New Altitude
+(`AccountCard`, an optional sign-in to the owner's account, with Skip; see "A
+New Altitude account"), Help fix Oddboro
+(`DiagnosticsCard`, only when the office has somewhere to send reports: Send
+reports or Don't send, each kept at once; Next works without an answer, and the
+Desk asks once the office is open), and Open the office. `POST /api/onboarding` keeps the time zone, finishes the
 welcome, hires the manager (`hireManager`), writes their hello into their chat
 (each ready-made manager's `hello` in `managers.ts`, in their own voice, asks
 for goals and lets the owner skip them; a described one gets `customHello`),
@@ -418,14 +427,17 @@ address when it answers and is trusted.
 ## Who the office answers
 
 Other pages open in the owner's browser can send requests to the office too,
-so `guardOffice` (`src/lib/server/owner-page.ts`, the server's `handle` in
-`hooks.server.ts`) checks every route and API request before the route sees
-it, in every mode. SvelteKit's own check covers form posts only. Files built
+so `guardOffice` (`src/lib/server/owner-page.ts`, the first step of the
+server's `handle` in `hooks.server.ts`, before Sentry's) checks every route and API request before the route sees
+it, in every mode. SvelteKit's own check covers form posts only. In the
+built server it also refuses a POST, PUT, PATCH or DELETE with no content
+type, since there the server takes its own origin as https; so `call()`
+(`src/lib/ui/api.ts`) says JSON on every one, with a body or without. Files built
 into the page (scripts, styles, images) are served before the check.
 
 1. The Host must be one of the office's names, whatever the port: 127.0.0.1,
    [::1], localhost, the addresses through Caddy (`HOSTS` in
-   `src/lib/server/address.ts`) and the app's `ORIGIN`. A site that points its
+   `src/lib/server/hosts.ts`) and the app's `ORIGIN`. A site that points its
    own name at 127.0.0.1 looks same-origin to the browser, so only the name
    gives it away. A route asked by any other name gets 403.
 2. Anything but GET, HEAD and OPTIONS must come from the owner's page
@@ -435,9 +447,99 @@ into the page (scripts, styles, images) are served before the check.
 3. The one other client is the app's shell, which reports updates to
    `/api/update` with the token it passed the server (`fromShell` in
    `src/lib/server/update.ts`).
-4. Vite's dev server has its own route, `/__open-in-editor`, that opens a file
+4. `/account/callback` and `/connect/callback` arrive as GETs from the
+   owner's browser, sent back by the service's sign-in page, so they pass
+   rule 2 with no Origin.
+5. Vite's dev server has its own route, `/__open-in-editor`, that opens a file
    in an editor and runs before the handle. `noEditorLaunch` in
    `vite.config.ts` refuses it with 403, always: nothing in the office uses it.
+
+## Diagnostics
+
+Error and trace reports go to Sentry only after the owner's yes.
+
+1. The address is `ODDBORO_DIAGNOSTICS_DSN`, from the environment or `.env`.
+   The app's shell passes its own (`apps/desktop/CLAUDE.md`). With none,
+   `serverOptions` (`src/lib/server/diagnostics.ts`) returns nothing: the SDK
+   never starts, the office never asks, and the relay drops what it gets.
+2. The answer is `OFFICE_DIAGNOSTICS` in `.env`: `yes`, `no`, or unasked for
+   anything else. `PUT /api/diagnostics` writes it, from the first visit's
+   card, the Desk's From Oddboro item and the Setup switch
+   (`DiagnosticsSection`). It holds from the next report, with no restart.
+   `npm run reset` clears it.
+3. The gate: `gated` wraps the SDK's transport and asks `diagnosticsOn()` on
+   every send. What leaves has passed the one allow list in
+   `src/lib/diagnostics.ts` (`scrubEvent`, `scrubSpan`):
+   - An error's message only in a shape code writes (`keptMessage`): an
+     engine template with any property key as `[key]`, a system error's code
+     and call (`ENOENT open`), a Postgres error's SQLSTATE with its table,
+     column and constraint names, or a message Oddboro's code wrote
+     (`fixedError` in `@oddboro/ledger/errors`). Every other text leaves as
+     `[withheld]`.
+   - No address the office reaches. Every outgoing request, to the office
+     itself or another service, is named by its method alone, and no span
+     keeps `server.address`. A page frame from the office (the host and port
+     the page reached the relay on, whatever the scheme, or `HOSTS` on its
+     default port) keeps its origin, and its path under `/_app/`; any other
+     URL (another loopback port, a host, a browser extension, `file:`,
+     `blob:`) keeps its file name alone. Not the scheme: the built office
+     sees its own URL as https, since adapter-node reads no `ORIGIN`, while
+     the desktop window loads it over http.
+   - File paths by `reportPath`: relative to Oddboro's own code, from
+     `node_modules/` on inside a package, the file name alone anywhere else
+     under the home folder, and whole outside it. The shell's `report_path`
+     is the same rule.
+   - None of what the SDK collects by default (`DATA_COLLECTION`).
+
+   Every span container tells Sentry never to infer an address
+   (`infer_ip: 'never'`), and `fitDoor` cuts an envelope to the door's size
+   limit.
+
+4. The relay: the page's SDK (`hooks.client.ts`) posts to
+   `/api/diagnostics/envelope`, never to Sentry. The route scrubs each event
+   and span again and sends them through the office's own transport, so the
+   gate applies to them too.
+5. Traces: about one in ten (`TRACE_SAMPLE_RATE`). `QUIET_ROUTES` are never
+   traced: `/api/events` stays open as long as the page, `/api/update` is the
+   shell's poll, and the relay would trace itself.
+6. `instrumentation.server.ts` loads before the server, so
+   `src/lib/server/diagnostics.ts` and `src/lib/server/hosts.ts` import
+   nothing that brings in Postgres.
+
+## A New Altitude account
+
+An owner who already has a New Altitude account can sign in to it, on the
+first visit (`AccountCard`) or in Setup (`AccountSection`); both show
+`AccountSignIn.svelte`. Nothing in the office needs it.
+
+1. The site is `ODDBORO_ACCOUNT_SITE`, `https://members.newaltitude.ai` when
+   unset. The issuer comes from that site's protected resource document; the
+   resource sent is always the configured site.
+2. `src/lib/server/account.ts` signs in through the connectors' provider
+   (`oauth.ts`) as its own public client, asks for `profile` alone, and
+   returns to `/account/callback`. It asks `/api/me` once and keeps only the
+   id, name and email. Everything lives in one secret,
+   `new-altitude-account:oauth`, in the system's secret store, never in the
+   settings file. With no store, Sign in refuses before any request, and a
+   store that cannot write gets the same words. Only the newest Sign in's
+   page can finish, and none while a sign-in holds tokens. Any failure after
+   the tokens are kept signs out, so no tokens stay without an account. If
+   the store cannot keep them, nothing is kept here, and the grant lapses at
+   New Altitude on its own.
+3. The states (`AccountStatus` in `src/lib/account.ts`): `in` while the
+   sign-in holds tokens, `expired` once New Altitude refused a refresh (the
+   account is kept, so the page can say whose it was), `out` with none.
+4. Every change goes to every open page on the live line as
+   `{ type: 'account', status }`; the page keeps it in `account.svelte.ts`.
+   `GET /api/account` checks it live, refreshing only a token close to
+   running out. `POST` starts a sign-in. `DELETE` signs out: it revokes the
+   refresh token at New Altitude, then removes the secret even when New
+   Altitude cannot be reached. The page makes these requests only through
+   `src/lib/ui/account-actions.ts`. Its Switch account, shown with the
+   signed-in line, signs out and then starts a new sign-in, so a Cancel or a
+   refused start leaves the office signed out.
+5. `accountToken()` is the one way to get the account's token.
+   `npm run reset` leaves the sign-in, as it leaves connector sign-ins.
 
 ## Running it always
 
@@ -461,19 +563,24 @@ into the page (scripts, styles, images) are served before the check.
 
 ## Where things live
 
-| Path                              | What it holds                                                       |
-| --------------------------------- | ------------------------------------------------------------------- |
-| `src/lib/floor/`                  | The PixiJS floor and the Odds on it                                 |
-| `src/lib/staff/roster.ts`         | The Odd shape, hiring looks, and the label for each activity        |
-| `src/lib/ui/`                     | The card and its tabs, the Desk, the Ledger, hiring, chat           |
-| `src/lib/server/`                 | Staff runs, office runs, looks, the job clock, events, keychain     |
-| `src/routes/api/`                 | One folder per thing the page reads or changes                      |
-| `src/lib/server/office-design.ts` | Drawing an office from the owner's words, and where Odds move to    |
-| `src/lib/server/design-job.ts`    | The drawing as a job on the server, which pages follow              |
-| `src/lib/ui/onboarding/`          | A new owner's first visit: the cards, the reveal's story, the music |
-| `src/lib/floor/reveal.ts`         | The office going up beat by beat, and the bus                       |
-| `scripts/office-service.ts`       | The login service                                                   |
-| `src/app.css`                     | Tokens. Every colour in the chrome reads these.                     |
+| Path                              | What it holds                                                                                         |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `src/lib/floor/`                  | The PixiJS floor and the Odds on it                                                                   |
+| `src/lib/staff/roster.ts`         | The Odd shape, hiring looks, and the label for each activity                                          |
+| `src/lib/ui/`                     | The card and its tabs, the Desk, the Ledger, hiring, chat                                             |
+| `src/lib/server/`                 | Staff runs, office runs, looks, the job clock, events, keychain                                       |
+| `src/routes/api/`                 | One folder per thing the page reads or changes                                                        |
+| `src/lib/server/office-design.ts` | Drawing an office from the owner's words, and where Odds move to                                      |
+| `src/lib/server/design-job.ts`    | The drawing as a job on the server, which pages follow                                                |
+| `src/lib/ui/onboarding/`          | A new owner's first visit: the cards, the reveal's story, the music                                   |
+| `src/lib/floor/reveal.ts`         | The office going up beat by beat, and the bus                                                         |
+| `src/lib/diagnostics.ts`          | What a report may carry, and when a trace is taken: the server's, the relay's and the page's one rule |
+| `src/lib/server/diagnostics.ts`   | The SDK's options and the gate every report passes, with the owner's answer                           |
+| `src/lib/server/account.ts`       | The New Altitude sign-in: start, callback, refresh, sign out                                          |
+| `src/lib/account.ts`              | The account and its states, shared by the server and the page                                         |
+| `src/lib/server/hosts.ts`         | The office's names through Caddy (`HOSTS`), alone so reporting loads before Postgres                  |
+| `scripts/office-service.ts`       | The login service                                                                                     |
+| `src/app.css`                     | Tokens. Every colour in the chrome reads these.                                                       |
 
 ## Rules for this app
 

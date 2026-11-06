@@ -2,7 +2,7 @@
 
 Effective date: November 3, 2026
 
-> **The short version.** Oddboro is open source software that runs on your own computer: a Mac, Windows or Linux. Its database lives on that computer. New Altitude, Inc. operates no server that receives, stores or processes your data, and the software sends us no telemetry, analytics or crash reports. When you connect the software to Anthropic or another service, your data goes to that service under your own account and its own terms, never through us. This website is static files: no cookies, no analytics, no forms, no third-party requests. Today we hold no personal data about you. If that ever changes, we will update this policy, say so in the repository and on this site, and change the effective date above.
+> **The short version.** Oddboro is open source software that runs on your own computer: a Mac, Windows or Linux. Its database lives on that computer. New Altitude, Inc. operates no server that stores your office's data. If you say yes, the software sends error and tracing reports through New Altitude's relay to Sentry, which stores them; it sends nothing of the kind until you do, and you can say no again in Setup. If you already have a New Altitude account, you can sign in to it from the office. Signing in is optional. It sends your sign-in to New Altitude, and the office keeps only your account's id, name and email, with the sign-in, in your system's secret store. When you connect the software to Anthropic or another service, your data goes to that service under your own account and its own terms, never through us. This website is static files: no cookies, no analytics, no forms, no third-party requests. Today the only personal data we can hold about you is the approximate location in error reports you chose to send and, if you sign in to a New Altitude account, the record of that sign-in. If that ever changes, we will update this policy, say so in the repository and on this site, and change the effective date above.
 
 ## 1. Who we are
 
@@ -24,6 +24,7 @@ It does not cover:
 
 - **GitHub.** When you visit, clone, star, or open an issue in the repository, GitHub collects what GitHub collects under [GitHub's privacy statement](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement).
 - **Anthropic, Ollama and any other service you connect the software to.** Each one handles your data under its own terms and privacy policy. Section 5 lists them.
+- **Your New Altitude account.** If you have one, New Altitude holds it under the [New Altitude Privacy Policy](https://newaltitude.ai/privacy) and the terms you accepted for it.
 
 ### Definitions
 
@@ -53,24 +54,42 @@ Everything Oddboro stores, it stores on the computer you run it on. We verified 
 
 ### Where your data lives
 
-| Data                                                                                                                                       | Where it is                                                                                                                                                           |
-| ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The ledger: your name, Odds and their job descriptions, chats, asks, tasks, reports, decisions, goals, access grants, per-run token counts | A Postgres database on your computer. By default it runs inside the office at `~/.oddboro/db`.                                                                        |
-| Each Odd's working files                                                                                                                   | `~/.oddboro/staff/<id>/`                                                                                                                                              |
-| Each Odd's Claude Code transcripts: the chats and runs Claude Code keeps so it can pick up where it left off                               | `~/.claude/projects/`, in a folder named after the Odd's folder                                                                                                       |
-| Your Anthropic API key (if you use one) and sign-ins for other hosted tools                                                                | Your system's secret store, under the service name `oddboro`: the Keychain on a Mac, the Credential Manager on Windows, the desktop keyring (Secret Service) on Linux |
-| Family and people data (names, birthdays, schedules)                                                                                       | The `data/` folder in your copy of the repository. Git ignores it, so it never enters a commit.                                                                       |
-| Office settings (which model, plan or key, time zone)                                                                                      | The `.env` file in your copy of the repository. Git ignores it.                                                                                                       |
-| Backups made by `npm run reset`                                                                                                            | `~/.oddboro/backups/<date>/`                                                                                                                                          |
+| Data                                                                                                                                                            | Where it is                                                                                                                                                           |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The ledger: your name, Odds and their job descriptions, chats, asks, tasks, reports, decisions, goals, access grants, per-run token counts                      | A Postgres database on your computer. By default it runs inside the office at `~/.oddboro/db`.                                                                        |
+| Each Odd's working files                                                                                                                                        | `~/.oddboro/staff/<id>/`                                                                                                                                              |
+| Each Odd's Claude Code transcripts: the chats and runs Claude Code keeps so it can pick up where it left off                                                    | `~/.claude/projects/`, in a folder named after the Odd's folder                                                                                                       |
+| Your Anthropic API key (if you use one), your New Altitude sign-in with your account's id, name and email (if you sign in), and sign-ins for other hosted tools | Your system's secret store, under the service name `oddboro`: the Keychain on a Mac, the Credential Manager on Windows, the desktop keyring (Secret Service) on Linux |
+| Family and people data (names, birthdays, schedules)                                                                                                            | The `data/` folder in your copy of the repository. Git ignores it, so it never enters a commit.                                                                       |
+| Office settings (which model, plan or key, time zone, and your answer about error reports)                                                                      | The `.env` file: in the app, `~/.oddboro/.env`; from source, the one in your copy of the repository. Git ignores it.                                                  |
+| Backups made by `npm run reset`                                                                                                                                 | `~/.oddboro/backups/<date>/`                                                                                                                                          |
 
 You may point the office at a different Postgres database by setting `DATABASE_URL` in `.env`. If you choose a database hosted by someone else, your ledger goes to that provider under your agreement with them. That is your choice, and we are not part of it.
 
 ### What never happens
 
-- **No telemetry.** The software contains no analytics, crash reporting, usage reporting or "phone home" code. We checked for it. There is none.
-- **No New Altitude server.** We run no service that your office connects to. There is no account with us, no sync, no cloud copy.
+- **No reports without your yes.** The software sends error and tracing reports only after you say yes, in your first visit, on the Desk, or in Setup. Until then it sends none, and saying no stops them at once.
+- **No New Altitude server holds your office.** There is no sync and no cloud copy, and you need no account with us. The software reaches New Altitude only in two ways you choose: the error report relay after your yes (see "Error and tracing reports" below), and signing in to a New Altitude account you already have (see "Your New Altitude account" in section 5).
 - **No remote access.** The office listens on `127.0.0.1` only, so nothing outside your computer can reach it. Its built-in database does the same. If you choose the `https://local.oddboro.com` address during setup, the Caddy proxy that serves it listens on ports 80 and 443 and answers only for that name, which resolves to `127.0.0.1`.
-- **No sale or sharing.** We never receive your data, so we cannot sell it, share it, rent it or use it to train anything.
+- **No sale or sharing.** We never receive your office's data, so we cannot sell it, share it, rent it or use it to train anything. Error reports you choose to send are used only to fix Oddboro.
+
+### Error and tracing reports (only if you say yes)
+
+When something in Oddboro breaks, a report helps us fix it. You choose whether the software sends them.
+
+What a report holds:
+
+- The kind of error, where in the code it happened, and the lines of code around that place. A file in Oddboro's own folder is named by its path inside that folder, a file in another package by its path from that package on, and any other file in your home folder by its file name alone. Code outside your home folder, such as a system library, is named by its full path. The list of files Oddboro has loaded follows the same rule, except the desktop app's window, which names each file by its file name alone. A script in the page from anywhere but the office is named by its file name alone.
+- For a sample of about one in ten actions, which part of the office ran and how long it took. A request the office makes, to itself or to another service, is named by its method alone (such as POST), never by an address.
+- The Oddboro version, your system's name and version, your computer's chip, and the version of Node.js or Rust that runs Oddboro.
+
+What a report never holds: your IP address, your computer's name, cookies, request headers or bodies, web address query strings, your chats, your Odds' prompts or work, the tools they use and what they send them, the addresses of other services or computers the office reaches, the names of your folders, what is in your files, your family's details, or your name. An error's message is included only when Oddboro's code wrote it or it follows a fixed pattern: a JavaScript engine error (such as "x is not a function", with any data in it removed), a system error's code (such as "ENOENT open", without the file it names), or a database error's code with the names of the table, column and constraint it touched.
+
+Where it goes: the app sends each report to a relay New Altitude runs on Cloudflare, which adds our Sentry key and passes it to Sentry, the service that stores our error reports. The relay keeps no report and no IP address. Sentry does not store your IP address. It keeps the approximate location (city and country) the address points to. Sentry keeps reports for 90 days, then deletes them.
+
+If you run Oddboro from source, it sends no reports unless you name your own Sentry address in `.env` as `ODDBORO_DIAGNOSTICS_DSN`. Then it sends straight to your Sentry, never to us.
+
+To stop: open Setup and turn off "Send error and tracing reports to New Altitude". The office stops at once.
 
 ### Local search embeddings
 
@@ -88,7 +107,7 @@ The office carries its own fonts (Geist Pixel and Inter). Opening it makes no re
 
 ## 5. Services the software connects to at your direction
 
-Oddboro is useful because it connects your Odds to the tools you already use. Every connection below happens only when you set it up, under your own account, and under that service's own terms and privacy policy. New Altitude is not a party to any of it and receives nothing from it.
+Oddboro is useful because it connects your Odds to the tools you already use. Every connection below happens only when you set it up, under your own account, and under that service's own terms and privacy policy. Apart from your New Altitude account, New Altitude is not a party to any of it and receives nothing from it.
 
 ### Anthropic (Claude)
 
@@ -102,6 +121,16 @@ What goes to Anthropic in a run:
 - Setup also runs `npm install -g @anthropic-ai/claude-code`, which downloads Claude Code from the npm registry (on Windows, Claude Code's own installer from `claude.ai`), and `claude auth login`, which sends you to Anthropic to sign in.
 
 Anthropic processes all of this under your agreement with Anthropic: its [Consumer Terms](https://www.anthropic.com/legal/consumer-terms) and [Privacy Policy](https://www.anthropic.com/legal/privacy) for a Claude plan, or its [Commercial Terms](https://www.anthropic.com/legal/commercial-terms) for an API key. Anthropic's retention and training rules are Anthropic's, and your settings there control them. New Altitude never sees any of it.
+
+### Your New Altitude account (only if you sign in)
+
+If New Altitude gave you an account, you can sign in to it from the office: on your first visit, or later in Setup under Account. Nothing in the office needs it.
+
+- Signing in opens New Altitude's own sign-in page in your browser. You sign in there, and you may be asked to accept New Altitude's Beta Terms.
+- The office then asks New Altitude who you are. It keeps only your account's id, name and email, with the sign-in, in your system's secret store.
+- New Altitude keeps a record that your account signed in from Oddboro, under the [New Altitude Privacy Policy](https://newaltitude.ai/privacy).
+- Signing in sends nothing from your office to New Altitude: no chats, no Odds, no files.
+- To sign out, open Setup and choose Sign out under Account. The office tells New Altitude to end the sign-in, then deletes it from your computer.
 
 ### Ollama
 
@@ -125,9 +154,9 @@ An Odd may ask for a hosted tool (a service reached over the network). You appro
 
 ## 6. Data retention and deletion
 
-### What we keep: nothing
+### What we keep
 
-New Altitude keeps no personal data about users of the software, because none reaches us. We keep no account records, because there are no accounts. The only data that can exist about your visit to this site is the hosting provider's server log described in section 3.
+New Altitude keeps no personal data about users of the software except error and tracing reports from people who said yes to them, held by Sentry for 90 days as section 4 describes, and, for people who sign in to a New Altitude account, the record of that sign-in, kept with the account under the New Altitude Privacy Policy. The only data that can exist about your visit to this site is the hosting provider's server log described in section 3.
 
 ### What is on your computer, and how to delete it
 
@@ -145,7 +174,7 @@ To delete everything the software stores:
 2. Delete the `~/.oddboro` folder. This removes the database, Odd folders, working copies and backups.
 3. Delete the folders in `~/.claude/projects/` whose names contain `oddboro-staff`. These are the Odds' Claude Code transcripts.
 4. Delete the `data/` folder and the `.env` file in your copy of the repository, or delete the whole repository folder.
-5. On a Mac, open Keychain Access, search for `oddboro`, and delete the items you find. On Windows, open Credential Manager, select Windows Credentials, and remove each entry whose name contains `oddboro`. On Linux, run `secret-tool clear service oddboro`. These are your Anthropic API key (if you gave one) and sign-ins for hosted tools.
+5. On a Mac, open Keychain Access, search for `oddboro`, and delete the items you find. On Windows, open Credential Manager, select Windows Credentials, and remove each entry whose name contains `oddboro`. On Linux, run `secret-tool clear service oddboro`. These are your Anthropic API key (if you gave one), your New Altitude sign-in (if you signed in) and sign-ins for hosted tools. Deleting a New Altitude sign-in this way leaves it open at New Altitude until it runs out. Sign out in Setup ends it there too.
 6. If you named your own `DATABASE_URL`, delete that database yourself. The reset command leaves it alone.
 
 Anything an Odd sent to Anthropic or another service during a run is held by that service under its own retention rules. Delete it there.
@@ -155,7 +184,7 @@ Anything an Odd sent to Anthropic or another service during a run is held by tha
 We designed the software so that the easiest path is also the safe one. These are the measures in the code today:
 
 - The office and its database listen on `127.0.0.1` only. Nothing on your network can connect to them.
-- Secrets (your API key, hosted tool sign-ins) live in the system's secret store (the Keychain on a Mac, the Credential Manager on Windows, the desktop keyring on Linux), never in a file or the database.
+- Secrets (your API key, your New Altitude sign-in, hosted tool sign-ins) live in the system's secret store (the Keychain on a Mac, the Credential Manager on Windows, the desktop keyring on Linux), never in a file or the database.
 - Each Odd runs through Claude Code's permission system with a narrow tool list: it reads only its own folder, the `data/` folder and its own Claude Code transcripts, writes only inside its own folder, and uses the office's own tool server and the connections you granted. Everything else is denied, including other Odds' folders, your sign-ins and folders like `~/.ssh`.
 - The software is open source. Anyone can read it, audit it and report a problem.
 
@@ -163,13 +192,13 @@ No software is perfectly secure. Your computer's own security (its login, disk e
 
 ## 8. Children
 
-Oddboro and this website are not directed to children. We do not knowingly collect personal data from anyone under 13, or under 16 where the law sets that age. Since we collect none from anyone, we have nothing to delete. If you believe a child has given us personal data somehow, email privacy@oddboro.com and we will delete it.
+Oddboro and this website are not directed to children. We do not knowingly collect personal data from anyone under 13, or under 16 where the law sets that age. The only personal data we can hold is the approximate location in error reports people chose to send, and the record of a New Altitude sign-in people chose to make. If you believe a child has given us personal data somehow, email privacy@oddboro.com and we will delete it.
 
 ## 9. International users
 
-New Altitude is a company in the United States. This website is static files served by a hosting provider, which may serve them from locations around the world. The software runs on your computer in whatever country you are in, and we move nothing from it. If you connect the software to Anthropic or another service, that service's own policy explains where it processes data and on what legal basis.
+New Altitude is a company in the United States. This website is static files served by a hosting provider, which may serve them from locations around the world. The software runs on your computer in whatever country you are in, and we move nothing from it. The one exception is error and tracing reports, if you say yes: they go through our relay on Cloudflare to Sentry, which stores them in the United States. A New Altitude sign-in, if you make one, goes to New Altitude, whose privacy policy says where it is processed. If you connect the software to Anthropic or another service, that service's own policy explains where it processes data and on what legal basis.
 
-If you are in the European Economic Area, the United Kingdom or Switzerland: when you run the software, you decide what data goes in and where it goes, so you are the controller of that data (or you use it for purely personal or household purposes, which the GDPR does not cover). New Altitude is neither a controller nor a processor of it. For the website, the only processing is the hosting provider's server log, which rests on legitimate interest in keeping the site secure and running (GDPR Article 6(1)(f)).
+If you are in the European Economic Area, the United Kingdom or Switzerland: when you run the software, you decide what data goes in and where it goes, so you are the controller of that data (or you use it for purely personal or household purposes, which the GDPR does not cover). New Altitude is neither a controller nor a processor of it. For the website, the only processing is the hosting provider's server log, which rests on legitimate interest in keeping the site secure and running (GDPR Article 6(1)(f)). For error and tracing reports you agreed to send, New Altitude is the controller, the legal basis is your consent (GDPR Article 6(1)(a)), and you can withdraw it in Setup at any time. Sentry and Cloudflare process them for us. For your New Altitude account and its sign-ins, New Altitude is the controller under the New Altitude Privacy Policy.
 
 ## 10. Your privacy rights
 
@@ -177,14 +206,14 @@ Laws including the EU and UK GDPR, the California Consumer Privacy Act as amende
 
 We respect all of these. Honestly stated, here is how they apply:
 
-- **We hold no personal data about you**, so there is nothing for us to show, copy, correct or delete. If you ask, we will confirm that in writing.
-- **We do not sell personal information, we do not share it for cross-context behavioral advertising, and we do not use it for targeted advertising or profiling.** We have not done so in the preceding twelve months. There is no opt-out to exercise because there is nothing to opt out of.
+- **We hold almost no personal data about you.** If you said yes to error reports, Sentry holds them for us, each with an approximate location. Reports carry no name, account or IP address, so we cannot tell which ones are yours. Sentry deletes every report after 90 days. If you signed in to a New Altitude account, New Altitude holds the account and its sign-in records under the New Altitude Privacy Policy.
+- **We do not sell personal information, we do not share it for cross-context behavioral advertising, and we do not use it for targeted advertising or profiling.** We have not done so in the preceding twelve months. There is no sale or sharing to opt out of. Error reports are a separate choice, and you can turn them off in Setup at any time.
 - **We do not collect sensitive personal information** as those laws define it.
 - **We do not discriminate** against anyone for exercising a privacy right.
 - **Data on your computer** is under your control, and section 6 explains how to delete it.
 - **Data at Anthropic or another service** is held by that service. Exercise your rights with them directly.
 
-To make a request anyway, email privacy@oddboro.com. We will answer within the time the applicable law allows (45 days under the CCPA, one month under the GDPR), and we will not ask you to verify more than we need to answer, which for a company holding no data is usually nothing. An authorized agent may make a request on your behalf with written permission from you.
+To make a request anyway, email privacy@oddboro.com. We will answer within the time the applicable law allows (45 days under the CCPA, one month under the GDPR), and we will not ask you to verify more than we need to answer, which for a company holding this little data is usually nothing. An authorized agent may make a request on your behalf with written permission from you.
 
 If you are in the EEA or the UK, you have the right to complain to your data protection authority. We would rather hear from you first.
 
@@ -194,7 +223,7 @@ The website tracks nothing, so a Do Not Track header and a Global Privacy Contro
 
 ## 12. Future features and changes to this policy
 
-Today the project is the software and this site. We may add community features later: forums, accounts, shared offices, or a hosted service. Any of those would mean we collect some personal data for the first time, and this policy would have to change before that happens.
+Today the project is the software, this site, and signing in to a New Altitude account you already have. We may add community features later: forums, shared offices, or a hosted service. Any of those would mean we collect more personal data than error reports and a sign-in hold, and this policy would have to change before that happens.
 
 When we change this policy:
 
