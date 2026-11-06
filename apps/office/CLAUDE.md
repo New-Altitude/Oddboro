@@ -71,7 +71,8 @@ the app ships them whole (`apps/desktop/scripts/stage.ts`). In the app
    another. ✕ folds the bar away with its windows still open; closing a
    window with unsaved edits or a drawing in progress asks first.
    The end edge holds the Odds rail (`src/lib/ui/OddsRail.svelte`) once the
-   office has an Odd: a ⌘K button on top, then every Odd's portrait, with its
+   office has an Odd: a ⌘K button on top (Ctrl K off a Mac, set once the
+   page knows), then every Odd's portrait, with its
    count of work in progress and an ember ring when it waits on the owner.
    Hovering the rail, moving into it with the keyboard, the ⌘K button or
    Cmd+K (Ctrl+K) from anywhere widens the rail itself toward the floor
