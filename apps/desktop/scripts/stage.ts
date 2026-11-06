@@ -6,8 +6,8 @@
 //   stage/node_modules/             production packages, at the versions installed here
 //   stage/node_modules/@oddboro/*   ledger, sprites and world, as JavaScript, with their files
 //
-// Packages' test folders stay out, and no path may run long enough to stop
-// the Windows installer's builder (see LONGEST).
+// Packages' test folders and every source map stay out, and no path may run
+// long enough to stop the Windows installer's builder (see LONGEST).
 //
 // It also fetches the Node binary the app carries, checked against nodejs.org's
 // published sums. `--smoke` then starts the staged office on a spare port and
@@ -143,8 +143,10 @@ const LONGEST = 180;
 
 /**
  * Takes out every test folder, where the longest names live (layerchart's
- * screenshots run past 200 characters), then fails on any path still too
- * long, here rather than in the installer.
+ * screenshots run past 200 characters), and every source map: nothing in the
+ * app loads one, and the office's own would ship its source (Sentry's build
+ * plugin keeps them when it has no token to upload them). Then fails on any
+ * path still too long, here rather than in the installer.
  */
 function prune(dir: string, rel = ''): void {
   for (const name of readdirSync(dir)) {
@@ -153,7 +155,8 @@ function prune(dir: string, rel = ''): void {
     if (statSync(path).isDirectory()) {
       if (TEST_DIRS.has(name)) rmSync(path, { recursive: true, force: true });
       else prune(path, r);
-    } else if (r.length > LONGEST)
+    } else if (name.endsWith('.map')) rmSync(path);
+    else if (r.length > LONGEST)
       throw new Error(`stage/${r} is ${r.length} characters, too long for the Windows installer`);
   }
 }
@@ -222,7 +225,10 @@ async function smoke(): Promise<void> {
       // As in the app: the server quits when asked, and a versioned first
       // start in an empty home makes its folder and records the version.
       ODDBORO_APP: '1',
-      ODDBORO_VERSION: '0.0.0-smoke'
+      ODDBORO_VERSION: '0.0.0-smoke',
+      // So Sentry starts in the staged server. The home is new, so the owner
+      // has not said yes and nothing is sent; port 9 would take nothing anyway.
+      ODDBORO_DIAGNOSTICS_DSN: 'http://oddboro@127.0.0.1:9/oddboro/0'
     },
     // A held stdin, as the app gives it: the server quits when it closes.
     stdio: ['pipe', 'inherit', 'inherit']

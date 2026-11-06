@@ -3,6 +3,7 @@
   import Pixel from './Pixel.svelte';
   import Markdown from './Markdown.svelte';
   import Attachments from './Attachments.svelte';
+  import DiagnosticsAsk from './DiagnosticsAsk.svelte';
   import SelectToChat from './SelectToChat.svelte';
   import { call } from './api.ts';
   import { ago, when } from './format.ts';
@@ -10,7 +11,7 @@
   import { replyAbout, showInChat } from './chat-about.svelte.ts';
   import { OFFICE_TOOLS } from '@oddboro/ledger/tools';
   import { describe } from '@oddboro/ledger/time';
-  import { tickable } from '@oddboro/ledger/tools';
+  import { tickable, yesOrNo } from '@oddboro/ledger/tools';
   import { untrack } from 'svelte';
   import { goalWhen } from '@oddboro/ledger/goals';
   import type { StaffProfile } from '../staff/roster.ts';
@@ -18,6 +19,8 @@
   type Props = {
     desk: Desk;
     staff: StaffProfile[];
+    /** Ask about error and trace reports, first, until the owner answers. */
+    askDiagnostics: boolean;
     /** Open on this item when set, e.g. after clicking a waiting staffer. */
     focus?: string;
     notify: boolean;
@@ -29,7 +32,8 @@
     /** Open a staffer's card, from the name on an item. */
     onstaff: (id: string) => void;
   };
-  let { desk, staff, focus, notify, onnotify, onhire, onplan, onstaff }: Props = $props();
+  let { desk, staff, askDiagnostics, focus, notify, onnotify, onhire, onplan, onstaff }: Props =
+    $props();
 
   type Item =
     | { key: string; kind: 'ask'; at: string; row: AskRow }
@@ -58,6 +62,8 @@
       }))
     ].sort((a, b) => a.at.localeCompare(b.at))
   );
+
+  const waiting = $derived(items.length + Number(askDiagnostics));
 
   let openKey = $state<string | undefined>();
   /** An attached file with edits the owner has not saved. */
@@ -202,7 +208,7 @@
     <div class="flex-1">
       <div class="font-pixel text-lg leading-none">Your desk</div>
       <div class="mt-1 text-xs text-muted">
-        {items.length ? `${items.length} waiting on you` : 'Nothing waiting on you'}
+        {waiting ? `${waiting} waiting on you` : 'Nothing waiting on you'}
       </div>
     </div>
     <label
@@ -230,12 +236,20 @@
 
   <div class="flex-1 overflow-y-auto p-3">
     {#if !open}
-      {#if !items.length}
+      {#if !waiting}
         <p class="py-10 text-center text-sm text-muted">
           Desk clear. Your Odds will bring you anything that needs you.
         </p>
       {/if}
       <ul class="flex flex-col gap-1.5">
+        {#if askDiagnostics}
+          <li class="rounded-xl bg-raise px-3 py-2.5" aria-label="From Oddboro">
+            <span class="block text-[10px] tracking-[0.16em] text-ember uppercase"
+              >From Oddboro</span
+            >
+            <div class="mt-1"><DiagnosticsAsk /></div>
+          </li>
+        {/if}
         {#each items as i (i.key)}
           {@const from = who(i.row.staffId)}
           <li>
@@ -470,12 +484,16 @@
         {#key open.key}
           <Attachments items={attached('ask', a.id)} ondirty={(d) => (unsaved = d)} />
         {/key}
-        <label class="mt-4 block text-xs text-muted" for="reason">Reason, or what to change</label>
+        <label class="mt-4 block text-xs text-muted" for="reason"
+          >{yesOrNo(a.kind) ? 'Reason' : 'Reason, or what to change'}</label
+        >
         <textarea
           id="reason"
           rows="3"
           class="mt-1 w-full resize-y rounded-lg bg-raise px-3 py-2 text-sm outline-none placeholder:text-faint"
-          placeholder="Optional to approve or deny. Needed to iterate: say what to change."
+          placeholder={yesOrNo(a.kind)
+            ? 'Optional to approve or deny.'
+            : 'Optional to approve or deny. Needed to iterate: say what to change.'}
           bind:value={reason}></textarea>
         {#if a.kind === 'approval'}
           <label class="mt-2 flex items-center gap-2 text-xs text-muted">
@@ -490,14 +508,16 @@
           <button
             class="flex-1 rounded-lg bg-raise px-3 py-2 text-sm font-medium hover:bg-coral/25 disabled:opacity-40"
             disabled={busy || unsaved}
-            onclick={() => decide(a, 'deny')}>Deny</button
+            onclick={() => decide(a, 'deny')}>{a.kind === 'window' ? 'Pause it' : 'Deny'}</button
           >
-          <button
-            class="flex-1 rounded-lg bg-raise px-3 py-2 text-sm font-medium hover:bg-sea/25 disabled:opacity-40"
-            disabled={busy || unsaved || !reason.trim()}
-            title={reason.trim() ? '' : 'Say what to change in the box above first'}
-            onclick={() => decide(a, 'iterate')}>Iterate</button
-          >
+          {#if !yesOrNo(a.kind)}
+            <button
+              class="flex-1 rounded-lg bg-raise px-3 py-2 text-sm font-medium hover:bg-sea/25 disabled:opacity-40"
+              disabled={busy || unsaved || !reason.trim()}
+              title={reason.trim() ? '' : 'Say what to change in the box above first'}
+              onclick={() => decide(a, 'iterate')}>Iterate</button
+            >
+          {/if}
           {#if a.kind === 'hire'}
             <button
               class="flex-[1.4] rounded-lg bg-sea px-3 py-2 text-sm font-medium text-night disabled:opacity-40"
@@ -511,16 +531,20 @@
               onclick={() => decide(a, 'approve')}
               >{a.kind === 'goal'
                 ? 'Set the goal'
-                : a.plan && picked(a) < a.plan.items.length
-                  ? `Approve ${picked(a)} of ${a.plan.items.length}`
-                  : 'Approve'}</button
+                : a.kind === 'window'
+                  ? 'Let it carry on'
+                  : a.plan && picked(a) < a.plan.items.length
+                    ? `Approve ${picked(a)} of ${a.plan.items.length}`
+                    : 'Approve'}</button
             >
           {/if}
         </div>
-        <p class="mt-1.5 text-[11px] text-faint">
-          Iterate sends it back to {who(a.staffId)?.name ?? 'the Odd'} with your words, and the new version
-          comes back to your desk.
-        </p>
+        {#if !yesOrNo(a.kind)}
+          <p class="mt-1.5 text-[11px] text-faint">
+            Iterate sends it back to {who(a.staffId)?.name ?? 'the Odd'} with your words, and the new
+            version comes back to your desk.
+          </p>
+        {/if}
       {:else if open.kind === 'task'}
         {@const t = open.row}
         <p class="mt-2 text-sm leading-relaxed text-muted">{t.why}</p>

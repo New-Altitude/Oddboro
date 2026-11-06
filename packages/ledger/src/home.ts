@@ -15,6 +15,9 @@ export const IN_APP = process.env.ODDBORO_APP === '1';
 export const HOME = process.env.ODDBORO_HOME || join(homedir(), '.oddboro');
 export const home = (...parts: string[]): string => join(HOME, ...parts);
 
+/** An Odd's one chat session, which every chat resumes (staff.ts). */
+export const chatSession = (id: string): string => home('staff', id, 'session.json');
+
 /** The code: this repo in development, the app's Resources/server folder in a release. */
 export const CODE = process.env.ODDBORO_CODE || fileURLToPath(new URL('../../..', import.meta.url));
 

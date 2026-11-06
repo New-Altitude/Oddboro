@@ -3,19 +3,49 @@
 // here, a task is finished only here, and each writes its ledger row.
 import {
   and,
+  arrayOverlaps,
   asc,
   cosineDistance,
   desc,
   eq,
+  exists,
   gte,
+  inArray,
   isNotNull,
   isNull,
   lte,
+  ne,
+  not,
   or,
-  sql
+  sql,
+  type SQL
 } from 'drizzle-orm';
+import { rmSync } from 'node:fs';
+import { alias } from 'drizzle-orm/pg-core';
 import { db, sql as pg } from './db.ts';
 import { embed } from './embed.ts';
+import { fixedError } from './errors.ts';
+import { chatSession } from './home.ts';
+import {
+  answeredAll,
+  handBack,
+  handBackLater,
+  servesHandOff,
+  servesNoThread
+} from './hand-offs.ts';
+import { answerWindow } from './usage-window.ts';
+import {
+  addFollowUp,
+  answerHandOffs,
+  answerThread,
+  goalThread,
+  keepRun,
+  raisedOn,
+  settleThread,
+  startHeld,
+  type Db,
+  type Tx
+} from './threads.ts';
 import {
   asks,
   attachments,
@@ -33,9 +63,12 @@ import {
   staff,
   parts,
   tasks,
+  threads,
   usage,
   followUps,
   goals,
+  LEVELS,
+  levelAtMost,
   type AccessRequest,
   type FollowUpKind,
   type GoalDraft,
@@ -49,9 +82,11 @@ import {
   type Step,
   type UsageKind
 } from './schema.ts';
+import { AGENT_NAMES, type Agent } from './agents.ts';
 import { nextRun, zone } from './time.ts';
-import { isGrantable, OFFICE_TOOLS, STARTER_TOOLS, tickable } from './tools.ts';
+import { isGrantable, OFFICE_TOOLS, STARTER_TOOLS, tickable, yesOrNo } from './tools.ts';
 import { lookSignature, type DrawnPart, type LookSpec } from '@oddboro/sprites/look';
+import type { PersonaLink } from './personas.ts';
 
 export type StaffRow = typeof staff.$inferSelect;
 export type AskRow = typeof asks.$inferSelect;
@@ -65,17 +100,14 @@ export type GrantRow = typeof grants.$inferSelect;
 export type ConnectorRow = typeof connectors.$inferSelect;
 export type LedgerRow = Omit<typeof ledger.$inferSelect, 'embedding'>;
 
-const LEVELS: Level[] = ['read', 'draft', 'act'];
-export const levelAtMost = (a: Level, b: Level) => LEVELS.indexOf(a) <= LEVELS.indexOf(b);
-
 // Staff
 
 export async function roster(): Promise<StaffRow[]> {
   return db.select().from(staff).where(isNull(staff.leftAt)).orderBy(asc(staff.hiredAt));
 }
 
-export async function staffer(id: string): Promise<StaffRow | undefined> {
-  const [row] = await db.select().from(staff).where(eq(staff.id, id));
+export async function staffer(id: string, q: Db = db): Promise<StaffRow | undefined> {
+  const [row] = await q.select().from(staff).where(eq(staff.id, id));
   return row;
 }
 
@@ -89,6 +121,23 @@ export async function setPermission(id: string, permission: Level): Promise<void
     kind: 'access',
     actor: 'owner',
     title: `${up ? 'Raised' : 'Lowered'} ${before.name} from ${before.permission} to ${permission}`
+  });
+}
+
+/**
+ * Only the owner moves a staffer to another coding tool. Its chat session
+ * belongs to the tool it left, which could not resume it, so the next chat
+ * starts a fresh one.
+ */
+export async function setAgent(id: string, agent: Agent): Promise<void> {
+  const before = await staffer(id);
+  if (!before || before.agent === agent) return;
+  await db.update(staff).set({ agent }).where(eq(staff.id, id));
+  rmSync(chatSession(id), { force: true });
+  await record({
+    kind: 'access',
+    actor: 'owner',
+    title: `Moved ${before.name} from ${AGENT_NAMES[before.agent]} to ${AGENT_NAMES[agent]}`
   });
 }
 
@@ -120,6 +169,10 @@ export type Hire = Pick<
   portraitPx?: string;
   /** Parts drawn for this look, saved to the library once the hire happens. */
   newParts?: DrawnPart[];
+  /** The coding tool its runs go through, stored before its first run. Claude Code when left out. */
+  agent?: Agent;
+  /** The New Altitude persona it was installed from. */
+  package?: PersonaLink;
 };
 
 /** Current staff whose generated look matches this one, other than `except`. */
@@ -162,7 +215,9 @@ export async function setLook(
   newParts?: DrawnPart[]
 ): Promise<void> {
   const who = await staffer(id);
-  if (!who) throw new Error('No such Odd');
+  if (!who) throw fixedError('No such Odd');
+  if (who.package)
+    throw new Error(`${who.name}'s look comes from New Altitude and cannot be redrawn.`);
   const twin = await lookTaken(look, id);
   if (twin) throw new Error(`${twin.name} already looks exactly like that`);
   await saveParts(newParts, id);
@@ -201,18 +256,21 @@ export async function hire(h: Hire): Promise<StaffRow> {
 // The ledger
 
 /** Write one ledger row, embedded on the way in. */
-export async function record(e: {
-  kind: LedgerKind;
-  actor: string;
-  title: string;
-  body?: string;
-  reason?: string | null;
-  askId?: number;
-  taskId?: number;
-  runId?: number;
-}): Promise<void> {
+export async function record(
+  e: {
+    kind: LedgerKind;
+    actor: string;
+    title: string;
+    body?: string;
+    reason?: string | null;
+    askId?: number;
+    taskId?: number;
+    runId?: number;
+  },
+  q: Db = db
+): Promise<void> {
   const text = [e.title, e.body, e.reason].filter(Boolean).join('\n');
-  await db.insert(ledger).values({ ...e, embedding: await embed(text, 'document') });
+  await q.insert(ledger).values({ ...e, embedding: await embed(text, 'document') });
 }
 
 const ledgerColumns = {
@@ -299,20 +357,43 @@ export async function raiseAsk(
     /** `goal` and `plan` say so; the rest follow from access or hire. */
     kind?: 'goal' | 'plan';
     revises?: number;
-    /** Files in the staffer's folder that go with it. */
+    /** Raised while working on this hand-off: the owner's answer goes back to it. */
+    handOffId?: number;
+    /** Raised on this thread: the owner's answer moves it on. A plan ignores it. */
+    threadId?: number;
+    /** Files that go with it: paths in the staffer's folder, or names in a thread's folder (`workPath`). */
     attach?: string[];
+    /**
+     * The key of the run raising it (`runsGoing`), which its thread keeps: a
+     * plan's, or a lead's that named a thread from a run on none. A run on the
+     * thread passes none, since its own follow-up already holds the hub.
+     */
+    run?: string;
   }
 ): Promise<{ ask: AskRow; precedent: LedgerRow[] }> {
-  const { attach, kind, ...fields } = a;
+  const { attach, kind, run, ...fields } = a;
   const ask = await db.transaction(async (tx) => {
+    // A plan goes on its goal's one thread, whatever run raised it: a chat,
+    // the weekly review, or the goal's own planning run. So approving it
+    // always brings the goal's lead back there to lead the work.
+    const on = a.plan
+      ? { handOffId: undefined, threadId: await goalThread(tx, a.plan.goalId, staffId) }
+      : {};
     const [row] = await tx
       .insert(asks)
       .values({
         staffId,
         kind: kind ?? (a.access ? 'access' : a.hire ? 'hire' : 'approval'),
-        ...fields
+        ...fields,
+        ...on
       })
       .returning();
+    if (row.threadId) {
+      // The thread keeps the run's key, so the owner's answer cannot start the
+      // hub there while the run that raised it, such as a chat, still goes.
+      await keepRun(tx, row.threadId, { key: run, by: staffId });
+      await raisedOn(tx, row.threadId, { plan: !!a.plan });
+    }
     if (attach?.length)
       await tx
         .insert(attachments)
@@ -344,7 +425,8 @@ export type Decision = 'approve' | 'deny' | 'iterate';
  * The owner's decision. Approving an access ask grants it and gives the owner the steps
  * to connect; approving any other ask but a hire sends the staffer to carry it
  * out. A hire is approved by hiring, from the hire window. Iterate sends it
- * back with what to change, and needs their words.
+ * back with what to change, and needs their words; an ask the office raised
+ * itself takes a yes or a no only (`yesOrNo`).
  */
 export async function decideAsk(
   id: number,
@@ -352,14 +434,58 @@ export async function decideAsk(
   reason: string | null,
   reportWhenDone = false
 ): Promise<void> {
-  if (decision === 'iterate' && !reason) throw new Error('Say what to change');
+  await decide(id, decision, reason, { reportWhenDone });
+}
+
+/** What approving an ask means, done before the answer goes back. */
+export type Approval = {
+  /**
+   * Done in the transaction that approves the ask: if it fails, the ask stays
+   * open, and nothing is recorded or answered.
+   */
+  link?: (ask: AskRow, tx: Tx) => Promise<void>;
+  /** Done once the ask is approved, so the run the answer starts finds it. */
+  carryOut?: (ask: AskRow) => Promise<void>;
+};
+
+/**
+ * Approve a goal, plan or hire ask, and do what approving it means before the
+ * answer goes back, so the run the answer starts finds all of it: the goal
+ * set, the plan's jobs, hire asks and owner task, or the hire serving its goal.
+ * Nothing is done when the ask was no longer open, and that returns false.
+ */
+export async function approveAsk(
+  id: number,
+  reason: string | null,
+  approval: Approval
+): Promise<boolean> {
+  return decide(id, 'approve', reason, approval);
+}
+
+async function decide(
+  id: number,
+  decision: Decision,
+  reason: string | null,
+  o: Approval & { reportWhenDone?: boolean }
+): Promise<boolean> {
+  if (decision === 'iterate') {
+    if (!reason) throw fixedError('Say what to change');
+    const [raised] = await db.select({ kind: asks.kind }).from(asks).where(eq(asks.id, id));
+    if (yesOrNo(raised?.kind))
+      throw new Error('Say yes or no: the office raised this, so nobody reworks it');
+  }
   const status = decision === 'approve' ? 'approved' : decision === 'deny' ? 'denied' : 'revise';
-  const [ask] = await db
-    .update(asks)
-    .set({ status, reason: reason || null, decidedAt: new Date() })
-    .where(and(eq(asks.id, id), eq(asks.status, 'open')))
-    .returning();
-  if (!ask) return;
+  const ask = await db.transaction(async (tx) => {
+    const [claimed] = await tx
+      .update(asks)
+      .set({ status, reason: reason || null, decidedAt: new Date() })
+      .where(and(eq(asks.id, id), eq(asks.status, 'open')))
+      .returning();
+    if (claimed) await o.link?.(claimed, tx);
+    if (claimed?.kind === 'hand_offs' && decision === 'approve') await startHeld(tx, claimed);
+    return claimed;
+  });
+  if (!ask) return false;
   const verb = { approve: 'Approved', deny: 'Denied', iterate: 'Sent back' }[decision];
   await record({
     kind: 'decision',
@@ -369,11 +495,61 @@ export async function decideAsk(
     reason: ask.reason,
     askId: ask.id
   });
+  await o.carryOut?.(ask);
   if (decision === 'approve' && ask.access) await grantAccess(ask.staffId, ask.access, ask.id);
   else if (decision === 'approve' && ask.kind === 'approval')
-    await followUp(ask.staffId, 'carry_out', { askId: ask.id, note: ask.reason, reportWhenDone });
+    await followUp(ask.staffId, 'carry_out', {
+      askId: ask.id,
+      note: ask.reason,
+      reportWhenDone: o.reportWhenDone
+    });
   else if (decision === 'iterate')
     await followUp(ask.staffId, 'rework', { askId: ask.id, note: ask.reason });
+  // No run carries out a denial, or a hire, goal, plan or more hand-offs the owner
+  // approved: the answer itself goes back to a hand-off the ask came from, or
+  // to the thread's hub. A yes to more hand-offs started the hand-off it held
+  // with the claim, and a no stops the thread. A yes to the usage window wakes the threads it held.
+  else {
+    const owner = await ownerName();
+    const said = `${owner} ${decision === 'deny' ? 'said no to' : 'approved'} "${ask.title}"`;
+    const answer = ask.reason ? `${said}: ${ask.reason}` : `${said}.`;
+    if (ask.kind === 'window') {
+      // The title asks whether to pause the work or let it carry on, so "approved" would not say which.
+      const ran = `${owner} let hand-offs run until the usage window resets. Hand on the work the office held.`;
+      await answerWindow(
+        ask.id,
+        decision === 'approve',
+        ask.reason ? `${ran} They said: ${ask.reason}` : ran
+      );
+    } else if (ask.kind === 'hand_offs' && ask.threadId)
+      await answerHandOffs({ ...ask, threadId: ask.threadId }, decision === 'approve', answer);
+    else
+      await answerLater(
+        { handOffId: ask.handOffId, threadId: ask.threadId, askId: ask.id },
+        decision === 'deny' ? 'failed' : 'done',
+        answer
+      );
+    // A no with a reason may be a lesson: the Odd that asked reads it once. The
+    // office raised a window ask, not the Odd named on it, so it has none to learn.
+    if (decision === 'deny' && ask.reason && ask.kind !== 'window')
+      await followUp(ask.staffId, 'denied', { askId: ask.id, note: ask.reason });
+  }
+  return true;
+}
+
+/**
+ * The owner answered something raised on a hand-off or a thread, and no run
+ * follows it: the answer itself goes back. A colleague's goes to the Odd that
+ * handed it the work, and a hub's starts the hub's next run on its thread,
+ * which knows the ask it answers, if it was one.
+ */
+async function answerLater(
+  on: { handOffId: number | null; threadId: number | null; askId?: number },
+  outcome: Outcome,
+  answer: string
+): Promise<void> {
+  if (on.handOffId) await handBackLater(on.handOffId, outcome, answer);
+  else if (on.threadId) await answerThread(on.threadId, answer, on.askId);
 }
 
 /**
@@ -382,7 +558,7 @@ export async function decideAsk(
  */
 export async function replyToReport(id: number, note: string): Promise<ReportRow> {
   const r = await report(id);
-  if (!r) throw new Error('No such report');
+  if (!r) throw fixedError('No such report');
   if (!r.readAt) await readReport(id);
   await record({
     kind: 'decision',
@@ -409,21 +585,36 @@ async function followUp(
     reportWhenDone?: boolean;
   }
 ): Promise<void> {
-  await db.insert(followUps).values({ staffId, kind, ...f });
+  // The answer to something raised on a thread works on that thread.
+  const [on] = servesNoThread(kind)
+    ? []
+    : f.askId
+      ? await db.select({ threadId: asks.threadId }).from(asks).where(eq(asks.id, f.askId))
+      : f.taskId
+        ? await db.select({ threadId: tasks.threadId }).from(tasks).where(eq(tasks.id, f.taskId))
+        : [];
+  await addFollowUp(db, { staffId, kind, ...f, threadId: on?.threadId });
 }
 
 /**
- * A new hire's first day: right after it says hello, it starts its work. Its
- * result goes on the owner's desk, so they see the first piece of work.
+ * A new hire's first day: right after it says hello, a hire with a job starts
+ * its work. Its result goes on the owner's desk, so they see the first piece
+ * of work. A hire with no job gets none (`firstDay` in the office decides): one
+ * that serves a goal gets its first piece from the goal's lead, on the goal's
+ * thread, and any other runs only when handed work.
  */
 export async function startFirstDay(staffId: string): Promise<void> {
-  await followUp(staffId, 'first_day', { note: null, reportWhenDone: true });
+  await addFollowUp(db, { staffId, kind: 'first_day', note: null, reportWhenDone: true });
 }
 
-/** Follow-ups no staffer has started yet, with the ask, report, task or goal each is about. */
+/**
+ * Follow-ups ready to start, by id, with the ask, report, task, goal or thread
+ * each is about. Not the rows: a run takes its row from the claim
+ * (`startFollowUp`), with any answer that joined it since this list.
+ */
 export async function followUpsToDo(): Promise<
   {
-    f: FollowUpRow;
+    id: number;
     ask?: AskRow;
     report?: ReportRow;
     task?: TaskRow;
@@ -433,34 +624,124 @@ export async function followUpsToDo(): Promise<
   const rows = await db
     .select()
     .from(followUps)
-    .where(isNull(followUps.startedAt))
+    .where(and(isNull(followUps.startedAt), not(waitsOnOwnRun())))
     .orderBy(asc(followUps.createdAt));
   return Promise.all(
-    rows.map(async (f) => ({
-      f,
-      ask: f.askId ? await ask(f.askId) : undefined,
-      report: f.reportId
-        ? (await db.select().from(reports).where(eq(reports.id, f.reportId)))[0]
-        : undefined,
-      task: f.taskId ? (await db.select().from(tasks).where(eq(tasks.id, f.taskId)))[0] : undefined,
-      goal: f.goalId ? (await db.select().from(goals).where(eq(goals.id, f.goalId)))[0] : undefined
-    }))
+    rows.map(async (f) => {
+      const a = f.askId ? await ask(f.askId) : undefined;
+      // The owner's answer to a plan, or to a hire it proposed, is about the plan's goal.
+      const goalId = f.goalId ?? a?.plan?.goalId ?? a?.hire?.goal?.id;
+      return {
+        id: f.id,
+        ask: a,
+        report: f.reportId
+          ? (await db.select().from(reports).where(eq(reports.id, f.reportId)))[0]
+          : undefined,
+        task: f.taskId
+          ? (await db.select().from(tasks).where(eq(tasks.id, f.taskId)))[0]
+          : undefined,
+        goal: goalId ? (await db.select().from(goals).where(eq(goals.id, goalId)))[0] : undefined
+      };
+    })
   );
 }
 
-/** Claim a follow-up. False when something else already started it. */
-export async function startFollowUp(id: number): Promise<boolean> {
-  const claimed = await db
-    .update(followUps)
-    .set({ startedAt: new Date() })
-    .where(and(eq(followUps.id, id), isNull(followUps.startedAt)))
-    .returning({ id: followUps.id });
-  return claimed.length > 0;
+/**
+ * An Odd runs once at a time on a thread: a follow-up on one waits while a run
+ * of the same Odd there has yet to end. So a hub never picks its thread up
+ * twice at once, and a colleague's run on the owner's answer starts only once
+ * the run that raised it ended. Answers that come meanwhile join the waiting
+ * `resume` (`answerThread`), and results the waiting `handed_back`
+ * (`resultsToJoin`); the run ending starts it. A hand-off is new work, not a
+ * pick-up, so several may run side by side, even for one colleague. A run on
+ * no thread, such as a chat, a job or a follow-up like a carry-out, counts on
+ * each thread it put work on, a hand-off held or not or a goal's plan
+ * (`threads.runs`, `keepRun`), while its key is in `runsGoing`.
+ */
+function waitsOnOwnRun(): SQL {
+  const busy = alias(followUps, 'busy');
+  const ownRun = db
+    .select({ id: busy.id })
+    .from(busy)
+    .where(
+      and(
+        eq(busy.staffId, followUps.staffId),
+        eq(busy.threadId, followUps.threadId),
+        isNotNull(busy.startedAt),
+        isNull(busy.outcome)
+      )
+    );
+  // With no run going there is no key to look for, and drizzle refuses an empty list.
+  const held = runsGoing.size
+    ? or(
+        exists(ownRun),
+        exists(
+          db
+            .select({ id: threads.id })
+            .from(threads)
+            .where(
+              and(
+                eq(threads.id, followUps.threadId),
+                eq(threads.hubId, followUps.staffId),
+                arrayOverlaps(threads.runs, [...runsGoing])
+              )
+            )
+        )
+      )
+    : exists(ownRun);
+  // Bracketed, since callers negate it.
+  return sql`(${ne(followUps.kind, 'hand_off')} and (${held}))`;
 }
 
-const OUTCOME_TITLE: Record<FollowUpKind, Record<Outcome, string>> = {
+/**
+ * The keys of the runs going in this process. The office gives every run one,
+ * and a thread it takes a hand-off on keeps it (`threads.runs`), so while it
+ * goes the hub's pick-ups there wait (`waitsOnOwnRun`). Kept in memory, not
+ * the database: a restart ends every run, and so every hold, and nothing
+ * waits forever.
+ */
+export const runsGoing = new Set<string>();
+
+/**
+ * Claim a follow-up, and return it as claimed: an answer that joined it after
+ * it was listed is in its note (`answerThread`). Undefined when something else
+ * already started it, or it waits (`waitsOnOwnRun`).
+ */
+export async function startFollowUp(id: number): Promise<FollowUpRow | undefined> {
+  return db.transaction(async (tx) => {
+    // The thread is locked, so two claims on it at once cannot each miss the
+    // other's run starting, and both go.
+    const [on] = await tx
+      .select({ threadId: followUps.threadId })
+      .from(followUps)
+      .where(eq(followUps.id, id));
+    if (on?.threadId)
+      await tx
+        .select({ id: threads.id })
+        .from(threads)
+        .where(eq(threads.id, on.threadId))
+        .for('update');
+    const [claimed] = await tx
+      .update(followUps)
+      .set({ startedAt: new Date() })
+      .where(and(eq(followUps.id, id), isNull(followUps.startedAt), not(waitsOnOwnRun())))
+      .returning();
+    return claimed;
+  });
+}
+
+/**
+ * The ledger title of each follow-up as it ends, before what it was about. The
+ * owner reads these in the Ledger window, so none names a thread or a hand-off.
+ */
+export const OUTCOME_TITLE: Record<FollowUpKind, Record<Outcome, string>> = {
   carry_out: { done: 'Did', failed: 'Failed', waiting: 'Waiting on {owner} for' },
   rework: { done: 'Reworked', failed: 'Could not rework', waiting: 'Reworked' },
+  denied: {
+    done: 'Took in the no on',
+    failed: 'Could not take in the no on',
+    waiting: 'Waiting on {owner} after the no on'
+  },
   feedback: {
     done: 'Acted on feedback on',
     failed: 'Could not act on feedback on',
@@ -480,35 +761,105 @@ const OUTCOME_TITLE: Record<FollowUpKind, Record<Outcome, string>> = {
     done: 'Planned the goal',
     failed: 'Could not plan the goal',
     waiting: 'Brought {owner} the plan for the goal'
+  },
+  hand_off: {
+    done: 'Did work a colleague handed over',
+    failed: 'Could not do work a colleague handed over',
+    waiting: 'Waiting on {owner} for work a colleague handed over'
+  },
+  handed_back: {
+    done: 'Picked up what a colleague finished',
+    failed: 'Could not pick up what a colleague finished',
+    waiting: 'Waiting on {owner} after a colleague finished'
+  },
+  resume: {
+    done: 'Picked back up',
+    failed: 'Could not pick back up',
+    waiting: 'Waiting on {owner} after picking back up'
+  },
+  edited: {
+    done: "Read {owner}'s edit to",
+    failed: "Could not read {owner}'s edit to",
+    waiting: 'Waiting on {owner} after their edit to'
   }
 };
 
 /**
  * Record how a follow-up ended. Every outcome goes in the ledger. The owner's desk
- * gets a failure always, and a success only when the owner asked for one. When the
- * staffer is waiting, what it needs is already on their desk as an ask or task.
+ * gets a failure no lead is woken for, and a success only when the owner asked
+ * for one. When the staffer is waiting, what it needs is already on their desk
+ * as an ask or task. `joined` are the results this run picked up with its own
+ * (`resultsToJoin`): they end with it.
  */
 export async function finishFollowUp(
   f: FollowUpRow,
   about: string,
   outcome: Outcome,
-  result: string
+  result: string,
+  o: { joined?: number[] } = {}
 ): Promise<void> {
-  await db
-    .update(followUps)
-    .set({ outcome, result, doneAt: new Date() })
-    .where(eq(followUps.id, f.id));
+  const joined = o.joined ?? [];
   const title = `${OUTCOME_TITLE[f.kind][outcome].replace('{owner}', await ownerName())}: ${about}`;
-  await record({
-    kind: 'work',
-    actor: f.staffId,
-    title,
-    body: result,
-    askId: f.askId ?? undefined
+  const origin = await servesHandOff(f);
+  // Once only. The outcome, the owner's report and a hand-off's result going
+  // back are written together or not at all, so a restart or a second call
+  // never leaves the desk short or the staffer that handed it waiting.
+  const finished = await db.transaction(async (tx) => {
+    const now = new Date();
+    const [row] = await tx
+      .update(followUps)
+      .set({ outcome, result, doneAt: now })
+      .where(and(eq(followUps.id, f.id), isNull(followUps.outcome)))
+      .returning({ id: followUps.id });
+    if (!row) return false;
+    if (joined.length)
+      await tx
+        .update(followUps)
+        .set({ startedAt: now, outcome, result, doneAt: now })
+        .where(
+          and(
+            inArray(followUps.id, joined),
+            eq(followUps.staffId, f.staffId),
+            eq(followUps.kind, 'handed_back'),
+            isNull(followUps.startedAt)
+          )
+        );
+    // Work that serves a hand-off reports back to the Odd that handed it: the
+    // hand-off's own run however it ended, a later run once it ended, since a
+    // run left waiting has put what it needs on the desk, and the owner's
+    // answer brings the next run. The hand-off's own run left waiting goes
+    // back only while something it raised is still open: once the owner
+    // answered all of it, that answer went back already (`handBackLater`) or
+    // started a run whose result will, so "waiting" would be stale.
+    const back =
+      origin && (outcome !== 'waiting' || (f.kind === 'hand_off' && !(await answeredAll(tx, f.id))))
+        ? handBack(origin, outcome, result)
+        : undefined;
+    // A failure that goes back to a lead goes to the lead only: the lead
+    // picks it up at once and decides what comes next, so a desk item would
+    // wait on the owner for work already moving. With no one to wake, the
+    // owner hears.
+    const reported = outcome === 'failed' ? !back : outcome === 'done' && f.reportWhenDone;
+    if (reported) await tx.insert(reports).values({ staffId: f.staffId, title, body: result });
+    // The hand-back moves the thread on; with none, the outcome may end it.
+    if (back) await addFollowUp(tx, back);
+    else if (f.threadId) await settleThread(tx, f.threadId);
+    return true;
   });
-  if (outcome === 'failed' || (outcome === 'done' && f.reportWhenDone))
-    await db.insert(reports).values({ staffId: f.staffId, title, body: result });
+  // The ledger row embeds its text first, which can take a while: outside the transaction.
+  if (finished)
+    await record({
+      kind: 'work',
+      actor: f.staffId,
+      title,
+      body: result,
+      askId: f.askId ?? undefined
+    });
 }
+
+/** The result of a run a restart cut off. */
+export const CUT_OFF_RESULT =
+  'The office restarted while this was running, so it may be half done. Check it, then ask the Odd to finish it.';
 
 /** Follow-ups a restart cut off mid-run. They fail rather than run twice. */
 export async function closeStaleFollowUps(): Promise<void> {
@@ -516,21 +867,60 @@ export async function closeStaleFollowUps(): Promise<void> {
     .select()
     .from(followUps)
     .where(and(isNotNull(followUps.startedAt), isNull(followUps.outcome)));
-  for (const f of stale)
-    await finishFollowUp(
-      f,
-      f.askId
-        ? ((await ask(f.askId))?.title ?? `ask ${f.askId}`)
-        : f.taskId
-          ? `task ${f.taskId}`
-          : f.goalId
-            ? `goal ${f.goalId}`
-            : f.kind === 'first_day'
-              ? 'getting started'
-              : `report ${f.reportId}`,
-      'failed',
-      'The office restarted while this was running, so it may be half done. Check it, then ask the Odd to finish it.'
-    );
+  for (const f of stale) await finishFollowUp(f, await workTitle(f), 'failed', CUT_OFF_RESULT);
+}
+
+/**
+ * What the Ledger names work when no title is left for it, such as an ask
+ * since removed, or a first day. The owner reads it after each kind's
+ * `OUTCOME_TITLE`, so it names no thread and no number (test/owner-tables.test.ts).
+ */
+export const CUT_OFF_WORK: Record<FollowUpKind, string> = {
+  carry_out: 'an ask',
+  rework: 'an ask',
+  denied: 'an ask',
+  feedback: 'a report',
+  task_done: 'a task',
+  first_day: 'getting started',
+  goal: 'a goal',
+  hand_off: 'the work',
+  handed_back: 'the work',
+  resume: 'the work',
+  edited: 'a file'
+};
+
+/**
+ * What the Ledger names the work a follow-up was about, whether it finished or
+ * a restart cut it off: its ask's, hand-off's, file's, task's, goal's or
+ * report's title. A lead picking a thread back up names its goal, or the
+ * thread's own title when it serves none, never the thread itself. With no
+ * title left, its kind's plain words (`CUT_OFF_WORK`).
+ */
+export async function workTitle(f: FollowUpRow): Promise<string> {
+  return (await titleOf(f)) ?? CUT_OFF_WORK[f.kind];
+}
+
+async function titleOf(f: FollowUpRow): Promise<string | undefined> {
+  if (f.askId) return (await ask(f.askId))?.title;
+  if (f.handOff) return f.handOff.title;
+  if (f.edit) return f.edit.path;
+  if (f.taskId) return (await task(f.taskId))?.title;
+  if (f.goalId)
+    return (await db.select({ title: goals.title }).from(goals).where(eq(goals.id, f.goalId)))[0]
+      ?.title;
+  if (f.kind === 'resume' && f.threadId) {
+    const [t] = await db
+      .select({ goal: goals.title, title: threads.title })
+      .from(threads)
+      .leftJoin(goals, eq(goals.id, threads.goalId))
+      .where(eq(threads.id, f.threadId));
+    return t?.goal ?? t?.title;
+  }
+  if (f.reportId)
+    return (
+      await db.select({ title: reports.title }).from(reports).where(eq(reports.id, f.reportId))
+    )[0]?.title;
+  return undefined;
 }
 
 // Access
@@ -543,7 +933,7 @@ export async function grantAccess(
 ): Promise<void> {
   const who = await staffer(staffId);
   const conn = await connector(req.connector);
-  if (!who || !conn) throw new Error('No such Odd or connector');
+  if (!who || !conn) throw fixedError('No such Odd or connector');
   if (req.level === 'draft') throw new Error(`${conn.name} connects to read, or to read and write`);
   if (!levelAtMost(req.level, who.permission))
     throw new Error(`${who.name} holds ${who.permission}, so it cannot be given ${req.level}`);
@@ -706,14 +1096,37 @@ export async function revoke(staffId: string, connectorId: string): Promise<void
 
 export async function giveTask(
   staffId: string | null,
-  t: { title: string; why: string; steps: (string | Step)[]; attach?: string[] }
+  t: {
+    title: string;
+    why: string;
+    steps: (string | Step)[];
+    attach?: string[];
+    /** Given while working on this hand-off: the owner's answer goes back to it. */
+    handOffId?: number;
+    /** Given on this thread: the owner's answer moves it on. */
+    threadId?: number;
+    /** The key of the run giving it, which its thread keeps, as `raiseAsk` says. */
+    run?: string;
+  }
 ): Promise<TaskRow> {
   const steps = t.steps.map((s) => (typeof s === 'string' ? { text: s, done: false } : s));
   return db.transaction(async (tx) => {
     const [row] = await tx
       .insert(tasks)
-      .values({ staffId, title: t.title, why: t.why, steps })
+      .values({
+        staffId,
+        title: t.title,
+        why: t.why,
+        steps,
+        handOffId: t.handOffId,
+        threadId: t.threadId
+      })
       .returning();
+    if (row.threadId) {
+      // A task the office gives itself has no Odd, so no run of one to keep.
+      if (staffId) await keepRun(tx, row.threadId, { key: t.run, by: staffId });
+      await raisedOn(tx, row.threadId);
+    }
     if (staffId && t.attach?.length)
       await tx
         .insert(attachments)
@@ -724,7 +1137,7 @@ export async function giveTask(
   });
 }
 
-/** The files a task carries, as paths inside its staffer's folder. */
+/** The files a task carries, as paths inside its staffer's folder or names in a thread's folder (`workPath`). */
 export async function taskFiles(taskId: number): Promise<string[]> {
   const rows = await db
     .select({ path: attachments.path })
@@ -816,7 +1229,21 @@ export async function finishTask(id: number, done: boolean, note: string | null)
     reason: t.note,
     taskId: t.id
   });
-  if (!done || !t.staffId) return;
+  if (!done) {
+    // No run follows a dropped task: the answer itself goes back. A tool's connect
+    // task belongs to the access ask it came from.
+    const from = t.askId ? await ask(t.askId) : undefined;
+    await answerLater(
+      {
+        handOffId: t.handOffId ?? from?.handOffId ?? null,
+        threadId: t.threadId ?? from?.threadId ?? null
+      },
+      'failed',
+      `${await ownerName()} dropped "${t.title}"${t.note ? `: ${t.note}` : '.'}`
+    );
+    return;
+  }
+  if (!t.staffId) return;
   // The owner finished connecting a tool a staffer asked for: it can start the
   // work that was waiting on it.
   const a = t.askId ? await ask(t.askId) : undefined;
@@ -883,13 +1310,21 @@ export type Delivery = {
   at: Date;
   /** open, approved, denied, revise, done, dropped, or for a report new or read. */
   status: string;
+  /** When the owner decided it, for an ask. */
+  decidedAt?: Date | null;
 };
 
 /** What one staffer put on the owner's desk, newest last, with where each stands. */
 export async function deliveries(staffId: string, limit = 200): Promise<Delivery[]> {
   const [a, t, r] = await Promise.all([
     db
-      .select({ id: asks.id, title: asks.title, at: asks.createdAt, status: asks.status })
+      .select({
+        id: asks.id,
+        title: asks.title,
+        at: asks.createdAt,
+        status: asks.status,
+        decidedAt: asks.decidedAt
+      })
       .from(asks)
       .where(eq(asks.staffId, staffId))
       .orderBy(desc(asks.createdAt))
@@ -1038,9 +1473,9 @@ export async function setDescription(
   by: { owner: true; was: string } | { go: GoAhead }
 ): Promise<boolean> {
   const who = await staffer(staffId);
-  if (!who) throw new Error('No such Odd');
+  if (!who) throw fixedError('No such Odd');
   const desk = text.trim();
-  if (!desk) throw new Error('A job description cannot be empty');
+  if (!desk) throw fixedError('A job description cannot be empty');
   if ('owner' in by && by.was.trim() !== who.desk.trim())
     throw new Error(`${who.name}'s job description changed since you opened it. Reopen it to see.`);
   if (desk === who.desk.trim()) return false;
@@ -1059,7 +1494,7 @@ export async function setDescription(
 /** Remove a job that never ran. One that ran stays, paused, so its runs keep their record. */
 export async function deleteJob(id: number): Promise<void> {
   const [ran] = await db.select({ id: runs.id }).from(runs).where(eq(runs.jobId, id)).limit(1);
-  if (ran) throw new Error('This job has run before, so it stays paused to keep its record.');
+  if (ran) throw fixedError('This job has run before, so it stays paused to keep its record.');
   await db.delete(jobs).where(eq(jobs.id, id));
 }
 
@@ -1153,6 +1588,8 @@ export async function officeActivity(since: Date) {
         ask: asks.title,
         report: reports.title,
         task: tasks.title,
+        handOff: followUps.handOff,
+        thread: threads.title,
         outcome: followUps.outcome,
         at: followUps.createdAt
       })
@@ -1160,6 +1597,7 @@ export async function officeActivity(since: Date) {
       .leftJoin(asks, eq(followUps.askId, asks.id))
       .leftJoin(reports, eq(followUps.reportId, reports.id))
       .leftJoin(tasks, eq(followUps.taskId, tasks.id))
+      .leftJoin(threads, eq(followUps.threadId, threads.id))
       .where(gte(followUps.createdAt, since))
   ]);
   const allJobs = await db.select().from(jobs).where(eq(jobs.enabled, true));
@@ -1195,11 +1633,14 @@ export async function officeActivity(since: Date) {
     },
     // Work owed after the owner answered: carrying out an approved ask, reworking one
     // the owner sent back, acting on their feedback on a report, or picking up after a
-    // task they finished. A null outcome is still to do.
+    // task they finished. A hand_off is work a colleague handed this staffer,
+    // handed_back is the colleague's result coming home, and resume is a thread's
+    // hub picking it back up. A null outcome is still to do.
     followUps: follow.map((f) => ({
       from: f.staff,
       kind: f.kind,
-      about: f.ask ?? f.report ?? f.task,
+      about: f.ask ?? f.report ?? f.task ?? f.handOff?.title ?? f.thread,
+      ...(f.handOff ? { colleague: f.handOff.from } : {}),
       outcome: f.outcome,
       at: pt(f.at)
     })),
@@ -1275,7 +1716,7 @@ export async function finishWelcome(name: string): Promise<void> {
 /** Set the owner's name. */
 export async function setOwnerName(name: string): Promise<void> {
   const n = name.trim().slice(0, 30);
-  if (!n) throw new Error('Say a name');
+  if (!n) throw fixedError('Say a name');
   await db
     .insert(owner)
     .values({ id: 'owner', name: n, updatedAt: new Date() })
@@ -1305,7 +1746,7 @@ export type UsageBucket = { at: number; tokens: number; output: number };
 export async function usageFor(staffId: string) {
   const totals = async (interval: string): Promise<UsageTotals> => {
     const [r] = await pg`
-      select coalesce(sum(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens), 0)::float8 as tokens,
+      select coalesce(sum(tokens), 0)::float8 as tokens,
              coalesce(sum(output_tokens), 0)::float8 as output,
              coalesce(sum(cost_usd), 0)::float8 as "costUsd",
              count(distinct created_at)::int as runs
@@ -1325,7 +1766,7 @@ export async function usageFor(staffId: string) {
         ) as start
       )
       select (extract(epoch from b.start at time zone ${tz}) * 1000)::float8 as at,
-             coalesce(sum(u.input_tokens + u.output_tokens + u.cache_read_tokens + u.cache_write_tokens), 0)::float8 as tokens,
+             coalesce(sum(u.tokens), 0)::float8 as tokens,
              coalesce(sum(u.output_tokens), 0)::float8 as output
       from b
       left join usage u
@@ -1357,9 +1798,9 @@ const POKE_HORIZON_MS = 7 * 24 * 3_600_000;
 export async function schedulePoke(staffId: string, at: Date, message: string): Promise<PokeRow> {
   const minute = new Date(Math.floor(at.getTime() / 60_000) * 60_000);
   // The minute under way still counts: a poke for it goes out right away.
-  if (minute.getTime() + 60_000 <= Date.now()) throw new Error('That time has passed.');
+  if (minute.getTime() + 60_000 <= Date.now()) throw fixedError('That time has passed.');
   if (minute.getTime() > Date.now() + POKE_HORIZON_MS)
-    throw new Error('A poke can be at most 7 days ahead.');
+    throw fixedError('A poke can be at most 7 days ahead.');
   const [same] = await db
     .select()
     .from(pokes)
@@ -1475,7 +1916,7 @@ export async function renameRoom(
   names: { was: string; start: string }
 ): Promise<string> {
   const next = name.trim().replace(/\s+/g, ' ') || names.start;
-  if (next.length > 40) throw new Error('Keep a room name to 40 characters');
+  if (next.length > 40) throw fixedError('Keep a room name to 40 characters');
   if (next === names.was) return next;
   if (next === names.start)
     await db.delete(roomNames).where(and(eq(roomNames.office, office), eq(roomNames.room, room)));

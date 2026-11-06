@@ -2,6 +2,7 @@
 // ledger, in Postgres. Server only.
 export * from './office.ts';
 export * from './schema.ts';
+export * from './agents.ts';
 export {
   clockTime,
   describe as describeSchedule,
@@ -19,8 +20,15 @@ export * from './home.ts';
 export * from './platform.ts';
 export * from './offices.ts';
 export * from './managers.ts';
+export * from './personas.ts';
 export * from './goals.ts';
+export * from './lessons.ts';
 export * from './goal-words.ts';
 export * from './updates.ts';
 export * from './update-window.ts';
+export * from './hand-offs.ts';
+export * from './hand-off-news.ts';
+export * from './threads.ts';
+export * from './lead-brief.ts';
+export * from './sharing.ts';
 export { WEEKDAYS } from './time.ts';

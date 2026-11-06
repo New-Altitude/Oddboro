@@ -1,10 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { HireProposal, Schedule } from '@oddboro/ledger';
+  import { AGENT_NAMES, type Agent } from '@oddboro/ledger/agents';
   import { OFFICE_TOOLS } from '@oddboro/ledger/tools';
   import Pixel from './Pixel.svelte';
   import LookStudio, { type Drawn } from './LookStudio.svelte';
   import SchedulePicker from './SchedulePicker.svelte';
+  import RunsOn from './RunsOn.svelte';
   import { call } from './api.ts';
   import { wins } from './windows.svelte.ts';
   import type { StaffProfile } from '../staff/roster.ts';
@@ -32,8 +34,11 @@
   let remit = $state('');
   let desk = $state('');
   let permission = $state<'read' | 'draft' | 'act'>('read');
+  /** The tool its runs go through, its hello first. Stored with the hire. */
+  let agent = $state<Agent>('claude');
   let jobName = $state('');
   let jobInstructions = $state('');
+  /** Shown only once the owner names a job, so an empty job never reads as an hourly one. */
   let jobSchedule = $state<Schedule>({ every: 'minutes', n: 60 });
   /** Most first jobs make something for the owner to read, so this starts on. */
   let jobReport = $state(true);
@@ -80,6 +85,15 @@
     wins.dirty[id] = !!(name.trim() || desk.trim() || look);
   });
 
+  /** A job goes with the hire only when it has a name. */
+  const hasJob = $derived(!!jobName.trim());
+  /** A hire with no job starts nothing alone: a goal's lead passes it each piece (`firstDay`). */
+  const noJob = $derived(
+    from?.proposal.goal
+      ? "No job: its goal's lead passes it each piece of work"
+      : 'No job: works only when a colleague passes it work'
+  );
+
   const ready = $derived([
     !!name.trim() && !!role.trim() && !!look,
     !!room,
@@ -120,11 +134,12 @@
         newParts: look?.newParts,
         room,
         permission,
+        agent,
         remit,
         desk,
         tools,
         askId: from?.askId,
-        job: jobName.trim()
+        job: hasJob
           ? {
               name: jobName,
               instructions: jobInstructions,
@@ -254,6 +269,12 @@
             onclick={() => (permission = 'act')}>Acts on its own</button
           >
         </div>
+        <!-- Every option's value is a tool id `/api/agents` sent, so the cast holds. -->
+        <RunsOn
+          value={agent}
+          onpick={(select) => (agent = select.value as Agent)}
+          class="mt-2 text-xs"
+        />
       </div>
     {:else if step === 3}
       <p class="text-xs text-muted">
@@ -261,6 +282,9 @@
       </p>
       <div class="flex flex-col gap-2 rounded-xl bg-raise p-3">
         <span class="text-xs text-muted">A first job</span>
+        {#if !jobName.trim() && !jobInstructions.trim()}
+          <span class="text-xs text-ink">{noJob}</span>
+        {/if}
         <input
           class="{field} bg-night/60"
           placeholder="Name, e.g. Sort personal mail"
@@ -271,10 +295,12 @@
           class="{field} resize-none bg-night/60"
           placeholder="What to do each run"
           bind:value={jobInstructions}></textarea>
-        <SchedulePicker bind:value={jobSchedule} />
-        <label class="flex items-center gap-2 text-xs text-muted">
-          <input type="checkbox" bind:checked={jobReport} /> Put the result on my desk as a report
-        </label>
+        {#if hasJob}
+          <SchedulePicker bind:value={jobSchedule} />
+          <label class="flex items-center gap-2 text-xs text-muted">
+            <input type="checkbox" bind:checked={jobReport} /> Put the result on my desk as a report
+          </label>
+        {/if}
       </div>
     {:else}
       <dl class="flex flex-col gap-2">
@@ -300,6 +326,10 @@
                 : 'Acts on its own'}
           </dd>
         </div>
+        <div>
+          <dt class="text-xs text-muted">Runs on</dt>
+          <dd>{AGENT_NAMES[agent]}</dd>
+        </div>
         {#if tools}
           <div>
             <dt class="text-xs text-muted">Office tools</dt>
@@ -312,9 +342,7 @@
         <div>
           <dt class="text-xs text-muted">First job</dt>
           <dd>
-            {jobName.trim()
-              ? `${jobName.trim()}${jobReport ? ', reports to your desk' : ''}`
-              : 'None yet'}
+            {hasJob ? `${jobName.trim()}${jobReport ? ', reports to your desk' : ''}` : noJob}
           </dd>
         </div>
       </dl>

@@ -437,10 +437,16 @@ export function renderPortrait(lib: Library, spec: LookSpec, px: string): Uint8A
   return encodePng(portraitImage(lib, spec, px));
 }
 
-/** Check a drawn part composes on both bodies in every frame. Throws if not. */
+/**
+ * Check a drawn part is the part it says it is and composes on both bodies in
+ * every frame. Throws if not. The library keys a stored part by the name in
+ * its drawing, so a drawing that names another part would replace that one.
+ */
 export function checkPart(lib: Library, part: DrawnPart): Part {
   const p = parsePart(part.px, lib.palette, `${part.kind} ${part.name}`);
   if (p.kind !== part.kind) throw new PxError(`the part is tagged ${p.kind}, not ${part.kind}`);
+  if (p.name !== part.name)
+    throw new PxError(`the drawing is named ${p.kind}-${p.name}, not ${part.kind}-${part.name}`);
   const trial = loadLibraryWith(lib, p);
   const base: LookSpec = {
     hair: p.kind === 'hair' ? p.name : 'short-crop',

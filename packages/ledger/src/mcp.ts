@@ -4,9 +4,9 @@
 // the tools the owner granted that staffer (tools.ts), so the rest do not exist.
 //
 //   node packages/ledger/src/mcp.ts      (stdio; the office starts it)
-import { existsSync, statSync } from 'node:fs';
-import { relative, resolve } from 'node:path';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { realpathSync, statSync } from 'node:fs';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { McpServer, type ToolCallback } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import {
@@ -18,7 +18,6 @@ import {
   giveTask,
   reconnectTask,
   jobsFor,
-  levelAtMost,
   officeActivity,
   ownerName,
   raiseAsk,
@@ -42,10 +41,41 @@ import {
   type GoalView
 } from './goals.ts';
 import { goalWhen, HEALTH_WORDS, HORIZONS, STATUS_WORDS } from './goal-words.ts';
-import { capabilities, levelLine, outsideLines } from './capabilities.ts';
+import { accessInRun, capabilities, outsideLines } from './capabilities.ts';
+import { handOff } from './hand-offs.ts';
+import {
+  APPLIES_TO_MAX,
+  CITE_FIRST,
+  keepLesson,
+  QUOTE_MIN_WORDS,
+  usedLesson,
+  WHY_REPLACED,
+  type OwnerWords
+} from './lessons.ts';
+import {
+  HAND_OFF_LIMIT,
+  handOffsWord,
+  notLed,
+  parkThread,
+  recentThreads,
+  tellLead,
+  threadsOn,
+  workFile
+} from './threads.ts';
+import { THREADS_DIR, workName, workPath } from './work-paths.ts';
+import { goalWork, goalWorkRefused } from './goal-work.ts';
+import { heldTools, lacking } from './sharing.ts';
 import { ensureConnector, searchRegistry } from './registry.ts';
-import type { GoalPlanItem, HireProposal } from './schema.ts';
-import { clockTime, describe as describeSchedule, officeAt, WEEKDAYS, zoneName } from './time.ts';
+import { levelAtMost, type GoalPlanItem, type HireProposal } from './schema.ts';
+import {
+  clockTime,
+  describe as describeSchedule,
+  officeAt,
+  officeDay,
+  WEEKDAYS,
+  zone,
+  zoneName
+} from './time.ts';
 import { hasTool, isGrantable } from './tools.ts';
 import { home } from './home.ts';
 
@@ -65,8 +95,45 @@ const HOME = home('staff', ME);
  * the staffer, so a change made "because the owner asked" carries their real words.
  */
 const OWNER_SAID = process.env.OWNER_SAID || undefined;
+/**
+ * The owner's note a follow-up carries out: their reason on an ask, what to
+ * change, or their note on a task. Lessons may quote it; it is no go-ahead.
+ */
+const OWNER_NOTE = process.env.OWNER_NOTE || undefined;
+/**
+ * The owner's version of a file they edited, when this run reads that edit.
+ * Lessons may quote it, as guesses only (`keptAs`); it is no go-ahead.
+ */
+const OWNER_EDIT = process.env.OWNER_EDIT || undefined;
+/** The owner's words this run carries for a lesson. A run carries one of the three at most. */
+const OWNER_WORDS: OwnerWords | undefined = OWNER_EDIT
+  ? { text: OWNER_EDIT, from: 'edit' }
+  : OWNER_SAID
+    ? { text: OWNER_SAID, from: 'chat' }
+    : OWNER_NOTE
+      ? { text: OWNER_NOTE, from: 'note' }
+      : undefined;
 /** The ask the owner approved that this run carries out, set by the office. No other ask counts. */
 const APPROVED_ASK = Number(process.env.APPROVED_ASK) || undefined;
+/**
+ * Set by the office for a colleague's run on a hand-off: asks and tasks it
+ * raises carry it, so the owner's answer goes back, and it cannot hand off.
+ */
+const HAND_OFF_ID = Number(process.env.HAND_OFF_ID) || undefined;
+/**
+ * The thread this run works on, either side, set by the office. Asks and tasks
+ * it raises carry it. The hub's runs hand off into it and may park it.
+ */
+const THREAD_ID = Number(process.env.THREAD_ID) || undefined;
+/** Set by the office for every run: a thread it puts work on keeps it (`keepRun`, `runsGoing`). */
+const RUN_KEY = process.env.RUN_KEY || undefined;
+/**
+ * Set by the office for a run that only reads the owner's reason or edit for a
+ * lesson (`servesNoThread`): it hands nothing on, so it gets no hand_off.
+ */
+const LESSON_RUN = process.env.LESSON_RUN === '1';
+/** What an ask or task raised in this run is part of. */
+const RAISED_ON = { handOffId: HAND_OFF_ID, threadId: THREAD_ID };
 
 const approvedArg = z
   .number()
@@ -105,18 +172,29 @@ const attachArg = z
   .max(5)
   .optional()
   .describe(
-    `Files in your folder that go with it, e.g. ['notes/intake.md']. ${OWNER} sees them on their desk and edits a Markdown one right there, so do not tell them where to find it.`
+    `Files that go with it: one in your folder, e.g. ['notes/intake.md'], or one in the folder of a goal or work you are on, by its path from ${THREADS_DIR}/, e.g. ['${workName(12, 'paige/index.html')}']. Attach the file itself, never a copy. ${OWNER} sees them on their desk and edits a Markdown one from your folder right there, so do not tell them where to find it.`
   );
 
-/** The attachments as paths inside this staffer's folder, or why one is not. */
-function attachable(paths: string[] = []): { paths: string[] } | { problem: string } {
+/**
+ * The attachments as names the owner's viewer opens (`workPath` for a file in
+ * a thread's folder, else a path inside this staffer's folder), or why one is
+ * not. Never a full path, and never a file reached through a link out.
+ */
+async function attachable(
+  paths: string[] = []
+): Promise<{ paths: string[] } | { problem: string }> {
   const out: string[] = [];
   for (const p of paths) {
-    const file = resolve(HOME, p);
-    const rel = relative(HOME, file);
-    if (rel.startsWith('..') || !existsSync(file) || !statSync(file).isFile())
-      return { problem: `No file at ${p} in your folder. Write it first.` };
-    out.push(rel);
+    const name = isAbsolute(p)
+      ? undefined
+      : workPath(p)
+        ? (await workFile(ME, p)) && p
+        : ownFile(p);
+    if (!name)
+      return {
+        problem: `No file at ${p} that you can attach. Name a file in your folder by its path inside it, e.g. notes/intake.md, or one in the folder of a goal or work you are on from ${THREADS_DIR}/, e.g. ${workName(12, 'paige/index.html')}, never by its full path. Write it first if it is not there.`
+      };
+    out.push(name);
   }
   return { paths: [...new Set(out)] };
 }
@@ -131,11 +209,21 @@ const scheduleArg = z.discriminatedUnion('every', [
     .describe('Once a week, e.g. { every: "week", day: "Fri", at: "16:00" }.')
 ]);
 
-/** A file in this staffer's folder, as a path inside it, or undefined when there is none. */
+/**
+ * A file in this staffer's folder, as the path inside it to its real path, or
+ * undefined when there is none. A link out of the folder is not in it.
+ */
 function ownFile(path: string): string | undefined {
-  const file = resolve(HOME, path);
-  const rel = relative(HOME, file);
-  return rel.startsWith('..') || !existsSync(file) || !statSync(file).isFile() ? undefined : rel;
+  try {
+    const root = realpathSync(HOME);
+    const file = realpathSync(resolve(root, path));
+    return file.startsWith(root + sep) && statSync(file).isFile()
+      ? relative(root, file)
+      : undefined;
+  } catch {
+    // Nothing at that path.
+    return undefined;
+  }
 }
 
 /** What propose_hire and propose_goal_plan both take to describe one hire. */
@@ -157,7 +245,7 @@ const hireFields = {
     .array(z.string())
     .optional()
     .describe(
-      'Office tools beyond the ones every Odd has: search_ledger, give_owner_a_task, find_connectors, ask_for_access, edit_my_job, edit_my_description, poke_owner, propose_hire, office_report. Leave out for the usual starters.'
+      'Office tools beyond the ones every Odd has: search_ledger, give_owner_a_task, find_connectors, ask_for_access, edit_my_job, edit_my_description, hand_off, poke_owner, propose_hire, office_report. Leave out for the usual starters.'
     ),
   appearance: z
     .string()
@@ -251,14 +339,56 @@ const goalFields = {
 };
 
 const server = new McpServer({ name: 'office', version: '1.0.0' });
+/**
+ * Registers an office tool that refuses any argument its input does not name.
+ * The SDK builds a plain object from a raw shape, which drops an unknown key
+ * and runs the tool as if it were left out: an Odd whose chat still uses a
+ * renamed parameter would start new work when it meant to continue old work.
+ * The refusal lists the keys the tool takes instead of echoing the unknown
+ * one, since an old name may say a word the Odd never reads.
+ */
+function tool<Shape extends z.ZodRawShape>(
+  name: string,
+  { description, inputSchema }: { description: string; inputSchema: Shape },
+  run: ToolCallback<Shape>
+) {
+  const keys = Object.keys(inputSchema);
+  const takes = keys.length ? `takes only ${keys.join(', ')}` : 'takes no arguments';
+  const strict = z.strictObject(inputSchema, {
+    error: (issue) =>
+      issue.code === 'unrecognized_keys'
+        ? `${name} ${takes}. Nothing was done. Call it again with those.`
+        : undefined
+  });
+  // `run` is typed by the raw shape, as the SDK types one: the strict object
+  // parses to the same arguments, and reads a shape spread from a union
+  // (raisedArgs) as unknown fields. Named here because inference picks the raw
+  // shape; the first is the output schema, which no office tool has.
+  server.registerTool<z.ZodRawShape, typeof strict>(
+    name,
+    { description, inputSchema: strict },
+    run
+  );
+}
 const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] });
+/**
+ * A hand_off that handed nothing on: refused, or held for the owner's answer.
+ * An error, so the Odd cannot read it as the work being handed over.
+ */
+const notHanded = (why: string) => ({
+  ...text(`Nothing was handed off yet. ${why}`),
+  isError: true
+});
 const json = (v: unknown) => text(JSON.stringify(v, null, 2));
-const day = (d: Date | string) => new Date(d).toISOString().slice(0, 10);
+const day = (d: Date | string) => officeDay(new Date(d));
+/** "Oct 30", in the office's time zone. */
+const shortDay = (d: Date) =>
+  d.toLocaleDateString('en-US', { timeZone: zone(), month: 'short', day: 'numeric' });
 const line = (r: LedgerRow) =>
   `- ${day(r.createdAt)} [${r.kind}] ${r.actor}: ${r.title}${r.reason ? ` (reason: ${r.reason})` : r.kind === 'decision' ? ' (no reason given)' : ''}`;
 
 if (has('search_ledger'))
-  server.registerTool(
+  tool(
     'search_ledger',
     {
       description: `Search the office ledger: every decision ${OWNER} made, all work done by Odds or by ${OWNER}, and reports. Search by meaning. Check it before raising an ask, so you know how ${OWNER} decided similar things.`,
@@ -281,10 +411,67 @@ if (has('search_ledger'))
     }
   );
 
-server.registerTool(
+// In a chat, the threads this Odd works on and does not lead (`threadsOn`):
+// what the owner asks there about one goes to its lead with tell_lead.
+const said = OWNER_SAID;
+const workingOn = said && has('tell_lead') ? await threadsOn(ME) : [];
+const goalRule = await goalWork(ME, workingOn);
+// A hub in a run on no thread, such as a chat or a job, names the thread an ask
+// or task is for, or null, so what it raises about a thread lands there.
+const leading = has('hand_off') && !THREAD_ID && !LESSON_RUN ? await recentThreads(ME) : [];
+/** The arguments raise_ask and give_owner_a_task take for where what they raise goes. */
+const raisedArgs = {
+  ...(leading.length
+    ? {
+        work: z
+          .number()
+          .int()
+          .nullable()
+          .describe(
+            `The number of work you lead, as your instructions number it, when this is for it: it goes on that work, and ${OWNER}'s answer brings you back there. null when it is for none of them.`
+          )
+      }
+    : {})
+};
+/** What each tool `placed` checks for an ask or task adds to its description, in a chat that offers tell_lead. */
+const raisedNote = !workingOn.length
+  ? ''
+  : goalRule
+    ? ` Not in this chat: you have no job of your own, so what ${OWNER} asks of you here is a goal's work, which goes to ${goalRule.leads.join(' or ')} with tell_lead.`
+    : ` Never for work another Odd leads that you are on: pass ${OWNER}'s words to its lead with tell_lead.`;
+/** A tool call that put nothing on the desk. An error, so the Odd cannot read it as done. */
+const refused = (why: string) => ({
+  ...text(`Nothing went on ${OWNER}'s desk. ${why}`),
+  isError: true
+});
+/**
+ * Where an ask or task this run raises goes, from its arguments, or why it may
+ * not go at all, so a goal's work goes to its lead. raise_ask,
+ * give_owner_a_task, ask_for_access and propose_hire check it, and hand_off
+ * when it would open a thread. Three tools that reach the desk do not, since
+ * none can carry a goal's work off its thread: reconnect_access restores a
+ * tool the owner already gave this Odd, which all its work needs; propose_goal
+ * offers a new goal, which nobody leads yet; and propose_goal_plan always goes
+ * on its goal's one thread (`raiseAsk`).
+ */
+async function placed(a: {
+  work?: number | null;
+}): Promise<{ problem: string } | { handOffId?: number; threadId?: number; run?: string }> {
+  // A thread it leads is its own work, never a colleague's goal work.
+  if (a.work !== undefined && a.work !== null) {
+    const problem = await notLed({ hubId: ME, threadId: a.work, owner: OWNER });
+    // Only a lead's run naming its thread keeps its key there: a colleague's run
+    // on a thread must never hold the lead's pick-ups (`waitsOnOwnRun`).
+    return problem ? { problem } : { threadId: a.work, run: RUN_KEY };
+  }
+  if (goalRule) return { problem: goalWorkRefused(goalRule, OWNER) };
+  return RAISED_ON;
+}
+
+tool(
   'raise_ask',
   {
-    description: `Ask ${OWNER} to approve something. It lands on their desk and they approve, deny, or send it back with what to change, maybe with a reason. Use it for anything that needs their yes. One decision per ask, worded as the exact action: if they approve, you carry it out at once in a new run, with only the ask to go on. The reply lists their closest past decisions: if one matches and gave no reason, tell ${OWNER} that a reason would let Odds handle these without asking next time. For tool access use ask_for_access, and for a new Odd use propose_hire.`,
+    description: `Ask ${OWNER} to approve something. It lands on their desk and they approve, deny, or send it back with what to change, maybe with a reason. Use it for anything that needs their yes. One decision per ask, worded as the exact action: if they approve, you carry it out at once in a new run, with only the ask to go on. The reply lists their closest past decisions: if one matches and gave no reason, tell ${OWNER} that a reason would let Odds handle these without asking next time. For tool access use ask_for_access, and for a new Odd use propose_hire.${raisedNote}`,
     inputSchema: {
       title: z
         .string()
@@ -295,13 +482,17 @@ server.registerTool(
       why: z.string().describe('Why, in one to three plain sentences.'),
       if_approved: z.string().describe('What happens next if they say yes.'),
       attach: attachArg,
-      revises: revisesArg
+      revises: revisesArg,
+      ...raisedArgs
     }
   },
-  async ({ title, why, if_approved, attach, revises }) => {
-    const files = attachable(attach);
+  async ({ title, why, if_approved, attach, revises, ...where }) => {
+    const on = await placed(where);
+    if ('problem' in on) return refused(on.problem);
+    const files = await attachable(attach);
     if ('problem' in files) return text(files.problem);
     const { ask, precedent } = await raiseAsk(ME, {
+      ...on,
       title,
       why,
       ifApproved: if_approved,
@@ -317,7 +508,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+tool(
   'my_asks',
   {
     description: `Your asks and how ${OWNER} decided each, with their reason when they gave one.`,
@@ -338,20 +529,23 @@ server.registerTool(
 );
 
 if (has('give_owner_a_task'))
-  server.registerTool(
+  tool(
     'give_owner_a_task',
     {
-      description: `Give ${OWNER}, the human operator, a task: something only they can do. Steps are numbered and each is one action, written so anyone can follow them without guessing: name the button, the place, the exact thing. If they must choose, pass choices and the task ends with them, e.g. for 'Should this kind of email reach you?' pass ['Yes, keep sending these', 'No, filter these out']. When they must fill in or read a file, write it in your folder and attach it: a step says 'Answer each question in intake.md below', never where the file lives. Never write steps to connect or reconnect a tool: ask_for_access and reconnect_access give the office's own.`,
+      description: `Give ${OWNER}, the human operator, a task: something only they can do. Steps are numbered and each is one action, written so anyone can follow them without guessing: name the button, the place, the exact thing. If they must choose, pass choices and the task ends with them, e.g. for 'Should this kind of email reach you?' pass ['Yes, keep sending these', 'No, filter these out']. When they must fill in or read a file, write it in your folder and attach it: a step says 'Answer each question in intake.md below', never where the file lives. Never write steps to connect or reconnect a tool: ask_for_access and reconnect_access give the office's own.${raisedNote}`,
       inputSchema: {
         title: z.string().max(140),
         why: z.string().describe('One or two sentences on why this is theirs to do.'),
         steps: z.array(z.string()).min(1).max(12).describe('One action per step. No "and then".'),
         choices: z.array(z.string()).min(2).max(4).optional(),
-        attach: attachArg
+        attach: attachArg,
+        ...raisedArgs
       }
     },
-    async ({ title, why, steps, choices, attach }) => {
-      const files = attachable(attach);
+    async ({ title, why, steps, choices, attach, ...where }) => {
+      const on = await placed(where);
+      if ('problem' in on) return refused(on.problem);
+      const files = await attachable(attach);
       if ('problem' in files) return text(files.problem);
       const all = [
         ...steps.map((s) => ({ text: s, done: false })),
@@ -365,37 +559,28 @@ if (has('give_owner_a_task'))
             ]
           : [])
       ];
-      const t = await giveTask(ME, { title, why, steps: all, attach: files.paths });
+      const t = await giveTask(ME, {
+        title,
+        why,
+        steps: all,
+        attach: files.paths,
+        ...on
+      });
       return text(`Task ${t.id} is on ${OWNER}'s desk. The ledger records it when they finish it.`);
     }
   );
 
-server.registerTool(
+tool(
   'my_access',
   {
     description: `Your level, and each outside tool ${OWNER} gave you: what it reaches, or why a run leaves it out for now.`,
     inputSchema: {}
   },
-  async () => {
-    const caps = await capabilities(me);
-    // The run left these out because their sign-in ran out; only it could tell.
-    const signedOut = (process.env.SIGNED_OUT ?? '').split(',');
-    for (const a of caps.outside)
-      if (!a.heldBack && signedOut.includes(a.connector.id)) a.heldBack = 'sign-in ran out';
-    const lines = outsideLines(caps, OWNER);
-    return text(
-      [
-        levelLine(caps.level, OWNER),
-        lines.length
-          ? lines.map((l, i) => `- (id: ${caps.outside[i].connector.id}) ${l}`).join('\n')
-          : `${OWNER} has connected no outside tools for you yet.`
-      ].join('\n')
-    );
-  }
+  async () => text(accessInRun(await capabilities(me), OWNER, process.env))
 );
 
 if (has('find_connectors'))
-  server.registerTool(
+  tool(
     'find_connectors',
     {
       description:
@@ -437,10 +622,10 @@ if (has('find_connectors'))
   );
 
 if (has('ask_for_access'))
-  server.registerTool(
+  tool(
     'ask_for_access',
     {
-      description: `Ask ${OWNER} to connect a tool for you. Pass a catalog id or registry name from find_connectors, or the https address of a hosted MCP server. Ask for the lowest level that does the job: read to look, write to change things in the tool (needs act permission). If they approve, they get numbered steps to connect it, and it shows up in my_access when done.`,
+      description: `Ask ${OWNER} to connect a tool for you. Pass a catalog id or registry name from find_connectors, or the https address of a hosted MCP server. Ask for the lowest level that does the job: read to look, write to change things in the tool (needs act permission). If they approve, they get numbered steps to connect it, and it shows up in my_access when done.${raisedNote}`,
       inputSchema: {
         connector: z.string(),
         level: z
@@ -451,6 +636,8 @@ if (has('ask_for_access'))
       }
     },
     async ({ connector: wanted, level: asked, why, revises }) => {
+      const on = await placed({});
+      if ('problem' in on) return refused(on.problem);
       const level = asked === 'write' ? 'act' : 'read';
       if (!levelAtMost(level, me.permission))
         return text(
@@ -461,6 +648,7 @@ if (has('ask_for_access'))
       const conn = found.connector;
       const title = `Connect ${conn.name} (${asked})`;
       const { ask, precedent } = await raiseAsk(ME, {
+        ...on,
         title,
         why,
         ifApproved: conn.readyAt
@@ -478,7 +666,7 @@ if (has('ask_for_access'))
     }
   );
 
-server.registerTool(
+tool(
   'reconnect_access',
   {
     description: `A tool ${OWNER} already gave you stopped working: its tools fail to load, or it turns down its key or sign-in. This puts the office's own steps to connect it again on ${OWNER}'s desk, with a box for the new key and a Connect button, and no ask, since they said yes once. Never write those steps yourself with give_owner_a_task. Pass get_key only when the tool takes a key: how to get a new one, one action per step, naming the exact page and button.`,
@@ -508,7 +696,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+tool(
   'my_jobs',
   {
     description: `Your own jobs: name, schedule in ${ZONE}, and the steps each run follows.`,
@@ -528,7 +716,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+tool(
   'my_goals',
   {
     description: `The goals ${OWNER} set that you serve: why each matters, what done looks like, your part, and how it is going. Work toward them. You see only these.`,
@@ -542,7 +730,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+tool(
   'log_progress',
   {
     description: `Say how a goal you serve is going, once per run that moves it or shows it slipping. One line of evidence, with a number when there is one: "inbox at 14 on Friday, down from 40; a deadline pushed Tuesday's sort to Wednesday". ${OWNER}'s daily report reads these.`,
@@ -561,7 +749,7 @@ server.registerTool(
 );
 
 if (has('list_goals'))
-  server.registerTool(
+  tool(
     'list_goals',
     {
       description: `Every goal ${OWNER} set, active first: why, done when, who serves each and their part, and the latest progress.`,
@@ -574,7 +762,7 @@ if (has('list_goals'))
   );
 
 if (has('propose_goal'))
-  server.registerTool(
+  tool(
     'propose_goal',
     {
       description: `Offer ${OWNER} a goal you heard from them, for their yes. It lands on their desk; approving sets it, and then you plan it. One goal per ask, in their words. Never treat a goal as set before they approve it.`,
@@ -595,6 +783,7 @@ if (has('propose_goal'))
       });
       if (typeof d === 'string') return text(d);
       const { ask } = await raiseAsk(ME, {
+        ...RAISED_ON,
         kind: 'goal',
         title: `Set a goal: ${d.title}`,
         why: a.heard,
@@ -607,10 +796,14 @@ if (has('propose_goal'))
   );
 
 if (has('propose_goal_plan'))
-  server.registerTool(
+  tool(
     'propose_goal_plan',
     {
-      description: `Bring ${OWNER} the plan for one goal, in one ask: Odds already here who take on a part (with a new job or a change to one), new hires for work nobody here fits, and the steps only ${OWNER} can do. They tick the parts to go ahead with; each hire then opens in the hire window. Prefer Odds already here. Write each hire's job description to a file in your folder first.`,
+      description: [
+        `Bring ${OWNER} the plan for one goal, in one ask: Odds already here who take on a part (with a new job or a change to one), new hires for work nobody here fits, and the steps only ${OWNER} can do. They tick the parts to go ahead with; each hire then opens in the hire window. Prefer Odds already here. Write each hire's job description to a file in your folder first.`,
+        // A plan always goes on its goal's thread, with the raiser as hub (raiseAsk).
+        `Once they approve it, you pick up on the goal and lead the work: you hand each piece to the Odd who does it, and you pick up there again as each hire joins.`
+      ].join(' '),
       inputSchema: {
         goal_id: z.number().int(),
         why: z
@@ -653,7 +846,9 @@ if (has('propose_goal_plan'))
           .array(z.string())
           .max(8)
           .optional()
-          .describe(`What only ${OWNER} can do, one action per step. They get these as a task.`),
+          .describe(
+            `What only ${OWNER} can do, one action per step, such as signing in to a tool or a choice that is theirs. Never a step that passes work or a request to an Odd: you hand work on with hand_off. They get these as a task.`
+          ),
         attach: attachArg,
         revises: revisesArg
       }
@@ -679,9 +874,10 @@ if (has('propose_goal_plan'))
         items.push({ kind: 'hire', hire, part: h.part });
       }
       if (!items.length) return text('A plan needs at least one Odd or hire.');
-      const files = attachable(a.attach);
+      const files = await attachable(a.attach);
       if ('problem' in files) return text(files.problem);
       const { ask } = await raiseAsk(ME, {
+        ...RAISED_ON,
         kind: 'plan',
         title: `Plan for: ${g.title}`,
         why: a.why,
@@ -689,14 +885,106 @@ if (has('propose_goal_plan'))
           'Odds already here take on their part at once. Each hire opens in the hire window, and your steps land on your desk.',
         plan: { goalId: g.id, items, ownerSteps: a.owner_steps },
         revises: a.revises,
-        attach: files.paths
+        attach: files.paths,
+        run: RUN_KEY
       });
       return text(`Ask ${ask.id} is on ${OWNER}'s desk.`);
     }
   );
 
+tool(
+  'keep_lesson',
+  {
+    description: `Remember a correction from ${OWNER}, so they never give it twice. Call it once when they correct your work or say how they want something done from now on, in chat, in a reason on an ask, or in feedback on a report: "too long", "always copy Sam", "never book before 9". It works only in a chat, a run carrying ${OWNER}'s note on an ask or a task, or a run reading their edit to one of your files; in any other run it refuses, so tell them in your reply instead. Not for an instruction about this one piece of work only. ${OWNER} sees it in your chat as "I'll remember: ..." with Undo, so do not repeat it to them. It goes live in every later run at once when they said it; a lesson you inferred waits for their Keep.`,
+    inputSchema: {
+      lesson: z
+        .string()
+        .min(1)
+        .max(240)
+        .describe(
+          'One plain sentence, written as what you will do: "Keep reports to three lines."'
+        ),
+      quote: z
+        .string()
+        .min(1)
+        .max(400)
+        .describe(
+          `${OWNER}'s exact words it comes from, copied, not reworded: at least ${QUOTE_MIN_WORDS} words in a row.`
+        ),
+      how: z
+        .enum(['said', 'inferred'])
+        .describe(
+          `said: their words state it as a rule. inferred: you are reading a rule into a one-off fix.`
+        ),
+      scope: z
+        .enum(['me', 'everyone'])
+        .default('me')
+        .describe(
+          `me, unless their words say it is for every Odd ("all of you", "everyone", "the whole office"), or they are saying how the office should work for them (how much to do without checking, what to hear about): those are for every Odd.`
+        ),
+      applies_to: z
+        .string()
+        .max(APPLIES_TO_MAX)
+        .optional()
+        .describe(
+          `Where it applies, in a few plain words: "reports", "team emails", "family plans". Set it whenever their words or what they were correcting limit the lesson: said about a report, about emails, about family plans. Leave it out only when they meant everything you write.`
+        ),
+      replaces: z
+        .number()
+        .int()
+        .optional()
+        .describe('The id of a lesson of yours this one changes or corrects.'),
+      why_replaced: z
+        .enum(WHY_REPLACED)
+        .optional()
+        .describe(
+          `Needed with replaces, and only then. missed: ${OWNER} corrected something the old lesson already covered, so they had to say it again. refined: ${OWNER} changed or narrowed what they want.`
+        )
+    }
+  },
+  async (a) => {
+    const kept = await keepLesson(ME, {
+      text: a.lesson,
+      quote: a.quote,
+      how: a.how,
+      scope: a.scope,
+      appliesTo: a.applies_to,
+      replaces: a.replaces,
+      whyReplaced: a.why_replaced,
+      ownerWords: OWNER_WORDS
+    });
+    if ('problem' in kept) return text(kept.problem);
+    const missed =
+      a.why_replaced === 'missed'
+        ? ` In your reply, say in one line that ${OWNER} told you this before and you missed it.`
+        : '';
+    return text(
+      kept.status === 'live'
+        ? `Lesson #${kept.id} is live from now on.${missed}`
+        : `Lesson #${kept.id} waits for ${OWNER}'s Keep in your chat${OWNER_WORDS?.from === 'edit' ? `, as every lesson read from an edit does, and it is for you only` : a.how === 'said' ? `: the quote is not ${QUOTE_MIN_WORDS} or more of their words, word for word, from this run, so it counts as inferred` : ''}. Until they keep it, do not tell them you will do it from now on.${missed} Carry on with the work.`
+    );
+  }
+);
+
+tool(
+  'used_lesson',
+  {
+    description: `Tell the office a lesson from "What ${OWNER} has taught you" changed this run's work. Call it once per lesson per run, only when the work would have come out different without it.`,
+    inputSchema: { id: z.number().int() }
+  },
+  async ({ id }) => {
+    const l = await usedLesson(id, ME);
+    if (!l) return text(`Lesson #${id} is not a live lesson of yours.`);
+    return text(
+      l.uses <= CITE_FIRST
+        ? `Noted. Say so in your reply, in one line, naming what you did and when ${OWNER} asked, like "Kept it to three lines, as you asked on ${shortDay(l.createdAt)}."`
+        : 'Noted. No need to mention it.'
+    );
+  }
+);
+
 if (has('update_goal'))
-  server.registerTool(
+  tool(
     'update_goal',
     {
       description: `Change a goal: mark it met, paused, dropped or active again, or reword it. When ${OWNER} asks in chat, do it at once. Outside a chat, only to carry out an ask they approved, passing its id. To propose it, raise_ask first.`,
@@ -740,7 +1028,7 @@ if (has('update_goal'))
   );
 
 if (has('edit_my_job'))
-  server.registerTool(
+  tool(
     'edit_my_job',
     {
       description: `Change one of your own jobs: its steps, its schedule, or whether it reports to ${OWNER}. When ${OWNER} asks for a change in chat, make it at once, worded the way they asked, then tell them what changed. Outside a chat, only to carry out an ask they approved, passing its id. To propose a change, raise_ask with the exact new steps first.`,
@@ -761,7 +1049,7 @@ if (has('edit_my_job'))
   );
 
 if (has('edit_my_description'))
-  server.registerTool(
+  tool(
     'edit_my_description',
     {
       description: `Rewrite your own job description: the text that tells you who you are and how you work, which every run starts from. When ${OWNER} asks for a change in chat, make it at once, then tell them what changed. Outside a chat, only to carry out an ask they approved, passing its id. Pass the whole new description, keeping every part they did not ask to change. It takes effect from your next run.`,
@@ -781,8 +1069,172 @@ if (has('edit_my_description'))
     }
   );
 
+// A colleague's run on a hand-off cannot hand off, so a thread stays hub and
+// spoke, and neither can a run that only reads the owner's words for a lesson.
+if (has('hand_off') && !HAND_OFF_ID && !LESSON_RUN) {
+  const colleagues = (await roster()).filter((s) => s.id !== ME);
+  const serving = await goalsFor(ME);
+  const held = await heldTools([ME, ...colleagues.map((c) => c.id)]);
+  /** Each colleague's line, with the tools of this Odd's it lacks. */
+  const lines = colleagues.map((c) => {
+    const lacks = lacking(held, c.id, [ME]);
+    return `- ${c.id}: ${c.name}, ${c.role}. ${c.remit}${lacks.length ? ` Lacks your ${lacks.map((t) => `${t.name} (${t.id})`).join(', ')}.` : ''}${c.package ? ' Their replies come from New Altitude, so what you hand them leaves this computer.' : ''}`;
+  });
+  tool(
+    'hand_off',
+    {
+      description: [
+        `Hand a colleague a piece of work their job covers. They start on it at once, in a run of their own, and when they finish, you pick up in a fresh run with their result. Do not wait for it: finish this run.`,
+        THREAD_ID
+          ? `It goes on work ${THREAD_ID}, the work this run is on.`
+          : `A hand-off starts work you lead: each time work comes back you pick the next step in a fresh run, and you may hand on again in it, set a time to pick it back up, or ask ${OWNER}. Those runs see the work, not this conversation, so put what ${OWNER} asked for in request, with every later step and condition. For more of the same as work you lead, even finished work, set continue_work instead: it keeps that work's folder, files and history, and finished work reopens for a new round.`,
+        `A round of work takes up to ${HAND_OFF_LIMIT} hand-offs. The one after that waits: the office asks ${OWNER} whether the work keeps going. A yes starts that hand-off as you wrote it, the first of another round, and a no stops the work.`,
+        `Write the brief for them: what to do, why, and what to send back. Give them everything they need and nothing more: pass on details about ${OWNER}'s family, or anything from a goal they do not serve, only when their job covers it.`,
+        `Describe the work and the result you need, never which tools to use: each colleague may run on another coding tool, with tools of its own.`,
+        `Never copy anything from a tool the colleague lacks (the list below says which of yours) into the brief or the folder without ${OWNER}'s yes. If the work needs it, raise_ask first, naming the tool and what goes to whom, and hand off once they say yes.`,
+        `Their run works at Draft at most and cannot hand on, so they can prepare, research and draft, but anything outward goes to ${OWNER} as an ask. Your pick-up works at Draft at most too.`,
+        colleagues.length ? `Your colleagues:\n${lines.join('\n')}` : 'You have no colleagues yet.'
+      ].join('\n\n'),
+      inputSchema: {
+        to: z.string().describe("The colleague's id, from the list."),
+        title: z.string().min(1).max(120).describe('This piece of the work, in one line.'),
+        brief: z
+          .string()
+          .min(1)
+          .max(4000)
+          .describe('What to do, why, and what to send back, with full paths to any files.'),
+        request: z
+          .string()
+          .min(1)
+          .max(600)
+          .optional()
+          .describe(
+            `When this starts new work: what ${OWNER} asked for, in full, with any later steps or conditions (a pause, who checks it). Your later runs on the work see this. Defaults to title.`
+          ),
+        goal: z
+          .number()
+          .int()
+          .optional()
+          .describe(
+            'When this starts new work: the id of a goal you serve that it is for, if any.'
+          ),
+        // A run on a thread hands on in it, so only a run on none may name one, or open one.
+        ...(THREAD_ID
+          ? {}
+          : {
+              continue_work: z
+                .number()
+                .int()
+                .optional()
+                .describe(
+                  `The number of work you lead, as your instructions number it, when this is more of it. Leave out request and goal: it keeps its own. Leave this out for new work.`
+                )
+            })
+      }
+    },
+    async ({ to, title, brief, request, goal, continue_work }) => {
+      if (continue_work !== undefined && (request !== undefined || goal !== undefined))
+        return notHanded(
+          `Work ${continue_work} keeps its own request and goal. Leave out request and goal, put what is new in the brief, and call hand_off again.`
+        );
+      if (goal !== undefined && !serving.some((g) => g.id === goal))
+        return notHanded(
+          `Goal #${goal} is not one you serve. Leave goal out, or name one you serve, and call hand_off again.`
+        );
+      const on = THREAD_ID ?? continue_work;
+      if (on === undefined) {
+        const opens = await placed({});
+        if ('problem' in opens) return notHanded(opens.problem);
+      }
+      const r = await handOff({
+        from: ME,
+        to,
+        work: { title, brief },
+        thread: on !== undefined ? { id: on } : { title: request ?? title, goalId: goal },
+        run: RUN_KEY
+      });
+      if ('problem' in r) return notHanded(r.problem);
+      const name = colleagues.find((c) => c.id === to)?.name ?? to;
+      // Held, not refused: the ask keeps it, so the lead must not hand it on again.
+      if ('asked' in r)
+        return text(
+          `This round of work ${r.thread} has taken its ${HAND_OFF_LIMIT} hand-offs, so "${title}" waits on ${OWNER}'s answer to ask #${r.asked}. On a yes it goes to ${name} exactly as you wrote it, as the first hand-off of a new round, and you pick up in a fresh run when they finish. On a no the work stops, and you hear so. There is nothing more for you to do for it: do not hand it on again. Say so, and finish this run.`
+        );
+      // Named by colleague and title, as the thread's steps are: a follow-up's id
+      // means nothing to the Odd or to the owner.
+      return text(
+        [
+          `Handed "${title}" to ${name}, on work ${r.thread}. They start now. You pick up in a fresh run when they finish.`,
+          `${handOffsWord(r.left)} left this round.`
+        ].join('\n')
+      );
+    }
+  );
+
+  if (THREAD_ID)
+    tool(
+      'resume_at',
+      {
+        description: `Pick work ${THREAD_ID} back up at a time you set: the office starts a fresh run of yours on it then, with its history. Use it when the next step has to wait for a time, not for a colleague or for ${OWNER}. A new time replaces the old. Then finish this run.`,
+        inputSchema: {
+          at: z.string().optional().describe(`${ZONE}: "18:50" for today, or "2026-11-02 18:50".`),
+          in_minutes: z
+            .number()
+            .int()
+            .min(1)
+            .max(10_080)
+            .optional()
+            .describe('Instead of at: how many minutes from now.')
+        }
+      },
+      async ({ at, in_minutes }) => {
+        const when =
+          in_minutes !== undefined
+            ? new Date(Date.now() + in_minutes * 60_000)
+            : at
+              ? officeAt(at)
+              : undefined;
+        if (!when)
+          return text(`Say when: at as "HH:MM" or "YYYY-MM-DD HH:MM" in ${ZONE}, or in_minutes.`);
+        if (when.getTime() <= Date.now()) return text('That time has passed. Pick a later one.');
+        const set = await parkThread(ME, THREAD_ID, when);
+        return text(
+          set
+            ? `Work ${THREAD_ID} picks back up at ${clockTime(set)} ${ZONE}.`
+            : `Work ${THREAD_ID} has ended, or is not work you lead.`
+        );
+      }
+    );
+}
+
+// Only in a chat, where the office set the owner's words, and only for threads
+// this Odd works on and does not lead: their words reach the lead, not its own.
+if (said && workingOn.length)
+  tool(
+    'tell_lead',
+    {
+      description: `Pass what ${OWNER} just told you about work you are on to the Odd who leads it, which picks it back up with their words. Copy the part of their message about that work exactly: it goes as theirs. Then tell ${OWNER} you passed it on. The work you are on:\n${workingOn.map((t) => `- ${t.id}: ${t.title}, led by ${t.lead}`).join('\n')}`,
+      inputSchema: {
+        work: z.number().int().describe('The number of the work, from the list.'),
+        words: z
+          .string()
+          .min(1)
+          .max(4000)
+          .describe(`The part of ${OWNER}'s message about this work, copied exactly.`)
+      }
+    },
+    async ({ work, words }) => {
+      const r = await tellLead({ staffId: ME, threadId: work, owner: OWNER, said, words });
+      return text(
+        'problem' in r
+          ? r.problem
+          : `Passed to ${r.lead}, who picks work ${work} back up with ${OWNER}'s words.`
+      );
+    }
+  );
+
 if (has('poke_owner')) {
-  server.registerTool(
+  tool(
     'poke_owner',
     {
       description: `Send ${OWNER} a chat message later, once: a check-in after something they planned, or a nudge before it. Write the exact message now, in your voice, short; the office delivers it at that time as a chat from you, with a notification on their Mac. Use it when ${OWNER} asks ("check in on me in an hour"), or when your job says to; in_minutes 0 sends it now. One poke per minute: a new one at the same time replaces the old. Not for anything that needs their yes; that is raise_ask.`,
@@ -816,7 +1268,7 @@ if (has('poke_owner')) {
     }
   );
 
-  server.registerTool(
+  tool(
     'my_pokes',
     {
       description: 'Your pokes still to come, with their ids, times and messages.',
@@ -832,7 +1284,7 @@ if (has('poke_owner')) {
     }
   );
 
-  server.registerTool(
+  tool(
     'cancel_poke',
     {
       description: 'Cancel one of your pokes still to come, by its id from my_pokes.',
@@ -846,10 +1298,10 @@ if (has('poke_owner')) {
 }
 
 if (has('propose_hire'))
-  server.registerTool(
+  tool(
     'propose_hire',
     {
-      description: `Propose a new Odd to ${OWNER}. Write the job description to a file in your folder first, then pass its path. It lands on their desk as an ask; approving it opens the hire window filled in with this, and they hire from there. They may edit the file before they hire, so the window reads it then. One hire per ask. For a hire that serves a goal, use propose_goal_plan instead.`,
+      description: `Propose a new Odd to ${OWNER}. Write the job description to a file in your folder first, then pass its path. It lands on their desk as an ask; approving it opens the hire window filled in with this, and they hire from there. They may edit the file before they hire, so the window reads it then. One hire per ask. For a hire that serves a goal, use propose_goal_plan instead.${raisedNote}`,
       inputSchema: {
         ...hireFields,
         why: z.string().describe('Why this hire, in one to three sentences.'),
@@ -857,9 +1309,12 @@ if (has('propose_hire'))
       }
     },
     async (a) => {
+      const on = await placed({});
+      if ('problem' in on) return refused(on.problem);
       const hire = hireFrom(a);
       if (typeof hire === 'string') return text(hire);
       const { ask } = await raiseAsk(ME, {
+        ...on,
         title: `Hire ${a.name}, ${a.role}`,
         why: a.why,
         ifApproved: 'The hire window opens with this filled in. You hire from there.',
@@ -871,7 +1326,7 @@ if (has('propose_hire'))
   );
 
 if (has('office_report'))
-  server.registerTool(
+  tool(
     'office_report',
     {
       description: `Everything the office did in a window: each Odd with its remit, its level (read, draft or act), the office tools it holds beyond the ones every Odd has, its outside tools (each with what it reaches, or why a run leaves it out), and its jobs and runs, asks open and decided, and tasks for ${OWNER} open and done. For the daily report. followUps is the work owed after ${OWNER} answered: carrying out an approved ask, reworking one they sent back, acting on their feedback on a report, or picking up after a task they finished, each with its outcome (done, failed, waiting on ${OWNER}, or null while still to do). Each run has a trigger: 'schedule' means its timer started it, 'manual' means ${OWNER} pressed Run now. Judge a job's timing by its schedule runs only; a manual run at any hour is expected. Every time is ${ZONE}, like the schedules.`,

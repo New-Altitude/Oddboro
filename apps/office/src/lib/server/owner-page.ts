@@ -16,7 +16,7 @@
 // owner's page through Caddy, which reaches the office over http while the
 // page is https, so `fromOwnerPage` compares what the browser itself says.
 import type { Handle } from '@sveltejs/kit/hooks';
-import { HOSTS } from './address.ts';
+import { HOSTS } from './hosts.ts';
 import { fromShell } from './update.ts';
 
 /**

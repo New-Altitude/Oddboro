@@ -7,7 +7,11 @@ export async function call<T = { ok: true }>(
 ): Promise<T> {
   const res = await fetch(url, {
     method,
-    headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+    // Every request that changes something says JSON, with a body or without.
+    // The built server takes its own origin as https while the page is http,
+    // so SvelteKit refuses a POST or DELETE with no content type as a
+    // cross-site form. `vite dev` skips that check, so only the app shows it.
+    headers: method === 'GET' ? undefined : { 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body)
   });
   if (!res.ok) throw await failure(res);

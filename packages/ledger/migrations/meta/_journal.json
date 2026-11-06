@@ -15,6 +15,34 @@
       "when": 1793668237307,
       "tag": "0001_app-update",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793757899600,
+      "tag": "0002_hand-offs",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793787546585,
+      "tag": "0003_simplify-cuts",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793791632248,
+      "tag": "0004_agent",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793865655531,
+      "tag": "0005_persona-package",
+      "breakpoints": true
     }
   ]
 }

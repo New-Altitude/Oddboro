@@ -4,6 +4,7 @@
   import { chatRequest, type Delivered } from './chat-about.svelte.ts';
   import JobsTab from './JobsTab.svelte';
   import AccessTab from './AccessTab.svelte';
+  import LessonsTab from './LessonsTab.svelte';
   import UsageStats from './UsageStats.svelte';
   import LookStudio from './LookStudio.svelte';
   import WorkTab from './WorkTab.svelte';
@@ -72,25 +73,34 @@
   let redrawing = $state(false);
   let appearance = $state('');
   // The chat comes first: the card is a click away.
-  let tab = $state<'card' | 'send' | 'chat' | 'work' | 'jobs' | 'access'>('chat');
+  let tab = $state<'card' | 'send' | 'chat' | 'work' | 'jobs' | 'lessons' | 'access'>('chat');
   $effect(() => {
     if (show) tab = show.tab;
   });
+  // The id, not the profile: every office reload brings a new profile, and an
+  // effect that read it would send the owner back to Chat from any tab.
+  const id = $derived(profile.id);
   // A chat started from elsewhere, e.g. a report, opens on the Chat tab.
   $effect(() => {
-    if (chatRequest.drafts[profile.id] !== undefined) tab = 'chat';
+    if (chatRequest.drafts[id] !== undefined) tab = 'chat';
   });
   // So does one with a delivery selected in it.
   $effect(() => {
-    if (chatRequest.focus?.staff === profile.id) tab = 'chat';
+    if (chatRequest.focus?.staff === id) tab = 'chat';
   });
   const TABS = [
     { id: 'chat', label: 'Chat' },
     { id: 'card', label: 'Card' },
     { id: 'work', label: 'In progress' },
     { id: 'jobs', label: 'Jobs' },
+    { id: 'lessons', label: 'Lessons' },
     { id: 'access', label: 'Access' }
   ] as const;
+  /** What waits on a tab: work in progress, and guesses for the owner's Keep. */
+  const counts: Partial<Record<(typeof TABS)[number]['id'], number>> = $derived({
+    work: work.length,
+    lessons: profile.guesses
+  });
 
   const PERMISSION = {
     read: 'Reads and reports',
@@ -151,9 +161,7 @@
           : 'text-muted hover:text-ink'}"
         aria-current={tab === t.id ? 'page' : undefined}
         onclick={() => (tab = t.id)}
-        >{t.label}{#if t.id === 'work' && work.length}<span class="ms-1 text-ember"
-            >{work.length}</span
-          >{/if}</button
+        >{t.label}{#if counts[t.id]}<span class="ms-1 text-ember">{counts[t.id]}</span>{/if}</button
       >
     {/each}
   </nav>
@@ -214,11 +222,14 @@
             class="rounded-full bg-raise px-3 py-1 text-xs text-ink"
             onclick={() => (flipped = !flipped)}>{flipped ? 'Show the front' : 'Show stats'}</button
           >
-          <button
-            class="rounded-full bg-raise px-3 py-1 text-xs text-ink"
-            aria-expanded={redrawing}
-            onclick={() => (redrawing = !redrawing)}>Redraw look</button
-          >
+          <!-- A persona Odd's look is its package's, the same in every office. -->
+          {#if !profile.persona}
+            <button
+              class="rounded-full bg-raise px-3 py-1 text-xs text-ink"
+              aria-expanded={redrawing}
+              onclick={() => (redrawing = !redrawing)}>Redraw look</button
+            >
+          {/if}
           <button
             class="rounded-full bg-raise px-3 py-1 text-xs text-ink"
             onclick={() => (tab = 'send')}>Send to a place</button
@@ -290,6 +301,8 @@
       <WorkTab {profile} items={work} />
     {:else if tab === 'jobs'}
       <JobsTab {profile} {version} {working} />
+    {:else if tab === 'lessons'}
+      <LessonsTab {profile} {version} />
     {:else if tab === 'access'}
       <AccessTab {profile} {version} />
     {/if}

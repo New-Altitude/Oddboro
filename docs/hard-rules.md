@@ -57,11 +57,14 @@ The office will grow for years. If a new room needed engine code, every room
 would carry risk. A stamp and a plan in JSON can be added, moved and removed
 without touching the engine.
 
-## 9. Family data stays on the owner's computer.
+## 9. Family data never reaches a tracked file.
 
-The office holds the owner's family data: names, birthdays, schedules. It
-stays in the gitignored `data/` folder on the owner's computer. Moving any of
-it off that computer is its own decision.
+The office holds the owner's family data: names, birthdays, schedules. The
+code is open source, so the risk is that data landing in a commit. It lives
+in the gitignored `data/` folder, and `scripts/check-private.ts` fails on any
+private word in a tracked file. Every Odd reads that folder, whichever AI tool
+it runs on: which tool that is, and so who sees what it reads, is the owner's
+choice per Odd.
 
 ## 10. Every `CLAUDE.md` is named in its nearest ancestor.
 

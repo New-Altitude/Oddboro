@@ -1,0 +1,262 @@
+// What a colleague sees through a thread is no wider than its own access,
+// unless the owner says yes: a hand-off never waits on the office, and is told
+// which tools others on the work have that the colleague lacks. A giver whose
+// work needs their contents raises a plain ask first, and the owner's answer
+// reaches it as any ask's does. Access is compared with every Odd on the
+// thread, both ways: what the colleague lacks, and what it has that others
+// lack. The office's own code on every migration, in an in-memory PGlite that
+// stands in for db.ts (pglite.ts). Run with `npm test -w @oddboro/ledger`.
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { and, eq } from 'drizzle-orm';
+import {
+  asks,
+  connectors,
+  followUps,
+  goals,
+  grants,
+  staff,
+  threads,
+  type Level
+} from '../src/schema.ts';
+// Types only, erased before run, so the code under test still loads after the mock.
+import type { ThreadFor } from '../src/threads.ts';
+import { db } from './pglite.ts';
+
+// The ledger rows a decision writes embed nothing: no Ollama answers here.
+process.env.OLLAMA_URL = 'http://127.0.0.1:9';
+const { handOff, handOffBrief, handOffContext } = await import('../src/hand-offs.ts');
+const { decideAsk, raiseAsk } = await import('../src/office.ts');
+const { HAND_OFF_LIMIT } = await import('../src/threads.ts');
+
+const odd = (id: string, name: string, permission: Level = 'draft') => ({
+  id,
+  name,
+  role: 'Tester',
+  remit: 'Tests.',
+  variant: 'a',
+  portrait: 'a',
+  permission,
+  desk: `You are ${name}.`
+});
+await db
+  .insert(staff)
+  .values([
+    odd('cole', 'Cole'),
+    odd('paige', 'Paige'),
+    odd('rex', 'Rex'),
+    odd('nia', 'Nia', 'read')
+  ]);
+const tool = (id: string, name: string) => ({
+  id,
+  name,
+  description: name,
+  kind: 'http' as const,
+  readyAt: new Date()
+});
+await db
+  .insert(connectors)
+  .values([tool('gmail', 'Gmail'), tool('slack', 'Slack'), tool('drive', 'Drive')]);
+const grant = (staffId: string, connectorId: string, level: Level = 'read') => ({
+  staffId,
+  connectorId,
+  level
+});
+// Cole has Gmail and Slack. Paige has Slack only, Rex both and Drive, which
+// nobody else has, and Nia holds a Gmail grant above her level, which her
+// runs do not get.
+await db
+  .insert(grants)
+  .values([
+    grant('cole', 'gmail'),
+    grant('cole', 'slack'),
+    grant('paige', 'slack'),
+    grant('rex', 'gmail'),
+    grant('rex', 'slack'),
+    grant('rex', 'drive'),
+    grant('nia', 'gmail', 'act')
+  ]);
+
+const work = { title: 'Sum up the client emails', brief: 'Read inbox.md and sum it up.' };
+let titles = 0;
+/** Cole hands a colleague a piece of work on a new thread, as the hand_off tool does. */
+const give = (to: string, thread: ThreadFor = { title: `T${++titles}` }) =>
+  handOff({ from: 'cole', to, work, thread });
+const asksOn = (id: number) => db.select().from(asks).where(eq(asks.threadId, id));
+const ran = (id: number, kind: 'hand_off' | 'resume' | 'carry_out') =>
+  db
+    .select()
+    .from(followUps)
+    .where(and(eq(followUps.threadId, id), eq(followUps.kind, kind)));
+
+test('a hand-off to a colleague that lacks a tool goes at once, and the brief says what not to expect', async () => {
+  const r = await give('paige');
+  assert.ok('id' in r, JSON.stringify(r));
+  assert.deepEqual(await asksOn(r.thread), [], 'the office raises no ask of its own');
+  const [f] = await ran(r.thread, 'hand_off');
+  assert.deepEqual(f.handOff?.withheld, ['Gmail']);
+  assert.ok(f.handOff);
+  const brief = handOffBrief({
+    kind: 'hand_off',
+    h: f.handOff,
+    colleague: { id: 'cole', name: 'Cole' },
+    me: 'paige',
+    result: null,
+    thread: r.thread
+  }).join('\n');
+  assert.match(
+    brief,
+    /You have no access to Gmail, which others on this work have, so do not expect its contents beyond what the brief gives you\. If the work needs more from it, say so in your reply\./
+  );
+  assert.doesNotMatch(brief, /Someone else on this work has no access/);
+  assert.ok(
+    brief.includes('Do not say what happens next or who does it: Cole decides.'),
+    'only the lead promises a next step'
+  );
+});
+
+/** Cole, leading a thread, asks the owner whether Paige may read what came from Gmail. */
+async function askToShare(): Promise<{ thread: number; ask: number }> {
+  const first = await give('rex');
+  assert.ok('id' in first, JSON.stringify(first));
+  const { ask } = await raiseAsk('cole', {
+    title: 'Pass the client emails to Paige?',
+    why: 'Paige sums them up, and has no Gmail.',
+    ifApproved: 'I hand her the emails.',
+    threadId: first.thread
+  });
+  assert.equal(ask.kind, 'approval', 'a plain ask, as any Odd raises');
+  return { thread: first.thread, ask: ask.id };
+}
+
+test("a yes to sharing a tool's contents reaches the giver on the thread with the owner's words, and its hand-off then goes", async () => {
+  const { thread, ask } = await askToShare();
+  await decideAsk(ask, 'approve', 'Yes, but leave out anything from the bank.');
+  const [carry, ...more] = await ran(thread, 'carry_out');
+  assert.equal(more.length, 0);
+  assert.equal(carry.staffId, 'cole');
+  assert.equal(carry.askId, ask);
+  assert.equal(carry.note, 'Yes, but leave out anything from the bank.');
+  const r = await give('paige', { id: thread });
+  assert.ok('id' in r, JSON.stringify(r));
+  assert.equal((await asksOn(thread)).length, 1, 'the hand-off raised no second ask');
+});
+
+test("a no to sharing a tool's contents brings the giver back on the thread with the answer", async () => {
+  const { thread, ask } = await askToShare();
+  await decideAsk(ask, 'deny', 'Not the client mail.');
+  const [wake] = await ran(thread, 'resume');
+  assert.equal(wake?.staffId, 'cole');
+  assert.match(
+    wake?.note ?? '',
+    /said no to "Pass the client emails to Paige\?": Not the client mail\./
+  );
+  assert.equal((await ran(thread, 'hand_off')).filter((f) => f.staffId === 'paige').length, 0);
+});
+
+test('a colleague with every tool the others have is told nothing is withheld', async () => {
+  const r = await give('rex');
+  assert.ok('id' in r, JSON.stringify(r));
+  assert.equal((await ran(r.thread, 'hand_off'))[0]?.handOff?.withheld, undefined);
+});
+
+test('a grant above the colleague level is not its access', async () => {
+  const r = await give('nia');
+  assert.ok('id' in r, JSON.stringify(r));
+  // Her Gmail grant is above her level, so Gmail is withheld as Slack is.
+  assert.deepEqual((await ran(r.thread, 'hand_off'))[0]?.handOff?.withheld, ['Gmail', 'Slack']);
+});
+
+test('continuing a thread checks access the same way', async () => {
+  const [t] = await db
+    .insert(threads)
+    .values({
+      title: 'Done before',
+      hubId: 'cole',
+      holderId: 'cole',
+      status: 'done',
+      endedAt: new Date()
+    })
+    .returning({ id: threads.id });
+  const r = await give('paige', { id: t.id });
+  assert.ok('id' in r && r.thread === t.id, JSON.stringify(r));
+  assert.deepEqual((await ran(t.id, 'hand_off'))[0]?.handOff?.withheld, ['Gmail']);
+});
+
+/** Cole hands `to` more work on a thread he leads. */
+const more = (to: string, thread: number) =>
+  handOff({ from: 'cole', to, work, thread: { id: thread } });
+
+test("a colleague is compared with every Odd on the thread, so a third Odd's tool it lacks is named in its brief", async () => {
+  const first = await give('rex');
+  assert.ok('id' in first, JSON.stringify(first));
+  const r = await more('paige', first.thread);
+  assert.ok('id' in r, JSON.stringify(r));
+  const f = (await ran(r.thread, 'hand_off')).find((x) => x.staffId === 'paige');
+  assert.deepEqual(f?.handOff?.withheld, ['Drive', 'Gmail']);
+});
+
+test('a colleague with a tool someone on the thread lacks is told never to write its contents there, and to ask the owner instead', async () => {
+  const first = await give('paige');
+  assert.ok('id' in first, JSON.stringify(first));
+  // Cole lacks Drive, and Paige lacks Gmail and Drive, which Rex has.
+  const r = await more('rex', first.thread);
+  assert.ok('id' in r, JSON.stringify(r));
+  const f = (await ran(r.thread, 'hand_off')).find((x) => x.staffId === 'rex');
+  assert.ok(f?.handOff);
+  assert.deepEqual(f.handOff.kept, ['Drive', 'Gmail']);
+  const rule =
+    /Someone else on this work has no access to Drive and Gmail, which you have\. Never write anything from Drive and Gmail into your part of its folder or your reply.*raise_ask/;
+  const brief = handOffBrief({
+    kind: 'hand_off',
+    h: f.handOff,
+    colleague: { id: 'cole', name: 'Cole' },
+    me: 'rex',
+    result: null,
+    thread: r.thread
+  }).join('\n');
+  assert.match(brief, rule);
+  // A later run on the same hand-off is told again.
+  const later = handOffContext({ h: f.handOff, giver: 'Cole', me: 'rex', thread: r.thread });
+  assert.match(later.join('\n'), rule);
+});
+
+test("a goal's hand-offs from a chat compare each colleague with everyone on the goal's work", async () => {
+  const [g] = await db.insert(goals).values({ title: 'Run the fair' }).returning({ id: goals.id });
+  // From a chat, Cole names the goal, not its thread, for each hand-off.
+  const onGoal = { title: 'Run the fair', goalId: g.id };
+  const first = await handOff({ from: 'cole', to: 'paige', work, thread: onGoal });
+  assert.ok('id' in first, JSON.stringify(first));
+  const r = await handOff({ from: 'cole', to: 'rex', work, thread: onGoal });
+  assert.ok('id' in r && r.thread === first.thread, JSON.stringify(r));
+  const f = (await ran(r.thread, 'hand_off')).find((x) => x.staffId === 'rex');
+  // Cole lacks Drive, and Paige, already on the goal's work, lacks Gmail too.
+  assert.deepEqual(f?.handOff?.kept, ['Drive', 'Gmail']);
+});
+
+test("a held hand-off carries access as it is at the owner's yes, as a fresh hand-off then would", async () => {
+  // Tess has Slack only, so the hand-off is held telling her Gmail is withheld.
+  await db.insert(staff).values(odd('tess', 'Tess'));
+  await db.insert(grants).values(grant('tess', 'slack'));
+  const [t] = await db
+    .insert(threads)
+    .values({
+      title: 'Tune the inbox',
+      hubId: 'cole',
+      holderId: 'cole',
+      handOffsUsed: HAND_OFF_LIMIT
+    })
+    .returning({ id: threads.id });
+  const held = await give('tess', { id: t.id });
+  assert.ok('asked' in held, JSON.stringify(held));
+  // While the ask waits, the owner gives Tess Drive, which Cole lacks.
+  await db.insert(grants).values(grant('tess', 'drive'));
+  await decideAsk(held.asked, 'approve', null);
+  const [started] = await ran(t.id, 'hand_off');
+  assert.deepEqual(started?.handOff?.withheld, ['Gmail']);
+  assert.deepEqual(started?.handOff?.kept, ['Drive'], 'Tess is not told to keep Drive out');
+  const fresh = await give('tess');
+  assert.ok('id' in fresh, JSON.stringify(fresh));
+  const [now] = await ran(fresh.thread, 'hand_off');
+  assert.deepEqual(started?.handOff, now?.handOff);
+});

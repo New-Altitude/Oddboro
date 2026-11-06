@@ -1,41 +1,68 @@
-// Running a staffer: each chat message or job run is Claude Code run headless
-// on the owner's own login, with the staffer's job description from Postgres
-// appended to the system prompt. Server only.
+// Running a staffer: each chat message or job run is Claude Code, or Grok, Codex
+// or Gemini for an Odd the owner moved to one (cli.ts), run headless, with the staffer's job
+// description from Postgres added to the system prompt. Server only.
 //
-// Every run gets five file tools (Read, Glob, Grep, Write, Edit), may read
-// only its own folder and the owner's data folder (see `readable`), may write
-// only inside the staffer's own folder, except Claude Code's own config there
-// (CLAUDE.md and .claude/), loads no project settings, skills or plugins, and
+// A Claude Code run gets five file tools (Read, Glob, Grep, Write, Edit), may
+// read only its own folder, the owner's data folder and, on a thread, the
+// thread's folder (see `readable`), may write only inside the staffer's own folder and
+// its own part of that thread's, except its tools' own instructions
+// (`INSTRUCTIONS` in files.ts) and, reading the owner's edit, that file (`deniedEdits`),
+// loads no project settings, skills or plugins, and
 // is denied anything not pre-approved. It always gets the office server (asks,
 // tasks, the ledger), plus whatever access the owner granted: servers at read
 // level (the tools the owner ticked as read-only) or at write level (every
 // tool). Hosted servers get a fresh OAuth token per run.
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import {
-  appendFileSync,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  writeFileSync
-} from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, sep } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import {
   DATABASE_URL,
+  goal as findGoal,
   goalsFor,
   goalWhen,
+  atDraft,
   capabilities,
+  capped,
+  handOffBrief,
+  handOffContext,
+  handOffsFor,
+  resultsToJoin,
+  runsGoing,
+  servesHandOff,
+  servesNoThread,
+  thread as threadById,
+  threadBrief,
+  threadFolder,
+  threadPart,
+  threadsFor,
+  recentThreads,
+  recentThreadsBrief,
+  threadsOn,
+  threadsOnBrief,
+  goalsLedBrief,
+  ledStories,
+  type ThreadLine,
+  type ThreadStory,
   HEALTH_WORDS,
   hasTool,
+  jobsFor,
+  levelAtMost,
   levelLine,
+  lessonLine,
+  lessonsOf,
+  liveLessons,
   outsideLines,
   ownerName,
+  ownerNoteOf,
   recordUsage,
   setPlanLimits,
   startFirstDay,
   claimPoke,
   deliveries,
+  EDIT_CHARS,
+  editShown,
   ask as askById,
   replyToReport,
   report as reportById,
@@ -44,15 +71,22 @@ import {
   taskFiles,
   type AskRow,
   type Capabilities,
+  type EditShown,
   type FollowUpRow,
   type GoalRow,
+  type FollowUpKind,
+  type HandOffLine,
+  type HandOffStep,
   type JobRow,
+  type LessonLine,
+  type Level,
   type RunTrigger,
   type ModelUsage,
   type Outcome,
   type ReportRow,
   type TaskRow,
   type PokeRow,
+  type Agent,
   type StaffRow,
   type UsageKind,
   clockTime,
@@ -60,40 +94,62 @@ import {
   zone,
   zoneName,
   STAFF_SERVER,
+  AGENT_NAMES,
+  chatSession,
   home,
   rulePath,
   toolCommand
 } from '@oddboro/ledger';
-import { emit } from './events.ts';
+import { fixedError } from '@oddboro/ledger/errors';
+import { workPath } from '@oddboro/ledger/work-paths';
+import { bus, emit } from './events.ts';
+import { deniedEdits, denyRules, readStaffFile } from './files.ts';
 import type { Work } from '../staff/work.ts';
 import { getSecret, headerSecret } from './keychain.ts';
 import { bearer } from './oauth.ts';
-import { apiKey, claudeSettings, cleanEnv, modelArgs, spawnClaude } from './claude.ts';
+import { apiKey, claudeSettings, cleanEnv, modelArgs } from './claude.ts';
 import { notifyMac } from './notify.ts';
 import { downtime, installsAt } from './update.ts';
+import { catchUp, NOW, parseSession, saveSession, sectionsOf } from './resume.ts';
+import { chatPreface } from './chat-preface.ts';
+import { officeEnv } from './run-env.ts';
+import { firstDayOf } from './first-day.ts';
+import { endedEarly, LAUNCHES, OWN_TOOLS, streamTools, type Launch } from './cli.ts';
+import { stopGroups } from './launch.ts';
+import { agentCommand } from './agent-sign-in.ts';
+import { ACT_WRITE, house } from './house.ts';
+import { OUTCOME_LINE, personaRun, voiced } from './persona-run.ts';
 
-/** The owner's data folder, which every staffer may read. */
+/** The owner's data folder, which every staffer may read, whatever tool it runs on. */
 const DATA = home('data');
 const HOMES = home('staff');
-/** Hard rule 4's one exception to asking first, said the same way in every brief that tells an Odd to ask. */
-const ACT_WRITE = 'unless you hold Act and use a tool {owner} connected for you at read and write';
 const CHAT_TIMEOUT_MS = 5 * 60_000;
 const JOB_TIMEOUT_MS = 20 * 60_000;
 
 /** Something the staffer put on the owner's desk. */
 export type ChatRef = { kind: 'ask' | 'task' | 'report'; id: number; title: string };
 /**
- * A `poke` line is one the office delivered later, not a reply. An `item` line
+ * A `poke` line is one the office delivered later, not a reply. A `told` line
+ * is one the office said in the staffer's name that no run of its chat session
+ * wrote, like a new manager's hello. An `item` line
  * is something the staffer put on the owner's desk, shown where it landed. An
- * owner's line with `re` replied about one of those.
+ * owner's line with `re` replied about one of those. A `handOff` line is work
+ * the staffer handed a colleague, or a colleague handed it. A `thread` line is
+ * a thread the staffer leads, holding each hand-off it gave on it. A `lesson`
+ * line is one the staffer kept, where it kept it.
  */
 export type ChatEntry = {
   at: string;
   from: 'owner' | 'staff';
   text: string;
   poke?: true;
+  told?: true;
   re?: ChatRef;
   item?: ChatRef & { status: string };
+  lesson?: LessonLine;
+  /** `back` is which hand-back a reply or pick-up line shows. */
+  handOff?: { line: HandOffLine; step: HandOffStep; back?: number };
+  thread?: { line: ThreadLine; steps: HandOffLine[] };
 };
 export type ChatEvent =
   | { type: 'delta'; text: string }
@@ -184,8 +240,12 @@ function homeOf(id: string): string {
   return dir;
 }
 
+const chatFile = (id: string) => join(homeOf(id), 'chat.jsonl');
+const addToChat = (id: string, line: ChatEntry) =>
+  appendFileSync(chatFile(id), JSON.stringify(line) + '\n');
+
 export function history(id: string): ChatEntry[] {
-  const file = join(homeOf(id), 'chat.jsonl');
+  const file = chatFile(id);
   if (!existsSync(file)) return [];
   return readFileSync(file, 'utf8')
     .split('\n')
@@ -193,7 +253,7 @@ export function history(id: string): ChatEntry[] {
     .map((line) => JSON.parse(line) as ChatEntry);
 }
 
-/** The chat as the owner sees it: what was said, and each delivery where it landed. */
+/** The chat as the owner sees it: what was said, and each delivery and lesson where it landed. */
 export async function chatLog(id: string): Promise<ChatEntry[]> {
   const items: ChatEntry[] = (await deliveries(id)).map(({ at, ...d }) => ({
     at: at.toISOString(),
@@ -201,7 +261,48 @@ export async function chatLog(id: string): Promise<ChatEntry[]> {
     text: '',
     item: d
   }));
-  return [...history(id), ...items].sort((a, b) => a.at.localeCompare(b.at));
+  const kept: ChatEntry[] = (await lessonsOf(id))
+    .filter((l) => l.heardBy === id)
+    .map(({ id: lessonId, text, quote, appliesTo, how, status, staffId, missed, createdAt }) => ({
+      at: createdAt.toISOString(),
+      from: 'staff',
+      text: '',
+      lesson: { id: lessonId, text, quote, appliesTo, how, status, staffId, missed }
+    }));
+  // Each step of a hand-off lands where it happened, so a reply that came back
+  // an hour later sits after whatever was said in that hour. The giver's chat
+  // keeps the colleague's reply inside the hand-off and shows its own pick-up.
+  // A hand-off it gave sits on the card of its thread, where the thread began.
+  const lines = await handOffsFor(id);
+  const threads: ChatEntry[] = (await threadsFor(id)).map((line) => ({
+    at: line.at.toISOString(),
+    from: 'staff',
+    text: '',
+    thread: { line, steps: lines.filter((h) => h.gave && h.threadId === line.id) }
+  }));
+  const handOffs: ChatEntry[] = lines.flatMap((line) => {
+    const at = (d: Date, step: HandOffStep, back?: number): ChatEntry => ({
+      at: d.toISOString(),
+      from: 'staff',
+      text: '',
+      handOff: { line, step, back }
+    });
+    return [
+      ...(line.gave ? [] : [at(line.at, 'given')]),
+      ...line.backs.flatMap((b, i) =>
+        line.gave
+          ? b.pickUp.at && b.pickUp.text
+            ? [at(b.pickUp.at, 'next', i)]
+            : []
+          : b.answered
+            ? []
+            : [at(b.at, 'reply', i)]
+      )
+    ];
+  });
+  return [...history(id), ...items, ...threads, ...handOffs, ...kept].sort((a, b) =>
+    a.at.localeCompare(b.at)
+  );
 }
 
 /** What the staffer needs to know about the delivery the owner is replying about. */
@@ -211,7 +312,7 @@ async function replyBrief(
 ): Promise<{ ref: ChatRef; brief: string }> {
   if (re.kind === 'ask') {
     const a = await askById(re.id);
-    if (a?.staffId !== id) throw new Error('No such ask from this Odd');
+    if (a?.staffId !== id) throw fixedError('No such ask from this Odd');
     return {
       ref: { kind: 'ask', id: a.id, title: a.title },
       brief: [
@@ -225,7 +326,7 @@ async function replyBrief(
   }
   if (re.kind === 'task') {
     const t = await taskById(re.id);
-    if (t?.staffId !== id) throw new Error('No such task from this Odd');
+    if (t?.staffId !== id) throw fixedError('No such task from this Odd');
     return {
       ref: { kind: 'task', id: t.id, title: t.title },
       brief: [
@@ -241,7 +342,7 @@ async function replyBrief(
     };
   }
   const r = await reportById(re.id);
-  if (r?.staffId !== id) throw new Error('No such report from this Odd');
+  if (r?.staffId !== id) throw fixedError('No such report from this Odd');
   return {
     ref: { kind: 'report', id: r.id, title: r.title },
     brief: [
@@ -280,8 +381,13 @@ export function staffEnv(): NodeJS.ProcessEnv {
 
 type Server = Record<string, unknown>;
 
-/** The servers and tool permissions one run gets: the outside tools `capabilities` says it holds. */
-async function access(who: StaffRow) {
+/**
+ * The servers and tool permissions one run gets: the outside tools
+ * `capabilities` says it holds. A run from a hand-off works at Draft at most
+ * (`ceiling`), so a colleague's words never stand in for the owner's yes. Its
+ * caps come down to the ceiling too (`capped`), so its prompt lists what it loads.
+ */
+async function access(who: StaffRow, ceiling: Level) {
   const servers: Record<string, Server> = {
     office: {
       command: process.execPath,
@@ -290,7 +396,7 @@ async function access(who: StaffRow) {
     }
   };
   const allowed = ['mcp__office'];
-  const caps = await capabilities(who);
+  const caps = capped(await capabilities(who), ceiling);
   for (const a of caps.outside) {
     if (a.heldBack) continue;
     const c = a.connector;
@@ -316,35 +422,6 @@ async function access(who: StaffRow) {
     else allowed.push(...c.readTools.map((t) => `mcp__${c.id}__${t}`));
   }
   return { servers, allowed, caps };
-}
-
-/** How the office works, naming only the office tools this staffer holds. */
-function house(who: StaffRow, now: string): string {
-  const has = (t: string) => hasTool(who.tools, t);
-  const more = !has('ask_for_access')
-    ? ''
-    : has('find_connectors')
-      ? ' For more, call find_connectors, then ask_for_access.'
-      : ' For more, call ask_for_access.';
-  const updating = installsAt();
-  return [
-    '',
-    '## How the office works',
-    '',
-    `- The office keeps ${zoneName()}. It is ${now} now.`,
-    updating !== undefined &&
-      `- Oddboro updates at ${clockTime(updating)}, and the office restarts. Start nothing that runs past it, and write where you are to your notes.`,
-    '- You are an Odd. Oddboro calls its AI workers Odds (one Odd, two Odds). When you talk to {owner}, call yourself and the others here Odds, never staff or agents.',
-    `- {owner}'s desk is how you reach them. Anything that needs their yes goes through raise_ask${has('give_owner_a_task') ? ', and anything only they can do goes through give_owner_a_task' : ''}. Do not ask for a decision in chat when it should be an ask.`,
-    has('search_ledger') &&
-      '- Before you raise an ask, search_ledger for how they decided things like it. Follow a decision that fits. If the closest one gave no reason, say so.',
-    `- my_access lists your outside tools.${more} When one stops working (its tools fail to load, or it turns down its key), call reconnect_access.`,
-    `- Nothing leaves the office without {owner}'s yes on that exact action, ${ACT_WRITE}.`,
-    '- Write to {owner} in active voice: the person or thing that acts is the subject ("I moved the call", not "the call was moved"). Plain words, short sentences.',
-    ''
-  ]
-    .filter((l) => l !== false)
-    .join('\n');
 }
 
 /**
@@ -380,7 +457,7 @@ async function whoFor(who: StaffRow, dir: string): Promise<string> {
     serving.length
       ? `- The goals you serve. You see only these; my_goals has the latest:\n${serving.map(goalLine).join('\n')}`
       : '- You serve none of their goals yet.',
-    serving.length &&
+    serving.length > 0 &&
       '- After a run that moves one of these goals, or shows it slipping, call log_progress once with one line of evidence.',
     hasTool(who.tools, 'list_goals') &&
       '- list_goals shows every goal, who serves it and how it is going.',
@@ -390,45 +467,109 @@ async function whoFor(who: StaffRow, dir: string): Promise<string> {
     .join('\n');
 }
 
-/** What this run can do: its level, where it writes, and each outside tool it holds or was granted. */
-function canDo(caps: Capabilities, owner: string): string {
+/** "Oct 30", in the office's time zone. */
+const shortDay = (d: Date) =>
+  d.toLocaleDateString('en-US', { timeZone: zone(), month: 'short', day: 'numeric' });
+
+/**
+ * What the owner has taught this staffer, and every Odd: the live lessons,
+ * loaded into every run by the office, so none depends on the staffer
+ * remembering to look.
+ */
+async function taught(who: StaffRow): Promise<string> {
+  const live = await liveLessons(who.id);
+  return [
+    '',
+    '## What {owner} has taught you',
+    '',
+    '- When {owner} corrects your work or says how they want something done from now on, call keep_lesson once, with their words. Only a chat, a run carrying a note {owner} left on an ask or a task, or a run reading their edit to one of your files has their words; in any other run keep_lesson refuses, so tell them in your reply instead. The lesson is enough: it beats your job steps where they disagree, so do not also edit your job for the same correction unless they ask you to.',
+    '- Only the lessons listed here are yours. A correction {owner} gave another Odd, which you may see in the ledger, is not a lesson for you.',
+    '- How the whole office should work is a lesson for every Odd. When {owner} says how much the office should do without checking with them, or how they want to hear how things are going, keep it with scope everyone, in their words, even when they do not say it is for everyone. If the answer is too vague to act on, like "just be helpful", ask one follow-up question, and keep nothing if that is still vague. If they skip the question, keep nothing: the office\'s own way stands.',
+    `- A lesson can make you more careful, never more permitted. It never widens your level or your tools, and nothing leaves the office on a lesson alone: it still needs {owner}'s yes on that exact action, ${ACT_WRITE}. If their words ask for more than you hold, such as "send emails without asking", keep only what makes you more careful, and tell them plainly that more access is the Access tab's job, not a lesson's.`,
+    ...(live.length
+      ? [
+          '- Follow every lesson below wherever it applies. A lesson marked "only in" applies only there; one with no mark applies everywhere. Where two disagree, the newer one wins. Where one disagrees with your job steps, the lesson wins.',
+          '- A lesson about how you write to {owner} covers what they read from you: chat messages, reports and drafts. It does not cover the titles and fields of asks and tasks unless it says so.',
+          '- Before your final reply, go through the lessons below. For each one that shaped what you wrote or did this run, call used_lesson with its id, and do what its answer says. Never mention a lesson that changed nothing.',
+          '- When a new lesson replaces one below, keep_lesson needs replaces set to its id and why_replaced. Choose missed when {owner} corrected something the old lesson already covered, so they had to say it again; choose refined only when they changed or narrowed what they want. After a missed one, tell them in one line that you missed it.',
+          '- A lesson only for you can replace only one marked for you. For one marked for every Odd, keep yours without replaces: the newer lesson wins for you, and the other Odds keep theirs.',
+          '',
+          ...live.map((l) => lessonLine(l, shortDay(l.createdAt)))
+        ]
+      : ['- Nothing yet.']),
+    ''
+  ].join('\n');
+}
+
+/** What this run can do: its level, where it writes, its own tools, and each outside tool it holds or was granted. */
+function canDo(caps: Capabilities, owner: string, agent: Agent): string {
   const lines = outsideLines(caps, owner);
   return [
     '',
     '## What you can do',
     '',
     `- ${levelLine(caps.level, owner)}`,
-    '- You write files only in your folder. Your own tools work on files only: no shell and no web. The outside tools below are your only reach beyond the office.',
+    `- You write files only in your folder, or, on work you share with colleagues, in your part of its folder. ${OWN_TOOLS[agent]} The outside tools below are your only reach beyond the office.`,
+    '- If a brief names tools you do not have, do the work with your own tools.',
     '- Outside tools:',
     ...(lines.length ? lines.map((l) => `  - ${l}`) : ['  - None yet.']),
     ''
   ].join('\n');
 }
 
+/**
+ * The system prompt. A run on no thread, such as a chat or a job, lists the
+ * threads the staffer leads, so it can continue one rather than open another;
+ * a run on a thread hands on in that one. A chat also lists the threads it
+ * works on and does not lead, so what {owner} says there about one reaches
+ * its lead. `led` are the stories of the threads it leads that the run is
+ * told in full (`ledStories`): the lead's run on its thread is told how to
+ * move it on, and its chat where each of its goals stands.
+ */
 async function prompt(
   who: StaffRow,
-  opts: { dir: string; caps: Capabilities; owner: string }
+  opts: {
+    dir: string;
+    caps: Capabilities;
+    owner: string;
+    thread?: number;
+    chat: boolean;
+    led: ThreadStory[];
+    shown?: number[];
+  }
 ): Promise<string> {
   const { dir } = opts;
-  const now = new Date().toLocaleString('en-US', {
-    timeZone: zone(),
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit'
-  });
+  // run() fills in the time, so the rest can be compared with what a resumed session saw.
+  const now = NOW;
+  const leads = !opts.thread && hasTool(who.tools, 'hand_off');
+  const updating = installsAt();
   return (
     who.desk +
     '\n' +
     (await whoFor(who, dir)) +
-    house(who, now) +
+    (await taught(who)) +
+    // A chat is told each live goal it leads in full (`goalsLedBrief`), so its list leaves them out.
+    (leads
+      ? recentThreadsBrief(
+          await recentThreads(who.id, { told: opts.led.map((story) => story.thread.id) })
+        )
+      : '') +
+    (opts.chat ? threadsOnBrief(await threadsOn(who.id)) : '') +
+    (opts.thread
+      ? opts.led.flatMap((story) => threadBrief({ story, shown: opts.shown })).join('\n')
+      : goalsLedBrief(opts.led)) +
+    house({
+      has: (t) => hasTool(who.tools, t),
+      now,
+      zone: zoneName(),
+      updatesAt: updating === undefined ? undefined : clockTime(updating)
+    }) +
     `\n## Where things are\n\n- Your folder: ${dir}\n- Your notes: ${join(dir, 'notes')}\n- {owner}'s data folder: ${DATA}\n` +
-    canDo(opts.caps, opts.owner)
+    canDo(opts.caps, opts.owner, who.agent)
   );
 }
 
-type Run = { ok: boolean; text: string };
+export type Run = { ok: boolean; text: string };
 
 type Window = { utilization?: number; resetsAt?: number };
 
@@ -451,12 +592,17 @@ export async function notePlan(info: unknown): Promise<void> {
 
 /**
  * What a staffer's file tools may read: its own folder, the owner's data
- * folder, and Claude Code's folder for this run's sessions (long tool results
- * land there). Read rules govern Glob and Grep too, and dontAsk turns down
- * every other path.
+ * folder, Claude Code's folder for this run's sessions (long tool results
+ * land there), and the folder of each thread the run reads (`reads`). Read
+ * rules govern Glob and Grep too, and dontAsk turns down every other path.
  */
-function readable(dir: string): string[] {
-  return [dir, DATA, join(homedir(), '.claude', 'projects', sessionsOf(dir))];
+function readable(dir: string, reads: number[]): string[] {
+  return [
+    dir,
+    DATA,
+    join(homedir(), '.claude', 'projects', sessionsOf(dir)),
+    ...reads.map(threadFolder)
+  ];
 }
 
 /** Claude Code names a working folder's sessions folder after its path. */
@@ -468,10 +614,10 @@ function sessionsOf(dir: string): string {
  * What no staffer may read, even when the owner's own Claude Code settings
  * allow it: a deny rule beats every allow. Secret stores, the rest of the
  * office's folder and other staffers' folders, and the rest of Claude Code's
- * folder, sessions included. A rule on a folder covers everything inside it.
+ * folder, sessions included. Each is denied with everything under it (`denyRules`).
  */
-function unreadable(id: string, dir: string): string[] {
-  const reads = readable(dir);
+function unreadable(id: string, dir: string, threads: number[]): string[] {
+  const reads = readable(dir, threads);
   const claude = join(homedir(), '.claude');
   const besides = (parent: string, keep: string[]) => {
     try {
@@ -496,108 +642,248 @@ function unreadable(id: string, dir: string): string[] {
       '.claude.json',
       '.google_workspace_mcp'
     ].map((p) => join(homedir(), p)),
-    ...besides(home(), ['staff', 'data']),
+    ...besides(home(), ['staff', 'data', ...(threads.length ? ['threads'] : [])]),
     ...besides(HOMES, [id]),
+    // Every other thread's folder. Claude Code takes a read rule on a folder
+    // to cover writes too, so none may cover this run's own part.
+    ...(threads.length ? besides(dirname(threadFolder(threads[0])), threads.map(String)) : []),
     ...besides(claude, ['projects']),
     ...besides(join(claude, 'projects'), [sessionsOf(dir)])
   ];
   // Never deny a folder a staffer must read, such as an office kept under ~/Library.
   const covers = (p: string) => reads.some((r) => r === p || r.startsWith(`${p}${sep}`));
-  return [...new Set(paths)].filter((p) => !covers(p)).map((p) => `Read(${rulePath(p)})`);
+  return [...new Set(paths)]
+    .filter((p) => !covers(p))
+    .flatMap((p) => denyRules(['Read'], rulePath(p)));
 }
 
-/** One headless Claude Code run. `session` resumes a saved session file, or starts fresh. */
-async function run(
-  who: StaffRow,
-  message: string,
-  opts: {
-    kind: UsageKind;
-    sessionFile?: string;
-    extra?: string;
-    /** The owner's own message, when this is a chat. */
-    ownerSaid?: string;
-    /** The ask the owner approved that this run carries out: the only one its self-edits may cite. */
-    approvedAsk?: number;
-    timeoutMs: number;
-    onEvent?: (e: ChatEvent) => void;
-  }
-): Promise<Run> {
+/** The time as a run is told it: "Tuesday, November 3, 9:41 PM", in the office's time zone. */
+const officeNow = () =>
+  new Date().toLocaleString('en-US', {
+    timeZone: zone(),
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  });
+
+/**
+ * A run ended, so pick-ups it held may start (follow-ups.ts).
+ * The page never hears it: /api/events sends only `event`.
+ */
+export const RUN_ENDED = 'run-ended';
+
+/** What a run is for, and what it may do. */
+export type RunOpts = {
+  kind: UsageKind;
+  sessionFile?: string;
+  extra?: string;
+  /** The owner's own message, when this is a chat. */
+  ownerSaid?: string;
+  /** What a follow-up was asked, in words a persona can read: its `message` is only a label. */
+  asked?: string;
+  /** The ask the owner approved that this run carries out: the only one its self-edits may cite. */
+  approvedAsk?: number;
+  /** The owner's note a follow-up carries out, which a lesson may quote. */
+  ownerNote?: string;
+  /** The file the owner edited, and their version of it, which a lesson read from it quotes. The run may not write that file. */
+  ownerEdit?: { path: string; text: string };
+  /** Draft at most: a follow-up `atDraft` names. */
+  draftOnly?: boolean;
+  /** A run that only reads the owner's reason or edit for a lesson (`servesNoThread`): it hands nothing on. */
+  lessonRun?: boolean;
+  /** The hand-off a colleague's run serves: asks and tasks it raises carry it, and it cannot hand off. */
+  handOffId?: number;
+  /** The thread the run works on, either side: it reads the thread's folder and writes its own part. */
+  threadId?: number;
+  /** The hand-backs this run's brief already holds in full, so its lead's story leaves them out. */
+  shown?: number[];
+  timeoutMs: number;
+  onEvent?: (e: ChatEvent) => void;
+};
+
+/**
+ * One run of an Odd. A persona Odd's chat, job or follow-up goes on from its
+ * coding tool to its persona on New Altitude (`personaRun`); every other run
+ * is the coding tool's alone.
+ */
+async function run(who: StaffRow, message: string, opts: RunOpts): Promise<Run> {
+  const kind = opts.kind;
+  return who.package && voiced(kind) && !opts.lessonRun
+    ? personaRun(who, message, { ...opts, kind }, runTool)
+    : runTool(who, message, opts);
+}
+
+/**
+ * One headless run on the Odd's coding tool. `session` resumes a saved session
+ * file, or starts fresh. A tool that will not start fails the run, naming the
+ * tool: no run falls back to another.
+ */
+async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<Run> {
   const dir = homeOf(who.id);
-  const prior =
+  const saved =
     opts.sessionFile && existsSync(opts.sessionFile)
-      ? (JSON.parse(readFileSync(opts.sessionFile, 'utf8')) as { sessionId: string }).sessionId
+      ? parseSession(readFileSync(opts.sessionFile, 'utf8'))
       : undefined;
-  const { servers, allowed, caps } = await access(who);
+  const ceiling = opts.draftOnly && levelAtMost('draft', who.permission) ? 'draft' : who.permission;
+  const { servers, allowed, caps } = await access(who, ceiling);
   // Prompts name the owner as {owner}: each install's staff use its own name.
   const owner = await ownerName();
   const say = (s: string) => s.replaceAll('{owner}', owner);
+  // Claude Code keeps a session's first system prompt on --resume, so a
+  // resumed run's message carries the time and the sections that changed.
+  const prior = saved?.sessionId;
+  const time = officeNow();
+  const inChat = opts.kind === 'chat';
+  // What the lead knows of the threads it leads, read now, as the run starts.
+  // A lead's chat reads its goals' folders, as its pick-ups there do.
+  const led = opts.threadId
+    ? await ledStories(who.id, { thread: opts.threadId })
+    : inChat
+      ? await ledStories(who.id, 'chat')
+      : [];
+  const reads = opts.threadId ? [opts.threadId] : led.map((s) => s.thread.id);
+  const system = say(
+    (await prompt(who, {
+      dir,
+      caps,
+      owner,
+      thread: opts.threadId,
+      chat: inChat,
+      led,
+      shown: opts.shown
+    })) + (opts.extra ?? '')
+  );
+  const sections = sectionsOf(system, say(who.desk));
+  const preface = prior ? catchUp(saved?.seen, sections, time) : '';
   // In a chat, the office tools get the owner's own words, so a change the owner asks for
-  // there is recorded as their decision without an ask.
-  if (opts.ownerSaid)
-    (servers.office.env as Record<string, string>).OWNER_SAID = opts.ownerSaid.slice(0, 4000);
-  if (opts.approvedAsk)
-    (servers.office.env as Record<string, string>).APPROVED_ASK = String(opts.approvedAsk);
-  // Only this run knows which sign-ins ran out, so my_access hears it from here.
-  const signedOut = caps.outside.filter((a) => a.heldBack === 'sign-in ran out');
-  if (signedOut.length)
-    (servers.office.env as Record<string, string>).SIGNED_OUT = signedOut
-      .map((a) => a.connector.id)
-      .join(',');
-  const args = [
-    '-p',
-    '--output-format',
-    'stream-json',
-    '--verbose',
-    '--include-partial-messages',
-    '--tools',
-    'Read,Glob,Grep,Write,Edit',
-    '--allowedTools',
-    ...readable(dir).map((p) => `Read(${rulePath(p)}/**)`),
-    // Edit rules cover every file-writing tool; Claude Code ignores Write(path).
-    `Edit(${rulePath(dir)}/**)`,
-    ...allowed,
-    '--disallowedTools',
-    ...unreadable(who.id, dir),
-    // Claude Code loads these on every run: a staffer may not rewrite its own instructions or hooks.
-    ...['CLAUDE.md', 'CLAUDE.local.md', '.claude/**'].flatMap((f) => [
-      `Edit(${rulePath(dir)}/${f})`,
-      `Edit(${rulePath(dir)}/**/${f})`
-    ]),
-    '--permission-mode',
-    'dontAsk',
-    '--setting-sources',
-    'user',
-    '--strict-mcp-config',
-    '--mcp-config',
-    JSON.stringify({ mcpServers: servers }),
-    '--disable-slash-commands',
-    '--settings',
-    JSON.stringify({ enabledPlugins: pluginsOff() }),
-    '--add-dir',
-    DATA,
-    ...modelArgs(),
-    '--append-system-prompt',
-    say((await prompt(who, { dir, caps, owner })) + (opts.extra ?? '')),
-    ...(prior ? ['--resume', prior] : ['--session-id', randomUUID()])
-  ];
+  // there is recorded as their decision without an ask. Every run gets a key: a
+  // thread it hands off on keeps it, and holds the Odd's pick-ups there until it
+  // ends (`runsGoing`), even when it is a follow-up on no thread.
+  const key = randomUUID();
+  Object.assign(
+    servers.office.env as Record<string, string>,
+    officeEnv({
+      key,
+      ownerSaid: opts.ownerSaid,
+      approvedAsk: opts.approvedAsk,
+      signedOut: caps.outside
+        .filter((a) => a.heldBack === 'sign-in ran out')
+        .map((a) => a.connector.id),
+      ownerNote: opts.ownerNote,
+      ownerEdit: opts.ownerEdit?.text,
+      ceiling: ceiling !== who.permission ? ceiling : undefined,
+      handOffId: opts.handOffId,
+      threadId: opts.threadId,
+      lessonRun: !!opts.lessonRun
+    })
+  );
+  // On a thread, the run writes only its own part of the thread's folder.
+  const part = opts.threadId ? threadPart(opts.threadId, who.id) : undefined;
+  if (part) mkdirSync(part, { recursive: true });
+  const writes = part ? [dir, part] : [dir];
+  function claudeArgs(): string[] {
+    return [
+      '-p',
+      '--output-format',
+      'stream-json',
+      '--verbose',
+      '--include-partial-messages',
+      '--tools',
+      'Read,Glob,Grep,Write,Edit',
+      '--allowedTools',
+      ...readable(dir, reads).map((p) => `Read(${rulePath(p)}/**)`),
+      // Edit rules cover every file-writing tool; Claude Code ignores Write(path).
+      ...writes.map((w) => `Edit(${rulePath(w)}/**)`),
+      ...allowed,
+      '--disallowedTools',
+      ...unreadable(who.id, dir, reads),
+      ...deniedEdits(dir, writes, opts.ownerEdit?.path).flatMap((p) =>
+        denyRules(['Edit'], rulePath(p))
+      ),
+      '--permission-mode',
+      'dontAsk',
+      '--setting-sources',
+      'user',
+      '--strict-mcp-config',
+      '--mcp-config',
+      JSON.stringify({ mcpServers: servers }),
+      '--disable-slash-commands',
+      '--settings',
+      JSON.stringify({ enabledPlugins: pluginsOff() }),
+      '--add-dir',
+      DATA,
+      ...reads.flatMap((t) => ['--add-dir', threadFolder(t)]),
+      ...modelArgs(),
+      '--append-system-prompt',
+      system.replaceAll(NOW, time),
+      ...(prior ? ['--resume', prior] : ['--session-id', randomUUID()])
+    ];
+  }
+  const input = preface + say(message);
+  const launch: Launch | { refused: string } =
+    who.agent === 'claude'
+      ? { args: claudeArgs(), env: staffEnv(), stdin: input, done: () => {} }
+      : await LAUNCHES[who.agent]({
+          key,
+          staffId: who.id,
+          dir,
+          reads: [DATA, ...reads.map(threadFolder)],
+          part,
+          writes,
+          edited: opts.ownerEdit?.path,
+          system: system.replaceAll(NOW, time),
+          input,
+          resume: prior,
+          servers,
+          allowed,
+          timeoutMs: opts.timeoutMs
+        });
+  if ('refused' in launch) {
+    opts.onEvent?.({ type: 'error', message: launch.refused });
+    return { ok: false, text: launch.refused };
+  }
+  const tool = AGENT_NAMES[who.agent];
 
   return new Promise((done) => {
-    const child = spawnClaude(args, { cwd: dir, env: staffEnv() });
+    runsGoing.add(key);
+    // The command the page counts as installed, such as a Grok only in xAI's
+    // install folder or an npm Claude Code on Windows; by name when there is
+    // none, so the run fails naming it.
+    const [cmd, before] = agentCommand(who.agent) ?? [who.agent, []];
+    const child = spawn(cmd, [...before, ...launch.args], {
+      cwd: dir,
+      env: launch.env,
+      detached: !!launch.ownGroup,
+      windowsHide: true
+    });
+    /** Stop the tool, and with a group of its own, whatever its commands left running. */
+    const stop = () => {
+      if (!launch.ownGroup) return child.kill();
+      if (child.pid) stopGroups(child.pid);
+    };
     let buffer = '';
+    let stderr = '';
     let reply = '';
+    /** The last whole message a Codex or Gemini run sent, which is its reply. */
+    let last = '';
     let session: string | undefined;
     let finished = false;
     const finish = (r: Run) => {
       if (finished) return;
       finished = true;
       clearTimeout(timer);
+      runsGoing.delete(key);
+      launch.done();
+      bus.emit(RUN_ENDED);
       if (session && opts.sessionFile)
-        writeFileSync(opts.sessionFile, JSON.stringify({ sessionId: session }));
+        saveSession(opts.sessionFile, { sessionId: session, seen: sections });
       opts.onEvent?.(r.ok ? { type: 'done', text: r.text } : { type: 'error', message: r.text });
       done(r);
     };
     const timer = setTimeout(() => {
-      child.kill();
+      stop();
       finish({ ok: false, text: `No reply after ${opts.timeoutMs / 60_000} minutes.` });
     }, opts.timeoutMs);
 
@@ -615,16 +901,31 @@ async function run(
         } catch {
           continue;
         }
+        if (launch.read) {
+          for (const ev of launch.read(e)) {
+            if (ev.type === 'session') session = ev.id;
+            else if (ev.type === 'tool') opts.onEvent?.({ type: 'tool', name: ev.name });
+            else if (ev.type === 'message') {
+              const text = (reply ? '\n\n' : '') + ev.text;
+              reply += text;
+              last = ev.text;
+              opts.onEvent?.({ type: 'delta', text });
+            } else if (ev.type === 'usage')
+              void recordUsage(who.id, opts.kind, ev.usage).catch(() => {});
+            else if (ev.type === 'done') finish({ ok: true, text: last.trim() });
+            else if (ev.type === 'failed') finish({ ok: false, text: ev.message });
+            // Said again when the tool stops, if the run ends there.
+            else stderr += `${ev.message}\n`;
+          }
+          continue;
+        }
         if (typeof e.session_id === 'string') session = e.session_id;
         if (e.type === 'rate_limit_event') void notePlan(e.rate_limit_info);
         if (e.type === 'result' && e.modelUsage)
           void recordUsage(who.id, opts.kind, e.modelUsage as ModelUsage).catch(() => {});
+        for (const name of streamTools(who.agent, e)) opts.onEvent?.({ type: 'tool', name });
         if (e.type === 'stream_event') {
-          const ev = e.event as {
-            type: string;
-            delta?: { type: string; text?: string };
-            content_block?: { type: string; name?: string };
-          };
+          const ev = e.event as { type: string; delta?: { type: string; text?: string } };
           if (
             ev.type === 'content_block_delta' &&
             ev.delta?.type === 'text_delta' &&
@@ -632,8 +933,6 @@ async function run(
           ) {
             reply += ev.delta.text;
             opts.onEvent?.({ type: 'delta', text: ev.delta.text });
-          } else if (ev.type === 'content_block_start' && ev.content_block?.type === 'tool_use') {
-            opts.onEvent?.({ type: 'tool', name: ev.content_block.name ?? 'a tool' });
           } else if (ev.type === 'message_start' && reply && !reply.endsWith('\n\n')) {
             // A new turn after a tool call: keep its text apart from the last.
             reply += '\n\n';
@@ -641,23 +940,23 @@ async function run(
           }
         } else if (e.type === 'result') {
           if (e.subtype === 'success') finish({ ok: true, text: String(e.result ?? reply).trim() });
-          else finish({ ok: false, text: `The session ended early (${String(e.subtype)}).` });
+          else finish({ ok: false, text: endedEarly(who.agent, e) });
         }
       }
     });
-    let stderr = '';
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (c: string) => (stderr += c));
     child.on('error', (err) =>
-      finish({ ok: false, text: `Could not start Claude Code: ${err.message}` })
+      finish({ ok: false, text: `Could not start ${tool}: ${err.message}` })
     );
-    child.on('close', (code) =>
+    child.on('close', (code) => {
+      if (launch.ownGroup) stop();
       finish({
         ok: false,
-        text: `Claude Code stopped (exit ${code}). ${stderr.trim().split('\n').slice(-2).join(' ')}`
-      })
-    );
-    child.stdin.end(say(message));
+        text: `${tool} stopped (exit ${code}). ${stderr.trim().split('\n').slice(-2).join(' ')}`
+      });
+    });
+    child.stdin.end(launch.stdin);
   });
 }
 
@@ -675,46 +974,27 @@ export async function chat(
   // Stamped when sent, so what the staffer delivers while replying lands between the two.
   const sent = new Date().toISOString();
   try {
-    // Pokes delivered and work put on the desk since the owner last wrote are
-    // not in the session: say so, so "How did the call go?" or "What about
-    // Thursday?" makes sense to the staffer.
-    const past = history(id);
-    const poked = past
-      .slice(past.findLastIndex((e) => e.from === 'owner') + 1)
-      .filter((e) => e.poke);
-    // The session saw what it delivered up to the end of its last reply.
-    const last = past.findLast((e) => !e.poke)?.at ?? '';
+    // Lines the office wrote in the chat, and work put on the desk, since the
+    // owner last wrote are not in the session: say so, so an answer to the
+    // hello, "How did the call go?" or "What about Thursday?" makes sense to
+    // the staffer.
     const re = replyTo ? await replyBrief(id, replyTo) : undefined;
     const landed = (await deliveries(id, 20)).filter(
-      (d) => d.at.toISOString() > last && !(d.kind === re?.ref.kind && d.id === re.ref.id)
+      (d) => !(d.kind === re?.ref.kind && d.id === re.ref.id)
     );
-    const prompt = [
-      ...(poked.length
-        ? [
-            `(Since {owner} last wrote, the office delivered your pokes to them: ${poked.map((e) => `"${e.text}"`).join(', ')}.)`
-          ]
-        : []),
-      ...(landed.length
-        ? [
-            `(Since {owner} last wrote, you put these on their desk: ${landed.map((d) => `${d.kind} "${d.title}"`).join(', ')}.)`
-          ]
-        : []),
-      ...(re ? [re.brief] : []),
-      message
-    ].join('\n\n');
+    const prompt = [...chatPreface(history(id), landed), ...(re ? [re.brief] : []), message].join(
+      '\n\n'
+    );
     const r = await run(who, prompt, {
       kind: 'chat',
       ownerSaid: message,
-      sessionFile: join(homeOf(id), 'session.json'),
+      sessionFile: chatSession(id),
       timeoutMs: CHAT_TIMEOUT_MS,
       onEvent
     });
     if (r.ok) {
-      const log = join(homeOf(id), 'chat.jsonl');
-      const now = new Date().toISOString();
-      const said: ChatEntry = { at: sent, from: 'owner', text: message, re: re?.ref };
-      appendFileSync(log, JSON.stringify(said) + '\n');
-      appendFileSync(log, JSON.stringify({ at: now, from: 'staff', text: r.text }) + '\n');
+      addToChat(id, { at: sent, from: 'owner', text: message, re: re?.ref });
+      addToChat(id, { at: new Date().toISOString(), from: 'staff', text: r.text });
       if (re?.ref.kind === 'report') await replyToReport(re.ref.id, message);
     }
   } finally {
@@ -736,6 +1016,10 @@ export async function runJob(job: JobRow, trigger: RunTrigger = 'schedule'): Pro
   );
 }
 
+/** The owner's answers a hub picks its thread up with, one a line (`answerThread`). */
+const answers = (note: string | null): string[] =>
+  (note ?? '').split('\n').map((line) => `- ${line}`);
+
 /** What the staffer is told, for each kind of follow-up. */
 function followUpBrief(
   f: FollowUpRow,
@@ -744,6 +1028,56 @@ function followUpBrief(
   t?: { row: TaskRow; files: string[] },
   g?: GoalRow
 ): string[] {
+  // The owner answered a plan raised on this thread. Sending one back is a
+  // `rework` instead, so only an approval or a denial reaches a resume.
+  if (f.kind === 'resume' && a?.kind === 'plan') {
+    const plan = g ? `your plan for goal #${g.id}, "${g.title}"` : `"${a.title}"`;
+    const hires = a.plan?.items.some((i) => i.kind === 'hire')
+      ? ' Odds the plan hires are not here yet: you pick up here again as {owner} hires each one, and hand it its first piece then.'
+      : '';
+    if (a.status === 'approved')
+      return [
+        `{owner} approved ${plan}. Start the work now. You lead it, here on the goal.`,
+        '',
+        ...answers(f.note),
+        '',
+        `1. Hand each piece of the work to the colleague who should do it, with hand_off, on the goal.${hires}`,
+        '2. Each time a piece comes back, check it and hand on the next, until the goal is met or the next step waits on a time.',
+        '3. To check a piece of work, prefer a colleague who did not do it.',
+        '4. Tell {owner} only what needs them, with raise_ask or give_owner_a_task, and when something is ready to try, with poke_owner. Never ask them to pass work to an Odd: that is yours to do.'
+      ];
+    if (a.status === 'denied')
+      return [
+        `{owner} said no to ${plan}. Do not start any of it.`,
+        '',
+        ...answers(f.note),
+        '',
+        '1. If their answer says what they want instead, do that. A new plan goes through propose_goal_plan.',
+        '2. Otherwise say so, and stop.'
+      ];
+  }
+  // {owner} hired an Odd a plan of yours proposed, from its hire ask on this thread.
+  if (f.kind === 'resume' && a?.kind === 'hire' && a.status === 'approved' && g)
+    return [
+      `{owner} hired an Odd your plan for goal #${g.id}, "${g.title}", proposed. Carry on leading the work, here on the goal.`,
+      '',
+      ...answers(f.note),
+      '',
+      `1. Find each new Odd with list_goals: it serves goal #${g.id}, under the name {owner} hired it by.`,
+      '2. It starts nothing on its own. Hand it its first piece the plan gives it now, with hand_off, on the goal.',
+      "3. If its part waits on another's work, say so, and stop."
+    ];
+  // Each line says what it is: an answer to something raised on the thread,
+  // what {owner} told a colleague about it in chat (`tellLead`), or the usage
+  // window resetting on a thread it held (`wakeThread`).
+  if (f.kind === 'resume')
+    return f.note
+      ? [
+          'Word came for work you lead, and no run of yours has seen it yet. Pick it back up now.',
+          '',
+          ...answers(f.note)
+        ]
+      : ['The time you set to pick your work back up has come. Pick it up now.'];
   if (f.kind === 'first_day')
     return [
       'You joined the office today, and you just said hello to {owner} in chat. Get started now, so they never have to ask.',
@@ -751,7 +1085,7 @@ function followUpBrief(
       '1. Read your job description, notes/intake.md if you have one, my_goals and my_jobs.',
       '2. If you cannot do good work without answers from {owner}, write only the questions your intake did not answer to a file in your folder, put it on their desk with give_owner_a_task, attached, then stop.',
       '3. If a tool you need is not in my_access, ask for it with ask_for_access.',
-      '4. Otherwise do the first piece of real work your job calls for, now: the first run of your job, or the first thing your job description says to do, so {owner} sees it today.',
+      '4. Otherwise do the first piece of real work your job calls for, now: the first run of your job, or the first thing your job description says to do, so {owner} sees it today. Work for a goal you serve is not yours to start: the Odd who leads it hands you each piece.',
       '5. Your reply goes on their desk. Write it to {owner}: what you did, and what comes next.'
     ];
   if (f.kind === 'goal' && g)
@@ -766,8 +1100,9 @@ function followUpBrief(
       '1. Read the office: office_report for each Odd, what it does, its level and the tools it holds or is waiting on, and list_goals for the goals they already serve.',
       '2. Work out who does what, how often, and with which tools (find_connectors). Give the work to Odds already here when one fits, with a new job or a change to one. Give a part to an Odd whose level and tools cover it. For a tool an Odd lacks, put any level raise in owner_steps, and have the Odd ask for the tool itself with ask_for_access when its officeTools include it, or put connecting it in owner_steps when they do not. Keep every other step only {owner} can do in owner_steps too. Hire only for work nobody here fits.',
       '3. If you need answers from {owner} before you can plan it, write the questions to a file in your folder, put it on their desk with give_owner_a_task, attached, then stop. You pick up when they finish it.',
-      "4. Otherwise bring the whole plan in one ask with propose_goal_plan, including the steps only {owner} can do. Write each hire's job description to a file first, and pass any intake as its intake_file.",
-      '5. If the office already meets this goal as it is, say so and stop.'
+      "4. Otherwise bring the whole plan in one ask with propose_goal_plan. Write each hire's job description to a file first, and pass any intake as its intake_file.",
+      '5. Once {owner} approves the plan, you pick up here on the goal and lead the work: you hand each piece to the Odd who does it. So its owner steps hold only what truly needs {owner}, such as signing in to a tool, never passing work or a request to an Odd.',
+      '6. If the office already meets this goal as it is, say so and stop.'
     ];
   if (f.kind === 'task_done' && t) {
     const answers = t.row.steps
@@ -780,7 +1115,10 @@ function followUpBrief(
       ...answers,
       ...(f.note ? [`- Their note: ${f.note}`] : []),
       ...(t.files.length
-        ? [`- Attached, with anything they filled in: ${t.files.join(', ')}. Read each one first.`]
+        ? [
+            // A file from a thread's folder is named from the office's folder, so the run gets where it is.
+            `- Attached, with anything they filled in: ${t.files.map((f) => (workPath(f) ? home(f) : f)).join(', ')}. Read each one first.`
+          ]
         : []),
       '',
       '1. Read what they gave you: the files above, their answers and their note.',
@@ -816,6 +1154,17 @@ function followUpBrief(
       '1. Do what they approved, and nothing beyond it.',
       '2. If you cannot finish without something from {owner}, put it on their desk with raise_ask or give_owner_a_task, with everything needed to finish, then stop.'
     ];
+  if (f.kind === 'denied')
+    return [
+      `{owner} turned down your ask #${a?.id}, and said why.`,
+      '',
+      ...askLines,
+      `- Their reason: ${f.note}`,
+      '',
+      '1. If the reason tells you how they want things done from now on, keep_lesson with their words.',
+      '2. Do not carry out the ask, and do not raise it again.',
+      '3. If the reason asks for something else instead, raise that as a new ask.'
+    ];
   if (f.kind === 'rework')
     return [
       `{owner} sent your ask #${a?.id} back. Rework it the way they say, then bring it back.`,
@@ -843,6 +1192,29 @@ function followUpBrief(
   ];
 }
 
+/** What a staffer is told when it reads the owner's edit to its file, for a lesson. */
+function editBrief(path: string, shown: EditShown): string[] {
+  const cut = shown.from
+    ? ` Both start at character ${shown.from}, a little before the first change; the start is the same in both.`
+    : '';
+  return [
+    `{owner} edited your file ${path} and saved it. Below is the file just before their save (your version, unless they had saved it before), then as it is now, each cut at ${EDIT_CHARS} characters.${cut}`,
+    '',
+    '1. Work out what they changed.',
+    '2. If the changes show how they want this kind of work done from now on, call keep_lesson once, quoting their words from the version now. It waits for their Keep, whatever you pass.',
+    '3. If it is a one-off fix (a fact, a name, a typo), keep nothing, and say so.',
+    '4. Do not edit the file, or anything else. This run only reads the edit.',
+    '',
+    '<before>',
+    shown.before,
+    '</before>',
+    '',
+    '<now>',
+    shown.now,
+    '</now>'
+  ];
+}
+
 /**
  * Do the work the owner's answer calls for, in a fresh session, as soon as the owner
  * answers. The staffer ends its reply with an outcome line. A reply without one
@@ -854,37 +1226,117 @@ export async function followThrough(
   r?: ReportRow,
   t?: TaskRow,
   g?: GoalRow
-): Promise<{ outcome: Outcome; text: string }> {
+): Promise<{ outcome: Outcome; text: string; saw?: string; joined?: number[] }> {
   const who = await staffer(f.staffId);
   if (!who) return { outcome: 'failed', text: `No Odd named ${f.staffId}` };
-  const label =
-    a?.title ??
-    (t
-      ? `After: ${t.title}`
-      : g
-        ? `Plan: ${g.title}`
-        : f.kind === 'first_day'
-          ? 'First day'
-          : `Feedback on ${r?.title ?? 'a report'}`);
+  // Work a colleague handed over, or its result coming home.
+  const handed =
+    (f.kind === 'hand_off' || f.kind === 'handed_back') && f.handOff
+      ? { kind: f.kind, ...f.handOff }
+      : undefined;
+  const colleague = handed && {
+    id: handed.from,
+    name: (await staffer(handed.from))?.name ?? handed.from
+  };
+  // The hand-off this run's work serves, if any: its own, or the one whose ask or
+  // task the owner just answered. Its result goes back to the giver.
+  const serves = await servesHandOff(f);
+  const giver = serves?.handOff
+    ? {
+        id: serves.handOff.from,
+        name: (await staffer(serves.handOff.from))?.name ?? serves.handOff.from
+      }
+    : undefined;
+  // The thread it works on. Every hand-off is a step in one, and its files cross
+  // in the thread's folder. Hand-backs written before they carried their thread cannot find it.
+  const threadId = f.threadId ?? serves?.threadId ?? undefined;
+  const thread = threadId ? await threadById(threadId) : undefined;
+  if (colleague && !thread)
+    return {
+      outcome: 'failed',
+      text: `This hand-off with ${colleague.name} lost track of the work it was for.`
+    };
+  // Results that landed while a run of this Odd's on the thread had yet to end:
+  // this pick-up takes them too, and they end with it.
+  const joined = await Promise.all(
+    (await resultsToJoin(f)).flatMap(({ id, handOff: h, note }) =>
+      h
+        ? [
+            staffer(h.from).then((c) => ({
+              id,
+              h,
+              result: note,
+              colleague: { id: h.from, name: c?.name ?? h.from }
+            }))
+          ]
+        : []
+    )
+  );
+  const joinedIds = joined.map((j) => j.id);
+  // The owner's edit, read now, so saves while this waited to start are in it.
+  let edit: { path: string; saw: string; shown: EditShown } | undefined;
+  if (f.kind === 'edited') {
+    const e = f.edit;
+    if (!e) return { outcome: 'failed', text: 'This edit run lost track of its file.' };
+    try {
+      const saw = (await readStaffFile(who.id, e.path)).content;
+      edit = { path: e.path, saw, shown: editShown(e.before, saw) };
+    } catch (err) {
+      return {
+        outcome: 'failed',
+        text: `Could not read ${e.path}: ${err instanceof Error ? err.message : String(err)}`
+      };
+    }
+  }
+  const label = edit
+    ? `Reading your edit to ${edit.path}`
+    : handed
+      ? `${handed.kind === 'hand_off' ? 'For' : 'Back from'} ${colleague?.name}: ${handed.title}`
+      : f.kind === 'resume'
+        ? (thread?.title ?? 'Picking the work back up')
+        : (a?.title ??
+          (t
+            ? `After: ${t.title}`
+            : g
+              ? `Plan: ${g.title}`
+              : f.kind === 'first_day'
+                ? 'First day'
+                : `Feedback on ${r?.title ?? 'a report'}`));
   const task = t ? { row: t, files: await taskFiles(t.id) } : undefined;
-  const detail =
-    f.kind === 'carry_out'
-      ? `Carrying out ask #${a?.id}`
-      : f.kind === 'rework'
-        ? `Reworking ask #${a?.id}`
-        : f.kind === 'task_done'
-          ? 'Picking up after your task'
-          : f.kind === 'goal'
-            ? 'Planning your goal'
-            : f.kind === 'first_day'
-              ? 'Getting started'
-              : 'Acting on your feedback';
+  const details: Record<FollowUpKind, string> = {
+    carry_out: `Carrying out ask #${a?.id}`,
+    rework: `Reworking ask #${a?.id}`,
+    denied: `Reading why you said no to ask #${a?.id}`,
+    task_done: 'Picking up after your task',
+    goal: 'Planning your goal',
+    first_day: 'Getting started',
+    feedback: 'Acting on your feedback',
+    hand_off: `Work ${colleague?.name} handed over`,
+    handed_back: `Picking up after ${colleague?.name}`,
+    resume: 'Picking the work back up',
+    edited: 'Learning from your edit'
+  };
+  const detail = details[f.kind];
+  // A colleague handed work on a goal's thread is told the goal in its brief.
+  const goalServed =
+    handed?.kind === 'hand_off' && thread?.goalId ? await findGoal(thread.goalId) : undefined;
   const work = { kind: 'follow-up' as const, label, detail, askId: a?.id };
   const res = await slot(who.id, work, (onEvent) =>
     run(who, label, {
       kind: 'follow-up',
       onEvent,
+      asked:
+        handed?.kind === 'hand_off'
+          ? `${colleague?.name} asked you: ${handed.title}\n\n${handed.brief}`
+          : undefined,
       approvedAsk: f.kind === 'carry_out' ? a?.id : undefined,
+      ownerNote: ownerNoteOf(f),
+      ownerEdit: edit && { path: edit.path, text: edit.shown.now },
+      draftOnly: atDraft(f.kind),
+      lessonRun: servesNoThread(f.kind),
+      handOffId: serves?.id,
+      threadId: thread?.id,
+      shown: f.kind === 'handed_back' ? [f.id, ...joinedIds] : undefined,
       timeoutMs: JOB_TIMEOUT_MS,
       extra: [
         '',
@@ -892,23 +1344,52 @@ export async function followThrough(
         '',
         '{owner} is not in a chat with you.',
         '',
-        ...followUpBrief(f, a, r, task, g),
+        ...(handed && colleague && thread
+          ? handOffBrief({
+              kind: handed.kind,
+              h: handed,
+              colleague,
+              me: who.id,
+              result: f.note,
+              thread: thread.id,
+              goal: goalServed,
+              joined
+            })
+          : edit
+            ? editBrief(edit.path, edit.shown)
+            : [
+                ...followUpBrief(f, a, r, task, g),
+                ...(serves?.handOff && giver && thread
+                  ? handOffContext({
+                      h: serves.handOff,
+                      giver: giver.name,
+                      me: who.id,
+                      thread: thread.id
+                    })
+                  : [])
+              ]),
         '',
         'Then reply with what you did in a few plain lines. End with one line that is exactly one of: "Outcome: done", "Outcome: failed", "Outcome: waiting" (waiting means you put what you need on their desk).',
         ''
       ].join('\n')
     })
   );
-  if (!res.ok) return { outcome: 'failed', text: res.text };
-  const m = /[*_\s]*Outcome:[*_\s]*(done|failed|waiting)\W*$/i.exec(res.text);
+  // The file an edited run read, so the office can tell a save made while it ran.
+  const saw = edit?.saw;
+  if (!res.ok) return { outcome: 'failed', text: res.text, saw, joined: joinedIds };
+  const m = OUTCOME_LINE.exec(res.text);
   if (!m)
     return {
       outcome: 'failed',
-      text: `${res.text}\n\n(${who.name} did not say whether it finished.)`
+      text: `${res.text}\n\n(${who.name} did not say whether it finished.)`,
+      saw,
+      joined: joinedIds
     };
   return {
     outcome: m[1].toLowerCase() as Outcome,
-    text: res.text.slice(0, m.index).trim()
+    text: res.text.slice(0, m.index).trim(),
+    saw,
+    joined: joinedIds
   };
 }
 
@@ -925,12 +1406,21 @@ export async function draft(id: string, message: string): Promise<Run> {
 
 /**
  * A new hire's first minutes. It says hello in its chat, in the session the
- * owner's chats then resume, and then starts its first day's work as a
- * follow-up. Nobody has to ping it to get it moving.
+ * owner's chats then resume. A hire with a job then starts its first day's
+ * work as a follow-up, so nobody has to ping it to get it moving. A hire with
+ * no job starts nothing: one that serves a goal gets its first piece from the
+ * goal's lead, whom approving the hire already woke on the goal's thread, and
+ * any other runs only when it is handed work.
  */
 export async function firstDay(id: string): Promise<void> {
   const who = await staffer(id);
   if (!who) return;
+  // Read from the ledger, after the hire route has added the first job and
+  // linked the goal the hire was proposed for, so the hello and the first day
+  // agree with what the hire really has.
+  const [jobs, serving] = await Promise.all([jobsFor(id), goalsFor(id)]);
+  // Only an active goal: it is the only kind its runs are shown (`whoFor`).
+  const day = firstDayOf({ jobs: jobs.length, goal: serving.find((g) => g.status === 'active') });
   if (!chatting.has(id)) {
     chatting.add(id);
     try {
@@ -945,29 +1435,31 @@ export async function firstDay(id: string): Promise<void> {
               '',
               '- Write as yourself, the way your job description says you work: a few short lines, no headings, no lists.',
               '- Say who you are and what you are here for, in your own words, not your job title.',
-              '- Say what you will do first, and when your jobs run.',
-              '- Tell them you are getting started now. Do not do the work in this reply: the office starts your first day the moment you finish.'
+              ...day.hello
             ].join('\n'),
             {
               kind: 'chat',
-              sessionFile: join(homeOf(id), 'session.json'),
+              sessionFile: chatSession(id),
               timeoutMs: CHAT_TIMEOUT_MS,
               onEvent
             }
           )
       );
-      if (r.ok) sayInChat(id, r.text);
+      // The chat session wrote this hello, so it is not a told line.
+      if (r.ok) addToChat(id, { at: new Date().toISOString(), from: 'staff', text: r.text });
     } finally {
       chatting.delete(id);
     }
   }
-  await startFirstDay(id);
+  if (day.starts) await startFirstDay(id);
 }
 
-/** A line from a staffer in their chat that no run wrote, like a new manager's hello. */
+/**
+ * A line from a staffer in their chat that no run wrote, like a new manager's
+ * hello. The next chat tells the session it said it (`chatPreface`).
+ */
 export function sayInChat(id: string, text: string): void {
-  const line: ChatEntry = { at: new Date().toISOString(), from: 'staff', text };
-  appendFileSync(join(homeOf(id), 'chat.jsonl'), JSON.stringify(line) + '\n');
+  addToChat(id, { at: new Date().toISOString(), from: 'staff', text, told: true });
 }
 
 /** Deliver a due poke: a chat line from the staffer, and a notification on the Mac. */
@@ -976,12 +1468,11 @@ export async function deliverPoke(p: PokeRow): Promise<void> {
   const late = pokeMissed(p.at, new Date(), downtime());
   if (!(await claimPoke(p.id, late)) || late) return;
   const who = await staffer(p.staffId);
-  const line: ChatEntry = {
+  addToChat(p.staffId, {
     at: new Date().toISOString(),
     from: 'staff',
     text: p.message,
     poke: true
-  };
-  appendFileSync(join(homeOf(p.staffId), 'chat.jsonl'), JSON.stringify(line) + '\n');
+  });
   void notifyMac(who?.name ?? 'Oddboro', p.message);
 }

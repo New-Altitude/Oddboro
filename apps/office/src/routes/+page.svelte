@@ -1,31 +1,45 @@
 <script lang="ts">
   import { onMount, tick, untrack } from 'svelte';
   import { invalidateAll } from '$app/navigation';
-  import type { Desk } from '@oddboro/ledger';
+  import type { Desk, GoalThread } from '@oddboro/ledger';
   import { TILE, type World } from '@oddboro/world';
   import { addArt } from '#lib/floor/art.ts';
   import { Floor, sharedAtlas } from '#lib/floor/engine.ts';
   import { loadLook } from '#lib/floor/looks.ts';
-  import { StaffActor } from '#lib/floor/staff.ts';
+  import { StaffActor, type Pop } from '#lib/floor/staff.ts';
   import { bus, hideBuilding, raise, type Beat } from '#lib/floor/reveal.ts';
   import Onboarding, { type Stage } from '#lib/ui/onboarding/Onboarding.svelte';
   import FloorControls, { type Light } from '#lib/ui/FloorControls.svelte';
   import { music, musicEnded, startMusic } from '#lib/ui/music.svelte.ts';
   import { chatAbout } from '#lib/ui/chat-about.svelte.ts';
   import { ACTIVITY_LABEL, type Activity, type StaffProfile } from '#lib/staff/roster.ts';
+  import { threadTag, type HeldThread } from '#lib/staff/thread-tags.ts';
   import StaffCard from '#lib/ui/StaffCard.svelte';
   import { chatRequest, type Delivered } from '#lib/ui/chat-about.svelte.ts';
   import AgentsPanel from '#lib/ui/AgentsPanel.svelte';
   import type { Work } from '#lib/staff/work.ts';
+  import type { LessonEvent, OfficeEvent } from '#lib/server/events.ts';
   import DeskDrawer from '#lib/ui/DeskDrawer.svelte';
+  import { account } from '#lib/ui/account.svelte.ts';
+  import { personaNews } from '#lib/ui/persona-offers.svelte.ts';
+  import { diagnostics } from '#lib/ui/diagnostics.svelte.ts';
   import LedgerPanel from '#lib/ui/LedgerPanel.svelte';
   import GoalsPanel from '#lib/ui/GoalsPanel.svelte';
+  import LessonsLibrary from '#lib/ui/LessonsLibrary.svelte';
   import OfficeDesigner from '#lib/ui/OfficeDesigner.svelte';
   import Welcome from '#lib/ui/Welcome.svelte';
   import HireDrawer from '#lib/ui/HireDrawer.svelte';
   import FileViewer from '#lib/ui/FileViewer.svelte';
   import ReportView from '#lib/ui/ReportView.svelte';
-  import { close, open, openHire, openReport, wins, type Win } from '#lib/ui/windows.svelte.ts';
+  import {
+    close,
+    open,
+    openHire,
+    openLessons,
+    openReport,
+    wins,
+    type Win
+  } from '#lib/ui/windows.svelte.ts';
   import type { AskRow } from '@oddboro/ledger';
   import SidePanel, { RAIL } from '#lib/ui/SidePanel.svelte';
   import { placesFor, type Place } from '#lib/staff/places.ts';
@@ -38,6 +52,14 @@
   // Every time on the page is in the office's zone, which only the server knows.
   // It is fixed for the life of the page: a new zone takes a restart.
   setZone(untrack(() => data.zone));
+  // Whether the office can send reports, and the owner's answer. Answering
+  // updates it from then on.
+  Object.assign(
+    diagnostics,
+    untrack(() => data.diagnostics)
+  );
+  // The New Altitude sign-in. The live line keeps it current from then on.
+  account.status = untrack(() => data.account);
 
   /** `heading` is the room a walking staffer is on its way to. */
   type Tag = {
@@ -89,6 +111,9 @@
   /** Pokes that landed and the owner has not read, counted by staffer. */
   // svelte-ignore state_referenced_locally
   let messages = $state<Record<string, number>>(data.messages);
+  /** Threads a colleague holds for the Odd that leads them. */
+  // svelte-ignore state_referenced_locally
+  let threads = $state<HeldThread[]>(data.threads);
   /** False until the owner finishes the welcome, which the office opens on. */
   // svelte-ignore state_referenced_locally
   let welcomed = $state(data.welcomed);
@@ -116,7 +141,7 @@
   let inProgress = $state<Record<string, Work[]>>({});
   /** A request for the card to open on a tab, from the agents list. */
   let cardShow = $state<{ id: string; tab: 'work'; n: number } | undefined>();
-  /** Bumps when jobs, runs or access change, so the card's tabs reload. */
+  /** Bumps when jobs, runs, access, goals, threads or lessons change, so the card's tabs and the Goals and Lessons windows reload. */
   let version = $state(0);
   /** The start panel is open while it holds windows and the owner has not folded it away. */
   const leftOpen = $derived(wins.shown && wins.list.length > 0);
@@ -135,6 +160,7 @@
     { id: 'agents', label: 'Odds' },
     { id: 'desk', label: 'Desk' },
     { id: 'goals', label: 'Goals' },
+    { id: 'lessons', label: 'Lessons' },
     { id: 'ledger', label: 'Ledger' },
     { id: 'hire', label: 'Hire' },
     { id: 'office', label: 'Office' }
@@ -209,16 +235,36 @@
       ...Object.keys(messages)
     ])
   );
+  /** Each staffer's thread a colleague holds, or holds for its lead, in words. */
+  const threadTags = $derived(
+    Object.fromEntries(
+      staff.map((p) => [
+        p.id,
+        threadTag({
+          id: p.id,
+          threads,
+          working: !!working[p.id],
+          nameOf: (id) => staff.find((s) => s.id === id)?.name ?? id
+        })
+      ])
+    )
+  );
   /** What a staffer is doing, in words: where it is headed, or what it is at. */
   function statusOf(t: Tag): string {
     if (t.heading) return `→ ${t.heading}`;
     if (messages[t.id]) return 'Has a message for you';
     if (waiting.has(t.id)) return 'Waiting on you';
-    return working[t.id] ?? ACTIVITY_LABEL[t.activity];
+    return threadTags[t.id]?.text ?? working[t.id] ?? ACTIVITY_LABEL[t.activity];
   }
   const status = $derived(Object.fromEntries(tags.map((t) => [t.id, statusOf(t)])));
 
-  const deskCount = $derived(desk.asks.length + desk.tasks.length + desk.reports.length);
+  /** The Desk asks about reports once the office is open, until the owner answers. */
+  const askDiagnostics = $derived(
+    diagnostics.possible && diagnostics.answer === 'unasked' && welcomed
+  );
+  const deskCount = $derived(
+    desk.asks.length + desk.tasks.length + desk.reports.length + Number(askDiagnostics)
+  );
 
   /** Rooms a new hire can work in: any with a place to work, read or sort mail. */
   const hireRooms = $derived.by(() => {
@@ -259,8 +305,9 @@
     return (least + Math.random() * (most - least)) * 1000;
   };
 
-  /** Where a walking staffer is headed: the room's name, or home for the way out. */
+  /** Where a walking staffer is headed: a colleague it visits, the room's name, or home for the way out. */
   function headingOf(a: StaffActor): string | undefined {
+    if (a.visiting) return a.visiting.profile.name;
     const to = a.destination;
     if (!to) return undefined;
     if (to.activity === 'home') return 'Home';
@@ -284,6 +331,18 @@
         return a;
     return 'work';
   }
+
+  /**
+   * The mode the office puts a staffer in: outside the owner's door, at its
+   * job, or free. A lead waiting on a colleague stays at its job, so the end
+   * of its run moves nobody.
+   */
+  const wantOf = (p: StaffProfile): Activity | undefined =>
+    waiting.has(p.id)
+      ? 'wait'
+      : working[p.id] || threadTags[p.id]?.waitsOn
+        ? jobActivity(p)
+        : undefined;
 
   const taken = (except?: StaffActor) => {
     const off = new Set(switchedOff);
@@ -355,7 +414,7 @@
       else {
         // The office is opening: everyone is already somewhere, each in a
         // different spot, instead of all walking in from the lobby at once.
-        const want = waiting.has(p.id) ? 'wait' : working[p.id] ? jobActivity(p) : undefined;
+        const want = wantOf(p);
         forced[p.id] = want;
         const free = new Set(w.spots.map((s) => s.activity));
         if (!a.assign(want ?? pickActivity(free, 'home'), w.spots, taken(a)))
@@ -392,6 +451,7 @@
         roomNames: Record<string, string>;
         switchedOff: string[];
         messages: Record<string, number>;
+        threads: HeldThread[];
       }>('/api/office');
       const fresh = [...keys(next.desk)].filter((k) => !seen.has(k));
       if (
@@ -415,6 +475,7 @@
       roomNames = next.roomNames;
       switchedOff = next.switchedOff;
       messages = next.messages;
+      threads = next.threads;
     })());
   }
 
@@ -442,8 +503,11 @@
     deskFocus = focus;
   }
 
-  /** Something a staffer delivered, from its chat: on the desk while it waits, else on its own. */
-  function openDelivered(staffId: string, d: Delivered) {
+  /**
+   * Something a staffer delivered, from its chat: on the desk while it waits,
+   * else a report on its own. False when there is nothing to open.
+   */
+  function openDelivered(staffId: string, d: Delivered): boolean {
     const waiting =
       d.kind === 'ask'
         ? desk.asks.some((a) => a.id === d.id)
@@ -452,15 +516,23 @@
           : desk.reports.some((r) => r.id === d.id);
     if (waiting) void openDesk(`${d.kind}-${d.id}`);
     else if (d.kind === 'report') openReport({ id: d.id, staff: staffId, title: d.title });
+    return waiting || d.kind === 'report';
+  }
+
+  /** A thread from the Goals window: the oldest thing it waits on, else its hub's chat, which shows it as a card. */
+  function openThread(t: GoalThread) {
+    const first = t.waiting[0];
+    if (!(first && openDelivered(t.hubId, first))) select(t.hubId);
   }
 
   /** A section's button: brings its window forward, or folds the panel when it already is. */
-  function toggle(id: 'agents' | 'desk' | 'goals' | 'ledger' | 'hire' | 'office') {
+  function toggle(id: (typeof SECTIONS)[number]['id']) {
     if (leftOpen && front?.kind === id) return hide();
     if (id === 'agents') return open({ id: 'agents', kind: 'agents' });
     if (id === 'desk') return void openDesk();
     if (id === 'ledger') return open({ id: 'ledger', kind: 'ledger' });
     if (id === 'goals') return open({ id: 'goals', kind: 'goals' });
+    if (id === 'lessons') return openLessons();
     if (id === 'office') return open({ id: 'office', kind: 'office' });
     const hire = wins.list.findLast((w) => w.kind === 'hire');
     if (hire) open(hire);
@@ -481,12 +553,16 @@
     if (w.kind === 'desk') return 'Desk';
     if (w.kind === 'ledger') return 'Ledger';
     if (w.kind === 'goals') return 'Goals';
+    if (w.kind === 'lessons') return 'Lessons';
     if (w.kind === 'office') return wins.titles[w.id] ?? 'Office';
     if (w.kind === 'setup') return welcomed ? 'Setup' : 'Welcome';
     if (w.kind === 'file') return w.file.path.split('/').pop() ?? w.file.path;
     if (w.kind === 'report') return w.report.title;
     return wins.titles[w.id] ?? (w.from ? `Hire ${w.from.proposal.name}` : 'New hire');
   }
+
+  /** The icon over an Odd that keeps a lesson, or uses one. */
+  const LESSON_POP: Record<LessonEvent['kind'], Pop> = { kept: 'notebook', used: 'note' };
 
   onMount(() => {
     let disposed = false;
@@ -508,9 +584,11 @@
     // One live line from the server. Changes arrive as they happen.
     const events = new EventSource('/api/events');
     events.onmessage = (m) => {
-      const e = JSON.parse(m.data) as
-        | { type: 'change'; table: string }
-        | { type: 'working'; working: Record<string, string>; inProgress: Record<string, Work[]> };
+      const e = JSON.parse(m.data) as OfficeEvent;
+      if (e.type === 'account') {
+        account.status = e.status;
+        return;
+      }
       if (e.type === 'working') {
         // Every tool call a staffer makes updates its work in progress; only
         // work starting or ending reloads the card's tabs.
@@ -520,14 +598,35 @@
         if (started) version++;
         return;
       }
+      // Whoever handed work on, or did it, walks over to the other and back.
+      if (e.type === 'hand-off') {
+        const to = actors.find((a) => a.profile.id === e.to);
+        if (to) actors.find((a) => a.profile.id === e.from)?.visit(to);
+        return;
+      }
+      if (e.type === 'lesson') {
+        actors.find((a) => a.profile.id === e.staff)?.pop(LESSON_POP[e.kind]);
+        return;
+      }
+      // Only the persona offers hear this: the floor meets a persona Odd, or
+      // sees it go quiet, through the staff table's change, as any hire.
+      if (e.type === 'persona') return void personaNews(e);
       // A move into another layout rebuilds the whole floor.
       // During the first run, and until its last drawn pieces land, the floor
       // already shows the office being moved into.
       if (e.table === 'offices') return firstRun || landing ? void refresh() : location.reload();
       if (
-        ['staff', 'asks', 'tasks', 'reports', 'room_names', 'switched_off', 'pokes'].includes(
-          e.table
-        )
+        [
+          'staff',
+          'asks',
+          'tasks',
+          'reports',
+          'room_names',
+          'switched_off',
+          'pokes',
+          'lessons',
+          'threads'
+        ].includes(e.table)
       )
         refresh();
       if (
@@ -544,7 +643,10 @@
           'pokes',
           'goals',
           'staff_goals',
-          'goal_progress'
+          'goal_progress',
+          'lessons',
+          'lesson_uses',
+          'threads'
         ].includes(e.table)
       )
         version++;
@@ -581,7 +683,8 @@
           tags = actors
             .filter((a) => a.sprite.visible)
             .map((a) => {
-              const p = floor!.toScreen(a.head.x, a.head.y);
+              // A tag rises over an icon playing on the head, and settles once it ends.
+              const p = floor!.toScreen(a.head.x, a.head.y - a.tagLift);
               return {
                 id: a.profile.id,
                 name: a.profile.name,
@@ -603,6 +706,7 @@
 
         floor.onRelease = () => (letGo = true);
         floor.onTap = flip;
+        floor.onShelf = () => openLessons('all');
 
         // Each free staffer's own clock: it starts when the staffer gets
         // somewhere, so nobody gets up at the same moment as everyone else.
@@ -615,14 +719,11 @@
           for (const a of actors) a.update(dt);
           // Real state first: an open ask or task puts a staffer outside
           // the owner's door, and a running job puts it to work in its room.
+          // A staffer visiting a colleague finishes the trip first.
           for (const a of actors) {
             const id = a.profile.id;
-            if (manual[id]) continue;
-            const want: Activity | undefined = waiting.has(id)
-              ? 'wait'
-              : working[id]
-                ? jobActivity(a.profile)
-                : undefined;
+            if (manual[id] || a.onTrip) continue;
+            const want = wantOf(a.profile);
             if (want !== forced[id]) {
               forced[id] = want;
               a.assign(want ?? 'work', w.spots, taken(a));
@@ -631,7 +732,7 @@
           const now = performance.now();
           for (const a of actors) {
             const id = a.profile.id;
-            if (manual[id] || forced[id] || a.moving) {
+            if (manual[id] || forced[id] || a.moving || a.onTrip) {
               delete leaveAt[id];
               continue;
             }
@@ -878,8 +979,10 @@
     }
   });
 
+  // The end of the first run is a change too: the Odds it held back walk on then.
   $effect(() => {
     void staff;
+    void firstRun;
     if (floorReady) void syncActors();
   });
 </script>
@@ -892,7 +995,7 @@
   >
 </svelte:head>
 
-<main class="fixed inset-0 overflow-hidden">
+<main class="fixed inset-0 overflow-clip">
   <div
     bind:this={host}
     class="absolute inset-0 transition-opacity duration-700"
@@ -943,6 +1046,7 @@
     {/each}
     {#each tags as t (t.id)}
       {@const isWaiting = waiting.has(t.id)}
+      {@const words = statusOf(t)}
       <button
         class="tag pointer-events-auto absolute flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] whitespace-nowrap"
         class:active={selected === t.id}
@@ -951,7 +1055,9 @@
         onclick={() => tagClick(t.id)}
       >
         <span class="font-medium text-ink">{t.name}</span>
-        <span class={isWaiting ? 'text-ember' : 'text-muted'}>{statusOf(t)}</span>
+        <span class="max-w-64 truncate {isWaiting ? 'text-ember' : 'text-muted'}" title={words}
+          >{words}</span
+        >
       </button>
     {/each}
   </div>
@@ -1114,6 +1220,7 @@
               {:else if w.kind === 'desk'}
                 <DeskDrawer
                   {desk}
+                  {askDiagnostics}
                   {staff}
                   focus={deskFocus}
                   {notify}
@@ -1123,7 +1230,9 @@
                   onstaff={select}
                 />
               {:else if w.kind === 'goals'}
-                <GoalsPanel {staff} {version} />
+                <GoalsPanel {staff} {version} onthread={openThread} />
+              {:else if w.kind === 'lessons'}
+                <LessonsLibrary {staff} {version} bind:filter={w.filter} />
               {:else if w.kind === 'ledger'}
                 <LedgerPanel {staff} />
               {:else if w.kind === 'setup'}
@@ -1162,7 +1271,7 @@
                 <FileViewer
                   id={w.id}
                   file={w.file}
-                  staffName={staff.find((p) => p.id === w.file.staff)?.name ?? w.file.staff}
+                  nameOf={(id) => staff.find((p) => p.id === id)?.name ?? id}
                 />
               {/if}
             </div>

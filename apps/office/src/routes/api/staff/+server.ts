@@ -3,19 +3,32 @@
 // from a proposed hire approves that ask, gives the hire its copy of the
 // owner's intake, and links it to the goal it was proposed for. The first job
 // comes with the hire, so the new staffer knows it when it says hello in its
-// chat and gets started on its first day (`firstDay`).
+// chat and gets started on its first day (`firstDay`). A hire with no job says
+// hello and then runs only when it is handed work: one serving a goal gets its
+// first piece from the goal's lead, whom approving the hire wakes. The tool it
+// runs on (Runs on) is stored with the row, so its hello and every run after
+// go through it.
 import { error, json } from '@sveltejs/kit';
-import { addJob, ask, decideAsk, hire, serveGoal, type Level } from '@oddboro/ledger';
+import {
+  addJob,
+  agentsOn,
+  approveHire,
+  ask,
+  hire,
+  offeredAgent,
+  type Level
+} from '@oddboro/ledger';
 import { parseSchedule } from '#lib/server/schedule.ts';
 import { firstDay } from '#lib/server/staff.ts';
 import { giveIntake } from '#lib/server/files.ts';
 import { currentOffice } from '#lib/server/space.ts';
 import { drawnFrom, problemsWith } from '#lib/server/looks.ts';
-import { toProfile } from '#lib/staff/roster.ts';
+import { LIMITS, toProfile } from '#lib/staff/roster.ts';
 import type { RequestHandler } from './$types';
 
 type Body = Partial<Record<'name' | 'role' | 'room' | 'permission' | 'remit' | 'desk', string>> & {
   tools?: unknown;
+  agent?: unknown;
   askId?: unknown;
   look?: unknown;
   portraitPx?: unknown;
@@ -26,9 +39,9 @@ type Body = Partial<Record<'name' | 'role' | 'room' | 'permission' | 'remit' | '
 export const POST: RequestHandler = async ({ request }) => {
   const b = (await request.json().catch(() => ({}))) as Body;
   const text = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
-  const name = text(b.name, 40);
-  const role = text(b.role, 60);
-  const remit = text(b.remit, 200);
+  const name = text(b.name, LIMITS.name);
+  const role = text(b.role, LIMITS.role);
+  const remit = text(b.remit, LIMITS.remit);
   const desk = text(b.desk, 20_000);
   const drawn = drawnFrom(b);
   const office = await currentOffice();
@@ -42,6 +55,10 @@ export const POST: RequestHandler = async ({ request }) => {
   if (problems.length) error(400, problems.join('; '));
   if (!rooms.has(room)) error(400, 'Pick a room on the floor');
   if (!permission) error(400, 'Pick read, draft or act');
+  // Left out, the hire runs on the column's default, Claude Code.
+  const agent = b.agent === undefined ? undefined : offeredAgent(b.agent, process.platform);
+  if (b.agent !== undefined && !agent)
+    error(400, `Pick ${agentsOn(process.platform).join(' or ')}`);
   const jobName = text(b.job?.name, 80);
   const jobSteps = text(b.job?.instructions, 8000);
   const jobSchedule = b.job ? parseSchedule(b.job.schedule) : null;
@@ -64,6 +81,7 @@ export const POST: RequestHandler = async ({ request }) => {
       desk,
       room,
       permission,
+      agent,
       sprite: 'staff',
       variant: 'look',
       portrait: 'look',
@@ -83,16 +101,19 @@ export const POST: RequestHandler = async ({ request }) => {
       schedule: jobSchedule,
       report: b.job.report === true
     });
-  if (from) await decideAsk(from.id, 'approve', null);
-  const proposal = from?.hire;
-  // The hire is made: a missing intake or a goal gone since is logged, not a failed hire.
-  if (from && proposal?.intakeFile)
-    await giveIntake(from.staffId, proposal.intakeFile, row.id).catch((e: unknown) =>
+  // The hire is made, so what fails after this is logged, not a failed hire. A
+  // goal gone since leaves the proposal open on the desk: the hire does not serve it.
+  if (from?.hire?.intakeFile)
+    await giveIntake(from.staffId, from.hire.intakeFile, row.id).catch((e: unknown) =>
       console.error(`[hire] intake for ${row.id}: ${e instanceof Error ? e.message : e}`)
     );
-  if (proposal?.goal)
-    await serveGoal(row.id, proposal.goal.id, proposal.goal.part).catch((e: unknown) =>
-      console.error(`[hire] goal for ${row.id}: ${e instanceof Error ? e.message : e}`)
+  // Approved last: the answer wakes the goal's lead to hand the hire its first
+  // piece, so the hire must already hold its intake. Approving links the goal.
+  if (from)
+    await approveHire(from.id, row.id).catch((e: unknown) =>
+      console.error(
+        `[hire] proposal ${from.id} for ${row.id}: ${e instanceof Error ? e.message : e}`
+      )
     );
   // Not awaited: the hire window closes now, and the hello lands in the chat it opens.
   void firstDay(row.id).catch((e: unknown) =>

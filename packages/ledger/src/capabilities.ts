@@ -5,14 +5,8 @@
 // same thing. The one gap is a hosted sign-in that ran out: only the run's
 // fresh token shows it. The run tells its own my_access (SIGNED_OUT), but
 // office_report and the Access tab, read outside any run, cannot know.
-import {
-  grantsFor,
-  levelAtMost,
-  type ConnectorRow,
-  type GrantRow,
-  type StaffRow
-} from './office.ts';
-import type { Level } from './schema.ts';
+import { grantsFor, type ConnectorRow, type GrantRow, type StaffRow } from './office.ts';
+import { LEVELS, levelAtMost, type Level } from './schema.ts';
 import { OFFICE_TOOLS } from './tools.ts';
 
 /**
@@ -52,6 +46,56 @@ export function accessOf(g: GrantRow & { connector: ConnectorRow }, permission: 
       ? undefined
       : 'still connecting';
   return { connector: g.connector, level: g.level, heldBack };
+}
+
+/**
+ * What a run below the Odd's own level can do (a hand-off's, either side, or
+ * a hub's pick-up): its level is `ceiling`, and a grant above it that the run
+ * still loads comes down to read, since a grant is only read or act. A grant
+ * already held back stays as it is. The run's tools, its prompt and its
+ * my_access all read this, so they say the same.
+ */
+export function capped(caps: Capabilities, ceiling: Level): Capabilities {
+  return {
+    ...caps,
+    level: ceiling,
+    outside: caps.outside.map((a) =>
+      a.heldBack || levelAtMost(a.level, ceiling) ? a : { ...a, level: 'read' }
+    )
+  };
+}
+
+/**
+ * What my_access says in one run: the Odd's access as that run holds it. Only
+ * the run knows two things, so the office passes them in its environment: its
+ * ceiling (`CEILING`), set when it is below the Odd's own level, and the
+ * sign-ins that ran out (`SIGNED_OUT`).
+ */
+export function accessInRun(
+  own: Capabilities,
+  owner: string,
+  env: Record<string, string | undefined>
+): string {
+  const ceiling = LEVELS.find((l) => l === env.CEILING);
+  const caps = ceiling ? capped(own, ceiling) : own;
+  const signedOut = (env.SIGNED_OUT ?? '').split(',');
+  const outside = caps.outside.map((a) =>
+    !a.heldBack && signedOut.includes(a.connector.id)
+      ? { ...a, heldBack: 'sign-in ran out' as const }
+      : a
+  );
+  const lines = outsideLines({ ...caps, outside }, owner);
+  return [
+    levelLine(caps.level, owner),
+    ...(ceiling
+      ? [
+          `This run was started by a colleague or by the office, not by ${owner}'s yes, so it works at ${LEVEL_NAME[ceiling]} at most.`
+        ]
+      : []),
+    lines.length
+      ? lines.map((l, i) => `- (id: ${outside[i].connector.id}) ${l}`).join('\n')
+      : `${owner} has connected no outside tools for you yet.`
+  ].join('\n');
 }
 
 /** How many tools a grant reaches, in words: every tool at write, else the read-only ones. */

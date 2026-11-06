@@ -2,12 +2,13 @@
 // Office Manager heard in chat, and the manager plans it: one ask holding the
 // hires and the work staff already here take on. A staffer serves the goals it
 // is linked to, sees only those, and says how each is going.
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from './db.ts';
+import { fixedError } from './errors.ts';
 import {
   addJob,
+  approveAsk,
   ask,
-  decideAsk,
   editOwnJob,
   giveTask,
   ownerName,
@@ -19,10 +20,10 @@ import {
   type StaffRow
 } from './office.ts';
 import {
-  followUps,
   goalProgress,
   goals,
   jobs,
+  staff,
   staffGoals,
   type GoalDraft,
   type GoalHealth,
@@ -31,6 +32,7 @@ import {
 } from './schema.ts';
 import { MANAGER_ROLE, goalReview } from './managers.ts';
 import { HORIZONS } from './goal-words.ts';
+import { addFollowUp, goalThread, goalThreads, type Db, type GoalThread } from './threads.ts';
 
 export type GoalRow = typeof goals.$inferSelect;
 export type ProgressRow = typeof goalProgress.$inferSelect;
@@ -60,8 +62,8 @@ export function goalDraft(v: Partial<Record<keyof GoalDraft, unknown>>): GoalDra
   };
 }
 
-export async function goal(id: number): Promise<GoalRow | undefined> {
-  const [row] = await db.select().from(goals).where(eq(goals.id, id));
+export async function goal(id: number, q: Db = db): Promise<GoalRow | undefined> {
+  const [row] = await q.select().from(goals).where(eq(goals.id, id));
   return row;
 }
 
@@ -96,6 +98,30 @@ export async function allGoals(): Promise<GoalView[]> {
   return views(await db.select().from(goals));
 }
 
+/** A goal as the owner's Goals window shows it, with its threads, newest first. */
+export type GoalWithThreads = GoalView & { threads: GoalThread[] };
+
+/**
+ * The owner's Goals window: every goal with its threads, and other work, the
+ * threads for no goal that are still under way or waiting on the owner, so
+ * all work in flight shows in one place.
+ */
+export type GoalsWindow = { goals: GoalWithThreads[]; other: GoalThread[] };
+
+/**
+ * The Goals window, for the owner only: an Odd's goals (`goalsFor`) leave the
+ * threads out, so its runs never pay for them.
+ */
+export async function goalsWindow(): Promise<GoalsWindow> {
+  const [rows, all] = await Promise.all([allGoals(), goalThreads()]);
+  return {
+    goals: rows.map((g) => ({ ...g, threads: all.filter((t) => t.goalId === g.id) })),
+    other: all.filter(
+      (t) => t.goalId === null && (t.stage === 'under_way' || t.stage === 'waiting_on_you')
+    )
+  };
+}
+
 /** The goals one staffer serves, and only those. */
 export async function goalsFor(staffId: string): Promise<(GoalView & { part: string })[]> {
   const links = await db.select().from(staffGoals).where(eq(staffGoals.staffId, staffId));
@@ -115,9 +141,15 @@ export async function goalsFor(staffId: string): Promise<(GoalView & { part: str
   }));
 }
 
-/** The office's manager, if it has one. */
-export async function manager(): Promise<StaffRow | undefined> {
-  return (await roster()).find((s) => s.role === MANAGER_ROLE);
+/** The office's manager, if it has one. `q` reads it inside a transaction. */
+export async function manager(q: Db = db): Promise<StaffRow | undefined> {
+  const [m] = await q
+    .select()
+    .from(staff)
+    .where(and(eq(staff.role, MANAGER_ROLE), isNull(staff.leftAt)))
+    .orderBy(asc(staff.hiredAt))
+    .limit(1);
+  return m;
 }
 
 /**
@@ -138,7 +170,15 @@ export async function addGoal(d: GoalDraft, askId?: number): Promise<GoalRow> {
   const m = await manager();
   if (m) {
     await ensureReview(m);
-    await db.insert(followUps).values({ staffId: m.id, kind: 'goal', goalId: row.id });
+    // Planned on a thread for the goal, so what the plan raises files under it.
+    await db.transaction(async (tx) =>
+      addFollowUp(tx, {
+        staffId: m.id,
+        kind: 'goal',
+        goalId: row.id,
+        threadId: await goalThread(tx, row.id, m.id)
+      })
+    );
   }
   return row;
 }
@@ -184,21 +224,46 @@ export async function updateGoal(
 }
 
 /** Link a staffer to a goal, with its part in it. A staffer sees only goals it serves. */
-export async function serveGoal(staffId: string, goalId: number, part: string): Promise<void> {
-  const [who, g] = await Promise.all([staffer(staffId), goal(goalId)]);
-  if (!who || !g) throw new Error('No such Odd or goal');
+export async function serveGoal(
+  staffId: string,
+  goalId: number,
+  part: string,
+  q: Db = db
+): Promise<void> {
+  const who = await staffer(staffId, q);
+  const g = await goal(goalId, q);
+  if (!who || !g) throw fixedError('No such Odd or goal');
   const words = part.trim().slice(0, 400);
   if (!words) throw new Error(`Say what ${who.name} does for it`);
-  await db
+  await q
     .insert(staffGoals)
     .values({ staffId, goalId, part: words })
     .onConflictDoUpdate({ target: [staffGoals.staffId, staffGoals.goalId], set: { part: words } });
-  await record({
-    kind: 'decision',
-    actor: 'owner',
-    title: `${who.name} serves the goal: ${g.title}`,
-    body: words
+  await record(
+    {
+      kind: 'decision',
+      actor: 'owner',
+      title: `${who.name} serves the goal: ${g.title}`,
+      body: words
+    },
+    q
+  );
+}
+
+/**
+ * The owner hired from a proposed hire. The hire serves the goal it was
+ * proposed for in the transaction that approves the ask, since the answer
+ * wakes the goal's lead to hand the hire its first piece. If the link fails,
+ * the ask stays open and nobody is woken.
+ */
+export async function approveHire(askId: number, staffId: string): Promise<void> {
+  const approved = await approveAsk(askId, null, {
+    link: async (a, tx) => {
+      if (a.kind !== 'hire') throw new Error('That is not a proposed hire');
+      if (a.hire?.goal) await serveGoal(staffId, a.hire.goal.id, a.hire.goal.part, tx);
+    }
   });
+  if (!approved) throw new Error('That proposal is no longer open');
 }
 
 export async function stopServing(staffId: string, goalId: number): Promise<void> {
@@ -238,9 +303,16 @@ export async function logProgress(
 export async function approveGoal(askId: number, reason: string | null): Promise<GoalRow> {
   const a = await ask(askId);
   if (a?.kind !== 'goal' || !a.goal || a.status !== 'open')
-    throw new Error('That goal is no longer open');
-  await decideAsk(askId, 'approve', reason);
-  return addGoal(a.goal, askId);
+    throw fixedError('That goal is no longer open');
+  const draft = a.goal;
+  let set: GoalRow | undefined;
+  await approveAsk(askId, reason, {
+    carryOut: async () => {
+      set = await addGoal(draft, askId);
+    }
+  });
+  if (!set) throw new Error('That goal is no longer open');
+  return set;
 }
 
 const itemLabel = (i: GoalPlanItem) =>
@@ -248,8 +320,11 @@ const itemLabel = (i: GoalPlanItem) =>
 
 /**
  * A plan ask approved, with the parts the owner ticked. Staff already here take
- * on their part at once. Each hire becomes a hire ask, which the page opens in
- * the hire window, and the owner's own steps a task on their desk.
+ * on their part at once. Each hire becomes a hire ask on the plan's thread,
+ * which the page opens in the hire window, and the owner's own steps a task on
+ * their desk. Only then does the answer bring the plan's Odd back to the goal's
+ * thread to lead the work, so its run finds all of it. Hiring one of the plan's
+ * hires answers its ask, and that brings the Odd back there again.
  */
 export async function approvePlan(
   askId: number,
@@ -258,45 +333,51 @@ export async function approvePlan(
 ): Promise<{ hires: AskRow[] }> {
   const a = await ask(askId);
   if (a?.kind !== 'plan' || !a.plan || a.status !== 'open')
-    throw new Error('That plan is no longer open');
+    throw fixedError('That plan is no longer open');
   const g = await goal(a.plan.goalId);
-  if (!g) throw new Error('The goal this plan is for is gone');
-  const picked = a.plan.items.filter((_, i) => picks.includes(i));
-  if (!picked.length) throw new Error('Tick at least one part of the plan, or deny it');
-  const left = a.plan.items.filter((_, i) => !picks.includes(i));
+  if (!g) throw fixedError('The goal this plan is for is gone');
+  const { plan } = a;
+  const picked = plan.items.filter((_, i) => picks.includes(i));
+  if (!picked.length) throw fixedError('Tick at least one part of the plan, or deny it');
+  const left = plan.items.filter((_, i) => !picks.includes(i));
   const note =
     [reason, left.length && `Left out: ${left.map(itemLabel).join('; ')}.`]
       .filter(Boolean)
       .join('\n') || null;
-  await decideAsk(askId, 'approve', note);
 
   const hires: AskRow[] = [];
-  for (const item of picked) {
-    if (item.kind === 'assign') {
-      await serveGoal(item.staff, g.id, item.part);
-      if (item.job) await addJob({ staffId: item.staff, ...item.job });
-      if (item.editJob)
-        await editOwnJob(
-          item.staff,
-          item.editJob.name,
-          { instructions: item.editJob.instructions, schedule: item.editJob.schedule },
-          { askId }
-        );
-    } else {
-      const { ask: h } = await raiseAsk(a.staffId, {
-        title: `Hire ${item.hire.name}, ${item.hire.role}`,
-        why: `For the goal "${g.title}": ${item.part}`,
-        ifApproved: 'The hire window opens with this filled in. You hire from there.',
-        hire: { ...item.hire, goal: { id: g.id, part: item.part } }
-      });
-      hires.push(h);
+  const approved = await approveAsk(askId, note, {
+    carryOut: async () => {
+      for (const item of picked) {
+        if (item.kind === 'assign') {
+          await serveGoal(item.staff, g.id, item.part);
+          if (item.job) await addJob({ staffId: item.staff, ...item.job });
+          if (item.editJob)
+            await editOwnJob(
+              item.staff,
+              item.editJob.name,
+              { instructions: item.editJob.instructions, schedule: item.editJob.schedule },
+              { askId }
+            );
+        } else {
+          const { ask: h } = await raiseAsk(a.staffId, {
+            title: `Hire ${item.hire.name}, ${item.hire.role}`,
+            why: `For the goal "${g.title}": ${item.part}`,
+            ifApproved: 'The hire window opens with this filled in. You hire from there.',
+            hire: { ...item.hire, goal: { id: g.id, part: item.part } },
+            threadId: a.threadId ?? undefined
+          });
+          hires.push(h);
+        }
+      }
+      if (plan.ownerSteps?.length)
+        await giveTask(a.staffId, {
+          title: `For "${g.title}": yours to do`,
+          why: 'The part of the plan only you can do.',
+          steps: plan.ownerSteps
+        });
     }
-  }
-  if (a.plan.ownerSteps?.length)
-    await giveTask(a.staffId, {
-      title: `For "${g.title}": yours to do`,
-      why: 'The part of the plan only you can do.',
-      steps: a.plan.ownerSteps
-    });
+  });
+  if (!approved) throw new Error('That plan is no longer open');
   return { hires };
 }

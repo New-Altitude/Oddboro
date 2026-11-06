@@ -10,5 +10,5 @@ out/
 .env*
 !.env.example
 
-# People and family data. Stays on this Mac. See docs/hard-rules.md rule 9.
+# People and family data. Never tracked. See docs/hard-rules.md rule 9.
 data/

@@ -92,6 +92,11 @@ export function wallClock(t: Date) {
   };
 }
 
+/** "2026-11-03": the office's calendar day at an instant, not the UTC one. */
+export function officeDay(t: Date): string {
+  return t.toLocaleDateString('en-CA', { timeZone: zone() });
+}
+
 /** The instant an office wall-clock time names. */
 export function instant(y: number, m: number, d: number, h: number, min: number): Date {
   const guess = Date.UTC(y, m - 1, d, h, min);

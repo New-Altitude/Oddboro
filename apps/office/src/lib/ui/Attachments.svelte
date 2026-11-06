@@ -1,10 +1,12 @@
 <script lang="ts">
   import type { AttachmentRow } from '@oddboro/ledger';
   import FileEditor from './FileEditor.svelte';
-  import { openFile } from './windows.svelte.ts';
+  import { offers } from './viewer.ts';
+  import { openFile, type FileRef } from './windows.svelte.ts';
 
   // The files a staffer attached to an ask or a task. A Markdown one opens in
-  // the editor right here; anything else opens in its own window.
+  // the editor right here; anything else opens in its own window. One from a
+  // thread's folder shows by its bare name and opens to read only (`offers`).
   type Props = {
     items: AttachmentRow[];
     /** Where a Markdown file starts: Edit when the owner has to fill it in. */
@@ -13,9 +15,10 @@
   };
   let { items, start = 'view', ondirty }: Props = $props();
 
+  const ref = (f: AttachmentRow): FileRef => ({ staff: f.staffId, path: f.path });
   // svelte-ignore state_referenced_locally: each file starts in this mode, then the owner switches it
   let mode = $state<Record<number, 'view' | 'edit'>>(
-    Object.fromEntries(items.map((f) => [f.id, start]))
+    Object.fromEntries(items.map((f) => [f.id, offers(ref(f)).edit ? start : 'view']))
   );
   let dirty = $state<Record<number, boolean>>({});
   $effect(() => ondirty?.(Object.values(dirty).some(Boolean)));
@@ -34,9 +37,9 @@
         <div class="flex items-center gap-2">
           <div class="min-w-0 flex-1">
             <div class="truncate text-sm font-medium">{name(f)}</div>
-            <div class="truncate text-[11px] text-faint">{kind(f)} · {f.path}</div>
+            <div class="truncate text-[11px] text-faint">{kind(f)} · {offers(ref(f)).shown}</div>
           </div>
-          {#if isMarkdown(f)}
+          {#if isMarkdown(f) && offers(ref(f)).edit}
             <div
               class="flex gap-0.5 rounded-full bg-night/60 p-0.5"
               role="group"
@@ -56,14 +59,13 @@
           <button
             class="rounded-lg px-2 py-1 text-xs text-muted hover:text-ink"
             title="Open it in its own window"
-            onclick={() => openFile({ staff: f.staffId, path: f.path })}
-            >{isMarkdown(f) ? 'Pop out' : 'Open'}</button
+            onclick={() => openFile(ref(f))}>{isMarkdown(f) ? 'Pop out' : 'Open'}</button
           >
         </div>
         {#if isMarkdown(f)}
           <div class="mt-2">
             <FileEditor
-              file={{ staff: f.staffId, path: f.path }}
+              file={ref(f)}
               bind:mode={mode[f.id]}
               inline
               ondirty={(d) => (dirty[f.id] = d)}
