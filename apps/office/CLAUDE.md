@@ -607,8 +607,10 @@ the app ships them whole (`apps/desktop/scripts/stage.ts`). In the app
    gets a fresh access token as a header. When a tool an Odd holds stops working, it calls
    `reconnect_access` (every Odd has it): the office puts its own connect
    steps on the desk again (`reconnectTask`), after the Odd's steps for
-   getting a new key, with no ask, one open per tool. Odds never write
-   connect steps by hand.
+   getting a new key, with no ask, one open per tool. The key steps go only
+   on a tool that takes a key: a sign-in tool's task has no key box, so the
+   office leaves them out and tells the Odd. Odds never write connect steps
+   by hand.
 10. Every run records its tokens per model and the owner's plan windows (5 hours
     and weekly), read from Claude Code's own stream. A run often reports only
     one window, so each is kept as it last came (`notePlan`). The card's back shows

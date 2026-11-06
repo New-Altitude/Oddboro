@@ -121,7 +121,7 @@ When an Odd looks for a tool it does not have, the office searches its own catal
 
 ### Other tools you connect
 
-An Odd may ask for a hosted tool (a service reached over the network). You approve or deny every connection, and you sign in to the service yourself. The office keeps the sign-in tokens in your system's secret store and refreshes them before each run. Data the Odd reads from or writes to that service goes to that service under its own terms. Each Odd gets only the access you give it: a tool connects read only, or with write while the Odd holds the Act level. A write-level grant to one Odd for one tool is your standing permission for that Odd to use that tool without asking each time. You can lower the Odd's level, which pauses the grant, or revoke the grant from the Odd's Access tab at any time.
+An Odd may ask for a hosted tool (a service reached over the network). You approve or deny every connection, and you sign in to the service yourself. The office keeps the sign-in tokens in your system's secret store and refreshes them before each run. Data the Odd reads from or writes to that service goes to that service under its own terms. Each Odd gets only the access you give it: a tool connects read only, or with write while the Odd holds the Act level. A write-level grant to one Odd for one tool is your standing permission for that Odd to use that tool without asking each time. You can lower the Odd's level, which pauses the grant, or revoke the grant from the Odd's Settings, under Services, at any time.
 
 ## 6. Data retention and deletion
 

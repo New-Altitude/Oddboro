@@ -72,7 +72,7 @@ export async function hostedSignIn(id: string): Promise<{ url?: string }> {
       // Neither a sign-in nor an open door: most likely it takes a key.
       const why = signInError instanceof Error ? signInError.message : String(signInError);
       throw new Error(
-        `This server did not offer a sign-in${why ? ` (${why})` : ''}. If its setup guide gives you a key instead, open the Odd's Access tab, click Add access, paste the server's address, and pick Takes a key.`
+        `This server did not offer a sign-in${why ? ` (${why})` : ''}. If its setup guide gives you a key instead, open the Odd's Settings, then Services, click + Add service, paste the server's address, and pick Takes a key.`
       );
     }
     const c = await connector(id);

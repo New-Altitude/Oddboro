@@ -695,7 +695,7 @@ if (has('ask_for_access'))
 tool(
   'reconnect_access',
   {
-    description: `A tool ${OWNER} already gave you stopped working: its tools fail to load, or it turns down its key or sign-in. This puts the office's own steps to connect it again on ${OWNER}'s desk, with a box for the new key and a Connect button, and no ask, since they said yes once. Never write those steps yourself with give_owner_a_task. Pass get_key only when the tool takes a key: how to get a new one, one action per step, naming the exact page and button.`,
+    description: `A tool ${OWNER} already gave you stopped working: its tools fail to load, or it turns down its key or sign-in. This puts the office's own steps to connect it again on ${OWNER}'s desk, with a box for the new key or a Sign in button, then a Connect button, and no ask, since they said yes once. Never write those steps yourself with give_owner_a_task. Pass get_key only when the tool takes a key: how to get a new one, one action per step, naming the exact page and button.`,
     inputSchema: {
       connector: z.string().describe('The id my_access lists.'),
       problem: z
@@ -714,10 +714,12 @@ tool(
   async ({ connector: id, problem, get_key = [] }) => {
     const r = await reconnectTask(ME, id, problem, get_key);
     if ('problem' in r) return text(r.problem);
+    if (r.already)
+      return text(
+        `Task ${r.task.id} to connect it is already on ${OWNER}'s desk. Point them to it.`
+      );
     return text(
-      r.already
-        ? `Task ${r.task.id} to connect it is already on ${OWNER}'s desk. Point them to it.`
-        : `Task ${r.task.id} is on ${OWNER}'s desk. You hear when they finish it.`
+      `Task ${r.task.id} is on ${OWNER}'s desk. You hear when they finish it.${r.keptOut ? ` ${id} takes no key, so your get_key steps were left out. Never tell ${OWNER} to paste a key for it.` : ''}`
     );
   }
 );

@@ -1284,13 +1284,16 @@ export async function grantAccess(
  * A tool the owner already gave a staffer stopped working: its connect steps go
  * on the desk again, after the staffer's own steps for getting a new key. There
  * is no ask, since the owner said yes once. A tool has one open reconnect at a time.
+ * Only a tool that takes a key has a box for one, so the staffer's key steps
+ * go only on its task. For a tool that signs in, or needs nothing, they would
+ * send the owner looking for a box that is not there (`keptOut` says so).
  */
 export async function reconnectTask(
   staffId: string,
   connectorId: string,
   problem: string,
   getKey: string[]
-): Promise<{ task: TaskRow; already: boolean } | { problem: string }> {
+): Promise<{ task: TaskRow; already: boolean; keptOut: boolean } | { problem: string }> {
   const who = await staffer(staffId);
   const conn = await connector(connectorId);
   if (!who || !conn) return { problem: `No connector named ${connectorId}.` };
@@ -1306,14 +1309,15 @@ export async function reconnectTask(
   const waiting = open.find((t) =>
     t.steps.some((st) => st.action && 'connector' in st.action && st.action.connector === conn.id)
   );
-  if (waiting) return { task: waiting, already: true };
+  if (waiting) return { task: waiting, already: true, keptOut: false };
+  const takesKey = secretNames(conn).some((n) => n !== 'oauth');
   const steps = connectSteps(conn, true);
   const task = await giveTask(staffId, {
     title: `Reconnect ${conn.name} for ${who.name}`,
     why: problem,
-    steps: [...getKey, ...steps]
+    steps: [...(takesKey ? getKey : []), ...steps]
   });
-  return { task, already: false };
+  return { task, already: false, keptOut: !takesKey && getKey.length > 0 };
 }
 
 /** The steps that connect a tool. `again` gives them even when it looks connected. */

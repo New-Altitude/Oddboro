@@ -49,7 +49,7 @@ access its job needs, and every claim rests on the office's real rules:
 | An Odd asks, the owner approves and connects it                       | `grantAccess` and the 2026-10-30 access ruling                            |
 | A tool connects read only, or with write only while the Odd is act    | `grantAccess` refuses a grant above the level; `access()` in `staff.ts`   |
 | A lowered level makes a grant above it wait                           | `access()` skips it; `setPermission`'s comment                            |
-| A write grant uses that one tool without asking; the owner revokes it | `revoke` in `office.ts`; the Access tab in `apps/office`                  |
+| A write grant uses that one tool without asking; the owner revokes it | `revoke` in `office.ts`; the Odd's Settings › Services in `apps/office`   |
 | An Odd pokes the owner in chat at a time it sets                      | `poke_owner` in `packages/ledger/src/mcp.ts`                              |
 | Every Odd reads the people list, which stays on the owner's computer  | `readable` in `staff.ts`; hard rule 9                                     |
 
@@ -223,7 +223,7 @@ its own composition; none is a row of identical cards.
 | `hire`         | `Hire`       | "Hire an Odd for ..." as a list you pick from, and the pick as a job card        |
 | `how-it-works` | `HowItWorks` | Six floor states as vignettes cut from a real office, Odd in                     |
 | `managers`     | `Managers`   | Character cards with portraits, a walk on hover, pick one; describe your own     |
-| `access`       | `Access`     | Least access: an Odd's Access tab as a working mock, level and tool grants       |
+| `access`       | `Access`     | Least access: an Odd's Settings as a working mock, level and tool grants         |
 | `goals`        | `Goals`      | A sample goal beside its three-step plan, the line drawing in on scroll          |
 | `on-your-mac`  | `OnYourMac`  | A map of where the data lives: the computer in the middle, edges on dashed lines |
 | `open-source`  | `OpenSource` | The license as a terminal block, the GitHub link, the music note                 |
