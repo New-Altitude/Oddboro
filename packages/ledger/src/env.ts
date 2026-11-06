@@ -5,6 +5,7 @@
 // the app's own folder is signed and every update replaces it.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { parseEnv } from 'node:util';
 import { home, IN_APP } from './home.ts';
 
 // The app's shell finds this file the same way, in apps/desktop/src-tauri/src/diagnostics.rs.
@@ -12,28 +13,30 @@ export const ENV_FILE =
   process.env.ODDBORO_ENV ??
   (IN_APP ? home('.env') : fileURLToPath(new URL('../../../.env', import.meta.url)));
 
-export function readEnv(file = ENV_FILE): Record<string, string> {
-  if (!existsSync(file)) return {};
-  return Object.fromEntries(
-    readFileSync(file, 'utf8')
-      .split('\n')
-      .map((l) => /^([A-Z_][A-Z0-9_]*)=(.*)$/.exec(l.trim()))
-      .filter((m): m is RegExpExecArray => !!m)
-      .map((m) => [m[1], m[2]])
-  );
+/**
+ * The file's keys as Node's own parser reads them, the one db.ts loads with
+ * (`process.loadEnvFile`), so quotes, `export` and a trailing comment come off
+ * the same way in both.
+ */
+export function readEnv(file = ENV_FILE): NodeJS.Dict<string> {
+  return existsSync(file) ? parseEnv(readFileSync(file, 'utf8')) : {};
 }
 
-/** Set keys in .env. An empty value removes the key. */
+/**
+ * Set keys in .env. An empty value removes the key. A key's lines are found
+ * the way readEnv reads them, an `export` line and spaces included. readEnv
+ * takes a key's last line, so a set rewrites the first and drops the rest, and
+ * a clear drops them all: a reset leaves no line readEnv would still read.
+ */
 export function writeEnv(updates: Record<string, string>, file = ENV_FILE): void {
-  const lines = existsSync(file)
+  let lines = existsSync(file)
     ? readFileSync(file, 'utf8').replace(/\n$/, '').split('\n')
     : ['# Written by the office. Keep it out of git.'];
   for (const [k, v] of Object.entries(updates)) {
-    const at = lines.findIndex((l) => l.startsWith(`${k}=`));
-    if (!v) {
-      if (at >= 0) lines.splice(at, 1);
-    } else if (at >= 0) lines[at] = `${k}=${v}`;
-    else lines.push(`${k}=${v}`);
+    const line = new RegExp(`^\\s*(?:export +)?${k}\\s*=`);
+    const at = lines.findIndex((l) => line.test(l));
+    lines = lines.flatMap((l, i) => (i === at && v ? [`${k}=${v}`] : line.test(l) ? [] : [l]));
+    if (at < 0 && v) lines.push(`${k}=${v}`);
   }
   writeFileSync(file, `${lines.join('\n')}\n`, { mode: 0o600 });
 }

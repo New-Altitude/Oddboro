@@ -3,7 +3,7 @@
   import { BarChart } from 'layerchart';
   import type { UsageBucket, UsageTotals } from '@oddboro/ledger';
   import { call } from './api.ts';
-  import { ago, when } from './format.ts';
+  import { ago, compact, when } from './format.ts';
 
   type Plan = {
     fiveHour: number;
@@ -36,7 +36,6 @@
     { id: 'd30', label: '30d' }
   ] as const;
 
-  const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 });
   /** The bucket label: an hour for the day view, a day for the others. */
   const bucketLabel = (ms: number, r: typeof range) =>
     r === 'd1'

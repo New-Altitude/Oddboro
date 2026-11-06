@@ -19,12 +19,15 @@ import type { ArtKind, Place } from '@oddboro/sprites/art';
 import type { LookSpec, PartKind } from '@oddboro/sprites/look';
 import type { FloorPlan, OfficeSpec, RoomKind, RoomTemplate } from '@oddboro/world';
 import { STARTER_TOOLS } from './tools.ts';
+import type { Agent } from './agents.ts';
 
 const at = (name: string) => timestamp(name, { withTimezone: true });
 const created = (name = 'created_at') => at(name).notNull().defaultNow();
 const id = () => integer().primaryKey().generatedAlwaysAsIdentity();
 
 export type Level = 'read' | 'draft' | 'act';
+export const LEVELS: readonly Level[] = ['read', 'draft', 'act'];
+export const levelAtMost = (a: Level, b: Level) => LEVELS.indexOf(a) <= LEVELS.indexOf(b);
 
 export const staff = pgTable('staff', {
   id: text().primaryKey(),
@@ -37,6 +40,8 @@ export const staff = pgTable('staff', {
   /** The room template it works in. */
   room: text().notNull().default('workspace'),
   permission: text().$type<Level>().notNull().default('read'),
+  /** The coding tool its runs go through. The owner picks it at hire and on the Access tab. */
+  agent: text().$type<Agent>().notNull().default('claude'),
   /** The office tools the owner granted, beyond the ones every staffer has. See tools.ts. */
   tools: text().array().notNull().default(STARTER_TOOLS),
   /** One sentence on what it is for, shown on the card. */
@@ -55,8 +60,13 @@ export const staff = pgTable('staff', {
 /**
  * `goal` proposes a goal the manager heard in chat; approving sets it. `plan`
  * is how the office meets one goal: hires and work for staff already here.
+ * `hand_offs` is the office's ask when a hand-off would pass a round's limit
+ * (threads.ts): a yes starts another round, and a no stops the thread. `window` is the
+ * office's one ask when the plan's 5-hour window passes its guard
+ * (usage-window.ts): a yes lets hand-offs run until it resets, and a no holds
+ * them until then.
  */
-export type AskKind = 'approval' | 'access' | 'hire' | 'goal' | 'plan';
+export type AskKind = 'approval' | 'access' | 'hire' | 'goal' | 'plan' | 'hand_offs' | 'window';
 /** `revise` means the owner sent it back to be reworked. */
 export type AskStatus = 'open' | 'approved' | 'denied' | 'revise';
 /** What an access ask wants: a connector and a level. */
@@ -189,6 +199,12 @@ export const asks = pgTable('asks', {
   plan: jsonb().$type<GoalPlan>(),
   /** The ask this one reworks, after the owner sent that one back. */
   revises: integer(),
+  /** The hand-off (its `hand_off` follow-up) the staffer raised this while working on. */
+  handOffId: integer(),
+  /** The thread the staffer raised this on: the owner's answer moves it on. */
+  threadId: integer(),
+  /** On a `hand_offs` ask, the hand-off past the limit it held: the owner's yes starts it. */
+  held: jsonb().$type<HeldHandOff>(),
   status: text().$type<AskStatus>().notNull().default('open'),
   reason: text(),
   createdAt: created(),
@@ -220,6 +236,10 @@ export const tasks = pgTable('tasks', {
   /** The staffer that gave the owner this task, if any. */
   staffId: text().references(() => staff.id),
   askId: integer().references(() => asks.id),
+  /** The hand-off (its `hand_off` follow-up) the staffer gave this while working on. */
+  handOffId: integer(),
+  /** The thread the staffer gave this on: the owner's answer moves it on. */
+  threadId: integer(),
   title: text().notNull(),
   why: text().notNull(),
   steps: jsonb().$type<Step[]>().notNull(),
@@ -241,9 +261,10 @@ export const reports = pgTable('reports', {
 });
 
 /**
- * A file a staffer hands the owner with an ask or a task: a path inside the
- * staffer's own folder. The desk lists them, and a Markdown one opens in the
- * editor right there.
+ * A file a staffer hands the owner with an ask or a task: one in the
+ * staffer's own folder, or one in the folder of a thread it is on. The desk
+ * lists them. A Markdown one from its own folder opens in the editor right
+ * there; one from a thread's folder opens to read only.
  */
 export const attachments = pgTable(
   'attachments',
@@ -252,7 +273,11 @@ export const attachments = pgTable(
     staffId: text()
       .notNull()
       .references(() => staff.id),
-    /** Relative to the staffer's folder, e.g. notes/intake.md. */
+    /**
+     * Relative to the staffer's folder, e.g. notes/intake.md, or for a file in
+     * a thread's folder, from the office's folder, e.g. threads/12/paige/index.html
+     * (`workPath`), which `workFile` finds while the staffer is on that thread.
+     */
     path: text().notNull(),
     mediaType: text().notNull(),
     taskId: integer().references(() => tasks.id),
@@ -286,6 +311,65 @@ export const pokes = pgTable('pokes', {
   createdAt: created(),
   sentAt: at('sent_at')
 });
+
+/**
+ * `said` when the owner's own words this run carried state it; `inferred` when the
+ * Odd read it into a one-off correction. Only a said lesson goes live by itself.
+ */
+export type LessonHow = 'said' | 'inferred';
+/**
+ * `waiting` for the owner's Keep (an inferred lesson), `live` in every run,
+ * `undone` by the owner, `replaced` by a newer lesson on the same point.
+ */
+export type LessonStatus = 'waiting' | 'live' | 'undone' | 'replaced';
+
+/**
+ * Something the owner said or fixed once, which an Odd acts on from then on.
+ * A null `staffId` is a lesson for every Odd; `heardBy` is the Odd that caught it.
+ */
+export const lessons = pgTable(
+  'lessons',
+  {
+    id: id(),
+    staffId: text().references(() => staff.id),
+    heardBy: text()
+      .notNull()
+      .references(() => staff.id),
+    /** The lesson, one plain sentence. */
+    text: text().notNull(),
+    /** The owner's words it came from. */
+    quote: text().notNull(),
+    /** Where it applies, in a few plain words ("reports", "family plans"); null is everywhere. */
+    appliesTo: text(),
+    how: text().$type<LessonHow>().notNull(),
+    status: text().$type<LessonStatus>().notNull(),
+    /** The older lesson this one replaced. */
+    replaces: integer(),
+    /** Times the owner had to give this correction again after a lesson covered it. */
+    missed: integer().notNull().default(0),
+    createdAt: created()
+  },
+  (t) => [index('lessons_by_staff').on(t.staffId, t.status)]
+);
+
+/**
+ * Runs where a lesson changed an Odd's work, as that Odd told the office. Kept
+ * per Odd, so each Odd cites a lesson for every Odd its own first few times.
+ */
+export const lessonUses = pgTable(
+  'lesson_uses',
+  {
+    staffId: text()
+      .notNull()
+      .references(() => staff.id),
+    lessonId: integer()
+      .notNull()
+      .references(() => lessons.id),
+    uses: integer().notNull().default(0),
+    lastUsedAt: at('last_used_at')
+  },
+  (t) => [primaryKey({ columns: [t.staffId, t.lessonId] })]
+);
 
 export type LedgerKind = 'decision' | 'work' | 'report' | 'hire' | 'access';
 
@@ -390,14 +474,110 @@ export const jobs = pgTable('jobs', {
 });
 
 /**
- * Work a staffer owes after the owner answers it: carry out an approved ask, rework
- * one the owner sent back, act on their feedback on a report, pick up the work
- * that waited on a task the staffer gave them, or plan a goal the owner set. A
- * new hire's `first_day` gets it started without being asked.
+ * `open` until it ends, and the three ways it ends: the hub's last run said
+ * done or failed, or the owner said no to more hand-offs (`stopped`). A done
+ * or failed one opens again when its hub continues it. Whether an open one
+ * waits on the owner is read from their desk (`stageOf` in threads.ts).
  */
-export type FollowUpKind = 'carry_out' | 'rework' | 'feedback' | 'task_done' | 'goal' | 'first_day';
+export type ThreadStatus = 'open' | 'done' | 'failed' | 'stopped';
+
+/**
+ * One piece of work an Odd chains through colleagues (threads.ts). Its first
+ * `hand_off` opens it, with that Odd as the hub; only the hub's runs hand off
+ * again, so it stays hub and spoke, and threads never nest.
+ */
+export const threads = pgTable('threads', {
+  id: id(),
+  /** What the work is for: the request, with any later steps or conditions. Every hub run on it sees this. */
+  title: text().notNull(),
+  goalId: integer().references(() => goals.id),
+  hubId: text()
+    .notNull()
+    .references(() => staff.id),
+  /** Who has it now. */
+  holderId: text()
+    .notNull()
+    .references(() => staff.id),
+  status: text().$type<ThreadStatus>().notNull().default('open'),
+  /** In this round of work, up to `HAND_OFF_LIMIT` (threads.ts). Every round's are its `hand_off` follow-ups. */
+  handOffsUsed: integer().notNull().default(0),
+  /** When the hub picks it back up, set by the hub. The office clock wakes it. */
+  resumeAt: at('resume_at'),
+  /**
+   * The `window` ask that holds this thread's hand-offs (usage-window.ts). Its
+   * `resumeAt` is then the window's reset, and the owner's yes wakes it sooner.
+   */
+  heldBy: integer().references(() => asks.id),
+  /**
+   * The key of each run that put work here from outside the thread: a hand-off,
+   * held or not, or a goal's plan (`keepRun` in threads.ts).
+   * While one of them goes (`runsGoing` in office.ts), the hub's pick-ups here
+   * wait, so the hub runs once at a time on its thread.
+   */
+  runs: text().array().notNull().default([]),
+  createdAt: created(),
+  endedAt: at('ended_at')
+});
+
+/**
+ * Work a staffer owes after the owner answers it: carry out an approved ask, rework
+ * one the owner sent back, take in the reason for a no, act on their feedback on a report, pick up the work
+ * that waited on a task the staffer gave them, or plan a goal the owner set. A
+ * new hire with a job gets started without being asked by its `first_day`. A `hand_off` is
+ * work a colleague handed it, and `handed_back` brings the result home. A
+ * `resume` picks a thread back up for its hub: at the time the hub set, or with
+ * the owner's answer when no other run follows it. An `edited` run reads the
+ * owner's edit to one of the staffer's files, for a lesson.
+ */
+export type FollowUpKind =
+  | 'carry_out'
+  | 'rework'
+  | 'denied'
+  | 'feedback'
+  | 'task_done'
+  | 'goal'
+  | 'first_day'
+  | 'hand_off'
+  | 'handed_back'
+  | 'resume'
+  | 'edited';
 /** `waiting` means the staffer put what it needs on the owner's desk. */
 export type Outcome = 'done' | 'failed' | 'waiting';
+
+/**
+ * Work one staffer handed another (hand-offs.ts). On a `hand_off` row, `from`
+ * is the staffer that handed it. On the `handed_back` row that brings the
+ * result home, `from` is the colleague that did it, with how it ended, and
+ * `id` is the `hand_off` row it answers. A hand-off that waited on the owner
+ * comes home again once they answer; `answered` marks a hand-back whose text
+ * is the owner's answer itself, since no run followed it.
+ */
+export type HandOff = {
+  from: string;
+  title: string;
+  brief: string;
+  /** Tools others on the thread have and the colleague lacks (sharing.ts). */
+  withheld?: string[];
+  /** The colleague's own tools that someone else on the thread lacks: it must not write their contents there. */
+  kept?: string[];
+  outcome?: Outcome;
+  id?: number;
+  answered?: boolean;
+};
+
+/**
+ * A hand-off held for the owner's yes: only what the lead chose, the work and
+ * the colleague it goes to. What it carries is worked out at the yes
+ * (`sharing`), since access can change while the ask waits.
+ */
+export type HeldHandOff = Pick<HandOff, 'from' | 'title' | 'brief'> & { to: string };
+
+/**
+ * The owner saved an edit to a staffer's file: its path inside the staffer's
+ * folder, and the file as it was just before that save. The `edited` run reads
+ * the file as it is when the run starts.
+ */
+export type FileEdit = { path: string; before: string };
 
 export const followUps = pgTable('follow_ups', {
   id: id(),
@@ -410,6 +590,12 @@ export const followUps = pgTable('follow_ups', {
   taskId: integer().references(() => tasks.id),
   /** A new goal for the Office Manager to plan. */
   goalId: integer().references(() => goals.id),
+  /** Work a colleague handed this staffer, or the result of work it handed one. */
+  handOff: jsonb().$type<HandOff>(),
+  /** The thread this run works on, either side (threads.ts). */
+  threadId: integer().references(() => threads.id),
+  /** On an `edited` follow-up, the file the owner edited. */
+  edit: jsonb().$type<FileEdit>(),
   /** The owner's words: their reason, what to change, their feedback, or their note on a task. */
   note: text(),
   /** The owner ticked "Report when done": success goes on their desk too. A failure always does. */
@@ -471,6 +657,10 @@ export const usage = pgTable(
     outputTokens: integer().notNull().default(0),
     cacheReadTokens: integer().notNull().default(0),
     cacheWriteTokens: integer().notNull().default(0),
+    /** Every token the row counts, its one sum, which a staffer's usage (`usageFor`) adds up. */
+    tokens: integer().generatedAlwaysAs(
+      sql`input_tokens + output_tokens + cache_read_tokens + cache_write_tokens`
+    ),
     /** What the run would cost at API list prices. The owner's plan does not bill it. */
     costUsd: doublePrecision().notNull().default(0),
     createdAt: created()

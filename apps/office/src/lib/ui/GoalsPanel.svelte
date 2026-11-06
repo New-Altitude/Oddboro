@@ -1,5 +1,13 @@
 <script lang="ts">
-  import type { GoalHorizon, GoalStatus, GoalView } from '@oddboro/ledger';
+  import type {
+    GoalHorizon,
+    GoalStatus,
+    GoalsWindow,
+    GoalThread,
+    GoalView,
+    GoalWithThreads,
+    ThreadStage
+  } from '@oddboro/ledger';
   import {
     GOAL_AREAS,
     goalWhen,
@@ -8,16 +16,20 @@
     STATUS_WORDS
   } from '@oddboro/ledger/goals';
   import { call } from './api.ts';
-  import { ago } from './format.ts';
+  import { ago, workLine } from './format.ts';
   import type { StaffProfile } from '../staff/roster.ts';
 
   // The owner's goals: what they want more of. Setting one sends the Office
   // Manager off to plan it; the plan comes back to the desk. Each goal shows who
-  // serves it and how it is going, and the owner can give it to more staff.
-  type Props = { staff: StaffProfile[]; version: number };
-  let { staff, version }: Props = $props();
+  // serves it, its threads and how it is going, and the owner can give it to
+  // more staff. Other work, under the goals, is every thread for no goal still
+  // in flight, so all of it shows here. `onthread` opens a thread, as the page
+  // does from anywhere.
+  type Props = { staff: StaffProfile[]; version: number; onthread: (t: GoalThread) => void };
+  let { staff, version, onthread }: Props = $props();
 
-  let goals = $state<GoalView[]>([]);
+  let goals = $state<GoalWithThreads[]>([]);
+  let other = $state<GoalThread[]>([]);
   let loaded = $state(false);
   let problem = $state('');
   let busy = $state(false);
@@ -54,14 +66,16 @@
       .filter((a) => a.list.length)
   );
 
+  async function load() {
+    const r = await call<GoalsWindow>('/api/goals');
+    goals = r.goals;
+    other = r.other;
+    loaded = true;
+  }
+
   $effect(() => {
     void version;
-    call<GoalView[]>('/api/goals')
-      .then((r) => {
-        goals = r;
-        loaded = true;
-      })
-      .catch((e: unknown) => (problem = e instanceof Error ? e.message : String(e)));
+    load().catch((e: unknown) => (problem = e instanceof Error ? e.message : String(e)));
   });
 
   async function act(fn: () => Promise<unknown>) {
@@ -69,7 +83,7 @@
     problem = '';
     try {
       await fn();
-      goals = await call<GoalView[]>('/api/goals');
+      await load();
     } catch (e) {
       problem = e instanceof Error ? e.message : String(e);
     } finally {
@@ -128,6 +142,12 @@
 
   const removeServer = (g: GoalView, id: string) =>
     act(() => call(`/api/goals/${g.id}/staff?staff=${encodeURIComponent(id)}`, {}, 'DELETE'));
+
+  const nameOf = (id: string) => staff.find((s) => s.id === id)?.name ?? id;
+  const STAGE_TONE: Partial<Record<ThreadStage, string>> = {
+    waiting_on_you: 'text-ember',
+    failed: 'text-coral'
+  };
 
   const HEALTH_TONE = { on_track: 'text-moss', slipping: 'text-ember', blocked: 'text-coral' };
   const field =
@@ -250,7 +270,24 @@
       </div>
     {/if}
 
-    {#snippet goalRow(g: GoalView)}
+    {#snippet threadRow(t: GoalThread)}
+      <li>
+        <button
+          class="w-full rounded-lg bg-night/30 px-2.5 py-1.5 text-start text-xs hover:bg-sea/10"
+          onclick={() => onthread(t)}
+        >
+          <span class="block text-ink">{t.title}</span>
+          <span class="mt-0.5 block {STAGE_TONE[t.stage] ?? 'text-faint'}">
+            {workLine({ ...t, lead: nameOf(t.hubId), holder: nameOf(t.holderId) }).text}
+          </span>
+          {#each t.waiting as w (`${w.kind}-${w.id}`)}
+            <span class="mt-0.5 block text-ember">Waits on your {w.kind}: {w.title}</span>
+          {/each}
+        </button>
+      </li>
+    {/snippet}
+
+    {#snippet goalRow(g: GoalWithThreads)}
       {@const latest = g.progress[0]}
       {@const isOpen = openId === g.id}
       <li class="rounded-xl bg-raise">
@@ -326,7 +363,7 @@
                 <p class="mt-1 text-xs text-faint">
                   {planning === g.id
                     ? `${manager?.name ?? 'The office'} is planning it. The plan comes to your desk.`
-                    : 'Nobody yet. Approve a plan, or add someone here.'}
+                    : 'Nobody yet. Approve a plan, or add an Odd here.'}
                 </p>
               {/if}
               {#if staff.some((p) => !g.staff.some((s) => s.staffId === p.id))}
@@ -344,7 +381,7 @@
                       aria-label="Who"
                       bind:value={addWho}
                     >
-                      <option value="">Add someone</option>
+                      <option value="">Add an Odd to this goal</option>
                       {#each staff.filter((p) => !g.staff.some((s) => s.staffId === p.id)) as p (p.id)}
                         <option value={p.id}>{p.name}</option>
                       {/each}
@@ -371,6 +408,16 @@
                 </form>
               {/if}
             </div>
+
+            {#if g.threads.length}
+              <ul class="flex flex-col gap-1">
+                {#each g.threads as t (t.id)}
+                  {@render threadRow(t)}
+                {/each}
+              </ul>
+            {:else}
+              <p class="text-xs text-faint">Not started yet.</p>
+            {/if}
 
             <div>
               <div class="text-xs text-muted">How it is going</div>
@@ -434,6 +481,15 @@
         {/each}
       </ul>
     {/each}
+
+    {#if other.length}
+      <h3 class="mt-1 mb-1.5 text-[10px] tracking-[0.16em] text-faint uppercase">Other work</h3>
+      <ul class="mb-3 flex flex-col gap-1">
+        {#each other as t (t.id)}
+          {@render threadRow(t)}
+        {/each}
+      </ul>
+    {/if}
 
     {#if past.length}
       <button

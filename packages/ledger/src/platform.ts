@@ -1,10 +1,10 @@
 // What differs between operating systems, in one place: where logs go, how a
-// page opens in the browser, and how a login service runs. Each system gets
+// page or a file opens, and how a login service runs. Each system gets
 // one entry in the tables below. A Mac uses launchd and ~/Library/Logs, Linux
 // a systemd user unit and the XDG state folder, and Windows a Task Scheduler
 // task and %LOCALAPPDATA%\Oddboro. Everything else in the office is the same
 // code on each.
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
@@ -78,13 +78,56 @@ const ps = async (script: string, env: Record<string, string> = {}) =>
   (await powershell(script, env)).ok;
 
 /**
- * Open a URL in the owner's browser. Windows goes through rundll32, not
- * `cmd /c start`, so the & in a query string is not read as a command.
+ * Each system's opener: the program, then any words it needs before what it
+ * opens. Windows goes through rundll32, not `cmd /c start`, so the & in a
+ * query string is not read as a command. A system the office does not know
+ * tries xdg-open.
  */
+const OPENER: Record<System, [string, ...string[]]> = {
+  mac: ['open'],
+  linux: ['xdg-open'],
+  windows: ['rundll32', 'url.dll,FileProtocolHandler']
+};
+const [OPEN, ...OPEN_WORDS] = OPENER[SYSTEM ?? 'linux'];
+
+/** Open a URL in the owner's browser, and say whether the opener took it. */
 export function openUrl(url: string): Promise<boolean> {
-  if (MAC) return run('open', [url]);
-  if (WINDOWS) return run('rundll32', ['url.dll,FileProtocolHandler', url]);
-  return run('xdg-open', [url]);
+  return run(OPEN, [...OPEN_WORDS, url]);
+}
+
+/**
+ * How long an opener has to fail before the office takes it as working. `open`
+ * hands the file on and exits at once, but `xdg-open` may stay up as long as
+ * the browser does, so the office never waits for it to end.
+ */
+export const OPENER_FAILS_WITHIN_MS = 1_000;
+
+/**
+ * Open a file on this computer in the program the system picks for it, such
+ * as the browser for a page. The opener runs on its own, with no shell, and
+ * the office never waits on what it opens: this resolves true once the opener
+ * exits cleanly or is still up after `OPENER_FAILS_WITHIN_MS`, and false when
+ * it could not start or exited with an error in that time.
+ */
+export function openFile(path: string): Promise<boolean> {
+  return new Promise((done) => {
+    const child = spawn(OPEN, [...OPEN_WORDS, path], { detached: true, stdio: 'ignore' });
+    const working = setTimeout(() => done(true), OPENER_FAILS_WITHIN_MS);
+    const failed = (why: unknown) => {
+      clearTimeout(working);
+      console.error(`${OPEN} could not open ${path}:`, why);
+      done(false);
+    };
+    child.once('spawn', () => child.unref());
+    child.once('error', failed);
+    // After the wait the owner was already told it opened, so a late failure only reaches the log.
+    child.once('exit', (code, signal) => {
+      if (code === 0) {
+        clearTimeout(working);
+        done(true);
+      } else failed(signal ?? `exit ${code}`);
+    });
+  });
 }
 
 /**
@@ -94,9 +137,10 @@ export function openUrl(url: string): Promise<boolean> {
  * shim's script runs under this Node instead; and Claude's own installer puts
  * claude.exe in ~/.local/bin, which a server started before the install does
  * not have on its PATH. Looked up on each run, so an install mid-session counts.
+ * The system is read per call too, not from WINDOWS, so a test can stub it.
  */
 export function claudeCommand(): [string, string[]] {
-  if (!WINDOWS) return ['claude', []];
+  if (process.platform !== 'win32') return ['claude', []];
   const dirs = [
     ...(process.env.PATH ?? '').split(delimiter).filter(Boolean),
     join(homedir(), '.local', 'bin')

@@ -1,11 +1,13 @@
-// Which grants accessOf holds back, and how an Odd is told about each. That
-// access() in apps/office skips a held-back grant is not tested here: the office
-// app has no test runner.
+// Which grants accessOf holds back, how an Odd is told about each, and what a
+// run below the Odd's own level keeps and says (capped, accessInRun). That
+// access() in apps/office skips a held-back grant is not tested yet (NEW-1617).
 // Run with `npm test -w @oddboro/ledger`.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  accessInRun,
   accessOf,
+  capped,
   levelLine,
   outsideLines,
   reachOf,
@@ -76,4 +78,64 @@ test('each held-back reason tells the Odd what brings the tool back', () => {
 test('only the Act level is told it may use a write tool without asking', () => {
   for (const level of LEVELS)
     assert.equal(levelLine(level, 'Sam').includes('without asking'), level === 'act', level);
+});
+
+test('a run capped at Draft reads as Draft, and a write grant it still loads comes down to read', () => {
+  const own: Capabilities = {
+    level: 'act',
+    remit: '',
+    office: [],
+    outside: [accessOf(grant('act'), 'act'), accessOf(grant('read', { id: 'drive' }), 'act')]
+  };
+  const run = capped(own, 'draft');
+  assert.equal(run.level, 'draft');
+  assert.deepEqual(
+    run.outside.map((a) => [a.connector.id, a.level, a.heldBack]),
+    [
+      ['notion', 'read', undefined],
+      ['drive', 'read', undefined]
+    ]
+  );
+  assert.equal(outsideLines(run, 'Sam')[0], 'Notion (read only): 1 tool.');
+  // The Odd's own access is unchanged: office_report reads it.
+  assert.equal(own.level, 'act');
+  assert.equal(own.outside[0].level, 'act');
+});
+
+test('a write grant a Draft Odd holds stays held back above its level, capped or not', () => {
+  const own: Capabilities = {
+    level: 'draft',
+    remit: '',
+    office: [],
+    outside: [accessOf(grant('act'), 'draft')]
+  };
+  const [a] = capped(own, 'draft').outside;
+  assert.equal(a.level, 'act');
+  assert.equal(a.heldBack, 'above its level');
+});
+
+test("my_access says a capped run's level and why, and an uncapped run's own level", () => {
+  const own: Capabilities = {
+    level: 'act',
+    remit: '',
+    office: [],
+    outside: [accessOf(grant('act'), 'act')]
+  };
+  const draftOnly = accessInRun(own, 'Sam', { CEILING: 'draft' });
+  assert.equal(
+    draftOnly,
+    [
+      levelLine('draft', 'Sam'),
+      "This run was started by a colleague or by the office, not by Sam's yes, so it works at Draft at most.",
+      '- (id: notion) Notion (read only): 1 tool.'
+    ].join('\n')
+  );
+  assert.equal(
+    accessInRun(own, 'Sam', {}),
+    [levelLine('act', 'Sam'), '- (id: notion) Notion (read and write): every tool.'].join('\n')
+  );
+  assert.match(
+    accessInRun(own, 'Sam', { SIGNED_OUT: 'notion' }),
+    /Its sign-in ran out, and Sam needs to sign in again\./
+  );
 });

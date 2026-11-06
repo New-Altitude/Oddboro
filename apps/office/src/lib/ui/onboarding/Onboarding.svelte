@@ -30,6 +30,7 @@
 <script lang="ts">
   import { setZone } from '@oddboro/ledger/time';
   import type { StaffProfile } from '../../staff/roster.ts';
+  import { AgentTools } from '../agent-tools.svelte.ts';
   import { call, follow } from '../api.ts';
   import { diagnostics } from '../diagnostics.svelte.ts';
   import AccountCard from './AccountCard.svelte';
@@ -38,11 +39,15 @@
   import MacCard, { type Setup } from './MacCard.svelte';
   import ManagerCard, { type Custom, type Preset } from './ManagerCard.svelte';
   import SpaceCard from './SpaceCard.svelte';
+  import ToolsCard from './ToolsCard.svelte';
+  import { selectOnFocus } from '../select-on-focus.ts';
+  import { offersOtherTools } from '../tool-action.ts';
 
-  // A new owner's first visit, over the live floor: eight cards (seven when
-  // the office has nowhere to send reports), one of them an optional sign-in
-  // to New Altitude, then the office going up on their lot
-  // and their manager arriving by bus. The slow parts
+  // A new owner's first visit, over the live floor: nine cards (Other AI tools
+  // only where this system offers a tool besides Claude Code, Help fix Oddboro
+  // only where the office has somewhere to send reports), one of them an
+  // optional sign-in to New Altitude, then the office going up on their lot and
+  // their manager arriving by bus. The slow parts
   // start the moment their inputs exist: the office draws from when the owner
   // leaves "Your space", and a described manager from when they leave theirs.
   // So Open the office starts the show at once instead of a wait.
@@ -53,6 +58,7 @@
     'mac',
     'you',
     'claude',
+    'tools',
     'manager',
     'space',
     'account',
@@ -64,18 +70,30 @@
     mac: 'Your computer',
     you: 'You',
     claude: 'Your Claude',
+    tools: 'Other AI tools',
     manager: 'Your office manager',
     space: 'Your space',
     account: 'New Altitude',
     diagnostics: 'Help fix Oddboro',
     go: 'Open the office'
   };
-  const steps = $derived<readonly Step[]>(
-    diagnostics.possible ? STEPS : STEPS.filter((s) => s !== 'diagnostics')
-  );
   let step = $state<Step>('mac');
   let backward = $state(false);
   let wantKey = $state(false);
+
+  // Other AI tools, read from the first card on, so the step is known by the time it comes.
+  const agentTools = new AgentTools();
+  /**
+   * The cards this owner sees: Other AI tools only where this system offers one
+   * to sign in to, Help fix Oddboro only where reports have somewhere to go.
+   */
+  const steps: readonly Step[] = $derived(
+    STEPS.filter(
+      (s) =>
+        (s !== 'tools' || offersOtherTools(agentTools.tools)) &&
+        (s !== 'diagnostics' || diagnostics.possible)
+    )
+  );
 
   function go(to: Step) {
     backward = steps.indexOf(to) < steps.indexOf(step);
@@ -449,6 +467,7 @@
                 autocomplete="given-name"
                 bind:value={name}
                 oninput={() => stage.name(name)}
+                {@attach selectOnFocus}
                 {@attach (n) => n.focus()}
               />
               <div class="mt-4 flex items-center gap-3">
@@ -459,6 +478,8 @@
             </form>
           {:else if step === 'claude'}
             <ClaudeCard onnext={next} onback={back} {wantKey} {onmodel} />
+          {:else if step === 'tools'}
+            <ToolsCard tools={agentTools} onnext={next} onback={back} />
           {:else if step === 'manager'}
             <ManagerCard
               {presets}

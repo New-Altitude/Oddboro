@@ -1,14 +1,19 @@
 <script lang="ts">
   import type { Check } from '@oddboro/ledger/checks';
   import AccountSection from './AccountSection.svelte';
+  import { AgentTools } from './agent-tools.svelte.ts';
   import { call } from './api.ts';
   import DiagnosticsSection from './DiagnosticsSection.svelte';
+  import { selectOnFocus } from './select-on-focus.ts';
+  import { offersOtherTools } from './tool-action.ts';
+  import ToolRows from './ToolRows.svelte';
   import UpdatesSection from './UpdatesSection.svelte';
   import { diagnostics } from './diagnostics.svelte.ts';
 
   // The office's first screen for a new owner, and its Setup window after:
   // the name staff call them, the office they work in, their first staffer,
-  // and the same checks `npm run setup` runs.
+  // the other AI tools Odds can run on (where this system offers one, as on
+  // onboarding's card), and the same checks `npm run setup` runs.
   type Props = {
     office: string;
     welcomed: boolean;
@@ -31,6 +36,7 @@
   let checking = $state(false);
   let saving = $state(false);
   let problem = $state('');
+  const agentTools = new AgentTools();
 
   async function load() {
     checking = true;
@@ -88,7 +94,13 @@
       <h3 class="text-xs tracking-[0.16em] text-sea uppercase">1 · You</h3>
       <label class="flex flex-col gap-1">
         <span class="text-xs text-muted">What should your Odds call you?</span>
-        <input class={field} placeholder="Your first name" maxlength="30" bind:value={name} />
+        <input
+          class={field}
+          placeholder="Your first name"
+          maxlength="30"
+          bind:value={name}
+          {@attach selectOnFocus}
+        />
       </label>
       {#if setup}
         <p class="text-xs text-muted">
@@ -145,6 +157,16 @@
         </div>
       {/if}
     </section>
+
+    {#if offersOtherTools(agentTools.tools)}
+      <section class="flex flex-col gap-2">
+        <h3 class="text-xs tracking-[0.16em] text-sea uppercase">4 · Other AI tools</h3>
+        <p class="text-xs text-muted">
+          Odds can also run on these. Optional: Claude Code stays the default.
+        </p>
+        <ToolRows tools={agentTools} />
+      </section>
+    {/if}
 
     {#if welcomed}
       <UpdatesSection />

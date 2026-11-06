@@ -1,28 +1,92 @@
 // One bus for everything the page should hear about: a table changed (from
 // Postgres NOTIFY, whichever process wrote it), a staffer started or stopped
-// working, or the New Altitude sign-in changed. /api/events streams it to the
-// page. Nothing polls.
+// working, an Odd kept or used a lesson, an Odd handed a colleague work or
+// got its result back, or the New Altitude sign-in changed. /api/events
+// streams it to the page. Nothing polls.
 import { EventEmitter } from 'node:events';
-import { LOCAL, pg } from '@oddboro/ledger';
+import {
+  LOCAL,
+  handOffMark,
+  handOffNewsSince,
+  lessonMark,
+  lessonNewsSince,
+  pg,
+  type HandOffNews,
+  type LessonNews
+} from '@oddboro/ledger';
 import { listenLocal } from '@oddboro/ledger/local-db';
 import type { AccountStatus } from '../account.ts';
 import type { Work } from '../staff/work.ts';
 
+/** An Odd kept a lesson (`staff` heard it) or used one, for the floor to show over that Odd. */
+export type LessonEvent = { type: 'lesson' } & LessonNews;
+/** An Odd handed a colleague work, or a result went back: `from` walks over to `to`. */
+export type HandOffEvent = { type: 'hand-off' } & HandOffNews;
+
 export type OfficeEvent =
   | { type: 'change'; table: string }
   | { type: 'working'; working: Record<string, string>; inProgress: Record<string, Work[]> }
-  | { type: 'account'; status: AccountStatus };
+  | { type: 'account'; status: AccountStatus }
+  | LessonEvent
+  | HandOffEvent;
 
 type Bus = EventEmitter & { listening?: Promise<unknown> };
 const g = globalThis as unknown as { officeBus?: Bus };
 // One bus per process, even when Vite reloads this module.
 export const bus: Bus = (g.officeBus ??= new EventEmitter().setMaxListeners(50));
 
+/**
+ * Tells the page each piece of one kind of news since it was last told, one
+ * read at a time, from the newest row there when the office started, so a
+ * restart tells nothing again. A failed read loses that news rather than tell
+ * it twice: the next starts from the newest row.
+ */
+export function teller<Mark, News>(news: {
+  name: string;
+  mark: () => Promise<Mark>;
+  since: (mark: Mark) => Promise<{ news: News[]; mark: Mark }>;
+  event: (n: News) => OfficeEvent;
+}): () => void {
+  const lost = (e: unknown) => {
+    console.error(`${news.name} events:`, e);
+    return undefined;
+  };
+  let told: Promise<Mark | undefined> = news.mark().catch(lost);
+  return () => {
+    told = told
+      .then(async (mark) => {
+        const read = await news.since(mark ?? (await news.mark()));
+        for (const n of read.news) emit(news.event(n));
+        return read.mark;
+      })
+      .catch(lost);
+  };
+}
+
 export function listen(): void {
-  const change = (table: string) => bus.emit('event', { type: 'change', table });
+  bus.listening ??= start();
+}
+
+function start(): Promise<unknown> {
+  const tellLessons = teller({
+    name: 'Lesson',
+    mark: lessonMark,
+    since: lessonNewsSince,
+    event: (n) => ({ type: 'lesson', ...n })
+  });
+  const tellHandOffs = teller({
+    name: 'Hand-off',
+    mark: handOffMark,
+    since: handOffNewsSince,
+    event: (n) => ({ type: 'hand-off', ...n })
+  });
+  const change = (table: string) => {
+    bus.emit('event', { type: 'change', table });
+    if (table === 'lessons' || table === 'lesson_uses') tellLessons();
+    if (table === 'follow_ups') tellHandOffs();
+  };
   // The office's own database hears NOTIFY in this process, not over a connection.
-  if (LOCAL) bus.listening ??= Promise.resolve(listenLocal('office', change));
-  else bus.listening ??= pg.listen('office', change);
+  return LOCAL ? Promise.resolve(listenLocal('office', change)) : pg.listen('office', change);
 }
 
 export function emit(e: OfficeEvent): void {

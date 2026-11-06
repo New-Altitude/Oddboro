@@ -62,20 +62,45 @@ const SETTLE_MS = 140;
 /** A sprite the ambient clock animates, with its box in world pixels. */
 type Anim = { s: Sprite; frames: Texture[]; fps: number; start: number; box: Box };
 type Box = [number, number, number, number];
+/** Something a tap can land on: its box, and its place in draw order, so the one drawn on top wins. */
+type Hit = { box: Box; rank: number };
 /**
  * A prop that gives off light, which the owner can switch off: its sprites, the
  * glowing pixels over them, and its lights. Off, a sprite shows its off frame
  * (drawn, like a cold fireplace, or compiled with its glow colours unlit).
  */
-type Switch = {
+type Switch = Hit & {
+  obj: string;
   on: boolean;
-  /** Draw order of its topmost sprite: a tap picks the prop drawn on top. */
-  rank: number;
-  box: Box;
   parts: { s: Sprite; lit: Texture; off?: Texture; anim?: Anim }[];
   glows: { s: Sprite; anim?: Anim }[];
   lights: Sprite[];
 };
+
+/** Of the hits whose box holds a world point, the one drawn on top. */
+function topAt<T extends Hit>(hits: Iterable<T>, [x, y]: [number, number]): T | undefined {
+  let best: T | undefined;
+  for (const h of hits) {
+    const [bx, by, bw, bh] = h.box;
+    if (x >= bx && x < bx + bw && y >= by && y < by + bh && (!best || h.rank > best.rank)) best = h;
+  }
+  return best;
+}
+
+/**
+ * What a tap at a world point does: switch the prop drawn on top there, else
+ * open the Lessons from a library shelf there. Switches come first, so the
+ * library's own lamps and fire still switch.
+ */
+export function tapAt(
+  switches: Iterable<Hit & { obj: string }>,
+  shelves: Iterable<Hit>,
+  at: [number, number]
+): { switch: string } | 'shelf' | undefined {
+  const sw = topAt(switches, at);
+  if (sw) return { switch: sw.obj };
+  return topAt(shelves, at) ? 'shelf' : undefined;
+}
 
 const toHex = (rgb: readonly number[]) =>
   (Math.round(rgb[0]) << 16) | (Math.round(rgb[1]) << 8) | Math.round(rgb[2]);
@@ -250,16 +275,18 @@ export class Floor {
   private switches = new Map<string, Switch>();
   /** Called when the owner taps a prop that can be switched, with its id. */
   onTap: ((obj: string) => void) | undefined;
+  /** Every library shelf, which a tap opens the Lessons from. */
+  private shelves: Hit[] = [];
+  /** Called when the owner taps a library shelf that no switch covers. */
+  onShelf: (() => void) | undefined;
   /** Every placed prop with an id in its room, for picking one by hand. */
-  private items: {
+  private items: (Hit & {
     obj: string;
     item: string;
-    box: Box;
-    rank: number;
     /** The footprint's top-left tile, and its size in tiles. */
     tile: [number, number];
     size: [number, number];
-  }[] = [];
+  })[] = [];
   /**
    * Set while arranging a room: a press on a placed thing that then moves
    * carries it, and letting go asks to put it at the tile under the pointer
@@ -366,6 +393,7 @@ export class Floor {
     this.blocks.clear();
     this.switches.clear();
     this.doors = [];
+    this.shelves = [];
     this.windows = [];
     this.items = [];
     this.lightSprites = [];
@@ -432,6 +460,7 @@ export class Floor {
       if (d.obj && (meta.emissive || lightOf.has(d.obj))) {
         const prefix = d.variant ? `${d.sprite}@${d.variant}` : d.sprite;
         const sw = this.switches.get(d.obj) ?? {
+          obj: d.obj,
           on: true,
           rank: i,
           box,
@@ -472,6 +501,8 @@ export class Floor {
           ],
           size: meta.footprint
         });
+      if (meta.tags.includes('shelf') && meta.tags.includes('library'))
+        this.shelves.push({ box, rank: i });
       // A door with open and closed frames swings open when staff come near.
       if (
         meta.tags.includes('door') &&
@@ -773,12 +804,7 @@ export class Floor {
   /** The prop drawn on top at a screen point, and the tile under it. */
   private pickAt(clientX: number, clientY: number) {
     const [x, y] = this.toWorld(clientX, clientY);
-    let best: (typeof this.items)[number] | undefined;
-    for (const it of this.items) {
-      const [bx, by, bw, bh] = it.box;
-      if (x >= bx && x < bx + bw && y >= by && y < by + bh && (!best || it.rank > best.rank))
-        best = it;
-    }
+    const best = topAt(this.items, [x, y]);
     const tile: [number, number] = [Math.floor(x / TILE), Math.floor(y / TILE)];
     return { obj: best?.obj, item: best?.item, tile };
   }
@@ -817,18 +843,9 @@ export class Floor {
     this.dirty = true;
   }
 
-  /** The switchable prop drawn on top at a screen point, if any. */
-  private switchAt(clientX: number, clientY: number): string | undefined {
-    const r = this.app.canvas.getBoundingClientRect();
-    const x = (clientX - r.left - this.stage.x) / this.zoom;
-    const y = (clientY - r.top - this.stage.y) / this.zoom;
-    let best: [string, number] | undefined;
-    for (const [obj, sw] of this.switches) {
-      const [bx, by, bw, bh] = sw.box;
-      if (x >= bx && x < bx + bw && y >= by && y < by + bh && (!best || sw.rank > best[1]))
-        best = [obj, sw.rank];
-    }
-    return best?.[0];
+  /** What a tap at a screen point does, if anything. */
+  private tapAtScreen(clientX: number, clientY: number) {
+    return tapAt(this.switches.values(), this.shelves, this.toWorld(clientX, clientY));
   }
 
   /**
@@ -1096,7 +1113,7 @@ export class Floor {
 
   private bindCamera() {
     const canvas = this.app.canvas;
-    // A press that does not move is a tap: it switches the prop under it.
+    // A press that does not move is a tap: it switches the prop under it, or opens a shelf.
     let still = false;
     canvas.addEventListener('pointerdown', (e) => {
       this.drag = { x: e.clientX, y: e.clientY, sx: this.stage.x, sy: this.stage.y };
@@ -1118,7 +1135,7 @@ export class Floor {
         if (e.target === canvas)
           canvas.style.cursor = this.onPick
             ? 'crosshair'
-            : this.switchAt(e.clientX, e.clientY)
+            : this.tapAtScreen(e.clientX, e.clientY)
               ? 'pointer'
               : '';
         return;
@@ -1159,8 +1176,9 @@ export class Floor {
       if (this.drag && still && e.target === canvas) {
         if (this.onPick) this.onPick(this.pickAt(e.clientX, e.clientY));
         else {
-          const obj = this.switchAt(e.clientX, e.clientY);
-          if (obj) this.onTap?.(obj);
+          const tap = this.tapAtScreen(e.clientX, e.clientY);
+          if (tap === 'shelf') this.onShelf?.();
+          else if (tap) this.onTap?.(tap.switch);
         }
       }
       this.drag = undefined;

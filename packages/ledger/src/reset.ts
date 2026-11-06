@@ -1,8 +1,8 @@
 // Start the office over, as if this Mac had never had one, so the next visit
 // is a new owner's first. Nothing is deleted: the office's own database, the
-// staff's homes and the office's notes move into a dated folder under
-// ~/.oddboro/backups, and .env is copied there before its office settings
-// are cleared. A database .env named stays as it was, just no longer used.
+// staff's homes, the threads' folders and the office's notes move into a
+// dated folder under ~/.oddboro/backups, and .env is copied there before its
+// office settings are cleared. A database .env named stays as it was, just no longer used.
 // The family files in data/ stay where they are. Asks for the word "reset"
 // before it moves anything.
 //
@@ -15,7 +15,9 @@ import { home } from './home.ts';
 import { stopServiceSync } from './platform.ts';
 
 const HOME = home();
-const MOVED = ['db', 'staff', 'office'].filter((d) => existsSync(join(HOME, d)));
+// Thread folders go with the database that numbers them, so a new office
+// never reuses an id over an old thread's files.
+const MOVED = ['db', 'staff', 'threads', 'office'].filter((d) => existsSync(join(HOME, d)));
 const CLEARED = [
   'DATABASE_URL',
   'POSTGRES_PASSWORD',

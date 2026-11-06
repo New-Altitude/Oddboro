@@ -47,12 +47,22 @@ export function modelArgs(): string[] {
   return ['--model', claudeSettings().model];
 }
 
-/** The environment a `claude` run gets: none of a parent Claude Code session's settings. */
+/**
+ * The environment a `claude` run gets: none of a parent Claude Code session's
+ * settings, none of the owner's own CLAUDE.md files, and no auto-memory. Under
+ * `--setting-sources user`, a run still loaded the owner's ~/.claude/CLAUDE.md,
+ * their instructions to their own Claude, which no Odd should read. Auto-memory
+ * wrote each Odd's own notes into the owner's ~/.claude/projects, a second
+ * memory beside the office's lessons that the owner never sees. A run's own
+ * instructions come in its arguments and its message, which this leaves alone.
+ */
 export function cleanEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
   for (const k of Object.keys(env))
     if (k === 'CLAUDECODE' || k.startsWith('CLAUDE_CODE_') || k === 'CLAUDE_CONFIG_DIR')
       delete env[k];
+  env.CLAUDE_CODE_DISABLE_CLAUDE_MDS = '1';
+  env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = '1';
   return env;
 }
 

@@ -1,7 +1,9 @@
-// The office clock. It keeps one timer, set for the soonest due job or poke,
-// and resets it whenever the jobs or pokes table changes. A job missed while
-// the Mac slept runs once when the clock next looks, then goes back on its
-// schedule; a poke that late is marked missed (see deliverPoke). While an
+// The office clock. It keeps one timer, set for the soonest due job, poke or
+// parked thread, and resets it whenever the jobs, pokes or threads table
+// changes. A thread's hub parks it until a time (resume_at); the clock starts
+// the hub's pick-up then. A job missed while the Mac slept runs once when the
+// clock next looks, then goes back on its schedule; a poke that late is marked
+// missed (see deliverPoke); a thread that late wakes then. While an
 // update is about to install (`held()` in update.ts) it starts no scheduled
 // job: a due one waits and runs once the app is back.
 import {
@@ -10,9 +12,11 @@ import {
   finishRun,
   job as jobById,
   nextRun,
+  parkedThreads,
   setNextRun,
   startRun,
   waitingPokes,
+  wakeThread,
   type JobRow,
   type RunTrigger
 } from '@oddboro/ledger';
@@ -45,6 +49,12 @@ async function plan(): Promise<void> {
     if (p.at <= now) void deliverPoke(p);
     else soonest = Math.min(soonest, p.at.getTime());
   }
+  for (const t of await parkedThreads()) {
+    // A failed wake leaves the time set, so the clock's next look tries again.
+    if (t.resumeAt <= now)
+      void wakeThread(t.id).catch((e: unknown) => console.error(`Thread ${t.id} did not wake:`, e));
+    else soonest = Math.min(soonest, t.resumeAt.getTime());
+  }
   clock.timer = setTimeout(() => void plan(), Math.max(1000, soonest - Date.now()));
 }
 
@@ -76,7 +86,7 @@ export function startClock(): void {
   g.jobClock = {};
   listen();
   bus.on('event', (e: OfficeEvent) => {
-    if (e.type === 'change' && (e.table === 'jobs' || e.table === 'pokes')) void plan();
+    if (e.type === 'change' && ['jobs', 'pokes', 'threads'].includes(e.table)) void plan();
   });
   void closeStaleRuns().then(plan);
 }

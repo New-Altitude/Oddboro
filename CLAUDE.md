@@ -33,9 +33,9 @@ Each rule's reason is in `docs/hard-rules.md`, under the same heading.
    in `apps/office/src/app.css`.
 8. **Spaces are data.** A room is a JSON stamp and an office is a JSON floor
    plan. Adding a space never needs engine code.
-9. **Family data stays on the owner's computer.** People and family schedules live in the
-   gitignored `data/` folder and never reach a tracked file or a cloud
-   service until a decision says otherwise.
+9. **Family data never reaches a tracked file.** People and family data
+   live in the gitignored `data/` folder. Which AI tool an Odd runs on is
+   the owner's choice per Odd. Enforced by `scripts/check-private.ts`.
 10. **Every `CLAUDE.md` is named in its nearest ancestor `CLAUDE.md`.**
     Enforced by `scripts/check-context-index.ts`.
 11. **Decisions are one file each in `docs/decisions/`, and never provisional.**

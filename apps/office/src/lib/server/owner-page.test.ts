@@ -2,7 +2,7 @@
 // server's `handle`, in front of the real routes, over the office's own database (local-db.ts) in a
 // throwaway folder on a free port. Run with `npm test -w @oddboro/office`.
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -38,6 +38,10 @@ const L = await import('@oddboro/ledger');
 const { fromOwnerPage, guardOffice } = await import('./owner-page.ts');
 const askRoute = await import('../../routes/api/asks/[id]/+server.ts');
 const updateRoute = await import('../../routes/api/update/+server.ts');
+const openRoute = await import('../../routes/api/files/open/+server.ts');
+const staffRoute = await import('../../routes/api/staff/[id]/+server.ts');
+const agentsRoute = await import('../../routes/api/agents/+server.ts');
+const toolRoute = await import('../../routes/api/agents/[tool]/+server.ts');
 const hooks = await import('../../hooks.server.ts');
 
 after(async () => {
@@ -239,6 +243,81 @@ test('the shell reports an update with its token, and nothing else reports one',
     headers: { ...PAGE, 'x-oddboro-update-token': 'wrong-token-for-tests' }
   });
   assert.deepEqual([page.status, page.ran], [403, true]);
+});
+
+test("only the owner's page reaches the route that opens a page", async () => {
+  // No such file: the route answers 404 once reached, and nothing opens either way.
+  mkdirSync(join(folder, 'staff', 'paige'), { recursive: true });
+  const open = (headers: Record<string, string>) =>
+    send(openRoute.POST as Route, {
+      path: '/api/files/open',
+      headers: { 'content-type': 'application/json', ...headers },
+      body: JSON.stringify({ staff: 'paige', path: 'nothing.html' })
+    });
+  const away = await open({ 'sec-fetch-site': 'cross-site' });
+  assert.deepEqual([away.status, away.ran], [403, false]);
+  const page = await open(PAGE);
+  assert.deepEqual([page.status, page.ran], [404, true]);
+});
+
+test('the "Runs on" picker lists the tools and moves an Odd to another from the owner\'s page, and from no other', async () => {
+  const listed = await send(agentsRoute.GET as Route, {
+    method: 'GET',
+    path: '/api/agents',
+    headers: PAGE
+  });
+  assert.deepEqual([listed.status, listed.ran], [200, true]);
+  assert.deepEqual(
+    (JSON.parse(listed.text) as { tools: { id: string }[] }).tools.map((a) => a.id),
+    L.agentsOn(process.platform)
+  );
+  const move = (agent: string, headers: Record<string, string>) =>
+    send(staffRoute.PATCH as Route, {
+      method: 'PATCH',
+      path: '/api/staff/paige',
+      params: { id: 'paige' },
+      headers: { 'content-type': 'application/json', ...headers },
+      body: JSON.stringify({ agent })
+    });
+  const away = await move('grok', {
+    'sec-fetch-site': 'cross-site',
+    origin: 'https://evil.example'
+  });
+  assert.deepEqual([away.status, away.ran], [403, false]);
+  assert.equal((await L.staffer('paige'))?.agent, 'claude');
+  const page = await move('grok', PAGE);
+  assert.deepEqual([page.status, page.ran], [200, true]);
+  assert.equal((await L.staffer('paige'))?.agent, 'grok');
+  assert.equal((await move('claude', PAGE)).status, 200);
+});
+
+test('signing a tool in is refused from another site, and never starts its command', async () => {
+  // A stand-in grok first on PATH, so the Mac's own never runs: it only leaves a mark.
+  const standIns = join(folder, 'sign-in-bin');
+  const mark = join(folder, 'grok-ran');
+  mkdirSync(standIns, { recursive: true });
+  writeFileSync(join(standIns, 'grok'), `#!/bin/sh\necho "$1" >> '${mark}'\n`);
+  chmodSync(join(standIns, 'grok'), 0o755);
+  const path = process.env.PATH;
+  process.env.PATH = `${standIns}:/usr/bin:/bin`;
+  const signIn = (headers: Record<string, string>) =>
+    send(toolRoute.POST as Route, {
+      path: '/api/agents/grok',
+      params: { tool: 'grok' },
+      headers: { 'content-type': 'application/json', ...headers },
+      body: JSON.stringify({ action: 'sign-in' })
+    });
+  try {
+    const away = await signIn({ 'sec-fetch-site': 'cross-site', origin: 'https://evil.example' });
+    assert.deepEqual([away.status, away.ran], [403, false]);
+    assert.ok(!existsSync(mark), 'a sign-in from another site started grok');
+    // The same request from the owner's page starts it, so the mark can show.
+    const page = await signIn(PAGE);
+    assert.deepEqual([page.status, page.ran], [200, true]);
+    assert.ok(existsSync(mark), "the owner's page did not start grok");
+  } finally {
+    process.env.PATH = path;
+  }
 });
 
 const from = (headers: Record<string, string>) =>

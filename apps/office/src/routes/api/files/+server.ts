@@ -1,18 +1,14 @@
 // A staffer's file, for the viewer: GET reads it, PUT saves the owner's edit.
 import { error, json } from '@sveltejs/kit';
-import { readStaffFile, writeStaffFile } from '#lib/server/files.ts';
+import { ownerMessage, readStaffFile, writeStaffFile } from '#lib/server/files.ts';
 import type { RequestHandler } from './$types';
 
-const fail = (e: unknown, status = 400): never =>
-  error(status, e instanceof Error ? e.message : String(e));
-
 export const GET: RequestHandler = async ({ url }) => {
+  const path = url.searchParams.get('path') ?? '';
   try {
-    return json(
-      await readStaffFile(url.searchParams.get('staff') ?? '', url.searchParams.get('path') ?? '')
-    );
+    return json(await readStaffFile(url.searchParams.get('staff') ?? '', path));
   } catch (e) {
-    return fail(e, 404);
+    error(404, ownerMessage(e, path, 'Could not open the file'));
   }
 };
 
@@ -23,6 +19,6 @@ export const PUT: RequestHandler = async ({ request }) => {
   try {
     return json(await writeStaffFile(b.staff, b.path, b.content, b.mtime));
   } catch (e) {
-    return fail(e, 409);
+    error(409, ownerMessage(e, b.path, 'Could not save the file'));
   }
 };

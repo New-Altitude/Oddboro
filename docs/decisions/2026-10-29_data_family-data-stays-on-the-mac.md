@@ -1,1 +1,0 @@
-- [data] **Decision (2026-10-29): people and family data live in the gitignored `data/` folder on the owner's computer, never in a tracked file or a cloud service.** It includes family names, birthdays and schedules. Moving any of it off that computer is a separate decision.

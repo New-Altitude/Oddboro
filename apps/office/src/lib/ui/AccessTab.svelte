@@ -2,6 +2,7 @@
   import type { Candidate, HeldBack } from '@oddboro/ledger';
   import { OFFICE_TOOLS } from '@oddboro/ledger/tools';
   import { call } from './api.ts';
+  import RunsOn from './RunsOn.svelte';
   import type { StaffProfile } from '../staff/roster.ts';
 
   type Grant = {
@@ -98,6 +99,17 @@
     }
   }
 
+  async function setAgent(select: HTMLSelectElement) {
+    problem = '';
+    try {
+      await call(`/api/staff/${profile.id}`, { agent: select.value }, 'PATCH');
+    } catch (e) {
+      problem = e instanceof Error ? e.message : String(e);
+      // The Odd stayed on its tool, and the profile did not change, so nothing redraws the select.
+      select.value = profile.agent;
+    }
+  }
+
   async function setPermission(permission: string) {
     problem = '';
     try {
@@ -128,6 +140,7 @@
         >
       {/each}
     </div>
+    <RunsOn value={profile.agent} onpick={setAgent} class="mt-2 text-[11px]" />
   </div>
   <div class="flex-1 overflow-y-auto p-3">
     <section aria-labelledby="office-tools">

@@ -1,8 +1,8 @@
 // The shape of a staffer on the floor, and the words for what each one is
 // doing. The staff themselves live in Postgres; hiring adds a row there.
-import type { StaffRow } from '@oddboro/ledger';
+import type { Agent, StaffRow } from '@oddboro/ledger';
 import type { LookSpec } from '@oddboro/sprites/look';
-import { zone } from '@oddboro/ledger/time';
+import { officeDay } from '@oddboro/ledger/time';
 
 export type Activity =
   'work' | 'intake' | 'read' | 'wait' | 'play' | 'rest' | 'eat' | 'exercise' | 'talk' | 'home';
@@ -19,12 +19,16 @@ export type StaffProfile = {
   portrait: string;
   hired: string;
   permission: PermissionLevel;
+  /** The coding tool its runs go through. */
+  agent: Agent;
   /** The office tools the owner granted, beyond the ones every staffer has. */
   tools: string[];
   /** One sentence on what this staffer is for, shown on the card. */
   remit: string;
   /** The room template this staffer works in when it has a choice. */
   room: string;
+  /** Guesses waiting for the owner's Keep on its Lessons tab. */
+  guesses: number;
   /** A generated look: where its frames and portrait load from. Absent for hand-drawn art. */
   look?: { spec: LookSpec; sheet: string; portrait: string; version: string };
 };
@@ -36,8 +40,11 @@ export function lookVersion(look: LookSpec, portraitPx: string): string {
   return h.toString(36);
 }
 
-/** A staff row as the page needs it. The job description stays on the server. */
-export function toProfile(r: StaffRow): StaffProfile {
+/**
+ * A staff row as the page needs it. The job description stays on the server.
+ * A new hire has no guesses of its own; the next office load counts any for every Odd.
+ */
+export function toProfile(r: StaffRow, guesses = 0): StaffProfile {
   return {
     id: r.id,
     name: r.name,
@@ -46,11 +53,13 @@ export function toProfile(r: StaffRow): StaffProfile {
     sprite: r.sprite,
     variant: r.variant,
     portrait: r.portrait,
-    hired: new Date(r.hiredAt).toLocaleDateString('en-CA', { timeZone: zone() }),
+    hired: officeDay(new Date(r.hiredAt)),
     permission: r.permission,
+    agent: r.agent,
     tools: r.tools,
     remit: r.remit,
     room: r.room,
+    guesses,
     look:
       r.look && r.portraitPx
         ? {

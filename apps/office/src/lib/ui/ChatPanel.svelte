@@ -1,12 +1,15 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import type { PokeRow } from '@oddboro/ledger';
+  import { SvelteSet } from 'svelte/reactivity';
+  import type { HandOffLine, HandOffStep, LessonLine, PokeRow, ThreadLine } from '@oddboro/ledger';
   import { clockTime } from '@oddboro/ledger/time';
   import Markdown from './Markdown.svelte';
+  import Lesson from './Lesson.svelte';
   import { call } from './api.ts';
-  import { when } from './format.ts';
+  import { when, workLine } from './format.ts';
   import { chatRequest, takeDraft, type Delivered } from './chat-about.svelte.ts';
   import type { StaffProfile } from '../staff/roster.ts';
+  import { toolWords } from '../staff/work.ts';
 
   type Props = {
     profile: StaffProfile;
@@ -41,6 +44,12 @@
     item?: Delivered & { status: string };
     /** What the owner's message replied about. */
     re?: Delivered;
+    /** A lesson the staffer kept, shown where it kept it. */
+    lesson?: LessonLine;
+    /** One step of work handed to a colleague, or from one. */
+    handOff?: { line: HandOffLine; step: HandOffStep; back?: number };
+    /** A thread the staffer leads, with each hand-off it gave on it. */
+    thread?: { line: ThreadLine; steps: HandOffLine[] };
   };
   type Entry = {
     at: string;
@@ -49,7 +58,64 @@
     poke?: true;
     item?: Delivered & { status: string };
     re?: Delivered;
+    lesson?: LessonLine;
+    handOff?: { line: HandOffLine; step: HandOffStep; back?: number };
+    thread?: { line: ThreadLine; steps: HandOffLine[] };
   };
+
+  /** Where a hand-off stands, in words, and whether the owner has to act. */
+  function progress(h: HandOffLine): { text: string; yours: boolean } {
+    if (h.status === 'queued') return { text: `${h.to} has not started yet`, yours: false };
+    // Back on it: the owner answered what an earlier step put on the desk.
+    if (h.status === 'working')
+      return { text: `${h.to} is ${h.backs.length ? 'back on it' : 'on it'}`, yours: false };
+    // A denial or a dropped task is the owner's answer, not the colleague failing.
+    const ended = h.answered
+      ? 'You answered'
+      : {
+          done: `${h.to} finished`,
+          failed: `${h.to} could not finish`,
+          waiting: `${h.to} is waiting on you`
+        }[h.status];
+    const next = h.backs.at(-1)?.pickUp.status;
+    if (!next || next === 'queued' || next === 'working')
+      return { text: `${ended} · ${h.from} is taking it from here`, yours: h.status === 'waiting' };
+    // Something on the desk outranks how the pick-up went: it still needs the owner.
+    if (next === 'waiting' || h.status === 'waiting')
+      return { text: 'Waiting on you', yours: true };
+    if (next === 'failed') return { text: `${h.from} could not pick it up`, yours: false };
+    return { text: h.status === 'done' ? 'Done' : ended, yours: false };
+  }
+  /** A thread's steps in the order they happened: each hand-off given, and each run of the hub's own. */
+  function threadSteps(
+    t: NonNullable<Line['thread']>
+  ): ({ at: string; h: HandOffLine } | { at: string; run: ThreadLine['runs'][number] })[] {
+    return [
+      ...t.steps.map((h) => ({ at: String(h.at), h })),
+      ...t.line.runs.map((run) => ({ at: String(run.at), run }))
+    ].sort((a, b) => a.at.localeCompare(b.at));
+  }
+  /** A block that only names what follows: headings, or a bold line on its own. */
+  const label = (block: string) =>
+    block.split('\n').every((l) => /^(#{1,6}\s.*|\*\*[^*]+\*\*:?)$/.test(l.trim()));
+  /**
+   * What the owner sees of a hand-off's text before opening it: its opening
+   * paragraph, which the Odds' briefs ask them to write for the owner, with any
+   * label above it. A lead still over `LONG` is cut and fades.
+   */
+  function lead(text: string): { text: string; more: boolean } {
+    const blocks = text
+      .replace(/\r\n?/g, '\n')
+      .trim()
+      .split(/\n\s*\n/);
+    const i = blocks.findIndex((b) => !label(b));
+    if (i < 0 || i === blocks.length - 1) return { text, more: false };
+    return { text: blocks.slice(0, i + 1).join('\n\n'), more: true };
+  }
+  const LONG = 600;
+  /** The hand-off stories and texts the owner opened. */
+  const opened = new SvelteSet<string>();
+  const toggle = (key: string) => opened.delete(key) || opened.add(key);
 
   const KIND: Record<Delivered['kind'], string> = {
     ask: 'Ask',
@@ -109,14 +175,6 @@
   let status = $state('');
   let loaded = $state(false);
   let list: HTMLDivElement | undefined = $state();
-
-  const TOOL_LABEL: Record<string, string> = {
-    Read: 'Reading',
-    Glob: 'Looking through files',
-    Grep: 'Searching',
-    Write: 'Writing a note',
-    Edit: 'Updating a note'
-  };
 
   async function scrollDown() {
     await tick();
@@ -226,7 +284,7 @@
           if (ev.type === 'delta') {
             reply.text += ev.text;
             status = '';
-          } else if (ev.type === 'tool') status = TOOL_LABEL[ev.name] ?? 'Working';
+          } else if (ev.type === 'tool') status = toolWords(ev.name);
           else if (ev.type === 'done') {
             reply.text = ev.text;
             reply.pending = false;
@@ -247,8 +305,8 @@
       status = '';
       onend();
       scrollDown();
-      // A reply about a report reads it: show where it stands now.
-      if (re && !reply.failed) load(profile.id);
+      // Show what the reply changed: a report it read, a lesson it kept.
+      if (!reply.failed) load(profile.id);
     }
   }
 
@@ -332,6 +390,60 @@
   }
 </script>
 
+<!-- A hand-off text: its opening paragraph until the owner opens the rest. -->
+{#snippet full(text: string, key: string, staff: string)}
+  {@const short = lead(text)}
+  {@const open = opened.has(key)}
+  <div class={!open && short.text.length > LONG ? 'clamped max-h-40 overflow-hidden' : ''}>
+    <Markdown text={open ? text : short.text} {staff} />
+  </div>
+  {#if short.more || short.text.length > LONG}
+    <button class="mt-1 text-xs text-muted hover:text-ink" onclick={() => toggle(key)}
+      >{open ? 'Show less' : 'Show all'}</button
+    >
+  {/if}
+{/snippet}
+
+<!-- The whole of a hand-off, in the giver's chat: what it asked, and what came back. -->
+{#snippet story(h: HandOffLine)}
+  <div class="mt-2 flex flex-col gap-2 border-t border-sea/20 pt-2 text-ink">
+    <div>
+      <span class="block text-xs text-muted">{h.from} asked</span>
+      {@render full(h.brief, `${h.id}-brief`, h.fromId)}
+    </div>
+    {#each h.backs as b, n (n)}
+      <div class="border-s-2 border-sea ps-2">
+        <span class="block text-xs text-muted"
+          >{b.answered ? 'You answered' : `${h.to} replied`} · {when(b.at)}</span
+        >
+        {@render full(b.text, `${h.id}-back-${n}`, h.toId)}
+      </div>
+    {:else}
+      <span class="text-xs text-muted">{h.to} has not replied yet.</span>
+    {/each}
+  </div>
+{/snippet}
+
+<!-- Where the Odd asked a colleague, on its thread's card: one line whose status moves, the story inside. -->
+{#snippet gave(h: HandOffLine)}
+  {@const p = progress(h)}
+  <div class="rounded-xl border border-sea/40 px-3 py-2">
+    <button
+      class="flex w-full items-baseline gap-2 text-start"
+      aria-expanded={opened.has(`${h.id}-card`)}
+      onclick={() => toggle(`${h.id}-card`)}
+    >
+      <span class="min-w-0 flex-1">
+        <span class="block text-xs text-muted">↳ Asked {h.to} · {when(h.at)}</span>
+        <span class="block font-medium break-words text-ink">{h.title}</span>
+      </span>
+      <span class="text-xs text-sea">{opened.has(`${h.id}-card`) ? 'Close' : 'Open'}</span>
+    </button>
+    <span class="text-xs {p.yours ? 'text-ember' : 'text-muted'}">{p.text}</span>
+    {#if opened.has(`${h.id}-card`)}{@render story(h)}{/if}
+  </div>
+{/snippet}
+
 <div class="flex h-full min-h-0 flex-col" bind:this={root}>
   <div
     bind:this={list}
@@ -344,7 +456,103 @@
       </p>
     {/if}
     {#each lines as line, i (i)}
-      {#if line.item}
+      {#if line.lesson}
+        <Lesson lesson={line.lesson} name={profile.name} />
+      {:else if line.thread}
+        <!-- One card per piece of work the Odd leads: where it stands, and each step on Open. -->
+        {@const t = line.thread.line}
+        {@const p = workLine({ ...t, lead: t.hub })}
+        {@const key = `thread-${t.id}`}
+        <div
+          class="me-auto w-[85%] rounded-2xl rounded-es-md border border-sea/40 px-3 py-2 text-sm"
+        >
+          <button
+            class="flex w-full items-baseline gap-2 text-start"
+            aria-expanded={opened.has(key)}
+            onclick={() => toggle(key)}
+          >
+            <span class="min-w-0 flex-1">
+              <span class="block font-medium break-words text-ink">{t.title}</span>
+              <span class="block text-xs text-muted">{when(t.at)}</span>
+            </span>
+            <span class="text-xs text-sea">{opened.has(key) ? 'Close' : 'Open'}</span>
+          </button>
+          <span class="text-xs {p.yours ? 'text-ember' : 'text-muted'}">{p.text}</span>
+          {#each t.waiting as w (`${w.kind}-${w.id}`)}
+            <button
+              class="mt-1 block text-start text-xs text-ember hover:text-ink"
+              onclick={() => pick(w)}>{KIND[w.kind]}: {w.title}</button
+            >
+          {/each}
+          {#if opened.has(key)}
+            <div class="mt-2 flex flex-col gap-2 border-t border-sea/20 pt-2 text-ink">
+              {#each threadSteps(line.thread) as s, n (n)}
+                {#if 'h' in s}
+                  {@render gave(s.h)}
+                {:else}
+                  <div class="border-s-2 border-sea ps-2">
+                    <span class="block text-xs text-muted"
+                      >{t.hub} picked it back up · {when(s.at)}{s.run.outcome
+                        ? ''
+                        : ' · working'}</span
+                    >
+                    {#if s.run.text}{@render full(s.run.text, `${key}-run-${n}`, profile.id)}{/if}
+                  </div>
+                {/if}
+              {/each}
+            </div>
+          {/if}
+        </div>
+      {:else if line.handOff}
+        {@const h = line.handOff.line}
+        {@const step = line.handOff.step}
+        {@const p = progress(h)}
+        {#if step === 'given'}
+          <!-- In the colleague's chat, the hand-off is the giver asking. -->
+          <div class="-mb-1 ms-1 text-[10px] tracking-[0.16em] text-sea uppercase">
+            {h.from} asked{line.at ? ` · ${when(line.at)}` : ''}
+          </div>
+          <div
+            class="me-auto max-w-[85%] rounded-2xl rounded-es-md border-s-2 border-sea bg-raise px-3 py-2 text-sm leading-relaxed break-words text-ink"
+          >
+            <span class="mb-1 block font-medium">{h.title}</span>
+            {@render full(h.brief, `${h.id}-brief`, h.fromId)}
+          </div>
+          {#if !h.backs.length}
+            <div class="-mt-1 ms-1 text-xs text-muted">{p.text}</div>
+          {/if}
+        {:else}
+          <!-- The colleague's reply in its own chat, or the giver's pick-up in the giver's. -->
+          {@const reply = step === 'reply'}
+          {@const n = line.handOff.back ?? 0}
+          {@const b = h.backs[n]}
+          {@const text = (reply ? b?.text : b?.pickUp.text) ?? ''}
+          {#if reply}
+            <div class="-mb-1 ms-1 text-[10px] tracking-[0.16em] text-sea uppercase">
+              Reply to {h.from}{line.at ? ` · ${when(line.at)}` : ''}
+            </div>
+          {/if}
+          <div
+            class="me-auto max-w-[85%] rounded-2xl rounded-es-md bg-raise px-3 py-2 text-sm leading-relaxed break-words text-ink"
+          >
+            {@render full(text, `${h.id}-${step}-${n}`, reply ? h.toId : h.fromId)}
+            {#if !reply}
+              <button
+                class="mt-2 block text-start text-xs text-sea hover:text-ink"
+                aria-expanded={opened.has(`${h.id}-from`)}
+                onclick={() => toggle(`${h.id}-from`)}>↳ From {h.to}'s work: {h.title}</button
+              >
+              {#if opened.has(`${h.id}-from`)}{@render story(h)}{/if}
+            {/if}
+          </div>
+          {#if reply && n === h.backs.findLastIndex((x) => !x.answered) && (h.status === 'waiting' || (h.status === 'failed' && !h.answered))}
+            <!-- How it stands, under the colleague's latest reply, when the owner has to know: the giver's card says it too. -->
+            <div class="-mt-1 ms-1 text-xs {h.status === 'waiting' ? 'text-ember' : 'text-muted'}">
+              {h.status === 'waiting' ? 'Waiting on you' : 'Could not finish'}
+            </div>
+          {/if}
+        {/if}
+      {:else if line.item}
         {@const it = line.item}
         <div class="-mb-1 ms-1 text-[10px] tracking-[0.16em] text-sea uppercase">
           {KIND[it.kind]}{line.at ? ` · ${when(line.at)}` : ''}
@@ -515,5 +723,9 @@
     40% {
       opacity: 1;
     }
+  }
+  /* A long hand-off text fades out where it is cut, until the owner opens it. */
+  .clamped {
+    mask-image: linear-gradient(to bottom, black 70%, transparent);
   }
 </style>

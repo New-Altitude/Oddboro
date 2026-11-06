@@ -1,7 +1,14 @@
 // Staff on the floor. Each one walks to a spot that matches what it is doing
 // and plays the pose for it. Where a staffer stands is its status.
 import { Graphics, Sprite, type Texture } from 'pixi.js';
-import { findPath, TILE, type Facing, type PathRules, type PlacedSpot } from '@oddboro/world';
+import {
+  findPath,
+  TILE,
+  type Facing,
+  type PathRules,
+  type PlacedSpot,
+  type SpriteMeta
+} from '@oddboro/world';
 import type { Floor } from './engine.ts';
 import type { Activity, StaffProfile } from '../staff/roster.ts';
 import { posesFor } from '../staff/places.ts';
@@ -9,8 +16,30 @@ import { posesFor } from '../staff/places.ts';
 const SPEED = 46; // pixels per second, about three tiles
 /** Activities a staffer does in its own room when it can. */
 const WORK: Activity[] = ['work', 'intake', 'read'];
+/** How long a visit to a colleague lasts once there, in seconds. */
+const VISIT_STAY = 2;
+/** Visits that wait behind the one under way: a manager hands on several pieces in one run. */
+const VISIT_QUEUE = 3;
+/**
+ * How many times the way out turns after a colleague who moved on while it
+ * walked. Past that it stays where it got to, so a colleague who keeps moving
+ * is never chased round the floor.
+ */
+const REAIMS = 3;
+/** The icon's sprite in the atlas: `fx-pop/<icon>` is each one's animation. */
+const POP = 'fx-pop';
+/** Pixels between the top of the head and the bottom of an icon over it. */
+const POP_GAP = 1;
+/** Icons draw over everything standing: an object's depth is its feet's y, in the low thousands. */
+const POP_Z = 1e6;
+
+/** An icon that plays once over an Odd. Each is an animation of `fx-pop`. */
+export type Pop = 'notebook' | 'note';
 
 const dirOf = (f: Facing) => (f === 'left' || f === 'right' ? 'side' : f);
+/** Which way to face to look along (dx, dy). */
+const facingAlong = (dx: number, dy: number): Facing =>
+  Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : dy > 0 ? 'down' : 'up';
 
 export class StaffActor {
   readonly profile: StaffProfile;
@@ -36,6 +65,18 @@ export class StaffActor {
   private phase = 0;
   private clock = 0;
   private floor: Floor;
+  /**
+   * A walk over to a colleague and back, which leaves `spot` alone, so the
+   * place stays held for the way back. `reaims` counts the times the way out
+   * turned after the colleague.
+   */
+  private trip:
+    { phase: 'out' | 'stay' | 'back'; to: StaffActor; left: number; reaims: number } | undefined;
+  /** The icon playing over the head, and how long it has played, in seconds. */
+  private popping:
+    { sprite: Sprite; frames: Texture[]; meta: SpriteMeta; clock: number } | undefined;
+  /** Colleagues to visit after this trip, each found where it is when its trip starts. */
+  private visits: StaffActor[] = [];
 
   constructor(floor: Floor, profile: StaffProfile, start: [number, number]) {
     this.floor = floor;
@@ -94,12 +135,16 @@ export class StaffActor {
     this.sprite.scale.x = flip ? -1 : 1;
   }
 
-  /** Send the staffer somewhere that fits the activity. Returns false if no spot fits. */
+  /**
+   * Send the staffer somewhere that fits the activity. Returns false if no spot
+   * fits, and then any trip under way goes on: only a move that happens ends it.
+   */
   assign(activity: Activity, spots: PlacedSpot[], taken: Set<string>): boolean {
     this.activity = activity;
     this.since = Date.now();
     const exit = spots.find((s) => s.activity === 'home');
     if (activity === 'home' && !exit) {
+      this.endTrips();
       this.hide();
       return true;
     }
@@ -119,6 +164,7 @@ export class StaffActor {
       if (path && (!best || path.length < best.path.length)) best = { spot, path };
     }
     if (!best) return false;
+    this.endTrips();
     this.spot = best.spot;
     this.path = best.path.slice(1);
     return true;
@@ -128,6 +174,7 @@ export class StaffActor {
     this.sprite.visible = false;
     this.shadow.visible = false;
     this.spot = undefined;
+    this.endPop();
     this.floor.invalidate();
   }
 
@@ -141,18 +188,19 @@ export class StaffActor {
     return this.path.length > 0;
   }
 
+  /** On the floor: shown, and not taken off it for good. */
   get visible() {
-    return this.sprite.visible;
+    return !this.sprite.destroyed && this.sprite.visible;
   }
 
   /** Enter the target spot from its approach, and stand up from the current one the way we sat down. */
-  private rules(target: PlacedSpot): PathRules {
+  private rules(target?: PlacedSpot): PathRules {
     const here =
       this.spot && this.spot.tile[0] === this.tile[0] && this.spot.tile[1] === this.tile[1];
-    return { enter: target.approach, leave: here ? this.spot!.approach : undefined };
+    return { enter: target?.approach, leave: here ? this.spot!.approach : undefined };
   }
 
-  /** Walk to one particular spot and do what it is for. False if no path reaches it. */
+  /** Walk to one particular spot and do what it is for. False if no path reaches it, and any trip goes on. */
   sendTo(spot: PlacedSpot): boolean {
     const w = this.floor.world;
     this.sprite.visible = true;
@@ -160,6 +208,7 @@ export class StaffActor {
     this.floor.invalidate();
     const path = findPath(w.walkable, w.width, this.tile, spot.tile, this.rules(spot));
     if (!path) return false;
+    this.endTrips();
     this.activity = spot.activity as Activity;
     this.since = Date.now();
     this.spot = spot;
@@ -170,12 +219,11 @@ export class StaffActor {
 
   /** Be where the current walk ends, without walking it: for a staffer already there when the office opens. */
   arrive() {
+    this.endTrips();
     const end = this.path.at(-1);
     if (!end) return;
     this.path = [];
-    this.tile = end;
-    this.x = end[0] * TILE + TILE / 2;
-    this.y = (end[1] + 1) * TILE;
+    this.stand(end);
     if (this.activity === 'home') this.hide();
     this.place();
   }
@@ -189,8 +237,107 @@ export class StaffActor {
     return this.path.length ? this.spot : undefined;
   }
 
+  /** Where a colleague stands to meet this one: beside its seat, never on it. */
+  get meetAt(): [number, number] {
+    return (this.destination ?? this.spot)?.approach ?? this.tile;
+  }
+
+  /** True from setting off to a colleague until back at the spot. */
+  get onTrip(): boolean {
+    return !!this.trip;
+  }
+
+  /** The colleague it is on its way to or standing with. */
+  get visiting(): StaffActor | undefined {
+    return this.trip && this.trip.phase !== 'back' ? this.trip.to : undefined;
+  }
+
+  /**
+   * Walk over to a colleague, stand with it a moment, and walk back to the
+   * same spot, which stays held the whole time. During a trip it waits its
+   * turn, up to `VISIT_QUEUE`. False when either is off the floor, it is on its
+   * way out or has no spot to come back to, the queue is full, or no path
+   * reaches the colleague.
+   */
+  visit(target: StaffActor): boolean {
+    if (!this.visible || !target.visible || target === this) return false;
+    if (!this.spot || this.activity === 'home') return false;
+    if (!this.trip) return this.setOff(target);
+    if (this.visits.length >= VISIT_QUEUE) return false;
+    this.visits.push(target);
+    return true;
+  }
+
+  private setOff(to: StaffActor): boolean {
+    const path = this.pathTo(to.meetAt);
+    if (!path) return false;
+    this.trip = { phase: 'out', to, left: VISIT_STAY, reaims: 0 };
+    this.path = path.slice(1);
+    return true;
+  }
+
+  /** A path to a tile that is no spot, getting up from the spot it is at the way it sat down. */
+  private pathTo(at: [number, number]): [number, number][] | undefined {
+    const w = this.floor.world;
+    return findPath(w.walkable, w.width, this.tile, at, this.rules());
+  }
+
+  /** The owner or the office moved it on: any trip and the visits behind it are off. */
+  private endTrips() {
+    this.trip = undefined;
+    this.visits = [];
+  }
+
+  /** The next queued visit a colleague still on the floor can take, or none. */
+  private nextVisit() {
+    for (let to = this.visits.shift(); to; to = this.visits.shift())
+      if (to.visible && this.setOff(to)) return;
+  }
+
+  /** A trip with no walk under way moves on: the way out ended, the stay runs, or the way back ended. */
+  private tripStep(trip: NonNullable<StaffActor['trip']>, dt: number) {
+    if (trip.phase === 'back') {
+      this.trip = undefined;
+      this.nextVisit();
+    } else if (trip.phase === 'stay') {
+      trip.left -= dt;
+      if (trip.left <= 0) this.headBack(trip);
+    } else {
+      // The colleague may have moved on while this one walked: go after it.
+      const at = trip.to.meetAt;
+      const moved = at[0] !== this.tile[0] || at[1] !== this.tile[1];
+      const path = moved && trip.reaims < REAIMS ? this.pathTo(at) : undefined;
+      if (path && path.length > 1) {
+        trip.reaims++;
+        this.path = path.slice(1);
+      } else {
+        trip.phase = 'stay';
+        this.facing = facingAlong(trip.to.x - this.x, trip.to.y - this.y);
+      }
+    }
+  }
+
+  /** The stay is over: back to its spot, or onto it at once when the floor changed and no path leads there. */
+  private headBack(trip: NonNullable<StaffActor['trip']>) {
+    const spot = this.spot;
+    if (!spot) return this.endTrips();
+    const w = this.floor.world;
+    const path = findPath(w.walkable, w.width, this.tile, spot.tile, this.rules(spot));
+    trip.phase = 'back';
+    if (path) this.path = path.slice(1);
+    else this.stand(spot.tile);
+  }
+
+  /** Stand on a tile at once. */
+  private stand(at: [number, number]) {
+    this.tile = at;
+    this.x = at[0] * TILE + TILE / 2;
+    this.y = (at[1] + 1) * TILE;
+  }
+
   update(dt: number) {
     if (!this.sprite.visible) return;
+    if (this.trip && !this.path.length) this.tripStep(this.trip, dt);
     const next = this.path[0];
     if (next) {
       const tx = next[0] * TILE + TILE / 2;
@@ -199,12 +346,9 @@ export class StaffActor {
       const dy = ty - this.y;
       const dist = Math.hypot(dx, dy);
       const step = SPEED * dt;
-      if (Math.abs(dx) > Math.abs(dy)) this.facing = dx > 0 ? 'right' : 'left';
-      else this.facing = dy > 0 ? 'down' : 'up';
+      this.facing = facingAlong(dx, dy);
       if (dist <= step) {
-        this.x = tx;
-        this.y = ty;
-        this.tile = next;
+        this.stand(next);
         this.path.shift();
         // Going home ends at the exit: step out of sight.
         if (!this.path.length && this.activity === 'home') this.hide();
@@ -213,6 +357,9 @@ export class StaffActor {
         this.y += (dy / dist) * step;
       }
       this.play(`walk-${dirOf(this.facing)}`, this.facing === 'left');
+    } else if (this.trip) {
+      // Standing with the colleague, facing it.
+      this.play(`idle-${dirOf(this.facing)}`, this.facing === 'left');
     } else {
       const facing = this.spot?.facing ?? 'down';
       const dir = dirOf(facing);
@@ -221,6 +368,58 @@ export class StaffActor {
     }
     this.clock += dt;
     this.place();
+    this.turnPop(dt);
+  }
+
+  /**
+   * Play an icon once over the head. One that arrives while another plays is
+   * dropped, and so is one for an Odd off the floor.
+   */
+  pop(icon: Pop) {
+    if (this.popping || !this.visible) return;
+    // An atlas compiled before the icon was drawn has no frames or meta for it: show nothing.
+    const frames = this.floor.atlas.sheet.animations[`${POP}/${icon}`] as Texture[] | undefined;
+    const meta = this.floor.atlas.catalog[POP] as SpriteMeta | undefined;
+    if (!frames?.length || !meta) return;
+    const sprite = new Sprite(frames[0]);
+    sprite.zIndex = POP_Z;
+    this.floor.objects.addChild(sprite);
+    this.popping = { sprite, frames, meta, clock: 0 };
+    this.turnPop(0);
+  }
+
+  /** How far the name tag rises, in world pixels, to sit above an icon while one plays. */
+  get tagLift(): number {
+    return this.popping ? this.popping.meta.height + POP_GAP : 0;
+  }
+
+  /**
+   * Turn the icon's frame on the Odd's own clock, as its walk turns, and keep
+   * it over the head. Asks for a draw only when that changed what shows, and
+   * takes the icon off after its last frame.
+   */
+  private turnPop(dt: number) {
+    const p = this.popping;
+    if (!p) return;
+    p.clock += dt;
+    const tex = p.frames[Math.floor(p.clock * p.meta.fps)];
+    if (!tex) return this.endPop();
+    const s = p.sprite;
+    const x = Math.round(this.head.x - p.meta.width / 2);
+    const y = Math.round(this.head.y) - this.tagLift;
+    if (s.x === x && s.y === y && s.texture === tex && s.tint === this.floor.nightTint) return;
+    s.texture = tex;
+    s.position.set(x, y);
+    s.tint = this.floor.nightTint;
+    this.floor.invalidate();
+  }
+
+  /** Take the icon off, if one plays. */
+  private endPop() {
+    if (!this.popping) return;
+    this.popping.sprite.destroy();
+    this.popping = undefined;
+    this.floor.invalidate();
   }
 
   /** Put the sprite where the staffer is, and ask for a draw only if that changed what shows. */
@@ -256,6 +455,7 @@ export class StaffActor {
   }
 
   destroy() {
+    this.endPop();
     this.sprite.destroy();
     this.shadow.destroy();
   }

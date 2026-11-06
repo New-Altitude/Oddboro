@@ -10,7 +10,8 @@ colour from `src/palette.json`. `scripts/compile.ts` turns the `.px` files into
 - `ART.md` is the style guide: palette roles, outlines, shading, and how to add
   an Odd or a prop that matches.
 - `src/tiles/` holds walls and floors, `src/props/` furniture and objects,
-  `src/characters/` the Odds' bodies and portraits.
+  `src/characters/` the Odds' bodies and portraits, `src/fx/` the icons that
+  play once over an Odd (`fx-pop`, one animation per icon).
 - `out/` holds enlarged previews after a compile. Open them to check work.
   Gitignored.
 
