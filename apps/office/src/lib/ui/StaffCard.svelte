@@ -222,11 +222,14 @@
             class="rounded-full bg-raise px-3 py-1 text-xs text-ink"
             onclick={() => (flipped = !flipped)}>{flipped ? 'Show the front' : 'Show stats'}</button
           >
-          <button
-            class="rounded-full bg-raise px-3 py-1 text-xs text-ink"
-            aria-expanded={redrawing}
-            onclick={() => (redrawing = !redrawing)}>Redraw look</button
-          >
+          <!-- A persona Odd's look is its package's, the same in every office. -->
+          {#if !profile.persona}
+            <button
+              class="rounded-full bg-raise px-3 py-1 text-xs text-ink"
+              aria-expanded={redrawing}
+              onclick={() => (redrawing = !redrawing)}>Redraw look</button
+            >
+          {/if}
           <button
             class="rounded-full bg-raise px-3 py-1 text-xs text-ink"
             onclick={() => (tab = 'send')}>Send to a place</button

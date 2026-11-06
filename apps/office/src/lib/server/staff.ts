@@ -118,6 +118,7 @@ import { endedEarly, LAUNCHES, OWN_TOOLS, streamTools, type Launch } from './cli
 import { stopGroups } from './launch.ts';
 import { agentCommand } from './agent-sign-in.ts';
 import { ACT_WRITE, house } from './house.ts';
+import { OUTCOME_LINE, personaRun, voiced } from './persona-run.ts';
 
 /** The owner's data folder, which every staffer may read, whatever tool it runs on. */
 const DATA = home('data');
@@ -568,7 +569,7 @@ async function prompt(
   );
 }
 
-type Run = { ok: boolean; text: string };
+export type Run = { ok: boolean; text: string };
 
 type Window = { utilization?: number; resetsAt?: number };
 
@@ -673,40 +674,53 @@ const officeNow = () =>
  */
 export const RUN_ENDED = 'run-ended';
 
+/** What a run is for, and what it may do. */
+export type RunOpts = {
+  kind: UsageKind;
+  sessionFile?: string;
+  extra?: string;
+  /** The owner's own message, when this is a chat. */
+  ownerSaid?: string;
+  /** What a follow-up was asked, in words a persona can read: its `message` is only a label. */
+  asked?: string;
+  /** The ask the owner approved that this run carries out: the only one its self-edits may cite. */
+  approvedAsk?: number;
+  /** The owner's note a follow-up carries out, which a lesson may quote. */
+  ownerNote?: string;
+  /** The file the owner edited, and their version of it, which a lesson read from it quotes. The run may not write that file. */
+  ownerEdit?: { path: string; text: string };
+  /** Draft at most: a follow-up `atDraft` names. */
+  draftOnly?: boolean;
+  /** A run that only reads the owner's reason or edit for a lesson (`servesNoThread`): it hands nothing on. */
+  lessonRun?: boolean;
+  /** The hand-off a colleague's run serves: asks and tasks it raises carry it, and it cannot hand off. */
+  handOffId?: number;
+  /** The thread the run works on, either side: it reads the thread's folder and writes its own part. */
+  threadId?: number;
+  /** The hand-backs this run's brief already holds in full, so its lead's story leaves them out. */
+  shown?: number[];
+  timeoutMs: number;
+  onEvent?: (e: ChatEvent) => void;
+};
+
+/**
+ * One run of an Odd. A persona Odd's chat, job or follow-up goes on from its
+ * coding tool to its persona on New Altitude (`personaRun`); every other run
+ * is the coding tool's alone.
+ */
+async function run(who: StaffRow, message: string, opts: RunOpts): Promise<Run> {
+  const kind = opts.kind;
+  return who.package && voiced(kind) && !opts.lessonRun
+    ? personaRun(who, message, { ...opts, kind }, runTool)
+    : runTool(who, message, opts);
+}
+
 /**
  * One headless run on the Odd's coding tool. `session` resumes a saved session
  * file, or starts fresh. A tool that will not start fails the run, naming the
  * tool: no run falls back to another.
  */
-async function run(
-  who: StaffRow,
-  message: string,
-  opts: {
-    kind: UsageKind;
-    sessionFile?: string;
-    extra?: string;
-    /** The owner's own message, when this is a chat. */
-    ownerSaid?: string;
-    /** The ask the owner approved that this run carries out: the only one its self-edits may cite. */
-    approvedAsk?: number;
-    /** The owner's note a follow-up carries out, which a lesson may quote. */
-    ownerNote?: string;
-    /** The file the owner edited, and their version of it, which a lesson read from it quotes. The run may not write that file. */
-    ownerEdit?: { path: string; text: string };
-    /** Draft at most: a follow-up `atDraft` names. */
-    draftOnly?: boolean;
-    /** A run that only reads the owner's reason or edit for a lesson (`servesNoThread`): it hands nothing on. */
-    lessonRun?: boolean;
-    /** The hand-off a colleague's run serves: asks and tasks it raises carry it, and it cannot hand off. */
-    handOffId?: number;
-    /** The thread the run works on, either side: it reads the thread's folder and writes its own part. */
-    threadId?: number;
-    /** The hand-backs this run's brief already holds in full, so its lead's story leaves them out. */
-    shown?: number[];
-    timeoutMs: number;
-    onEvent?: (e: ChatEvent) => void;
-  }
-): Promise<Run> {
+async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<Run> {
   const dir = homeOf(who.id);
   const saved =
     opts.sessionFile && existsSync(opts.sessionFile)
@@ -1311,6 +1325,10 @@ export async function followThrough(
     run(who, label, {
       kind: 'follow-up',
       onEvent,
+      asked:
+        handed?.kind === 'hand_off'
+          ? `${colleague?.name} asked you: ${handed.title}\n\n${handed.brief}`
+          : undefined,
       approvedAsk: f.kind === 'carry_out' ? a?.id : undefined,
       ownerNote: ownerNoteOf(f),
       ownerEdit: edit && { path: edit.path, text: edit.shown.now },
@@ -1359,7 +1377,7 @@ export async function followThrough(
   // The file an edited run read, so the office can tell a save made while it ran.
   const saw = edit?.saw;
   if (!res.ok) return { outcome: 'failed', text: res.text, saw, joined: joinedIds };
-  const m = /[*_\s]*Outcome:[*_\s]*(done|failed|waiting)\W*$/i.exec(res.text);
+  const m = OUTCOME_LINE.exec(res.text);
   if (!m)
     return {
       outcome: 'failed',

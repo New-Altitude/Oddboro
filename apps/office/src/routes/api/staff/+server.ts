@@ -23,7 +23,7 @@ import { firstDay } from '#lib/server/staff.ts';
 import { giveIntake } from '#lib/server/files.ts';
 import { currentOffice } from '#lib/server/space.ts';
 import { drawnFrom, problemsWith } from '#lib/server/looks.ts';
-import { toProfile } from '#lib/staff/roster.ts';
+import { LIMITS, toProfile } from '#lib/staff/roster.ts';
 import type { RequestHandler } from './$types';
 
 type Body = Partial<Record<'name' | 'role' | 'room' | 'permission' | 'remit' | 'desk', string>> & {
@@ -39,9 +39,9 @@ type Body = Partial<Record<'name' | 'role' | 'room' | 'permission' | 'remit' | '
 export const POST: RequestHandler = async ({ request }) => {
   const b = (await request.json().catch(() => ({}))) as Body;
   const text = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
-  const name = text(b.name, 40);
-  const role = text(b.role, 60);
-  const remit = text(b.remit, 200);
+  const name = text(b.name, LIMITS.name);
+  const role = text(b.role, LIMITS.role);
+  const remit = text(b.remit, LIMITS.remit);
   const desk = text(b.desk, 20_000);
   const drawn = drawnFrom(b);
   const office = await currentOffice();

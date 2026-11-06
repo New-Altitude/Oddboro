@@ -20,6 +20,7 @@ export * from './home.ts';
 export * from './platform.ts';
 export * from './offices.ts';
 export * from './managers.ts';
+export * from './personas.ts';
 export * from './goals.ts';
 export * from './lessons.ts';
 export * from './goal-words.ts';

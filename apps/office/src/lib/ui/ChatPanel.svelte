@@ -5,6 +5,7 @@
   import { clockTime } from '@oddboro/ledger/time';
   import Markdown from './Markdown.svelte';
   import Lesson from './Lesson.svelte';
+  import PersonaQuiet from './PersonaQuiet.svelte';
   import { call } from './api.ts';
   import { when, workLine } from './format.ts';
   import { chatRequest, takeDraft, type Delivered } from './chat-about.svelte.ts';
@@ -445,6 +446,18 @@
 {/snippet}
 
 <div class="flex h-full min-h-0 flex-col" bind:this={root}>
+  {#if profile.persona}
+    <div class="flex flex-col gap-2 border-b border-hairline p-3 text-xs">
+      <p class="leading-relaxed text-muted">{profile.persona.disclosure}</p>
+      {#if profile.persona.quiet}
+        <PersonaQuiet
+          slug={profile.persona.slug}
+          name={profile.name}
+          quiet={profile.persona.quiet}
+        />
+      {/if}
+    </div>
+  {/if}
   <div
     bind:this={list}
     {@attach pin}

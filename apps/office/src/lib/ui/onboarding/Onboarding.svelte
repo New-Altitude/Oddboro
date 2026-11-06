@@ -40,13 +40,16 @@
   import ManagerCard, { type Custom, type Preset } from './ManagerCard.svelte';
   import SpaceCard from './SpaceCard.svelte';
   import ToolsCard from './ToolsCard.svelte';
+  import PersonaCard from './PersonaCard.svelte';
+  import { PersonaOffers } from '../persona-offers.svelte.ts';
   import { selectOnFocus } from '../select-on-focus.ts';
   import { offersOtherTools } from '../tool-action.ts';
 
-  // A new owner's first visit, over the live floor: nine cards (Other AI tools
-  // only where this system offers a tool besides Claude Code, Help fix Oddboro
-  // only where the office has somewhere to send reports), one of them an
-  // optional sign-in to New Altitude, then the office going up on their lot and
+  // A new owner's first visit, over the live floor: ten cards (Other AI tools
+  // only where this system offers a tool besides Claude Code, New Altitude
+  // personas only where New Altitude offers the signed-in account one, Help
+  // fix Oddboro only where the office has somewhere to send reports), one of
+  // them an optional sign-in to New Altitude, then the office going up on their lot and
   // their manager arriving by bus. The slow parts
   // start the moment their inputs exist: the office draws from when the owner
   // leaves "Your space", and a described manager from when they leave theirs.
@@ -62,6 +65,7 @@
     'manager',
     'space',
     'account',
+    'persona',
     'diagnostics',
     'go'
   ] as const;
@@ -74,6 +78,7 @@
     manager: 'Your office manager',
     space: 'Your space',
     account: 'New Altitude',
+    persona: 'New Altitude personas',
     diagnostics: 'Help fix Oddboro',
     go: 'Open the office'
   };
@@ -83,14 +88,21 @@
 
   // Other AI tools, read from the first card on, so the step is known by the time it comes.
   const agentTools = new AgentTools();
+  // The personas on offer, read once the owner signs in, so the step is known by the time it comes.
+  const personas = new PersonaOffers();
   /**
    * The cards this owner sees: Other AI tools only where this system offers one
-   * to sign in to, Help fix Oddboro only where reports have somewhere to go.
+   * to sign in to, New Altitude personas only where the account is offered one
+   * (and while its card shows, so a later read cannot pull it away), Help fix
+   * Oddboro only where reports have somewhere to go.
    */
   const steps: readonly Step[] = $derived(
     STEPS.filter(
       (s) =>
         (s !== 'tools' || offersOtherTools(agentTools.tools)) &&
+        (s !== 'persona' ||
+          step === 'persona' ||
+          (personas.state?.state === 'ok' && personas.state.offers.length > 0)) &&
         (s !== 'diagnostics' || diagnostics.possible)
     )
   );
@@ -508,6 +520,8 @@
             />
           {:else if step === 'account'}
             <AccountCard onnext={next} onback={back} />
+          {:else if step === 'persona'}
+            <PersonaCard offers={personas} onnext={next} onback={back} />
           {:else if step === 'diagnostics'}
             <DiagnosticsCard onnext={next} onback={back} />
           {:else}

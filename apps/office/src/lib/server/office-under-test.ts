@@ -35,7 +35,8 @@ const port = await new Promise<number>((done) => {
 });
 // The stand-in for Claude Code: it reads the message, then reports one tool
 // call and a result that carries what the office gave the run. A message
-// that says "Hold until <file> exists." keeps the run going until it does.
+// that says "Hold until <file> exists." keeps the run going until it does,
+// and one that says "Think aloud: <words>." streams <words> as text first.
 // "claude auth status" says signed out at once, and "claude auth login"
 // prints its sign-in page and waits until it is stopped, as Setup's sign-in
 // waits on the owner.
@@ -75,6 +76,8 @@ function reply() {
   };
   const line = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
   line({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: 'tool_use', name: 'look' } } });
+  const aloud = /Think aloud: ([^.]+)\./.exec(message)?.[1];
+  if (aloud) line({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: aloud } } });
   line({ type: 'result', subtype: 'success', result: JSON.stringify(gave) + '\\nOutcome: done' });
 }
 `

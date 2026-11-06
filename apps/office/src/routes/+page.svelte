@@ -21,6 +21,7 @@
   import type { LessonEvent, OfficeEvent } from '#lib/server/events.ts';
   import DeskDrawer from '#lib/ui/DeskDrawer.svelte';
   import { account } from '#lib/ui/account.svelte.ts';
+  import { personaNews } from '#lib/ui/persona-offers.svelte.ts';
   import { diagnostics } from '#lib/ui/diagnostics.svelte.ts';
   import LedgerPanel from '#lib/ui/LedgerPanel.svelte';
   import GoalsPanel from '#lib/ui/GoalsPanel.svelte';
@@ -607,6 +608,9 @@
         actors.find((a) => a.profile.id === e.staff)?.pop(LESSON_POP[e.kind]);
         return;
       }
+      // Only the persona offers hear this: the floor meets a persona Odd, or
+      // sees it go quiet, through the staff table's change, as any hire.
+      if (e.type === 'persona') return void personaNews(e);
       // A move into another layout rebuilds the whole floor.
       // During the first run, and until its last drawn pieces land, the floor
       // already shows the office being moved into.
@@ -975,8 +979,10 @@
     }
   });
 
+  // The end of the first run is a change too: the Odds it held back walk on then.
   $effect(() => {
     void staff;
+    void firstRun;
     if (floorReady) void syncActors();
   });
 </script>

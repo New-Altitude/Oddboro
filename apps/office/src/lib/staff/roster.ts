@@ -1,6 +1,6 @@
 // The shape of a staffer on the floor, and the words for what each one is
 // doing. The staff themselves live in Postgres; hiring adds a row there.
-import type { Agent, StaffRow } from '@oddboro/ledger';
+import type { Agent, PersonaLink, StaffRow } from '@oddboro/ledger';
 import type { LookSpec } from '@oddboro/sprites/look';
 import { officeDay } from '@oddboro/ledger/time';
 
@@ -8,6 +8,9 @@ export type Activity =
   'work' | 'intake' | 'read' | 'wait' | 'play' | 'rest' | 'eat' | 'exercise' | 'talk' | 'home';
 
 export type PermissionLevel = 'read' | 'draft' | 'act';
+
+/** The most characters an Odd's name, role and remit take, however it joins: hired or added from New Altitude. */
+export const LIMITS = { name: 40, role: 60, remit: 200 } as const;
 
 export type StaffProfile = {
   id: string;
@@ -31,6 +34,8 @@ export type StaffProfile = {
   guesses: number;
   /** A generated look: where its frames and portrait load from. Absent for hand-drawn art. */
   look?: { spec: LookSpec; sheet: string; portrait: string; version: string };
+  /** Set for an Odd added from a New Altitude persona's package. */
+  persona?: PersonaLink;
 };
 
 /** A short stamp that changes whenever the look or portrait does. */
@@ -68,7 +73,8 @@ export function toProfile(r: StaffRow, guesses = 0): StaffProfile {
             sheet: `/api/staff/${r.id}/look?v=${lookVersion(r.look, r.portraitPx)}`,
             portrait: `/api/staff/${r.id}/portrait?v=${lookVersion(r.look, r.portraitPx)}`
           }
-        : undefined
+        : undefined,
+    ...(r.package ? { persona: r.package } : {})
   };
 }
 

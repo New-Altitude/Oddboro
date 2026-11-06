@@ -24,7 +24,7 @@
     },
     {
       q: 'What leaves my computer?',
-      a: 'Only what the work needs. Odds send their work to Claude under your own account, and an Odd talks to the tools you connected for it. The app checks GitHub for new versions of itself. Error reports go to New Altitude only if you say yes, and your sign-in only if you sign in to a New Altitude account.'
+      a: 'Only what the work needs. Odds send their work to Claude under your own account, and an Odd talks to the tools you connected for it. The app checks GitHub for new versions of itself. Error reports go to New Altitude only if you say yes, and your sign-in only if you sign in to a New Altitude account. A New Altitude persona you add as an Odd sends its conversations to New Altitude.'
     },
     {
       q: 'Can an Odd act without asking me?',

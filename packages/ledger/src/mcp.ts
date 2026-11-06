@@ -1078,7 +1078,7 @@ if (has('hand_off') && !HAND_OFF_ID && !LESSON_RUN) {
   /** Each colleague's line, with the tools of this Odd's it lacks. */
   const lines = colleagues.map((c) => {
     const lacks = lacking(held, c.id, [ME]);
-    return `- ${c.id}: ${c.name}, ${c.role}. ${c.remit}${lacks.length ? ` Lacks your ${lacks.map((t) => `${t.name} (${t.id})`).join(', ')}.` : ''}`;
+    return `- ${c.id}: ${c.name}, ${c.role}. ${c.remit}${lacks.length ? ` Lacks your ${lacks.map((t) => `${t.name} (${t.id})`).join(', ')}.` : ''}${c.package ? ' Their replies come from New Altitude, so what you hand them leaves this computer.' : ''}`;
   });
   tool(
     'hand_off',

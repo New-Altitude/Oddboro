@@ -86,6 +86,7 @@ import { AGENT_NAMES, type Agent } from './agents.ts';
 import { nextRun, zone } from './time.ts';
 import { isGrantable, OFFICE_TOOLS, STARTER_TOOLS, tickable, yesOrNo } from './tools.ts';
 import { lookSignature, type DrawnPart, type LookSpec } from '@oddboro/sprites/look';
+import type { PersonaLink } from './personas.ts';
 
 export type StaffRow = typeof staff.$inferSelect;
 export type AskRow = typeof asks.$inferSelect;
@@ -170,6 +171,8 @@ export type Hire = Pick<
   newParts?: DrawnPart[];
   /** The coding tool its runs go through, stored before its first run. Claude Code when left out. */
   agent?: Agent;
+  /** The New Altitude persona it was installed from. */
+  package?: PersonaLink;
 };
 
 /** Current staff whose generated look matches this one, other than `except`. */
@@ -213,6 +216,8 @@ export async function setLook(
 ): Promise<void> {
   const who = await staffer(id);
   if (!who) throw fixedError('No such Odd');
+  if (who.package)
+    throw new Error(`${who.name}'s look comes from New Altitude and cannot be redrawn.`);
   const twin = await lookTaken(look, id);
   if (twin) throw new Error(`${twin.name} already looks exactly like that`);
   await saveParts(newParts, id);

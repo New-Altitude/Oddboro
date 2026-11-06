@@ -25,6 +25,7 @@ test("an Odd hired on an evening in New York shows that day as its hire date, no
     desk: 'You are Penny.',
     look: null,
     portraitPx: null,
+    package: null,
     hiredAt: new Date('2026-11-04T01:30:00Z'),
     leftAt: null
   } satisfies StaffRow;

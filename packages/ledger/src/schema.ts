@@ -20,6 +20,7 @@ import type { LookSpec, PartKind } from '@oddboro/sprites/look';
 import type { FloorPlan, OfficeSpec, RoomKind, RoomTemplate } from '@oddboro/world';
 import { STARTER_TOOLS } from './tools.ts';
 import type { Agent } from './agents.ts';
+import type { PersonaLink } from './personas.ts';
 
 const at = (name: string) => timestamp(name, { withTimezone: true });
 const created = (name = 'created_at') => at(name).notNull().defaultNow();
@@ -52,6 +53,8 @@ export const staff = pgTable('staff', {
   look: jsonb().$type<LookSpec>(),
   /** The drawn portrait for a generated look, as .px text. */
   portraitPx: text(),
+  /** Set for an Odd installed from a New Altitude persona: which, its version, its disclosure, and why it is quiet. */
+  package: jsonb().$type<PersonaLink>(),
   hiredAt: created('hired_at'),
   /** Set when the owner lets a staffer go. Its history stays. */
   leftAt: at('left_at')

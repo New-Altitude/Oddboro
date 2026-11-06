@@ -1,7 +1,7 @@
 <script lang="ts">
   // Where the data lives: your computer in the middle with the office on its screen,
   // Anthropic and the tools you connect at the edges on dashed lines you open,
-  // and New Altitude off the map, reached only by the error reports and the sign-in the owner chooses.
+  // and New Altitude off the map, reached only by the error reports, the sign-in and the persona Odds the owner chooses.
   //
   // Each fact lights the part of the map it is about and dims the rest. While
   // the section is on screen the highlight steps through the four facts. The
@@ -21,9 +21,9 @@
     },
     {
       title: 'Nothing comes to us unless you say so.',
-      text: 'New Altitude runs no server for your office. If you say yes, error reports go to our relay so we can fix what broke. If you sign in to a New Altitude account, your sign-in comes to us too. Nothing else does.',
+      text: 'New Altitude runs no server for your office. If you say yes, error reports go to our relay so we can fix what broke. If you sign in to a New Altitude account, your sign-in comes to us too, and so do your conversations with a New Altitude persona you add as an Odd. Nothing else does.',
       shows:
-        "Highlights New Altitude, off the map, and the two dashed lines, the only paths your office's data takes. Error reports and a New Altitude sign-in reach us only if you choose them."
+        "Highlights New Altitude, off the map, and the two dashed lines, the only paths your office's data takes. Error reports, a New Altitude sign-in and a New Altitude persona's conversations reach us only if you choose them."
     },
     {
       title: 'Claude works under your own account.',
@@ -186,7 +186,8 @@
       >
       <p class="text-muted text-xs">
         <span class="text-ink font-semibold">New Altitude</span> is off the map. Your office's data never
-        flows here. Error reports and a sign-in do, only if you choose them.
+        flows here unless you add a New Altitude persona. Error reports and a sign-in do, only if you
+        choose them.
       </p>
     </div>
   </figure>

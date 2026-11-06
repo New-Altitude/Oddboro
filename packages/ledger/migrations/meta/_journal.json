@@ -36,6 +36,13 @@
       "when": 1793791632248,
       "tag": "0004_agent",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793865655531,
+      "tag": "0005_persona-package",
+      "breakpoints": true
     }
   ]
 }
