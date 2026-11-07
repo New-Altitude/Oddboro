@@ -14,7 +14,8 @@ import { db, sql } from './pglite.ts';
 // A home of the test's own, with the office's home and code inside it, set
 // before office.ts loads: home.ts fixes both at import.
 const HOME = realpathSync(mkdtempSync(join(tmpdir(), 'own-tools-')));
-process.env.HOME = HOME;
+// Windows ignores HOME and reads USERPROFILE.
+process.env.HOME = process.env.USERPROFILE = HOME;
 process.env.ODDBORO_HOME = join(HOME, '.oddboro');
 process.env.ODDBORO_CODE = join(HOME, 'code', 'oddboro');
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
@@ -194,6 +195,7 @@ test('setOwnTool and setFolder record one line each', async () => {
   await O.setOwnTool('ziva', 'web', true);
   await O.setOwnTool('ziva', 'web', false);
   const game = folder('Documents', 'GitHub', 'my-game');
+  const shownGame = join('~', 'Documents', 'GitHub', 'my-game');
   await O.setFolder('ziva', game, 'read');
   await O.setFolder('ziva', game, 'read');
   await O.setFolder('ziva', game, 'write');
@@ -205,9 +207,9 @@ test('setOwnTool and setFolder record one line each', async () => {
     'Stopped Ziva running commands',
     'Let Ziva browse the web',
     'Stopped Ziva browsing the web',
-    'Let Ziva read ~/Documents/GitHub/my-game',
-    'Let Ziva read and change ~/Documents/GitHub/my-game',
-    'Took ~/Documents/GitHub/my-game from Ziva'
+    `Let Ziva read ${shownGame}`,
+    `Let Ziva read and change ${shownGame}`,
+    `Took ${shownGame} from Ziva`
   ]);
   const row = await O.staffer('ziva');
   assert.deepEqual([row?.commands, row?.web, row?.folders], [false, false, []]);
@@ -254,10 +256,13 @@ test('checkFolder refuses a folder whose real path holds a character Codex reads
   assert.equal(R.glob('['), "That folder's path has a character an Odd's tool can't take: [");
   folder('Photos [2024]');
   assert.deepEqual(O.checkFolder('~/Photos [2024]'), { refused: R.glob('[') });
-  folder('a*b', 'inner');
-  assert.deepEqual(O.checkFolder('~/a*b/inner'), { refused: R.glob('*') });
-  folder('q?x');
-  assert.deepEqual(O.checkFolder('~/q?x'), { refused: R.glob('?') });
+  // Windows takes no * or ? in a name, so no such folder is there to give.
+  if (process.platform !== 'win32') {
+    folder('a*b', 'inner');
+    assert.deepEqual(O.checkFolder('~/a*b/inner'), { refused: R.glob('*') });
+    folder('q?x');
+    assert.deepEqual(O.checkFolder('~/q?x'), { refused: R.glob('?') });
+  }
   folder('a]b');
   assert.deepEqual(O.checkFolder('~/a]b'), { refused: R.glob(']') });
   const braces = folder('x{y}');
@@ -265,7 +270,7 @@ test('checkFolder refuses a folder whose real path holds a character Codex reads
   const bang = folder('i!j');
   assert.deepEqual(O.checkFolder('~/i!j'), { real: bang });
   // A typed path with no such character, whose real path has one.
-  symlinkSync(folder('pics [old]'), join(HOME, 'pics'));
+  symlinkSync(folder('pics [old]'), join(HOME, 'pics'), 'junction');
   assert.deepEqual(O.checkFolder('~/pics'), { refused: R.glob('[') });
 });
 
@@ -301,11 +306,11 @@ test(
 
 test('checkFolder refuses a link into a secret store, and a folder holding where one leads', () => {
   folder('.ssh');
-  symlinkSync(join(HOME, '.ssh'), join(HOME, 'x'));
+  symlinkSync(join(HOME, '.ssh'), join(HOME, 'x'), 'junction');
   assert.deepEqual(O.checkFolder('~/x'), { refused: O.FOLDER_REFUSED.secrets });
   // A secret store that is itself a link, as a dotfiles folder makes one.
   rmSync(join(HOME, '.gnupg'), { recursive: true, force: true });
-  symlinkSync(folder('dots', 'gnupg'), join(HOME, '.gnupg'));
+  symlinkSync(folder('dots', 'gnupg'), join(HOME, '.gnupg'), 'junction');
   assert.deepEqual(O.checkFolder('~/dots'), { refused: O.FOLDER_REFUSED.secrets });
   // A folder that only holds a `.ssh` of its own is not a secret store.
   const project = folder('project');

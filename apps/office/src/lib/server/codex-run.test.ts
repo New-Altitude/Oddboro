@@ -185,6 +185,7 @@ test("a Codex Odd's chat is held by the kernel to its own folder and its own tem
       '/private/var/db/xcode_select_link': 'read',
       '<home>/Applications/Xcode.app/Contents/Developer': 'read',
       '/System/Library/OpenSSL/openssl.cnf': 'read',
+      ...(process.platform === 'linux' && { '<home>/bin': 'read' }),
       '<home>/data': 'read',
       '<home>/staff/cody': 'write',
       '<home>/codex-tmp/<id>': 'write',

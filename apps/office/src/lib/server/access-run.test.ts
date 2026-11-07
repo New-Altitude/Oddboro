@@ -120,6 +120,8 @@ test("each tool's launch gives a shell exactly when commandsHow says and the off
   ] as const) {
     await setOwn(id, { commands: true });
     for (const platform of ['darwin', 'linux', 'win32'] as const) {
+      // Its temp folder is made in /private/tmp, which only a real Mac has.
+      if (agent === 'claude' && platform === 'darwin' && process.platform !== 'darwin') continue;
       const on = `${agent} on ${platform}`;
       assert.ok(L.AGENT_PLATFORMS[agent].runs.includes(platform), on);
       const chat = () => chatOf(id);

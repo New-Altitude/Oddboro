@@ -21,13 +21,13 @@ import {
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 const WIN = process.platform === 'win32';
 const SERVER =
-  process.env.FILES_SERVER ??
-  new URL('../src/files-server.ts', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+  process.env.FILES_SERVER ?? fileURLToPath(new URL('../src/files-server.ts', import.meta.url));
 
 const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'oddboro-files-')));
 const office = join(root, 'office');

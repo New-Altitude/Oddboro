@@ -21,7 +21,8 @@ import { db } from './pglite.ts';
 
 // A home of the test's own, so a folder given to an Odd is named from `~`.
 const HOME = realpathSync(mkdtempSync(join(tmpdir(), 'thread-access-')));
-process.env.HOME = HOME;
+// Windows ignores HOME and reads USERPROFILE.
+process.env.HOME = process.env.USERPROFILE = HOME;
 after(() => rmSync(HOME, { recursive: true, force: true }));
 // The ledger rows a decision writes embed nothing: no Ollama answers here.
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
@@ -295,12 +296,12 @@ test('a colleague is told of the web and the folders others on the thread hold a
   assert.match(brief, /You have no access to the web, which others on this work have/);
 
   const toFay = await handedTo(await from('wes', 'fay'), 'fay');
-  assert.deepEqual(toFay.kept, ['~/p'], 'Wes lacks ~/p, so Fay keeps it out');
+  assert.deepEqual(toFay.kept, [join('~', 'p')], 'Wes lacks ~/p, so Fay keeps it out');
 
   // Fay's ~/p holds Sol's ~/p/sub, so she lacks nothing of Sol's.
   const fromSol = await handedTo(await from('sol', 'fay'), 'fay');
   assert.equal(fromSol.withheld, undefined);
-  assert.deepEqual(fromSol.kept, ['~/p'], 'Sol has only ~/p/sub');
+  assert.deepEqual(fromSol.kept, [join('~', 'p')], 'Sol has only ~/p/sub');
 
   // Kit and Lou were both given ~/gone, since deleted from the disk. Lou's runs
   // no longer get it, so it is not hers, and what Kit read there is withheld.
@@ -313,5 +314,5 @@ test('a colleague is told of the web and the folders others on the thread hold a
     { ...odd('lou', 'Lou'), folders: given }
   ]);
   const toLou = await handedTo(await from('kit', 'lou'), 'lou');
-  assert.deepEqual(toLou.withheld, ['~/gone']);
+  assert.deepEqual(toLou.withheld, [join('~', 'gone')]);
 });

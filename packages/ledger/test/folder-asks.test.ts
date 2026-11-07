@@ -15,7 +15,8 @@ import { db, sql, toolServer } from './tool-server.ts';
 // A home of the test's own, for this process and the tool server's, so a
 // folder in it can be given and is shown as ~/...
 const HOME = realpathSync(mkdtempSync(join(tmpdir(), 'folder-asks-')));
-process.env.HOME = HOME;
+// Windows ignores HOME and reads USERPROFILE.
+process.env.HOME = process.env.USERPROFILE = HOME;
 after(() => rmSync(HOME, { recursive: true, force: true }));
 
 const { asks, followUps, ledger, staff } = await import('../src/schema.ts');
@@ -58,8 +59,9 @@ async function call(c: Client, args: Record<string, unknown>) {
     error: r.isError === true
   };
 }
+const shownTaxes = join('~', 'Documents', 'Taxes');
 const theo = (run: string, env: Record<string, string> = {}) =>
-  toolServer('theo', { RUN_KEY: run, HOME, ...env });
+  toolServer('theo', { RUN_KEY: run, HOME, USERPROFILE: HOME, ...env });
 const folderAsks = () => db.select().from(asks).where(eq(asks.kind, 'folder'));
 const row = async (id: number) => (await db.select().from(asks).where(eq(asks.id, id)))[0];
 const folders = async () => (await db.select().from(staff).where(eq(staff.id, 'theo')))[0].folders;
@@ -89,7 +91,7 @@ test('the tool refuses a missing, a refused and an already-held folder in the Se
     .set({ folders: [{ path: taxes, write: true }] })
     .where(eq(staff.id, 'theo'));
   const held = await call(c, { path: '~/Documents/Taxes/2026', level: 'write', why: 'w' });
-  assert.ok(held.error && held.text.includes('You already have ~/Documents/Taxes'), held.text);
+  assert.ok(held.error && held.text.includes(`You already have ${shownTaxes}`), held.text);
   assert.deepEqual(await folderAsks(), []);
 });
 
@@ -113,7 +115,7 @@ test('the tool raises one folder ask with the real path, and refuses a repeat fr
   assert.ok(!r.error, r.text);
   const [a] = await folderAsks();
   assert.deepEqual(a.folder, { path: taxes, level: 'read' });
-  assert.equal(a.title, 'Read ~/Documents/Taxes');
+  assert.equal(a.title, `Read ${shownTaxes}`);
   const again = await call(c, { path: taxes, level: 'read', why: 'w' });
   assert.ok(again.error && again.text.includes(`revises: ${a.id}`), again.text);
   assert.equal((await folderAsks()).length, 1);
@@ -130,7 +132,7 @@ test('Give access gives the folder with one ledger line, approves the ask and st
   const lines = await db.select().from(ledger);
   assert.deepEqual(
     lines.map((l) => l.title),
-    ['Let Theo read and change ~/Documents/Taxes']
+    [`Let Theo read and change ${shownTaxes}`]
   );
   const runs = await db.select().from(followUps);
   assert.deepEqual(

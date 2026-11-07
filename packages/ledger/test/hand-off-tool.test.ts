@@ -447,12 +447,14 @@ test("the hand_off tool names what each colleague lacks of the lead's tools once
       ['wes', 'fay'].map((staffId) => ({ staffId, connectorId: 'gmail', level: 'read' as const }))
     );
   try {
-    const t = await handOffTool(await toolServer('lead', { RUN_KEY: 'k-lacks', HOME: home }));
+    const t = await handOffTool(
+      await toolServer('lead', { RUN_KEY: 'k-lacks', HOME: home, USERPROFILE: home })
+    );
     const lines = (t?.description ?? '').split('\n');
     for (const line of [
-      '- wes: Wes, Tester. Tests. Lacks your folder ~/x.',
+      `- wes: Wes, Tester. Tests. Lacks your folder ${join('~', 'x')}.`,
       '- fay: Fay, Tester. Tests. Lacks the web.',
-      '- paige: Paige, Tester. Tests. Lacks your Gmail, the web, and your folder ~/x.'
+      `- paige: Paige, Tester. Tests. Lacks your Gmail, the web, and your folder ${join('~', 'x')}.`
     ])
       assert.ok(lines.includes(line), `${line}\n${t?.description}`);
   } finally {

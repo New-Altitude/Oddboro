@@ -17,7 +17,8 @@ import { staff } from '../src/schema.ts';
 import { db } from './pglite.ts';
 
 const HOME = realpathSync(mkdtempSync(join(tmpdir(), 'accounts-')));
-process.env.HOME = HOME;
+// Windows ignores HOME and reads USERPROFILE.
+process.env.HOME = process.env.USERPROFILE = HOME;
 process.env.ODDBORO_HOME = join(HOME, '.oddboro');
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
 after(() => rmSync(HOME, { recursive: true, force: true }));
