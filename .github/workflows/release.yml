@@ -87,6 +87,11 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: '1.27.3'
+          cache: false
+
       - name: Install Rust
         run: |
           rustup toolchain install stable --profile minimal --target aarch64-apple-darwin
@@ -181,6 +186,11 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: '1.27.3'
+          cache: false
+
       # GStreamer's plugins go into the AppImage as they are installed here:
       # libav decodes the office's AAC music, and PulseAudio and PipeWire
       # play it.
@@ -251,6 +261,11 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: '1.27.3'
+          cache: false
 
       # The x64 runner comes with rustup; the arm64 one may not.
       - name: Install Rust

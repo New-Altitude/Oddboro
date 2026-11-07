@@ -19,6 +19,7 @@ import type { RequestHandler } from './$types';
 export const POST: RequestHandler = async ({ request }) => {
   const b = (await request.json().catch(() => ({}))) as { agent?: unknown; label?: unknown };
   const agent = offeredAgent(b.agent, process.platform);
+  if (agent === 'pi') error(400, 'Pi uses the Magpie connection.');
   if (!agent) error(400, `Pick ${agentsOn(process.platform).join(' or ')}`);
   if (agent === 'gemini') error(400, 'Gemini takes one API key for the office.');
   try {

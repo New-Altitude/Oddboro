@@ -6,6 +6,7 @@ import {
   heldReach,
   MANAGER_ROLE,
   modelFor,
+  officeAgent,
   MODELS,
   type Agent,
   networkHeld,
@@ -24,8 +25,11 @@ import { claudeSettings } from './claude.ts';
  * default, first in its list.
  */
 function officeModel(agent: Agent): string | undefined {
+  if (agent === officeAgent() && process.env.OFFICE_MAGPIE_MODEL)
+    return `magpie:${process.env.OFFICE_MAGPIE_MODEL}`;
   if (agent === 'claude')
     return claudeSettings().model === 'sonnet' ? 'claude-sonnet-5-5' : 'claude-opus-5-5';
+  if (agent === 'pi') return undefined;
   const set = agent === 'codex' ? process.env.OFFICE_CODEX_MODEL : process.env.OFFICE_GROK_MODEL;
   return set ?? MODELS[agent][0]?.id;
 }

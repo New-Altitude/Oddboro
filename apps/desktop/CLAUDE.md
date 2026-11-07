@@ -90,20 +90,21 @@ never get IPC without one.
   `ODDBORO_TARGET`, so a debug build finds its copy.
 - Env Node gets:
 
-| Variable                       | Value                                                      |
-| ------------------------------ | ---------------------------------------------------------- |
-| `PORT`                         | the port, 4500 unless the shell's env sets `ODDBORO_PORT`  |
-| `ODDBORO_PORT`                 | the same                                                   |
-| `HOST`                         | `127.0.0.1`                                                |
-| `ORIGIN`                       | `http://127.0.0.1:<port>`                                  |
-| `ODDBORO_HOME`                 | `~/.oddboro` (`%USERPROFILE%\.oddboro`), unless set        |
-| `ODDBORO_CODE`                 | `<resources>/server`                                       |
-| `ODDBORO_DB_PORT`              | passed through when the shell's env sets it                |
-| `PATH`                         | the login-shell PATH from step 3                           |
-| `ODDBORO_VERSION`              | the app's version, like `0.0.4`                            |
-| `ODDBORO_UPDATE_TOKEN`         | a fresh secret per run, release builds only                |
-| `ODDBORO_SECRETS`              | `shell` on a Mac: the shell keeps the office's secrets     |
-| `ODDBORO_GOOGLE_CLIENT_SECRET` | the Google sign-in client's secret, when the build had one |
+| Variable                       | Value                                                        |
+| ------------------------------ | ------------------------------------------------------------ |
+| `PORT`                         | the port, 4500 unless the shell's env sets `ODDBORO_PORT`    |
+| `ODDBORO_PORT`                 | the same                                                     |
+| `HOST`                         | `127.0.0.1`                                                  |
+| `ORIGIN`                       | `http://127.0.0.1:<port>`                                    |
+| `ODDBORO_HOME`                 | `~/.oddboro` (`%USERPROFILE%\.oddboro`), unless set          |
+| `ODDBORO_CODE`                 | `<resources>/server`                                         |
+| `ODDBORO_MAGPIE_BINARY`        | `<resources>/server/magpie/magpie` (`magpie.exe` on Windows) |
+| `ODDBORO_DB_PORT`              | passed through when the shell's env sets it                  |
+| `PATH`                         | the login-shell PATH from step 3                             |
+| `ODDBORO_VERSION`              | the app's version, like `0.0.4`                              |
+| `ODDBORO_UPDATE_TOKEN`         | a fresh secret per run, release builds only                  |
+| `ODDBORO_SECRETS`              | `shell` on a Mac: the shell keeps the office's secrets       |
+| `ODDBORO_GOOGLE_CLIENT_SECRET` | the Google sign-in client's secret, when the build had one   |
 
 - `ODDBORO_APP=1`. With it the server quits on SIGTERM once its HTTP server
   closes, and when its stdin closes (`apps/office/src/hooks.server.ts`). It
@@ -135,6 +136,31 @@ never get IPC without one.
   running on the port.
 - `ODDBORO_SERVER_URL`, when set, skips Node and opens that URL. Use it to run
   the shell against `vite dev`.
+
+## Bundled Magpie runtime
+
+`npm run magpie:build` at the repo root runs `scripts/magpie-runtime.ts`
+inside this app. It checks the pinned archive and embedding patch in
+`magpie/`, then builds a headless binary without starting it or reading
+sign-ins. It requires Git, tar and the local Go toolchain recorded by
+`magpie/source.json`; the build does not fetch a Go toolchain. Source and
+patch checksums are required before a build can be accepted.
+
+The output is `stage/magpie/`: `magpie` or `magpie.exe`, its license and
+`magpie-runtime.json` and `THIRD_PARTY_NOTICES.txt`. The notice inventory copies the
+Go runtime and dependency notices from the exact target build sources. A cached
+binary is rebuilt if either notice file is missing or changed. The manifest records the source commit, embedding
+patch hash, binary hash, version, platform and chip. On a Mac the helper is
+signed before hashing. `scripts/stage.ts` builds this directory as part of
+staging, and Tauri includes it with the server resources. The shell gives
+Node its path in `ODDBORO_MAGPIE_BINARY`.
+
+The office checks the manifest and both embedded listeners before using the
+runtime. It owns the child process and private office state; an existing
+Magpie connection does not transfer process ownership. See
+[the integration guide](../../docs/magpie.md) for supported sign-ins and the
+remaining packaged setup walkthroughs and real-provider evidence. A local
+source build is not evidence that the runtime has shipped on all systems.
 
 ## Updates
 

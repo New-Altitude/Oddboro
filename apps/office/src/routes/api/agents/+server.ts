@@ -36,6 +36,8 @@ import {
 } from '#lib/server/agent-sign-in.ts';
 import { claudeAccount, claudeSettings } from '#lib/server/claude.ts';
 import { officeDrawsLooks } from '#lib/server/claude.ts';
+import { runsActive } from '#lib/server/staff.ts';
+import { magpieRunConnection } from '#lib/server/magpie.ts';
 import { versionState, type VersionState } from '#lib/server/versions.ts';
 import type { RequestHandler } from './$types';
 
@@ -46,6 +48,7 @@ export type AgentTool = {
   installed: boolean;
   signIn?: SignInState;
   commandsHow: CommandsHow;
+  magpieReady?: boolean;
 } & VersionState;
 /** A tool this system does not offer yet, with why, for setup's greyed row. */
 export type LaterTool = { id: Agent; name: string; why: string };
@@ -54,31 +57,56 @@ export type AccountState = { id: string; agent: Agent; label: string; signIn: Si
 
 /** One account's sign-in: Claude Code's read with its own folder, the rest from their files. */
 const stateOf = (tool: Agent, account?: string): Promise<SignInState> | SignInState =>
-  tool === 'claude'
-    ? claudeSignInState(
-        account,
-        // Only the Office account on the Claude plan falls back to the owner's own login.
-        !account && claudeSettings().auth === 'plan' ? () => claudeAccount() : undefined
-      )
-    : signInState(tool, account);
+  tool === 'pi'
+    ? { how: 'key', installing: false, signedIn: false }
+    : tool === 'claude'
+      ? claudeSignInState(
+          account,
+          // Only the Office account on the Claude plan falls back to the owner's own login.
+          !account && claudeSettings().auth === 'plan' ? () => claudeAccount() : undefined
+        )
+      : signInState(tool, account);
 
 export const GET: RequestHandler = async () => {
   const platform = process.platform;
+  const officeModel = process.env.OFFICE_MAGPIE_MODEL
+    ? `magpie:${process.env.OFFICE_MAGPIE_MODEL}`
+    : null;
+  let gatewayReady = false;
+  if (officeModel) {
+    try {
+      await magpieRunConnection(officeModel.slice(7));
+      gatewayReady = true;
+    } catch {
+      /* Shown as unavailable. */
+    }
+  }
   return json({
+    officeModel,
     // The picker's word for this computer.
     computer: computerWord(),
     office: officeAgent(),
+    officeConfigured: !!process.env.OFFICE_AGENT,
     drawsLooks: officeDrawsLooks(),
     tools: await Promise.all(
       agentsOn(platform).map(async (id): Promise<AgentTool> => {
         const installed = !!agentCommand(id);
+        const version = installed ? await versionState(id) : {};
         return {
           id,
           name: AGENT_NAMES[id],
           installed,
-          signIn: await stateOf(id),
+          signIn:
+            id === 'pi'
+              ? { how: 'key', installing: false, signedIn: gatewayReady }
+              : await stateOf(id),
           commandsHow: commandsHow(id, platform),
-          ...(installed ? await versionState(id) : {})
+          magpieReady:
+            installed &&
+            !version.tooOld &&
+            gatewayReady &&
+            (id === 'pi' || id === 'claude' || id === 'codex'),
+          ...version
         };
       })
     ),
@@ -101,9 +129,48 @@ export const GET: RequestHandler = async () => {
 
 /** Pick the tool the office runs on. It applies to the next office run and the next hire. */
 export const PUT: RequestHandler = async ({ request }) => {
-  const b = (await request.json().catch(() => ({}))) as { office?: unknown };
+  const b = (await request.json().catch(() => ({}))) as { office?: unknown; magpieModel?: unknown };
+  if (b.magpieModel !== undefined) {
+    if (runsActive()) error(409, 'Wait for current runs to finish, then switch the office model.');
+    if (
+      b.magpieModel !== null &&
+      (typeof b.magpieModel !== 'string' || !b.magpieModel.startsWith('magpie:'))
+    )
+      error(400, 'Pick a Magpie model');
+    const model = b.magpieModel === null ? '' : (b.magpieModel as string).slice(7);
+    if (b.magpieModel !== null && !model) error(400, 'Pick a Magpie model');
+    const freshMagpie = !process.env.OFFICE_AGENT && !process.env.OFFICE_MAGPIE_MODEL && !!model;
+    const chosen =
+      b.office === undefined
+        ? freshMagpie
+          ? 'pi'
+          : officeAgent()
+        : offeredAgent(b.office, process.platform);
+    if (!chosen) error(400, `Pick ${agentsOn(process.platform).join(' or ')}`);
+    if (!model && chosen === 'pi')
+      error(400, 'Pick another tool before turning off the office Magpie model.');
+    if (model) {
+      if (chosen !== 'pi' && chosen !== 'claude' && chosen !== 'codex')
+        error(400, 'Pick Pi, Claude Code or Codex before using Magpie.');
+      try {
+        await magpieRunConnection(model);
+      } catch (e) {
+        error(400, e instanceof Error ? e.message : 'Magpie is unavailable.');
+      }
+    }
+    writeEnv({
+      OFFICE_MAGPIE_MODEL: model,
+      ...(b.office !== undefined || freshMagpie ? { OFFICE_AGENT: chosen } : {})
+    });
+    process.env.OFFICE_MAGPIE_MODEL = model;
+    if (b.office !== undefined || freshMagpie) process.env.OFFICE_AGENT = chosen;
+    return json({ officeModel: model ? `magpie:${model}` : null });
+  }
+  if (runsActive()) error(409, 'Wait for current runs to finish, then switch the office tool.');
   const agent = offeredAgent(b.office, process.platform);
   if (!agent) error(400, `Pick ${agentsOn(process.platform).join(' or ')}`);
+  if (process.env.OFFICE_MAGPIE_MODEL && agent !== 'pi' && agent !== 'claude' && agent !== 'codex')
+    error(400, 'Turn off the office Magpie model before picking this tool.');
   writeEnv({ OFFICE_AGENT: agent });
   process.env.OFFICE_AGENT = agent;
   return json({ office: agent });

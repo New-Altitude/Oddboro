@@ -1,3 +1,4 @@
+import { magpieConnectionIdentity, magpieRunConnection } from './magpie.ts';
 // A one-off run as the office itself, not as any staffer: no MCP, no job
 // description, on the tool the office runs on (`officeAgent`, picked at
 // setup). Drafting a job description, drawing a look and designing an office
@@ -30,7 +31,7 @@ import {
 import { notePlan, pluginsOff, staffEnv } from './staff.ts';
 import { claudeRunHome, modelArgs, spawnClaude } from './claude.ts';
 import { endedEarly, LAUNCHES } from './cli.ts';
-import { SIGN_IN_WHERE, stopGroups, type RunImage } from './launch.ts';
+import { SIGN_IN_WHERE, stopGroups, stopPiChild, type RunImage } from './launch.ts';
 import { agentCommand } from './agent-sign-in.ts';
 import { tooOldLine } from './versions.ts';
 
@@ -52,6 +53,8 @@ type OfficeRunOpts = {
   model?: string;
   /** Stops the run, such as when the owner leaves a drawing for parts. */
   signal?: AbortSignal;
+  connection?: { baseUrl: string; apiKey: string; model: string };
+  sourceIdentity?: string;
 };
 
 /** What an office run says when its signal stopped it. */
@@ -59,12 +62,37 @@ const STOPPED = 'Stopped.';
 
 /** One office run. Prompts name the owner as {owner}, filled in with this install's name. */
 export async function runAsOffice(message: string, opts: OfficeRunOpts): Promise<OfficeRun> {
+  if (opts.signal?.aborted) return { ok: false, text: STOPPED };
   const owner = await ownerName();
   const say = (s: string) => s.replaceAll('{owner}', owner);
   const agent = officeAgent();
   const tooOld = await tooOldLine(agent, SIGN_IN_HERE);
+  if (opts.signal?.aborted) return { ok: false, text: STOPPED };
   if (tooOld) return { ok: false, text: tooOld };
-  const said = { ...opts, system: say(opts.system) };
+  let connection: Awaited<ReturnType<typeof magpieRunConnection>> | undefined;
+  let sourceIdentity: string | undefined;
+  if (process.env.OFFICE_MAGPIE_MODEL) {
+    if (agent !== 'pi' && agent !== 'claude' && agent !== 'codex')
+      return {
+        ok: false,
+        text: 'This tool cannot use Magpie in the office yet. Pick Pi, Claude Code or Codex.'
+      };
+    try {
+      const id = magpieConnectionIdentity();
+      if (!id) throw new Error('The Magpie connection is unavailable.');
+      sourceIdentity = `${id}:magpie:${process.env.OFFICE_MAGPIE_MODEL}`;
+      connection = await magpieRunConnection(process.env.OFFICE_MAGPIE_MODEL);
+      if (
+        sourceIdentity !== `${magpieConnectionIdentity()}:magpie:${process.env.OFFICE_MAGPIE_MODEL}`
+      )
+        throw new Error('The Magpie connection changed. Try the run again.');
+    } catch (e) {
+      if (opts.signal?.aborted) return { ok: false, text: STOPPED };
+      return { ok: false, text: e instanceof Error ? e.message : 'Magpie is unavailable.' };
+    }
+  }
+  if (opts.signal?.aborted) return { ok: false, text: STOPPED };
+  const said = { ...opts, system: say(opts.system), connection, sourceIdentity };
   return agent === 'claude' ? run(say(message), said) : runOn(agent, say(message), said);
 }
 
@@ -124,7 +152,10 @@ async function runOn(
     timeoutMs: opts.timeoutMs,
     images,
     bare: true,
-    ...(opts.effort ? { effort: opts.effort } : {})
+    ...(opts.effort ? { effort: opts.effort } : {}),
+    model: opts.connection?.model,
+    connection: opts.connection,
+    sourceIdentity: opts.sourceIdentity
   });
   if ('refused' in launch) {
     clear();
@@ -133,7 +164,7 @@ async function runOn(
   const tool = AGENT_NAMES[agent];
   return new Promise((done) => {
     runsGoing.add(key);
-    const [cmd, before] = agentCommand(agent) ?? [agent, []];
+    const [cmd, before] = launch.command ?? agentCommand(agent) ?? [agent, []];
     const child = spawn(cmd, [...before, ...launch.args], {
       cwd: dir,
       env: launch.env,
@@ -141,7 +172,8 @@ async function runOn(
       windowsHide: true
     });
     const stop = () => {
-      if (!launch.ownGroup) child.kill();
+      if (agent === 'pi') return stopPiChild(child);
+      else if (!launch.ownGroup) child.kill();
       else if (child.pid) stopGroups(child.pid);
     };
     let buffer = '';
@@ -159,8 +191,10 @@ async function runOn(
       done(r);
     };
     const timer = setTimeout(() => {
-      stop();
-      finish({ ok: false, text: `No reply after ${opts.timeoutMs / 60_000} minutes.` });
+      const stopped = stop();
+      const cleanup =
+        agent === 'pi' && stopped === false ? ' Pi could not stop all its child tools.' : '';
+      finish({ ok: false, text: `No reply after ${opts.timeoutMs / 60_000} minutes.${cleanup}` });
     }, opts.timeoutMs);
     onStop(opts.signal, () => {
       stop();
@@ -182,7 +216,8 @@ async function runOn(
         }
         if (launch.read) {
           for (const ev of launch.read(e)) {
-            if (ev.type === 'message') last = ev.text;
+            if (ev.type === 'delta') last += ev.text;
+            else if (ev.type === 'message') last = ev.text;
             else if (ev.type === 'usage')
               void recordUsage(null, opts.kind, ev.usage).catch(() => {});
             else if (ev.type === 'done') finish({ ok: true, text: last.trim() });
@@ -239,11 +274,20 @@ async function run(message: string, opts: OfficeRunOpts): Promise<OfficeRun> {
     '--append-system-prompt',
     opts.system,
     ...(opts.effort ? ['--effort', opts.effort] : []),
-    ...(opts.model ? ['--model', opts.model] : modelArgs()),
+    ...(opts.connection
+      ? ['--model', opts.connection.model]
+      : opts.model
+        ? ['--model', opts.model]
+        : modelArgs()),
     ...(opts.images?.length ? ['--input-format', 'stream-json'] : [])
   ];
   // The office's own Claude Code folder, or the owner's login before it is signed in.
   const env = staffEnv(await claudeRunHome(OFFICE_ACCOUNT));
+  if (opts.connection)
+    Object.assign(env, {
+      ANTHROPIC_BASE_URL: opts.connection.baseUrl,
+      ANTHROPIC_API_KEY: opts.connection.apiKey
+    });
   return new Promise((done) => {
     const child = spawnClaude(args, { cwd: HOME, env });
     let buffer = '';

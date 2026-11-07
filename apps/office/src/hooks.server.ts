@@ -19,13 +19,19 @@ import { keepAddress } from '#lib/server/address.ts';
 import { startFollowUps } from '#lib/server/follow-ups.ts';
 import { startClock } from '#lib/server/jobs.ts';
 import { loadUpdate } from '#lib/server/update.ts';
+import { initializeMagpie, shutdownMagpie } from '#lib/server/magpie.ts';
 
 export { guardOffice as handle } from '#lib/server/owner-page.ts';
 
-if (process.env.ODDBORO_APP) {
-  process.on('sveltekit:shutdown', () => process.exit(0));
-  process.stdin.on('close', () => process.exit(0)).resume();
-}
+let closing: Promise<void> | undefined;
+const closeOwnedRuntime = () => (closing ??= shutdownMagpie());
+process.on('sveltekit:shutdown', () => {
+  void closeOwnedRuntime().finally(() => {
+    if (process.env.ODDBORO_APP) process.exit(0);
+  });
+});
+if (process.env.ODDBORO_APP)
+  process.stdin.on('close', () => void closeOwnedRuntime().finally(() => process.exit(0))).resume();
 
 export const init: ServerInit = async () => {
   // In the Mac app the shell keeps the secrets; this process alone asks it.
@@ -34,6 +40,8 @@ export const init: ServerInit = async () => {
   await bringUpToDate();
   // Before the clock: a poke that came due while the app updated still lands.
   await loadUpdate();
+  // Resume only the private runtime the owner selected, before any jobs start.
+  await initializeMagpie();
   startClock();
   startFollowUps();
   void keepAddress();

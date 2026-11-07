@@ -68,7 +68,7 @@ export function ownTools(
   return {
     commands: runsCommands(who.agent, platform, who.commands),
     commandsHow: commandsHow(who.agent, platform),
-    web: who.web,
+    web: who.agent === 'pi' ? false : who.web,
     network: commandsOnline(who.agent, platform, who),
     // A folder deleted since the owner gave it reaches no tool.
     granted: who.folders.filter((f) => existsSync(f.path))
@@ -289,6 +289,8 @@ export function ownToolsLine(
   about?: string
 ): string {
   const whose = whoseOf(about);
+  if (agent === 'pi')
+    return `${about === undefined ? 'Your' : whose} own tools work on files only. No shell: Pi (built-in) can't run commands here. Pi has no built-in web search or fetch.`;
   const shell = `a shell confined to ${whose} folders and {owner}'s developer tools (read only), ${own.network ? 'which can reach the internet' : 'with no network'}`;
   const plus = [
     ...(own.commands ? [shell] : []),

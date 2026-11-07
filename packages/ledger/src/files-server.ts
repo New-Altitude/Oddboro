@@ -101,7 +101,11 @@ export function globRegex(glob: string): RegExp {
  * Never follows a link to a folder, so a walk cannot leave the folder it
  * started in; a linked file is listed, and reading it goes through the walls.
  */
-function* walk(root: string, rel = ''): Generator<{ rel: string; link: boolean }> {
+function* walk(
+  root: string,
+  walls: FileWalls,
+  rel = ''
+): Generator<{ rel: string; link: boolean }> {
   let entries: Dirent[];
   try {
     entries = readdirSync(join(root, rel), { withFileTypes: true });
@@ -111,8 +115,10 @@ function* walk(root: string, rel = ''): Generator<{ rel: string; link: boolean }
   entries.sort((a, b) => a.name.localeCompare(b.name));
   for (const e of entries) {
     const r = rel ? `${rel}/${e.name}` : e.name;
+    // A private subtree must not leak either its names or its contents.
+    if (walls.noAccess?.length && 'refused' in resolveIn(walls, join(root, r), 'read')) continue;
     if (e.isDirectory()) {
-      if (!SKIP.has(e.name)) yield* walk(root, r);
+      if (!SKIP.has(e.name)) yield* walk(root, walls, r);
     } else yield { rel: r, link: e.isSymbolicLink() };
   }
 }
@@ -203,6 +209,11 @@ export function fileServer(walls: FileWalls): McpServer {
       if ('refused' in r) return no(r.refused);
       if (!statSync(r.path).isDirectory()) return no(`${path} is a file. Use read_file.`);
       const names = readdirSync(r.path, { withFileTypes: true })
+        .filter(
+          (e) =>
+            !walls.noAccess?.length ||
+            !('refused' in resolveIn(walls, join(r.path, e.name), 'read'))
+        )
         .map((e) => (e.isDirectory() ? `${e.name}/` : e.name))
         .sort((a, b) => a.localeCompare(b));
       if (!names.length) return ok(`${path ?? 'Your folder'} is empty.`);
@@ -220,7 +231,7 @@ export function fileServer(walls: FileWalls): McpServer {
       if ('refused' in r) return no(r.refused);
       const re = globRegex(pattern.replace(/^\.\//, ''));
       const found: string[] = [];
-      for (const { rel: f } of walk(r.path)) {
+      for (const { rel: f } of walk(r.path, walls)) {
         if (re.test(f) || (!pattern.includes('/') && re.test(f.split('/').at(-1)!))) {
           found.push(shown(walls, join(r.path, f)));
           if (found.length > MAX_FIND) break;
@@ -253,14 +264,14 @@ export function fileServer(walls: FileWalls): McpServer {
       const only = glob ? globRegex(glob) : undefined;
       // A file the walk reached without a link is inside the folder; only a link is judged again.
       const files = statSync(r.path).isDirectory()
-        ? [...walk(r.path)].map((f) => ({ file: join(r.path, f.rel), link: f.link }))
+        ? [...walk(r.path, walls)].map((f) => ({ file: join(r.path, f.rel), link: f.link }))
         : [{ file: r.path, link: false }];
       const hits: string[] = [];
       for (const { file, link } of files) {
         const name = relative(r.path, file).split(sep).join('/') || file.split(sep).at(-1)!;
         if (only && !only.test(name) && !only.test(name.split('/').at(-1)!)) continue;
         let target = file;
-        if (link) {
+        if (link || walls.noAccess?.length) {
           // A linked file is read only where the walls allow its target.
           const t = resolveIn(walls, file, 'read');
           if ('refused' in t) continue;
@@ -269,7 +280,8 @@ export function fileServer(walls: FileWalls): McpServer {
         try {
           const st = statSync(target);
           // A file with a second name may be one outside the folders (file-walls.ts).
-          if (st.nlink > 1 || st.size > MAX_SEARCH_FILE || !isText(target)) continue;
+          if (!st.isFile() || st.nlink > 1 || st.size > MAX_SEARCH_FILE || !isText(target))
+            continue;
           const lines = readFileSync(target, 'utf8').split(/\r?\n/);
           for (let i = 0; i < lines.length; i++) {
             if (re.test(lines[i])) {

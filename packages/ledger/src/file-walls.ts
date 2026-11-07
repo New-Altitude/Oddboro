@@ -30,6 +30,8 @@ export type FileWalls = {
    * (`<folder>/**\/AGENTS.md`, `<folder>/.git/hooks`).
    */
   noWrite: string[];
+  /** Exact private paths and everything below them, denied for reads and writes. */
+  noAccess?: string[];
 };
 
 export type Resolved = { path: string } | { refused: string };
@@ -90,6 +92,11 @@ function realRoot(dir: string): string | undefined {
 export const within = (path: string, root: string): boolean =>
   path === root || path.startsWith(root.endsWith(sep) ? root : root + sep);
 
+// Denials are conservative even on case-sensitive filesystems. Normalizing
+// Unicode covers common macOS aliases without broadening an allow root.
+const privateWithin = (path: string, root: string): boolean =>
+  within(path.normalize('NFD').toLowerCase(), root.normalize('NFD').toLowerCase());
+
 const parts = (p: string) => p.split(/[\\/]+/).filter(Boolean);
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
@@ -125,11 +132,34 @@ export function resolveIn(walls: FileWalls, input: string, want: 'read' | 'write
   } catch {
     return { refused: `${input} does not exist.` };
   }
+  // Resolve private paths even when their leaf does not exist yet. Checking
+  // the asked and resolved paths prevents aliases from bypassing the wall.
+  if (
+    walls.noAccess?.some((privatePath) => {
+      let resolved: string;
+      try {
+        resolved = realOf(privatePath).real;
+      } catch {
+        return true;
+      }
+      return (
+        privateWithin(asked, privatePath) ||
+        privateWithin(real, privatePath) ||
+        privateWithin(asked, resolved) ||
+        privateWithin(real, resolved)
+      );
+    })
+  )
+    return { refused: `${input} is not available.` };
   if (want === 'read' && !exists) return { refused: `${input} does not exist.` };
   // A file with a second name (a hard link) may be one outside the folders,
   // and nothing says where the other name is: refused both ways.
   if (exists) {
     const st = statSync(real);
+    // The file tools only serve regular files and directories. Opening a
+    // FIFO or device synchronously can hang the shared server indefinitely.
+    if (!st.isFile() && !st.isDirectory())
+      return { refused: `${input} is not a regular file or folder.` };
     if (st.isFile() && st.nlink > 1)
       return { refused: `${input} has another name elsewhere, so it is not opened.` };
   }
@@ -169,7 +199,21 @@ export function wallsFromEnv(env: NodeJS.ProcessEnv): FileWalls {
     const list = (v: unknown) =>
       Array.isArray(v) ? v.filter((p): p is string => typeof p === 'string' && isAbsolute(p)) : [];
     if (typeof w.cwd !== 'string' || !isAbsolute(w.cwd) || !existsSync(w.cwd)) throw new Error();
-    return { cwd: w.cwd, reads: list(w.reads), writes: list(w.writes), noWrite: list(w.noWrite) };
+    // A supplied private wall must be understood whole; dropping an invalid
+    // member could expose the very path it was meant to protect.
+    if (
+      w.noAccess !== undefined &&
+      (!Array.isArray(w.noAccess) ||
+        w.noAccess.some((p) => typeof p !== 'string' || !isAbsolute(p) || p.includes('\0')))
+    )
+      throw new Error();
+    return {
+      cwd: w.cwd,
+      reads: list(w.reads),
+      writes: list(w.writes),
+      noWrite: list(w.noWrite),
+      ...(w.noAccess === undefined ? {} : { noAccess: w.noAccess })
+    };
   } catch {
     // No walls: nothing is readable or writable.
     return { cwd: resolve('/'), reads: [], writes: [], noWrite: [] };

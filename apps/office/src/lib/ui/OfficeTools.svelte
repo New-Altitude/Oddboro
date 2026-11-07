@@ -1,21 +1,22 @@
 <script lang="ts">
   import type { Agent } from '@oddboro/ledger/agents';
   import type { AgentTools } from './agent-tools.svelte.ts';
+  import { MagpieConnection } from './magpie.svelte.ts';
+  import { magpieRunner } from './magpie-ui.ts';
+  import MagpieSetup from './MagpieSetup.svelte';
   import ClaudeCard from './onboarding/ClaudeCard.svelte';
   import ToolTiles from './ToolTiles.svelte';
   import type { AgentTool } from '../../routes/api/agents/+server.ts';
   import { INSTALL_NOTES, MAKERS, offersSignOut, offersUpdate, toolAction } from './tool-action.ts';
 
-  // What the office runs on, on setup's Your AI card (onboarding/AiCard.svelte)
-  // and in the Setup window (Welcome.svelte): a square tile for every coding
-  // tool, with its maker's mark, on every system (ToolTiles.svelte, as on an
-  // Odd's Model tab). A tile this system offers picks the office's tool; one it
-  // does not offer yet is greyed, with why.
-  // Below the tiles, the picked tool's own panel: install it, sign in on its
-  // maker's page, or take an API key, each with its one action (`toolAction`,
-  // as beside "Runs on"). Each says its version: one older than the office
-  // runs offers Update first, and one with a newer version out offers it in
-  // one click. Claude Code's panel is ClaudeCard: its plan or key, and its model.
+  // Setup and onboarding expose one Magpie source tile, not a separate Pi setup.
+  // `tools.office` still stores the real runner. New Magpie choices use bundled
+  // Pi; `officeConfigured` preserves an owner's explicit Claude/Codex choice.
+  // The connection/model save stays separate from runner selection in the API,
+  // while this shared component presents one flow and hides direct login panels.
+  // An Odd's advanced ToolTiles still names the actual Pi runner when needed.
+  // The run layer owns the shared office file MCP and tool approval gates;
+  // choosing a model source here never grants folders or outside write access.
   type Props = {
     tools: AgentTools;
     /** Claude's model, when the office runs on Claude Code. */
@@ -26,12 +27,68 @@
   let { tools, onmodel = () => {}, onclaudeready = () => {} }: Props = $props();
 
   let claudeReady = $state(false);
+  const connection = new MagpieConnection();
+  let choosing = $state(false);
+  const magpieState = $derived(
+    connection.busy || choosing
+      ? 'Checking'
+      : connection.setup?.status === 'authorization-required'
+        ? 'Connect'
+        : connection.setup?.status === 'unavailable'
+          ? 'Unavailable'
+          : tools.tools.find((tool) => tool.id === tools.selectedOffice)?.magpieReady
+            ? 'Ready'
+            : connection.state?.connected
+              ? 'Choose model'
+              : 'Set up'
+  );
+
+  async function chooseMagpie() {
+    if (choosing || connection.busy) return;
+    tools.modelSource = 'magpie';
+    tools.officeProblem = '';
+    choosing = true;
+    try {
+      const runner = magpieRunner(tools.office, tools.tools, tools.officeConfigured);
+      if (!runner) {
+        connection.problem = 'The included Pi runner is unavailable. Rebuild or reinstall Oddboro.';
+        return;
+      }
+      if (runner !== tools.office && !(await tools.pickOffice(runner))) return;
+      await connection.act({ action: 'setup' });
+      await tools.load();
+    } finally {
+      choosing = false;
+    }
+  }
+
+  async function chooseDirect(id: Agent) {
+    if (choosing || connection.busy) return;
+    choosing = true;
+    try {
+      if (await tools.pickOffice(id, null)) tools.modelSource = 'direct';
+    } finally {
+      choosing = false;
+    }
+  }
+
+  async function chooseIncludedPi() {
+    if (choosing || connection.busy) return;
+    choosing = true;
+    try {
+      // Deliberate runner migration keeps the current gateway selection. An
+      // incomplete connection is allowed here; onboarding still gates Next.
+      if (await tools.pickOffice('pi')) tools.modelSource = 'magpie';
+    } finally {
+      choosing = false;
+    }
+  }
   /** The key a key tool's field holds, by tool. */
   let keys = $state<Partial<Record<Agent, string>>>({});
   /** Key tools whose field is open over a key they already have. */
   let replacing = $state<Partial<Record<Agent, boolean>>>({});
 
-  const picked = $derived(tools.tools.find((t) => t.id === tools.office));
+  const picked = $derived(tools.tools.find((t) => t.id === tools.selectedOffice));
 
   async function saveKey(id: Agent) {
     if (await tools.setKey(id, (keys[id] ?? '').trim())) {
@@ -44,6 +101,7 @@
   function stateOf(id: Agent): string {
     const t = tools.tools.find((x) => x.id === id);
     if (!t) return '';
+    if (id === 'pi') return t.installed && !t.tooOld ? 'Included' : 'Unavailable';
     const busy = tools.updating[id] ? 'Updating' : 'Installing';
     if (id === 'claude') {
       if (tools.installingClaude) return busy;
@@ -61,7 +119,11 @@
 </script>
 
 {#snippet versionLine(t: AgentTool)}
-  {#if t.tooOld}
+  {#if t.tooOld && t.id === 'pi'}
+    <p class="mt-2 text-sm text-coral">
+      The included Pi version does not match this office. Rebuild or reinstall Oddboro.
+    </p>
+  {:else if t.tooOld}
     <p class="mt-2 text-sm text-coral">
       {t.name}
       {t.version} is older than this office runs ({t.tooOld} or newer). Update it to go on.
@@ -86,15 +148,61 @@
 
 <ToolTiles
   {tools}
-  picked={tools.office}
-  onpick={(id) => tools.pickOffice(id)}
+  hideBuiltInPi
+  picked={tools.magpieSelected ? 'magpie' : tools.office}
+  onpick={chooseDirect}
+  magpie={{
+    state: magpieState,
+    disabled: !tools.loaded || choosing || connection.busy,
+    onpick: () => {
+      void chooseMagpie();
+    }
+  }}
   {stateOf}
   label="What your office runs on"
 />
+{#if tools.officeProblem}<p class="mt-2 text-sm text-coral" role="alert">
+    {tools.officeProblem}
+  </p>{/if}
 
 {#if picked}
   <div class="mt-3">
-    {#if picked.id === 'claude'}
+    {#if tools.magpieSelected}
+      <div class="panel p-3">
+        <p class="text-sm">Magpie supplies the model. {picked.name} runs your Odds.</p>
+        <p class="mt-1 text-xs text-muted">
+          {choosing || connection.busy
+            ? 'Checking for existing Magpie, then setting up the built-in runtime if needed.'
+            : !picked.installed
+              ? picked.id === 'pi'
+                ? 'The included Pi runner is unavailable. Rebuild or reinstall Oddboro.'
+                : `Install ${picked.name} to use your selected runner with Magpie.`
+              : picked.magpieReady
+                ? 'The gateway is ready. A direct vendor sign-in is not needed for this route.'
+                : 'Finish the Magpie connection and choose a ready model or group below.'}
+        </p>
+        {#if picked.id === 'pi'}<p class="mt-1 text-xs text-muted">
+            Pi is included with Oddboro. It needs no separate install or login.
+          </p>{/if}
+        {#if picked.id !== 'pi' && tools.tools.some((tool) => tool.id === 'pi')}
+          <button class="btn mt-2" disabled={choosing || connection.busy} onclick={chooseIncludedPi}
+            >Use included Pi</button
+          >
+          <p class="mt-1 text-xs text-muted">Keep this Magpie connection and selected model.</p>
+        {/if}
+        <p class="mt-1 text-xs text-muted">Magpie setup checks the computer running Oddboro.</p>
+        {@render versionLine(picked)}
+        {#if !picked.installed && picked.id !== 'pi'}<button
+            class="wide mt-2"
+            disabled={choosing || connection.busy}
+            onclick={() => tools.install(picked.id)}>Install {picked.name}</button
+          >{:else if picked.tooOld && picked.id !== 'pi'}{@render updateButton(picked)}{/if}
+      </div>
+    {:else if picked.id === 'pi'}
+      <p class="text-sm text-muted">
+        Pi is included and requires a Magpie model. Choose the Magpie tile to connect it.
+      </p>
+    {:else if picked.id === 'claude'}
       {#if !picked.installed}
         <div class="panel p-3">
           <p class="text-sm">
@@ -232,6 +340,8 @@
     {/if}
   </div>
 {/if}
+
+{#if tools.magpieSelected}<MagpieSetup {tools} {connection} onsetup={chooseMagpie} />{/if}
 
 <style>
   .panel {

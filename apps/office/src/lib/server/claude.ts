@@ -48,8 +48,17 @@ export function claudeSettings(): ClaudeSettings {
 /** Drawing looks and designing offices need more than Sonnet. */
 export const SONNET_CANNOT_DRAW =
   'On Sonnet, the office cannot draw looks or design offices. Pick Opus in Setup.';
+export const usesMagpie = () => !!process.env.OFFICE_MAGPIE_MODEL;
+
 /** Whether the office designs offices: on Grok or Codex always, on Claude Code unless it runs on Sonnet. */
-export const canDraw = () => officeAgent() !== 'claude' || claudeSettings().model !== 'sonnet';
+export const canDraw = () =>
+  !usesMagpie() && (officeAgent() !== 'claude' || claudeSettings().model !== 'sonnet');
+
+/** Why office design is unavailable on the selected model connection. */
+export const cannotDesignOffice = () =>
+  usesMagpie()
+    ? 'Office design is unavailable on Magpie. Use the ready-made Main Street office.'
+    : SONNET_CANNOT_DRAW;
 
 /** The model the office's own runs use, when the office names one. */
 const officeModel = (agent: Agent) =>
@@ -60,11 +69,13 @@ const officeModel = (agent: Agent) =>
       : undefined;
 
 /** Whether the office draws an Odd's look from words or a headshot (`drawsLooks`). */
-export const officeDrawsLooks = () => drawsLooks(officeAgent(), officeModel(officeAgent()));
+export const officeDrawsLooks = () =>
+  !usesMagpie() && drawsLooks(officeAgent(), officeModel(officeAgent()));
 
 /** Why the office does not draw a look, and what to do instead. */
 export function cannotDrawLook(): string {
   const agent = officeAgent();
+  if (usesMagpie()) return 'Build this look from parts when the office uses Magpie.';
   if (agent === 'claude')
     return 'On Sonnet, the office does not draw looks. Build this one from parts, or pick Opus in Setup.';
   const on = officeModel(agent);
@@ -94,6 +105,9 @@ export function cleanEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
   for (const k of Object.keys(env))
     if (
+      k.startsWith('MAGPIE_') ||
+      k === 'OPENAI_BASE_URL' ||
+      k.startsWith('ANTHROPIC_') ||
       k === 'CLAUDECODE' ||
       k.startsWith('CLAUDE_CODE_') ||
       k === 'CLAUDE_CONFIG_DIR' ||

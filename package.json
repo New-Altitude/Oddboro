@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "setup": "npm install --no-audit --no-fund --loglevel=error && node packages/ledger/src/setup.ts",
+    "magpie:build": "node apps/desktop/scripts/magpie-runtime.ts",
     "reset": "node packages/ledger/src/reset.ts",
     "build": "turbo run build",
     "dev": "turbo run dev",

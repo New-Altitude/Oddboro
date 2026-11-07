@@ -12,6 +12,7 @@
 import type { Agent } from '@oddboro/ledger/agents';
 import type { AccountState, AgentTool, LaterTool } from '../../routes/api/agents/+server.ts';
 import { call, stream } from './api.ts';
+import { magpieRunner } from './magpie-ui.ts';
 
 /** Bumped when an install or a sign-in changed, so every list on the page reads it again. */
 let changes = $state(0);
@@ -24,6 +25,26 @@ export class AgentTools {
   tools = $state<AgentTool[]>([]);
   /** The tool the office runs on: its own runs and every new hire. */
   office = $state<Agent>('claude');
+  /** Whether the owner explicitly chose the office's existing runner. */
+  officeConfigured = $state(false);
+  officeProblem = $state('');
+  /** The explicit gateway route for office runs, or null for a direct account. */
+  officeModel = $state<string | null>(null);
+  /** An explicit tile choice remains visible while its first route is being configured. */
+  modelSource = $state<'direct' | 'magpie'>();
+  get magpieSelected() {
+    return (
+      this.modelSource === 'magpie' ||
+      (this.modelSource === undefined &&
+        (this.office === 'pi' || !!this.officeModel?.startsWith('magpie:')))
+    );
+  }
+  /** Pending setup can show included Pi before a valid runner/model pair is saved. */
+  get selectedOffice(): Agent {
+    return this.magpieSelected
+      ? (magpieRunner(this.office, this.tools, this.officeConfigured) ?? this.office)
+      : this.office;
+  }
   /** Whether the office's tool, on its model, draws an Odd's look. Otherwise a hire builds one from parts. */
   drawsLooks = $state(false);
   /** The accounts the owner added beyond each tool's Office account, with their sign-ins. */
@@ -56,6 +77,8 @@ export class AgentTools {
       const a = await call<{
         computer: string;
         office: Agent;
+        officeConfigured: boolean;
+        officeModel: string | null;
         drawsLooks: boolean;
         tools: AgentTool[];
         accounts: AccountState[];
@@ -63,6 +86,8 @@ export class AgentTools {
       }>('/api/agents');
       this.computer = a.computer;
       this.office = a.office;
+      this.officeConfigured = !!a.officeConfigured;
+      this.officeModel = a.officeModel;
       this.drawsLooks = a.drawsLooks;
       this.tools = a.tools;
       this.accounts = a.accounts;
@@ -201,17 +226,48 @@ export class AgentTools {
     }
   }
 
-  /** Pick the tool the office runs on. */
-  async pickOffice(id: Agent) {
-    const was = this.office;
-    this.office = id;
+  /** Save an office runner and, when supplied, its source in one server transaction. */
+  async pickOffice(id: Agent, model?: string | null) {
+    this.officeProblem = '';
     try {
-      await call('/api/agents', { office: id }, 'PUT');
+      await call(
+        '/api/agents',
+        { office: id, ...(model !== undefined ? { magpieModel: model } : {}) },
+        'PUT'
+      );
+      // Only acknowledge a validated pair. Failed requests leave the working choice visible.
+      this.office = id;
+      if (model !== undefined) this.officeModel = model;
+      this.officeConfigured = true;
+      await this.load();
+      return true;
     } catch (e) {
-      this.office = was;
-      this.problems[id] = message(e);
+      this.officeProblem = message(e);
+      return false;
+    } finally {
+      changes++;
     }
-    changes++;
+  }
+
+  /** Save the selected runner and gateway route together after server validation. */
+  async pickMagpieModel(model: string | null) {
+    const runner = this.selectedOffice;
+    this.busy = runner;
+    this.officeProblem = '';
+    try {
+      await call('/api/agents', { office: runner, magpieModel: model }, 'PUT');
+      this.office = runner;
+      this.officeModel = model;
+      this.officeConfigured = true;
+      await this.load();
+      return true;
+    } catch (e) {
+      this.officeProblem = message(e);
+      return false;
+    } finally {
+      this.busy = undefined;
+      changes++;
+    }
   }
 
   /** Stop a sign-in that waits on its page, from this page or one before a refresh. */

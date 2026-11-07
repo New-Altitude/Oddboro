@@ -204,6 +204,20 @@ test('each Odd is told its own tools, and how to get each one it lacks', () => {
     offline: `Your own tools work on files, plus ${shell}, with no network, and ${web}.`
   });
   for (const agent of A.AGENTS) {
+    if (agent === 'pi') {
+      for (const commands of [false, true])
+        for (const web of [false, true])
+          assert.equal(
+            C.ownToolsLine(agent, {
+              commands,
+              commandsHow: { state: 'switch' },
+              web,
+              network: true
+            }),
+            "Your own tools work on files only. No shell: Pi (built-in) can't run commands here. Pi has no built-in web search or fetch."
+          );
+      continue;
+    }
     // Gemini's policy allows a write only by its full path, so its Odds are told so.
     const end = agent === 'gemini' ? " Give each file tool the file's full path." : '';
     // Codex's web searches and fetches no page.

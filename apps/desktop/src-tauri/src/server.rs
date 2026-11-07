@@ -130,6 +130,14 @@ impl Server {
             .env("ORIGIN", self.url())
             .env("ODDBORO_HOME", &self.home)
             .env("ODDBORO_CODE", &self.code)
+            .env(
+                "ODDBORO_MAGPIE_BINARY",
+                self.code.join("magpie").join(if cfg!(windows) {
+                    "magpie.exe"
+                } else {
+                    "magpie"
+                }),
+            )
             // Tells the server to quit when this stdin closes.
             .env("ODDBORO_APP", "1")
             // On quit, close the page's open connections (the live event

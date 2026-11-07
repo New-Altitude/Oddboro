@@ -471,6 +471,18 @@ setInterval(() => {
   );
   chmodSync(join(installers, name), 0o755);
 }
+// Simulated Mac runs need a writable temporary path on a non-Mac test host.
+// The production helper still uses /private/tmp on a real Mac.
+const nativeTestPlatform = process.platform;
+export const testRunTemp = (key: string) =>
+  nativeTestPlatform === 'darwin'
+    ? `/private/tmp/ob-${key.slice(0, 8)}`
+    : join(tmpdir(), `ob-${key.slice(0, 8)}`);
+if (nativeTestPlatform !== 'darwin') {
+  mock.module('./run-temp.ts', {
+    namedExports: { runTemp: (key: string) => join(tmpdir(), `ob-${key.slice(0, 8)}`) }
+  });
+}
 // Set before the office's modules load: they read where everything is as they start.
 Object.assign(process.env, {
   ODDBORO_HOME: folder,

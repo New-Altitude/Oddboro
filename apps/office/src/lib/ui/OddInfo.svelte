@@ -48,7 +48,9 @@
     );
     return [
       AGENT_NAMES[profile.agent],
-      model?.name,
+      (profile.model ?? profile.officeModel)?.startsWith('magpie:')
+        ? `Magpie: ${(profile.model ?? profile.officeModel)!.slice(7)}`
+        : model?.name,
       profile.effort && `thinks ${EFFORT_NAMES[profile.effort].toLowerCase()}`
     ]
       .filter(Boolean)

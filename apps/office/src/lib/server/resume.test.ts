@@ -120,3 +120,17 @@ test('a chat has a session only while its session file names one: a missing, bro
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('a session stays with its model source', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'oddboro-source-'));
+  const file = join(dir, 'session.json');
+  try {
+    saveSession(file, { sessionId: 'a', seen: now(), home: '/account', source: 'magpie:group/a' });
+    assert.equal(sessionIdIn(file, '/account', 'magpie:group/a'), 'a');
+    assert.equal(sessionIdIn(file, '/account', 'magpie:group/b'), undefined);
+    assert.equal(sessionIdIn(file, '/account', ''), undefined);
+    assert.equal(sessionIdIn(file, '/other', 'magpie:group/a'), undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

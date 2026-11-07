@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/yetone/magpie",
+  "commit": "83d9ee892daf503a827a195cf931bf60a2315f80",
+  "archiveSha256": "250c0bf0d638535122bda694f33b01c58e36ea77b78727b5c06320fd2123f0c5",
+  "version": "0.1.3261-oddboro.1",
+  "apiVersion": 1,
+  "goVersion": "1.27.3",
+  "patchSha256": "52e1b6705556b62702853d48ce841d25edf66875d845b7b671049c4eda27c2eb"
+}

@@ -30,7 +30,7 @@ import { createImage, drawImage, encodePng, scaleImage } from '@oddboro/sprites/
 import { drawnParts, lookCatalogue, lookTaken, home } from '@oddboro/ledger';
 import { runAsOffice } from './office-run.ts';
 import { lookVersion } from '../staff/roster.ts';
-import { cannotDrawLook, officeDrawsLooks } from './claude.ts';
+import { cannotDrawLook, officeDrawsLooks, usesMagpie } from './claude.ts';
 
 export type Drawn = { look: LookSpec; portraitPx: string; newParts: DrawnPart[] };
 export type Preview = Drawn & {
@@ -428,7 +428,7 @@ export async function drawLook(req: {
   /** Stops the drawing: the owner left it for parts, or closed the page. */
   signal?: AbortSignal;
 }): Promise<Preview> {
-  if (!req.model && !officeDrawsLooks()) throw new Error(cannotDrawLook());
+  if (usesMagpie() || (!req.model && !officeDrawsLooks())) throw new Error(cannotDrawLook());
   const lib = await library();
   const others = await lookCatalogue(req.staffId);
   const ask = [

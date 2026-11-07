@@ -11,6 +11,7 @@ import type { RunEvent, RunImage } from './launch.ts';
 import { GROK_PLAN_LIMIT, GROK_SIGN_IN, grokLaunch, grokSignedOut } from './grok.ts';
 import { codexLaunch, codexReader, codexSignedOut } from './codex.ts';
 import { geminiKeyMissing, geminiLaunch, geminiReader } from './gemini.ts';
+import { piLaunch } from './pi.ts';
 import { GROK_FILE_TOOLS } from '../staff/work.ts';
 
 /**
@@ -24,6 +25,7 @@ import { GROK_FILE_TOOLS } from '../staff/work.ts';
  */
 export type Launch = {
   args: string[];
+  command?: [string, string[]];
   env: NodeJS.ProcessEnv;
   stdin: string;
   done: () => void;
@@ -74,6 +76,8 @@ export type CliRun = {
   model?: string;
   /** The account whose home the tool runs with (`accountOf`): Office for an office run. */
   account: string;
+  connection?: { baseUrl: string; apiKey: string; model: string };
+  sourceIdentity?: string;
 };
 
 /**
@@ -88,7 +92,13 @@ export const LAUNCHES: Record<
   Exclude<Agent, 'claude'>,
   (r: CliRun) => Promise<Launch | { refused: string }>
 > = {
+  pi: async (r) =>
+    r.sourceIdentity
+      ? piLaunch({ ...r, sourceIdentity: r.sourceIdentity })
+      : { refused: 'The Magpie source is unavailable.' },
   grok: async (r) => {
+    if (r.connection)
+      return { refused: 'Grok cannot use Magpie in this office yet. Pick Claude Code or Codex.' };
     if (r.commands) return { refused: COMMANDS_WHY.grok };
     const signedOut = await grokSignedOut(r.timeoutMs, r.account);
     if (signedOut) return { refused: signedOut };
@@ -119,7 +129,7 @@ export const LAUNCHES: Record<
     };
   },
   codex: async (r) => {
-    const signedOut = codexSignedOut(r.account);
+    const signedOut = r.connection ? undefined : codexSignedOut(r.account);
     if (signedOut) return { refused: signedOut };
     return {
       ...codexLaunch({
@@ -139,7 +149,8 @@ export const LAUNCHES: Record<
         network: r.network,
         images: r.images,
         effort: r.effort,
-        model: r.model
+        model: r.model,
+        connection: r.connection
       }),
       read: codexReader(r.model ?? process.env.OFFICE_CODEX_MODEL ?? 'codex'),
       // Only a shell leaves processes behind.
@@ -147,6 +158,7 @@ export const LAUNCHES: Record<
     };
   },
   gemini: async (r) => {
+    if (r.connection) return { refused: 'Gemini cannot use Magpie in this office yet.' };
     if (r.commands) return { refused: COMMANDS_WHY.gemini };
     const missing = geminiKeyMissing();
     if (missing) return { refused: missing };

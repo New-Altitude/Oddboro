@@ -42,6 +42,7 @@ function stampOf(cmd: string, before: readonly string[]): string {
 
 /** The tool's version on this computer, or nothing when it is not installed or does not say. */
 export async function versionOf(agent: Agent): Promise<string | undefined> {
+  if (agent === 'pi') return agentCommand(agent) ? MIN_VERSIONS.pi : undefined;
   const command = agentCommand(agent);
   if (!command) return undefined;
   const [cmd, before] = command;
@@ -70,6 +71,7 @@ const newest = new Map<Agent, { at: number; version?: string }>();
 
 /** The newest version the tool's maker has out, or nothing when it cannot be asked. */
 export async function latestOf(agent: Agent): Promise<string | undefined> {
+  if (agent === 'pi') return undefined;
   // The office's tests ask no one.
   if (process.env.ODDBORO_NO_LATEST) return undefined;
   const was = newest.get(agent);
@@ -128,6 +130,7 @@ export function updateCommand(agent: Agent): {
   args: string[];
   env?: NodeJS.ProcessEnv;
 } {
+  if (agent === 'pi') throw new Error('Pi is bundled with Oddboro.');
   const [cmd, before] = agentCommand(agent) ?? [agent, []];
   if (agent === 'claude') return { cmd, args: [...before, 'update'] };
   if (agent === 'grok') {

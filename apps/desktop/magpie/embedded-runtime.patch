@@ -1,0 +1,2023 @@
+diff --git a/docs/subsystems/gui-shell.md b/docs/subsystems/gui-shell.md
+index 15a1ad5180aa16670a2a709f6adfe61142b50321..9dc0d3415b87a7e619baca72accf1e319b27b683 100644
+--- a/docs/subsystems/gui-shell.md
++++ b/docs/subsystems/gui-shell.md
+@@ -1095,0 +1096,6 @@ saves, narrow layouts and all five languages in Chromium and WebKit.
++
++### Embedded web runtime
++
++`magpie web --embedded --data-dir <absolute> --addr 127.0.0.1:<port> --no-open` is intended for a host-managed runtime. It requires a distinct loopback `MAGPIE_ADDR`, `MAGPIE_WEB_KEY`, `MAGPIE_EMBEDDED_GATEWAY_KEY`, and a per-process `MAGPIE_EMBEDDED_INSTANCE_ID` (the last two at least 16 characters). The management key uses the normal web session; the inference key is required on gateway requests, including loopback. The gateway key does not isolate processes running as the same OS user.
++
++`GET /api/integration` identifies the API as `magpie`, API version 1, with its version, embedded flag, instance ID, and capabilities. Authenticated inference route `GET /v1/magpie/integration` returns the same identity, so the host can check that both ports belong to the process it started. Port 0 is refused; both ports must be explicitly selected. Embedded management only exposes selected provider, group, account and sign-in operations. Agent management and self-update are unavailable. Only Codex sign-in and explicitly requested file-backed Codex account discovery are supported in embedded mode. A selected shared Codex file is read in place; when its token expires, Codex must renew it. Other subscription sign-ins are unavailable. The gateway accepts only model discovery, Claude messages and token counting, chat completions, Responses, and the identity endpoint; it refuses MCP, image, file and administrative routes. A host keeps stdin open while it owns the runtime; EOF stops the web and gateway listeners. This mode is not an operating-system filesystem sandbox. Hosts must own the binary, ports, data directory, credentials and lifecycle. This contract is experimental until its startup and provider paths are independently verified.
+diff --git a/docs/subsystems/providers-accounts.md b/docs/subsystems/providers-accounts.md
+index cc6b5f30d804774591f93e709a1bebbf6ae0ac0d..5379182b179f3a5dc4335308a1932dd424f47788 100644
+--- a/docs/subsystems/providers-accounts.md
++++ b/docs/subsystems/providers-accounts.md
+@@ -15,0 +16,30 @@ keys and accounts per request is in [Gateway routing and fallback](gateway-routi
++## Embedded Codex accounts
++
++In embedded mode, the legacy account-discovery paths stay disabled. The
++runtime can sign in to Codex through the browser OAuth flow and keeps that
++sign-in under its private data directory in `codex/auth.json`. Private
++credential and selection-record operations use an opened `os.Root` and reject
++symlinked stores. Refreshing an owned sign-in updates that private file. Other built-in and plugin sign-in
++flows are not available through this embedded account path.
++
++On an explicit discovery request, `DiscoverEmbeddedCodexSources` looks for
++file-backed Codex sign-ins and returns account metadata and a canonical source
++reference. `SelectEmbeddedCodexSource` records the selected reference under
++the private data directory; it does not copy credentials. Requests read the
++selected file without modifying it. If its access token needs renewal, the
++request fails and the user must renew the sign-in in Codex. Keychain and
++symlinked credential files are not supported by this discovery path. Privacy
++settings and a pre-existing `MAGPIE_NO_ACCOUNTS` disable these embedded flows.
++Standalone account behavior is unchanged.
++
++The embedded account uses the model list fetched from the Codex backend and
++stored under the private data directory, keyed by account and source. Model
++instructions use the same account-specific boundary. It does not read the user's Codex
++model cache or install a helper. A model refresh makes a network request; a
++missing saved list is not treated as evidence that a model is supported.
++
++Sources: [`embedded_codex.go`](../../internal/provider/embedded_codex.go),
++[`embedded_codex_sources.go`](../../internal/provider/embedded_codex_sources.go),
++[`signin.go`](../../internal/provider/signin.go), and
++[`embedded_codex_test.go`](../../internal/provider/embedded_codex_test.go).
++
+diff --git a/internal/agent/agent.go b/internal/agent/agent.go
+index 8dd998481f64daba7368d7bdeb4ad587b4b8c7a8..b1ef8807326ec5bd5ff6bb963ea83f50ddb15631 100644
+--- a/internal/agent/agent.go
++++ b/internal/agent/agent.go
+@@ -19,0 +20 @@ import (
++	"github.com/yetone/magpie/internal/embedded"
+@@ -630,0 +632,3 @@ func Detected() []*Agent {
++	if embedded.Enabled {
++		return nil
++	}
+diff --git a/internal/agent/agentenv_test.go b/internal/agent/agentenv_test.go
+index cd0ab9e205eabcf0899493cc081004839ba76c91..ed6dc163baefa989a6f8d8de301ef1eff3ae886d 100644
+--- a/internal/agent/agentenv_test.go
++++ b/internal/agent/agentenv_test.go
+@@ -23,15 +23,16 @@ var notAnAgent = map[string]string{
+-	"APPDATA":               "Windows' own folder, which a sandbox sets to one of its own rather than clears",
+-	"LOCALAPPDATA":          "the same",
+-	"PATH":                  "the process' own",
+-	"USER":                  "the process' own",
+-	"XDG_CONFIG_HOME":       "magpie's own folder's, which appdir decides",
+-	"XDG_DATA_HOME":         "the same",
+-	"XDG_DATA_DIRS":         "the system's own data folders, where a .deb puts Lody's desktop entry; a test that reaches agent.OpenLody sets it to its own, and DeepSeek Harness Desktop's entries are read there through proc.SystemDirs",
+-	"XDG_CACHE_HOME":        "Go's build cache's too, which a sandbox keeps shared; Air's ACP OpenCode under it is found by path in a test's own home (#2423)",
+-	"MAGPIE_ADDR":           "magpie's own",
+-	"MAGPIE_DEBUG":          "magpie's own debug flag",
+-	"MAGPIE_PUBLIC_URL":     "magpie's own public URL",
+-	"MAGPIE_TRUST_PROXY":    "magpie's own: a proxy here signs its clients in (#1022)",
+-	"MAGPIE_EFFORT_UPDATES": "magpie's own switch for effort updates (#617)",
+-	"MAGPIE_SITE_ORIGIN":    "a site origin magpie's Omarchy theme answers, to try the site locally",
+-	"MAGPIE_PARTNERS":       "where magpie's own partner list is read from (a URL, or off), not a folder",
++	"APPDATA":                     "Windows' own folder, which a sandbox sets to one of its own rather than clears",
++	"LOCALAPPDATA":                "the same",
++	"PATH":                        "the process' own",
++	"USER":                        "the process' own",
++	"XDG_CONFIG_HOME":             "magpie's own folder's, which appdir decides",
++	"XDG_DATA_HOME":               "the same",
++	"XDG_DATA_DIRS":               "the system's own data folders, where a .deb puts Lody's desktop entry; a test that reaches agent.OpenLody sets it to its own, and DeepSeek Harness Desktop's entries are read there through proc.SystemDirs",
++	"XDG_CACHE_HOME":              "Go's build cache's too, which a sandbox keeps shared; Air's ACP OpenCode under it is found by path in a test's own home (#2423)",
++	"MAGPIE_ADDR":                 "magpie's own",
++	"MAGPIE_EMBEDDED_GATEWAY_KEY": "the managed gateway credential, not an agent folder",
++	"MAGPIE_DEBUG":                "magpie's own debug flag",
++	"MAGPIE_PUBLIC_URL":           "magpie's own public URL",
++	"MAGPIE_TRUST_PROXY":          "magpie's own: a proxy here signs its clients in (#1022)",
++	"MAGPIE_EFFORT_UPDATES":       "magpie's own switch for effort updates (#617)",
++	"MAGPIE_SITE_ORIGIN":          "a site origin magpie's Omarchy theme answers, to try the site locally",
++	"MAGPIE_PARTNERS":             "where magpie's own partner list is read from (a URL, or off), not a folder",
+diff --git a/internal/agent/rename.go b/internal/agent/rename.go
+index 2d364c9869b3900d10ee3472265ee45e498569c6..b056042977e3c0f2e486896726135f0f38ae0561 100644
+--- a/internal/agent/rename.go
++++ b/internal/agent/rename.go
+@@ -6,0 +7 @@ import (
++	"github.com/yetone/magpie/internal/embedded"
+@@ -14,0 +16,3 @@ func RenameProvider(from, to string) ([]string, error) {
++	if embedded.Enabled {
++		return nil, provider.Rename(from, to)
++	}
+@@ -49,0 +54,3 @@ func RenameGroup(from, to string) ([]string, error) {
++	if embedded.Enabled {
++		return nil, provider.RenameGroup(from, to)
++	}
+diff --git a/internal/agent/reseat.go b/internal/agent/reseat.go
+index 5bf7f020ed056c768f368a0dae6a069a673d1849..8ae2771fecd8c1e9f6ca5dbee64a13298277fce7 100644
+--- a/internal/agent/reseat.go
++++ b/internal/agent/reseat.go
+@@ -7,0 +8 @@ import (
++	"github.com/yetone/magpie/internal/embedded"
+@@ -85,0 +87,3 @@ func Reseat(change func() error) ([]Move, error) {
++	if embedded.Enabled {
++		return nil, change()
++	}
+diff --git a/internal/agent/sync.go b/internal/agent/sync.go
+index e6eff154e2ea8537be565569d1cdf2e851440a40..198e6cc7effc8469e3be6a872363103172aaefb3 100644
+--- a/internal/agent/sync.go
++++ b/internal/agent/sync.go
+@@ -12,0 +13 @@ import (
++	"github.com/yetone/magpie/internal/embedded"
+@@ -36,0 +38,3 @@ func SyncCatalog() {
++	if embedded.Enabled {
++		return
++	}
+diff --git a/internal/appdir/appdir.go b/internal/appdir/appdir.go
+index 0dc358ea0025572bc986646219fc513516ee28dd..06caccad3521d74b69400e2e31e554c2dee6191b 100644
+--- a/internal/appdir/appdir.go
++++ b/internal/appdir/appdir.go
+@@ -50,0 +51,2 @@ import (
++
++	"github.com/yetone/magpie/internal/embedded"
+@@ -262,0 +265,3 @@ func Config() string {
++	if embedded.Enabled {
++		return embedded.DataDir
++	}
+@@ -294,0 +300,3 @@ func Cache() string {
++	if embedded.Enabled {
++		return Join(embedded.DataDir, "cache")
++	}
+@@ -315,0 +324,3 @@ func logsOn(goos string) string {
++	if embedded.Enabled {
++		return filepath.Join(embedded.DataDir, "logs")
++	}
+@@ -386,0 +398,9 @@ func SystemCache() (string, error) {
++
++// EmbeddedCodexHome is the managed runtime's private Codex credential store.
++// It is meaningful only while embedded mode is enabled.
++func EmbeddedCodexHome() string {
++	if !embedded.Enabled {
++		return ""
++	}
++	return filepath.Join(embedded.DataDir, "codex")
++}
+diff --git a/internal/cli/main.go b/internal/cli/main.go
+index e4115866d42d5f92a8412f2108c49ff8c52ac4ff..ddf080bf35950c845af49a6b0e6ff04c9c08d10c 100644
+--- a/internal/cli/main.go
++++ b/internal/cli/main.go
+@@ -8,0 +9 @@ import (
++	"net"
+@@ -9,0 +11 @@ import (
++	"path/filepath"
+@@ -25,0 +28 @@ import (
++	"github.com/yetone/magpie/internal/embedded"
+@@ -307,0 +311,25 @@ func run(args []string) error {
++	if len(args) > 1 && args[0] == "web" && slices.Contains(args[1:], "--embedded") {
++		var dir, addr string
++		for i := 1; i < len(args); i++ {
++			if (args[i] == "--data-dir" || args[i] == "--addr") && i+1 < len(args) {
++				if args[i] == "--data-dir" {
++					dir = args[i+1]
++				} else {
++					addr = args[i+1]
++				}
++				i++
++			}
++		}
++		loopback := func(a string) bool {
++			h, p, e := net.SplitHostPort(a)
++			ip := net.ParseIP(h)
++			return e == nil && ip != nil && ip.IsLoopback() && p != "" && p != "0"
++		}
++		if !filepath.IsAbs(dir) || !loopback(addr) || !loopback(os.Getenv("MAGPIE_ADDR")) || addr == os.Getenv("MAGPIE_ADDR") || os.Getenv("MAGPIE_WEB_KEY") == "" || len(os.Getenv("MAGPIE_EMBEDDED_GATEWAY_KEY")) < 16 || len(os.Getenv("MAGPIE_EMBEDDED_INSTANCE_ID")) < 16 {
++			return fmt.Errorf("embedded web requires an absolute --data-dir, distinct explicit loopback --addr and MAGPIE_ADDR, MAGPIE_WEB_KEY and MAGPIE_EMBEDDED_GATEWAY_KEY and MAGPIE_EMBEDDED_INSTANCE_ID (at least 16 characters each)")
++		}
++		embedded.DataDir, embedded.Enabled = filepath.Clean(dir), true
++		embedded.AccountsOff = settings.AccountDiscoveryOff()
++		os.Setenv("MAGPIE_NO_ACCOUNTS", "1")
++	}
++
+@@ -412 +440,7 @@ func run(args []string) error {
+-	startUp()
++	if embedded.Enabled {
++		if err := os.MkdirAll(embedded.DataDir, 0700); err != nil {
++			return err
++		}
++	} else {
++		startUp()
++	}
+@@ -416,18 +450,22 @@ func run(args []string) error {
+-	syncAgentsOnChange()
+-	// a model Claude Code names that magpie doesn't serve goes to the one
+-	// it is set to use for that tier
+-	gateway.StandIn = agent.StandIn
+-	// and its auto mode classifier, on a sonnet tier that follows a main
+-	// model /model has moved, to the model it moved to
+-	gateway.ClassifierStandIn = agent.ClassifierStandIn
+-	// a Codex that reaches magpie for account failover alone is handed
+-	// only its own models (#1385)
+-	gateway.CodexOwnOnly = agent.CodexOwnOnly
+-	// what magpie writes into an agent's TOML, YAML or dotenv config says
+-	// so in a comment, for whoever reads it once magpie is gone
+-	agent.MarkWritten()
+-	// the Codex app's titles, descriptions and summaries, which it asks
+-	// for on a model of its own, on the model of magpie's picked beside
+-	// its ChatGPT sign-in rather than on that account (atom_Ray on X)
+-	gateway.CodexSideModel = agent.CodexSideModel
+-	gateway.CodexSideSet = agent.CodexSideSet
++	if !embedded.Enabled {
++		syncAgentsOnChange()
++	}
++	if !embedded.Enabled {
++		// a model Claude Code names that magpie doesn't serve goes to the one
++		// it is set to use for that tier
++		gateway.StandIn = agent.StandIn
++		// and its auto mode classifier, on a sonnet tier that follows a main
++		// model /model has moved, to the model it moved to
++		gateway.ClassifierStandIn = agent.ClassifierStandIn
++		// a Codex that reaches magpie for account failover alone is handed
++		// only its own models (#1385)
++		gateway.CodexOwnOnly = agent.CodexOwnOnly
++		// what magpie writes into an agent's TOML, YAML or dotenv config says
++		// so in a comment, for whoever reads it once magpie is gone
++		agent.MarkWritten()
++		// the Codex app's titles, descriptions and summaries, which it asks
++		// for on a model of its own, on the model of magpie's picked beside
++		// its ChatGPT sign-in rather than on that account (atom_Ray on X)
++		gateway.CodexSideModel = agent.CodexSideModel
++		gateway.CodexSideSet = agent.CodexSideSet
++	}
+@@ -437,2 +475,4 @@ func run(args []string) error {
+-	agent.CodexDesktopList = gateway.CodexDesktopCatalog
+-	gateway.CodexDesktopChanged = agent.SyncCatalogSoon
++	if !embedded.Enabled {
++		agent.CodexDesktopList = gateway.CodexDesktopCatalog
++		gateway.CodexDesktopChanged = agent.SyncCatalogSoon
++	}
+@@ -440,17 +480,19 @@ func run(args []string) error {
+-	gateway.WhileServing = append(gateway.WhileServing, davsync.Run)
+-	// and the setup backed up into a folder here by itself (jwaitq)
+-	gateway.WhileServing = append(gateway.WhileServing, backup.RunAuto)
+-	// and dsh's patch lists, which dsh reads live: a route left behind by
+-	// something else writing the file fails every session there until
+-	// magpie writes its own list again
+-	gateway.WhileServing = append(gateway.WhileServing, agent.KeepDshWired)
+-	// and Cursor Private Inference's variables, which the Mac's launchd
+-	// forgets at a restart, for the gateway's address now
+-	gateway.WhileServing = append(gateway.WhileServing, agent.KeepCursorLocalEnv)
+-	// and Claude Science's daemon, which a restart of the computer ends,
+-	// started on the gateway again while it is connected
+-	gateway.WhileServing = append(gateway.WhileServing, agent.KeepClaudeScience)
+-	// and the Claude Code magpie downloaded for a machine with none (a
+-	// server's, a container's), at Claude Code's newest release: its runs
+-	// turn its own updater off
+-	gateway.WhileServing = append(gateway.WhileServing, claudecode.KeepCurrent)
++	if !embedded.Enabled {
++		gateway.WhileServing = append(gateway.WhileServing, davsync.Run)
++		// and the setup backed up into a folder here by itself (jwaitq)
++		gateway.WhileServing = append(gateway.WhileServing, backup.RunAuto)
++		// and dsh's patch lists, which dsh reads live: a route left behind by
++		// something else writing the file fails every session there until
++		// magpie writes its own list again
++		gateway.WhileServing = append(gateway.WhileServing, agent.KeepDshWired)
++		// and Cursor Private Inference's variables, which the Mac's launchd
++		// forgets at a restart, for the gateway's address now
++		gateway.WhileServing = append(gateway.WhileServing, agent.KeepCursorLocalEnv)
++		// and Claude Science's daemon, which a restart of the computer ends,
++		// started on the gateway again while it is connected
++		gateway.WhileServing = append(gateway.WhileServing, agent.KeepClaudeScience)
++		// and the Claude Code magpie downloaded for a machine with none (a
++		// server's, a container's), at Claude Code's newest release: its runs
++		// turn its own updater off
++		gateway.WhileServing = append(gateway.WhileServing, claudecode.KeepCurrent)
++	}
+diff --git a/internal/cli/settings_parity_test.go b/internal/cli/settings_parity_test.go
+index cad97c13ea36afbfab68aafa445614b10dc748e3..4bc0aae3a8503534b8bbe68be69712f837cf26b6 100644
+--- a/internal/cli/settings_parity_test.go
++++ b/internal/cli/settings_parity_test.go
+@@ -167,0 +168,3 @@ var notYet = map[string]string{
++	"GET /api/integration":                       "host integration identity, not a CLI operation",
++	"POST /api/integration/discovery":            "explicit embedded host discovery, not a CLI operation",
++	"POST /api/integration/discovery/select":     "explicit embedded host selection, not a CLI operation",
+diff --git a/internal/cli/web_cli.go b/internal/cli/web_cli.go
+index 3bfe3566cecaf72c9a117a8ce8463582bd4a9a1e..0d0ba1a6d6378885c02dc633083ef10e6988cbba 100644
+--- a/internal/cli/web_cli.go
++++ b/internal/cli/web_cli.go
+@@ -4,0 +5 @@ import (
++	"io"
+@@ -11,0 +13 @@ import (
++	"github.com/yetone/magpie/internal/embedded"
+@@ -39,0 +42,3 @@ func webCmd(args []string) error {
++		case a == "--embedded":
++		case a == "--data-dir" && i+1 < len(args):
++			i++
+@@ -49,0 +55,3 @@ func webCmd(args []string) error {
++	if embedded.Enabled && (lan || open) {
++		return fmt.Errorf("embedded web requires --no-open and forbids --lan")
++	}
+@@ -56,6 +64,9 @@ func webCmd(args []string) error {
+-	if a, k := daemon.Web(); a != "" && gateway.ServedBy().Running {
+-		link := webLink(a, k)
+-		fmt.Println(green.Render("●"), "the magpie service serves this page:", bold.Render(link))
+-		fmt.Println(muted.Render("  magpie daemon web off turns it off"))
+-		if open {
+-			openInBrowser(link)
++	if !embedded.Enabled {
++		if a, k := daemon.Web(); a != "" && gateway.ServedBy().Running {
++			link := webLink(a, k)
++			fmt.Println(green.Render("●"), "the magpie service serves this page:", bold.Render(link))
++			fmt.Println(muted.Render("  magpie daemon web off turns it off"))
++			if open {
++				openInBrowser(link)
++			}
++			return nil
+@@ -63,10 +74,10 @@ func webCmd(args []string) error {
+-		return nil
+-	}
+-	// the app serves this page on this port already (Settings › Network
+-	// and sharing › Browser access): its own is the one to open
+-	if a, k := gui.AppPage(); a != "" && samePort(a, addr) && answers(a) {
+-		link := webLink(a, k)
+-		fmt.Println(green.Render("●"), "the magpie app serves this page:", bold.Render(link))
+-		fmt.Println(muted.Render("  Settings › Network and sharing › Browser access turns it off"))
+-		if open {
+-			openInBrowser(link)
++		// the app serves this page on this port already (Settings › Network
++		// and sharing › Browser access): its own is the one to open
++		if a, k := gui.AppPage(); a != "" && samePort(a, addr) && answers(a) {
++			link := webLink(a, k)
++			fmt.Println(green.Render("●"), "the magpie app serves this page:", bold.Render(link))
++			fmt.Println(muted.Render("  Settings › Network and sharing › Browser access turns it off"))
++			if open {
++				openInBrowser(link)
++			}
++			return nil
+@@ -74 +84,0 @@ func webCmd(args []string) error {
+-		return nil
+@@ -79 +89,3 @@ func webCmd(args []string) error {
+-	proc.UserPath()
++	if !embedded.Enabled {
++		proc.UserPath()
++	}
+@@ -98,0 +111,3 @@ func webCmd(args []string) error {
++	if embedded.Enabled {
++		go func() { _, _ = io.Copy(io.Discard, os.Stdin); w.Stop() }()
++	}
+diff --git a/internal/embedded/embedded.go b/internal/embedded/embedded.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..fc1346654013ba10749392c38d765a20eb660b5c
+--- /dev/null
++++ b/internal/embedded/embedded.go
+@@ -0,0 +1,33 @@
++// Package embedded holds the process-wide managed-runtime boundary.
++package embedded
++
++import "os"
++
++// Enabled is set before startup, only for an explicitly requested web runtime.
++var Enabled bool
++
++// DataDir is the absolute directory holding this runtime's state.
++var DataDir string
++
++// AccountsOff records the user's inherited privacy choice before embedded mode suppresses legacy discovery.
++var AccountsOff bool
++
++// Identity binds both listeners to the host's per-process nonce.
++type Identity struct {
++	App          string   `json:"app"`
++	APIVersion   int      `json:"apiVersion"`
++	Embedded     bool     `json:"embedded"`
++	Version      string   `json:"version"`
++	InstanceID   string   `json:"instanceId,omitempty"`
++	Capabilities []string `json:"capabilities"`
++}
++
++// Integration describes the supported management contract.
++func Integration(version string) Identity {
++	id := Identity{App: "magpie", APIVersion: 1, Embedded: Enabled, Version: version, Capabilities: []string{"providers", "groups"}}
++	if Enabled {
++		id.Capabilities = append(id.Capabilities, "signin:codex", "discovery:codex-file")
++		id.InstanceID = os.Getenv("MAGPIE_EMBEDDED_INSTANCE_ID")
++	}
++	return id
++}
+diff --git a/internal/gateway/desktop.go b/internal/gateway/desktop.go
+index 26296507b758cff727453fc352fdbeb25c07ebe6..9dd4baf632dd5c99e5b322a2e667f3c4c034070f 100644
+--- a/internal/gateway/desktop.go
++++ b/internal/gateway/desktop.go
+@@ -19,0 +20 @@ import (
++	"github.com/yetone/magpie/internal/embedded"
+@@ -872,0 +874,3 @@ func desktopChosen() string {
++	if embedded.Enabled {
++		return ""
++	}
+diff --git a/internal/gateway/embedded_test.go b/internal/gateway/embedded_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..1f5cc9de053e9d2099eb2f56b4f18a6b64465ba9
+--- /dev/null
++++ b/internal/gateway/embedded_test.go
+@@ -0,0 +1,75 @@
++package gateway
++
++import (
++	"net/http"
++	"net/http/httptest"
++	"testing"
++
++	"github.com/yetone/magpie/internal/embedded"
++)
++
++func TestEmbeddedGatewayRequiresKey(t *testing.T) {
++	embedded.Enabled = true
++	t.Cleanup(func() { embedded.Enabled = false })
++	t.Setenv("MAGPIE_EMBEDDED_GATEWAY_KEY", "a-long-synthetic-key")
++	h := lanGuard(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }))
++	for _, tc := range []struct {
++		key  string
++		want int
++	}{{"", 401}, {"wrong", 401}, {"a-long-synthetic-key", 204}} {
++		r := httptest.NewRequest("GET", "http://127.0.0.1/v1/models", nil)
++		r.RemoteAddr = "127.0.0.1:1234"
++		if tc.key != "" {
++			r.Header.Set("Authorization", "Bearer "+tc.key)
++		}
++		w := httptest.NewRecorder()
++		h.ServeHTTP(w, r)
++		if w.Code != tc.want {
++			t.Errorf("key %q: got %d, want %d", tc.key, w.Code, tc.want)
++		}
++	}
++}
++
++func TestEmbeddedFrontProtectsDiagnosticRoute(t *testing.T) {
++	embedded.Enabled = true
++	t.Cleanup(func() { embedded.Enabled = false })
++	t.Setenv("MAGPIE_EMBEDDED_GATEWAY_KEY", "a-long-synthetic-key")
++	r := httptest.NewRequest("GET", "http://127.0.0.1"+GoroutinesPath, nil)
++	r.RemoteAddr = "127.0.0.1:1234"
++	w := httptest.NewRecorder()
++	New().Front().ServeHTTP(w, r)
++	if w.Code != http.StatusNotFound {
++		t.Fatalf("diagnostics exposed: got %d, want 404", w.Code)
++	}
++}
++
++func TestEmbeddedFrontOnlyInference(t *testing.T) {
++	h := embeddedFront(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }))
++	for _, tc := range []struct {
++		method, path string
++		want         int
++	}{
++		{"GET", "/v1/models", 204}, {"GET", "/v1/models/test", 204},
++		{"POST", "/v1/messages", 204}, {"POST", "/v1/messages/count_tokens", 204},
++		{"POST", "/v1/chat/completions", 204}, {"POST", "/v1/responses", 204},
++		{"POST", "/mcp/run/test", 404}, {"POST", "/v1/images/generations", 404},
++		{"POST", "/v1/magpie/keys", 404}, {"GET", "/v1/magpie/goroutines", 404},
++		{"POST", "/v1beta/models/x:generateContent", 404}, {"GET", "/v1/models/a/b", 404},
++	} {
++		w := httptest.NewRecorder()
++		h.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, nil))
++		if w.Code != tc.want {
++			t.Errorf("%s %s: got %d, want %d", tc.method, tc.path, w.Code, tc.want)
++		}
++	}
++}
++
++func TestEmbeddedDoesNotReadDesktopSelection(t *testing.T) {
++	oldRoots := desktopSelectorRoots
++	embedded.Enabled = true
++	desktopSelectorRoots = func() []string { t.Fatal("read global Desktop selection"); return nil }
++	t.Cleanup(func() { desktopSelectorRoots = oldRoots; embedded.Enabled = false })
++	if got := desktopChosen(); got != "" {
++		t.Fatalf("got Desktop model %q", got)
++	}
++}
+diff --git a/internal/gateway/gateway.go b/internal/gateway/gateway.go
+index 54c20886549c9ec36586516826f0e982b0e93436..c0bf1eaf4e5defccd19dfe294416de032c8e5331 100644
+--- a/internal/gateway/gateway.go
++++ b/internal/gateway/gateway.go
+@@ -35,0 +36 @@ import (
++	"github.com/yetone/magpie/internal/embedded"
+@@ -743,0 +745,16 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
++	return s.listenAndServe(ctx, nil)
++}
++
++// ListenAndServeReady reports the listener result before serving requests.
++func (s *Server) ListenAndServeReady(ctx context.Context, ready chan<- error) error {
++	return s.listenAndServe(ctx, ready)
++}
++
++func (s *Server) listenAndServe(ctx context.Context, ready chan<- error) (err error) {
++	if ready != nil {
++		defer func() {
++			if ready != nil {
++				ready <- err
++			}
++		}()
++	}
+@@ -755 +772 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
+-	if !Handover && !Inherited() {
++	if !embedded.Enabled && !Handover && !Inherited() {
+@@ -764,0 +782,4 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
++	if ready != nil {
++		ready <- nil
++		ready = nil
++	}
+@@ -822,42 +843,51 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
+-	go provider.KeepOnAnAccountWithRoom(ctx)
+-	// and has the Codex app read its provider again as magpie becomes it
+-	// for a used-up ChatGPT account, and after (its Send greys otherwise)
+-	go provider.KeepCodexAppOnItsProvider(ctx, s.CodexBusy)
+-	// and, when settings say to, starts its accounts' next windows as the last reset
+-	go provider.KeepCodexWindowsWarm(ctx)
+-	go provider.KeepClaudeWindowsWarm(ctx, warmClaude)
+-	// and spends a Codex reset about to run out unused, for the accounts
+-	// that let it
+-	go provider.KeepResetsFromRunningOut(ctx)
+-	// and checks the WorkBuddy accounts in for the day's credits
+-	go provider.KeepWorkBuddyCheckedIn(ctx)
+-	// and the Trae CN accounts (#694), and the MiniMax Code ones (#811)
+-	go provider.KeepTraeCheckedIn(ctx)
+-	go provider.KeepMiniMaxCheckedIn(ctx)
+-	// and the Qoder ones' daily credits
+-	go provider.KeepQoderCheckedIn(ctx)
+-	// and the accounts of the plugins that check in themselves
+-	go provider.KeepPluginsCheckedIn(ctx)
+-	// and moves the built-in subscriptions being retired onto their plugins
+-	go provider.KeepRetiringMoved(ctx)
+-	// and fetches the partner list every hour, asked for or not
+-	go provider.KeepPartnersFresh(ctx)
+-	go provider.KeepPluginsListed(ctx) // models a plugin's vendor drops or adds, while magpie runs
+-	// and renews the plugins' sign-ins as they come due, used or not (#5080)
+-	go provider.KeepPluginsSignedIn(ctx)
+-	// and those a signed-in account's vendor adds (a ChatGPT plan's new GPT)
+-	go provider.KeepAccountsListed(ctx)
+-	// and fetches the lists of the providers the user asked to keep fresh (#2135)
+-	go provider.KeepListsFresh(ctx)
+-	// and follows a Remote magpie's list as it changes there (KaCli)
+-	go provider.KeepRemoteListsFollowed(ctx)
+-	// and keeps the community's plugins up to date, noting others' updates, and the Bun they run on
+-	go plugin.KeepUpdated(ctx)
+-	go plugin.KeepBunUpdated(ctx)
+-	// and, when settings say to, keeps the computer awake while agents work
+-	go awake.Keep(ctx, func() awake.Level {
+-		switch set := settings.Load(); {
+-		case !set.KeepAwake:
+-			return awake.Off
+-		case set.KeepAwakeDisplay:
+-			return awake.Display
++	if !embedded.Enabled {
++		go provider.KeepOnAnAccountWithRoom(ctx)
++		// and has the Codex app read its provider again as magpie becomes it
++		// for a used-up ChatGPT account, and after (its Send greys otherwise)
++		go provider.KeepCodexAppOnItsProvider(ctx, s.CodexBusy)
++		// and, when settings say to, starts its accounts' next windows as the last reset
++		go provider.KeepCodexWindowsWarm(ctx)
++		go provider.KeepClaudeWindowsWarm(ctx, warmClaude)
++		// and spends a Codex reset about to run out unused, for the accounts
++		// that let it
++		go provider.KeepResetsFromRunningOut(ctx)
++		// and checks the WorkBuddy accounts in for the day's credits
++		go provider.KeepWorkBuddyCheckedIn(ctx)
++		// and the Trae CN accounts (#694), and the MiniMax Code ones (#811)
++		go provider.KeepTraeCheckedIn(ctx)
++		go provider.KeepMiniMaxCheckedIn(ctx)
++		// and the Qoder ones' daily credits
++		go provider.KeepQoderCheckedIn(ctx)
++		// and the accounts of the plugins that check in themselves
++		go provider.KeepPluginsCheckedIn(ctx)
++		// and moves the built-in subscriptions being retired onto their plugins
++		go provider.KeepRetiringMoved(ctx)
++		// and fetches the partner list every hour, asked for or not
++		go provider.KeepPartnersFresh(ctx)
++		go provider.KeepPluginsListed(ctx) // models a plugin's vendor drops or adds, while magpie runs
++		// and renews the plugins' sign-ins as they come due, used or not (#5080)
++		go provider.KeepPluginsSignedIn(ctx)
++		// and those a signed-in account's vendor adds (a ChatGPT plan's new GPT)
++		go provider.KeepAccountsListed(ctx)
++		// and fetches the lists of the providers the user asked to keep fresh (#2135)
++		go provider.KeepListsFresh(ctx)
++		// and follows a Remote magpie's list as it changes there (KaCli)
++		go provider.KeepRemoteListsFollowed(ctx)
++		// and keeps the community's plugins up to date, noting others' updates, and the Bun they run on
++		go plugin.KeepUpdated(ctx)
++		go plugin.KeepBunUpdated(ctx)
++		// and, when settings say to, keeps the computer awake while agents work
++		go awake.Keep(ctx, func() awake.Level {
++			switch set := settings.Load(); {
++			case !set.KeepAwake:
++				return awake.Off
++			case set.KeepAwakeDisplay:
++				return awake.Display
++			}
++			return awake.System
++		}, func() awake.State {
++			b := s.Busy()
++			return awake.State{Busy: b.Any(), Last: b.Last}
++		})
++		for _, f := range WhileServing {
++			go f(ctx)
+@@ -865,7 +894,0 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
+-		return awake.System
+-	}, func() awake.State {
+-		b := s.Busy()
+-		return awake.State{Busy: b.Any(), Last: b.Last}
+-	})
+-	for _, f := range WhileServing {
+-		go f(ctx)
+@@ -875 +898,3 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
+-	go s.serveWSL(ctx, srv)
++	if !embedded.Enabled {
++		go s.serveWSL(ctx, srv)
++	}
+@@ -970,0 +996,7 @@ func (s *Server) routes() *routeMux {
++	mux.HandleFunc("GET /v1/magpie/integration", func(w http.ResponseWriter, r *http.Request) {
++		if !embedded.Enabled {
++			http.NotFound(w, r)
++			return
++		}
++		writeJSON(w, http.StatusOK, embedded.Integration(Version))
++	})
+diff --git a/internal/gateway/goroutines.go b/internal/gateway/goroutines.go
+index 3c3257bfa381d970132ae70f9dfb46c1abf8f5d6..0fb7995bf5d76503bf66067d4786e0406ed85533 100644
+--- a/internal/gateway/goroutines.go
++++ b/internal/gateway/goroutines.go
+@@ -27,0 +28 @@ import (
++	"github.com/yetone/magpie/internal/embedded"
+@@ -67 +68 @@ func (s *Server) dumpFirst(next http.Handler) http.Handler {
+-		if r.Method == http.MethodGet && r.URL.Path == GoroutinesPath && goroutinesRefused(r) == "" {
++		if !embedded.Enabled && r.Method == http.MethodGet && r.URL.Path == GoroutinesPath && goroutinesRefused(r) == "" {
+diff --git a/internal/gateway/lan.go b/internal/gateway/lan.go
+index 4bacd78e95393df3a69edfbf05c66b5aaace420e..6d78335d572837805fe2a4c0fa208e59ed005a9d 100644
+--- a/internal/gateway/lan.go
++++ b/internal/gateway/lan.go
+@@ -20,0 +21 @@ import (
++	"github.com/yetone/magpie/internal/embedded"
+@@ -422,0 +424,13 @@ func lanGuard(next http.Handler) http.Handler {
++		if embedded.Enabled {
++			key := os.Getenv("MAGPIE_EMBEDDED_GATEWAY_KEY")
++			matched := false
++			for _, v := range callerKeys(r) {
++				if key != "" && subtle.ConstantTimeCompare([]byte(v), []byte(key)) == 1 {
++					matched = true
++				}
++			}
++			if !matched {
++				http.Error(w, "invalid embedded gateway key", http.StatusUnauthorized)
++				return
++			}
++		}
+diff --git a/internal/gateway/oneport.go b/internal/gateway/oneport.go
+index ab87c3353ed8c047c496eefb7ecb0f5f2bca2cf0..46905625e6ae6ef26eaef6c032eba061d9badba6 100644
+--- a/internal/gateway/oneport.go
++++ b/internal/gateway/oneport.go
+@@ -7,0 +8,2 @@ import (
++
++	"github.com/yetone/magpie/internal/embedded"
+@@ -19 +21,6 @@ func (s *Server) Front() http.Handler {
+-	s.frontOnce.Do(func() { s.front = socketEntry(s.dumpFirst(lanGuard(s.Handler()))) })
++	s.frontOnce.Do(func() {
++		s.front = socketEntry(s.dumpFirst(lanGuard(s.Handler())))
++		if embedded.Enabled {
++			s.front = embeddedFront(s.front)
++		}
++	})
+@@ -97,0 +105,25 @@ func takePagePort(r *http.Request) *http.Request {
++
++// embeddedFront exposes inference only to a managed host's gateway key.
++func embeddedFront(next http.Handler) http.Handler {
++	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		p := r.URL.Path
++		allowed := false
++		if r.Method == http.MethodGet {
++			allowed = p == "/v1/magpie/integration" || p == "/v1/responses" || p == "/v1/models"
++			if id, ok := strings.CutPrefix(p, "/v1/models/"); ok && id != "" && !strings.Contains(id, "/") {
++				allowed = true
++			}
++		}
++		if r.Method == http.MethodPost {
++			switch p {
++			case "/v1/chat/completions", "/v1/responses", "/v1/messages", "/v1/messages/count_tokens":
++				allowed = true
++			}
++		}
++		if !allowed || path.Clean(p) != p {
++			http.NotFound(w, r)
++			return
++		}
++		next.ServeHTTP(w, r)
++	})
++}
+diff --git a/internal/gateway/readonly_test.go b/internal/gateway/readonly_test.go
+index 08a68859cd61373d50714fc3f15ca998fb87089b..2099420f5245ac837bb88ea98cad16764acf2320 100644
+--- a/internal/gateway/readonly_test.go
++++ b/internal/gateway/readonly_test.go
+@@ -30 +30 @@ var readOnlyRefused = []string{
+-	"GET /v1/magpie/route", "GET /v1/magpie/trace",
++	"GET /v1/magpie/route", "GET /v1/magpie/trace", "GET /v1/magpie/integration",
+diff --git a/internal/gui/api.go b/internal/gui/api.go
+index 77c7b251c30ce026dd38fa1da18d6cd384dd796e..b2b699d486ca3f8531f4df71b5419fa9396dd74b 100644
+--- a/internal/gui/api.go
++++ b/internal/gui/api.go
+@@ -38,0 +39 @@ import (
++	"github.com/yetone/magpie/internal/embedded"
+@@ -1040,0 +1042,29 @@ func Handler(w Windows, gw *gateway.Server) http.Handler {
++	mux.HandleFunc("GET /api/integration", func(w http.ResponseWriter, r *http.Request) {
++		writeJSON(w, embedded.Integration(Version))
++	})
++	if embedded.Enabled {
++		mux.HandleFunc("POST /api/integration/discovery", func(w http.ResponseWriter, r *http.Request) {
++			sources, err := provider.DiscoverEmbeddedCodexSources()
++			if err != nil {
++				fail(w, err)
++				return
++			}
++			writeJSON(w, struct {
++				Sources []provider.EmbeddedCodexSource `json:"sources"`
++			}{sources})
++		})
++		mux.HandleFunc("POST /api/integration/discovery/select", func(w http.ResponseWriter, r *http.Request) {
++			var in struct {
++				Ref string `json:"ref"`
++			}
++			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&in); err != nil {
++				fail(w, err)
++				return
++			}
++			if err := provider.SelectEmbeddedCodexSource(in.Ref); err != nil {
++				fail(w, err)
++				return
++			}
++			writeJSON(w, map[string]bool{"ok": true})
++		})
++	}
+@@ -2772,0 +2803,3 @@ func Handler(w Windows, gw *gateway.Server) http.Handler {
++	if embedded.Enabled {
++		return noFramedAPI(held(embeddedRoutes(mux)))
++	}
+@@ -3332,0 +3366,30 @@ func codexAppOut() *appOutJSON {
++
++// embeddedRoutes limits the managed surface to the operations its host owns.
++func embeddedRoutes(next http.Handler) http.Handler {
++	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		p := r.URL.Path
++		allowed := r.Method == "GET" && (p == "/" || p == "/api/integration" || p == "/api/providers" || p == "/api/groups" || p == "/api/gateway/trace" || strings.HasPrefix(p, "/api/signin/"))
++		if r.Method == "POST" {
++			switch {
++			case p == "/api/integration/discovery", p == "/api/integration/discovery/select", p == "/api/signin", strings.HasPrefix(p, "/api/signin/") && (strings.HasSuffix(p, "/cancel") || strings.HasSuffix(p, "/callback")), p == "/api/providers/arrange":
++				allowed = true
++			case strings.HasPrefix(p, "/api/provider/"):
++				switch strings.TrimPrefix(p, "/api/provider/") {
++				case "save", "key", "name", "efforts", "images", "arrange", "accountmodels", "keylisted", "accountcap", "accountname", "windowcap", "accountconcurrency", "keyspendcap", "accountweight", "route", "off", "on", "keeplogin", "switchonly", "keepself", "capstop", "capcareful", "affinity", "sink", "usefirst", "delete":
++					allowed = true
++				}
++			case strings.HasPrefix(p, "/api/groups/"):
++				allowed = true
++			case strings.HasPrefix(p, "/api/keys/"):
++				allowed = true
++			case strings.HasPrefix(p, "/api/login/"):
++				allowed = true
++			}
++		}
++		if !allowed {
++			http.NotFound(w, r)
++			return
++		}
++		next.ServeHTTP(w, r)
++	})
++}
+diff --git a/internal/gui/backend.go b/internal/gui/backend.go
+index 9b97c9a00bc06c0da2fbeebd87843f1b6171f12b..a70d64dd900b250936bff8d15d6146917bef7341 100644
+--- a/internal/gui/backend.go
++++ b/internal/gui/backend.go
+@@ -12,0 +13 @@ import (
++	"github.com/yetone/magpie/internal/embedded"
+@@ -43,0 +45,3 @@ func startBackend() (gw *gateway.Server) {
++	if embedded.Enabled {
++		return gw
++	}
+@@ -134 +138,4 @@ func serveGatewayLocked() *gateway.Server {
+-	if !gateway.Handover && !gateway.Inherited() {
++	if embedded.Enabled && gateway.Taken() {
++		return nil
++	}
++	if !embedded.Enabled && !gateway.Handover && !gateway.Inherited() {
+@@ -177,0 +185,25 @@ func serveGatewayLocked() *gateway.Server {
++
++// startEmbeddedBackend waits for the owned listener and never attaches to another gateway.
++func startEmbeddedBackend() (*gateway.Server, error) {
++	gateway.Window = true
++	gw := gateway.New()
++	ctx, stop := context.WithCancel(backendCtx)
++	done := make(chan struct{})
++	ready := make(chan error, 1)
++	serving.Add(1)
++	go func() {
++		defer serving.Done()
++		defer close(done)
++		defer stop()
++		if err := gw.ListenAndServeReady(ctx, ready); err != nil {
++			log.Printf("gateway: %v", err)
++		}
++	}()
++	if err := <-ready; err != nil {
++		<-done
++		return nil, err
++	}
++	served.Store(gw)
++	servedRun.stop, servedRun.done = stop, done
++	return gw, nil
++}
+diff --git a/internal/gui/embedded_test.go b/internal/gui/embedded_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..253649bae06a3f1c78b93d2450ab055ecbfe0cc2
+--- /dev/null
++++ b/internal/gui/embedded_test.go
+@@ -0,0 +1,92 @@
++package gui
++
++import (
++	"net"
++	"net/http"
++	"net/http/httptest"
++	"os"
++	"path/filepath"
++	"strings"
++
++	"github.com/yetone/magpie/internal/agent"
++	"github.com/yetone/magpie/internal/embedded"
++	"testing"
++)
++
++func TestEmbeddedRoutes(t *testing.T) {
++	h := embeddedRoutes(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }))
++	for _, tc := range []struct {
++		method, path string
++		want         int
++	}{
++		{"GET", "/", 204}, {"GET", "/api/integration", 204}, {"GET", "/api/providers", 204}, {"POST", "/api/provider/save", 204},
++		{"POST", "/api/groups/save", 204}, {"POST", "/api/signin", 204},
++		{"POST", "/api/provider/adopt", 404}, {"POST", "/api/agent/connect", 404}, {"POST", "/api/window/quit", 404},
++	} {
++		w := httptest.NewRecorder()
++		h.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, nil))
++		if w.Code != tc.want {
++			t.Errorf("%s %s: got %d, want %d", tc.method, tc.path, w.Code, tc.want)
++		}
++	}
++}
++
++// Provider and group changes must leave another agent's configuration alone.
++func TestEmbeddedProviderGroupPreservesAgentFiles(t *testing.T) {
++	home := t.TempDir()
++	t.Setenv("HOME", home)
++	t.Setenv("USERPROFILE", home)
++	t.Setenv("MAGPIE_NO_ACCOUNTS", "1")
++	embedded.Enabled, embedded.DataDir = true, t.TempDir()
++	t.Cleanup(func() { agent.SyncCatalogSettled(); embedded.Enabled, embedded.DataDir = false, "" })
++	path := filepath.Join(home, ".codex", "config.toml")
++	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
++		t.Fatal(err)
++	}
++	const original = "model_provider = \"magpie\"\nmodel = \"relay/m\"\n"
++	if err := os.WriteFile(path, []byte(original), 0600); err != nil {
++		t.Fatal(err)
++	}
++	mux := http.NewServeMux()
++	providerRoutes(mux, webHost{func() {}})
++	h := embeddedRoutes(mux)
++	call := func(path, body string) {
++		t.Helper()
++		w := httptest.NewRecorder()
++		h.ServeHTTP(w, httptest.NewRequest("POST", path, strings.NewReader(body)))
++		if w.Code != http.StatusOK {
++			t.Fatalf("%s: %d %s", path, w.Code, w.Body.String())
++		}
++	}
++	call("/api/provider/save", `{"id":"relay","name":"Relay","chat":"http://127.0.0.1:1/v1","key":"fixture","models":["m"],"new":true}`)
++	call("/api/groups/save", `{"id":"first","name":"First","members":["relay/m"]}`)
++	call("/api/groups/save", `{"id":"second","from":"first","name":"Second","members":["relay/m"]}`)
++	call("/api/groups/delete", `{"id":"second"}`)
++	call("/api/provider/delete", `{"id":"relay"}`)
++	agent.SyncCatalogSettled()
++	b, err := os.ReadFile(path)
++	if err != nil || string(b) != original {
++		t.Fatalf("agent file changed: %q, %v", b, err)
++	}
++}
++
++func TestEmbeddedWebRejectsOccupiedGateway(t *testing.T) {
++	home := t.TempDir()
++	t.Setenv("HOME", home)
++	t.Setenv("USERPROFILE", home)
++	t.Setenv("MAGPIE_NO_ACCOUNTS", "1")
++	t.Setenv("MAGPIE_WEB_KEY", "synthetic-management-key")
++	t.Setenv("MAGPIE_EMBEDDED_GATEWAY_KEY", "synthetic-gateway-key")
++	busy, err := net.Listen("tcp", "127.0.0.1:0")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer busy.Close()
++	t.Setenv("MAGPIE_ADDR", busy.Addr().String())
++	embedded.Enabled, embedded.DataDir = true, t.TempDir()
++	t.Cleanup(func() { embedded.Enabled, embedded.DataDir = false, "" })
++	if w, err := StartWeb("127.0.0.1:0", "test"); err == nil {
++		w.srv.Close()
++		t.Fatal("started management despite an occupied inference port")
++	}
++}
+diff --git a/internal/gui/web.go b/internal/gui/web.go
+index 74787d68626f29097cf15fb5d703408eb5b08312..0bd86b61e7fb73b6149403cf934c3b4c1ec46873 100644
+--- a/internal/gui/web.go
++++ b/internal/gui/web.go
+@@ -22,0 +23 @@ import (
++	"github.com/yetone/magpie/internal/embedded"
+@@ -58,0 +60 @@ type Web struct {
++	quitOnce   sync.Once
+@@ -98,2 +100 @@ func StartWeb(addr, version string) (*Web, error) {
+-	var once sync.Once
+-	quit := func() { once.Do(func() { close(w.quit) }) }
++	quit := w.Stop
+@@ -106,0 +108,10 @@ func StartWeb(addr, version string) (*Web, error) {
++	var gw *gateway.Server
++	if embedded.Enabled {
++		gw, err = startEmbeddedBackend()
++		if err != nil {
++			ln.Close()
++			return nil, fmt.Errorf("embedded gateway: %w", err)
++		}
++	} else {
++		gw = startBackend()
++	}
+@@ -108 +119 @@ func StartWeb(addr, version string) (*Web, error) {
+-		Handler:           webServed(port, key, keep, Handler(webHost{quit}, startBackend())),
++		Handler:           webServed(port, key, keep, Handler(webHost{quit}, gw)),
+@@ -120,2 +131,4 @@ func StartWeb(addr, version string) (*Web, error) {
+-	updates.start()
+-	news.start()
++	if !embedded.Enabled {
++		updates.start()
++		news.start()
++	}
+@@ -124,0 +138,3 @@ func StartWeb(addr, version string) (*Web, error) {
++// Stop asks a web server to end once its current response is sent.
++func (w *Web) Stop() { w.quitOnce.Do(func() { close(w.quit) }) }
++
+@@ -137,0 +154,6 @@ func (w *Web) Wait() error {
++	if embedded.Enabled && servedRun.stop != nil {
++		servedRun.stop()
++		<-servedRun.done
++		served.Store(nil)
++		plugin.EndHosts()
++	}
+diff --git a/internal/provider/account.go b/internal/provider/account.go
+index 75a64d73657c11bfc6183d14421a53a3269d7dd9..462a1a1fdc74fed9c53f08d1fc72b78f25ee79e7 100644
+--- a/internal/provider/account.go
++++ b/internal/provider/account.go
+@@ -38,0 +39 @@ import (
++	"github.com/yetone/magpie/internal/embedded"
+@@ -47,3 +48,5 @@ type Account struct {
+-	Agent string `json:"agent"`          // the agent's id: codex, copilot
+-	User  string `json:"user"`           // who is signed in: an email, a GitHub login
+-	Plan  string `json:"plan,omitempty"` // the subscription, when the agent says
++	embeddedCodex bool
++	modelsCacheID string
++	Agent         string `json:"agent"`          // the agent's id: codex, copilot
++	User          string `json:"user"`           // who is signed in: an email, a GitHub login
++	Plan          string `json:"plan,omitempty"` // the subscription, when the agent says
+@@ -218 +221 @@ func (p Provider) Sign(ctx context.Context, req *http.Request, proto Protocol, b
+-	if p.Account != nil && settings.AccountDiscoveryOff() && !p.publicAccount() {
++	if p.Account != nil && settings.AccountDiscoveryOff() && !p.publicAccount() && !p.Account.embeddedCodex {
+@@ -895,0 +899,6 @@ func Accounts() []Provider {
++	if embedded.Enabled {
++		if p, ok := embeddedCodexAccount(); ok {
++			return []Provider{p}
++		}
++		return nil
++	}
+diff --git a/internal/provider/codex_models.go b/internal/provider/codex_models.go
+index 13346ad9fe69d664ffe1f3326761f9f67c333079..0997ce599f04d1214a732b66c6c5bcd6c84dc25a 100644
+--- a/internal/provider/codex_models.go
++++ b/internal/provider/codex_models.go
+@@ -22,0 +23 @@ import (
++	"github.com/yetone/magpie/internal/embedded"
+@@ -37,0 +39,4 @@ func codexModels(ctx context.Context, sign func(context.Context, *http.Request,
++	return codexModelsWithPrompts(ctx, sign, saveCodexPrompts)
++}
++
++func codexModelsWithPrompts(ctx context.Context, sign func(context.Context, *http.Request, []byte) error, save func([]byte)) ([]catalog.Model, error) {
+@@ -55 +60 @@ func codexModels(ctx context.Context, sign func(context.Context, *http.Request,
+-	saveCodexPrompts(b)
++	save(b)
+@@ -124,0 +130,3 @@ func codexVersion() string {
++	if embedded.Enabled {
++		return codexClientVersion
++	}
+@@ -299,0 +308,7 @@ func accountModels(agent, user string) string {
++func (a *Account) modelCacheID() string {
++	if a.modelsCacheID != "" {
++		return a.modelsCacheID
++	}
++	return accountModels(a.Agent, a.User)
++}
++
+@@ -316 +331 @@ func (a *Account) Lists(model string) bool {
+-	live, _, ok := catalog.Live(accountModels(a.Agent, a.User))
++	live, _, ok := catalog.Live(a.modelCacheID())
+@@ -344 +359 @@ func (a *Account) Levels(model string) (levels []string, ok bool) {
+-	live, _, found := catalog.Live(accountModels(a.Agent, a.User))
++	live, _, found := catalog.Live(a.modelCacheID())
+@@ -366 +381 @@ func (a *Account) Tiers(model string) (tiers []string, ok bool) {
+-	live, _, found := catalog.Live(accountModels(a.Agent, a.User))
++	live, _, found := catalog.Live(a.modelCacheID())
+@@ -723 +738,6 @@ func CodexNativeWindow(restore bool) func(slug string) (n, most int, ok bool) {
+-	live, _, _ := catalog.Live("codex")
++	var live []catalog.Model
++	if embedded.Enabled {
++		live, _, _ = p.live()
++	} else {
++		live, _, _ = catalog.Live("codex")
++	}
+@@ -757,0 +778,16 @@ func CodexWindow(user, slug string) int {
++	if embedded.Enabled {
++		if p.Account == nil || !p.Account.embeddedCodex {
++			return 0
++		}
++		if live, _, ok := p.live(); ok {
++			lists = append(lists, live)
++		}
++		for _, ms := range lists {
++			for _, m := range ms {
++				if n := catalog.Window(m.Context); m.ID == slug && n > 0 {
++					return n
++				}
++			}
++		}
++		return 0
++	}
+diff --git a/internal/provider/codex_request.go b/internal/provider/codex_request.go
+index 85e6c03a12c36cf4a21d2e29a133d86a954463df..bb053053a1b54072481cce41e6c737f7b5060e6a 100644
+--- a/internal/provider/codex_request.go
++++ b/internal/provider/codex_request.go
+@@ -19,0 +20 @@ import (
++	"github.com/yetone/magpie/internal/embedded"
+@@ -194 +195,3 @@ func codexPrompts(b []byte) map[string]string {
+-func saveCodexPrompts(b []byte) {
++func saveCodexPrompts(b []byte) { saveCodexPromptsAt(codexPromptsPath(), b) }
++
++func saveCodexPromptsAt(path string, b []byte) {
+@@ -199 +201,0 @@ func saveCodexPrompts(b []byte) {
+-	path := codexPromptsPath()
+@@ -266,2 +268,4 @@ func codexInstructions(model string) string {
+-	if s, ok := codexCLIPrompts.get(catalog.CodexModelsCache(), model, codexPrompts); ok {
+-		return s
++	if !embedded.Enabled {
++		if s, ok := codexCLIPrompts.get(catalog.CodexModelsCache(), model, codexPrompts); ok {
++			return s
++		}
+@@ -277 +281,3 @@ func codexInstructions(model string) string {
+-func codexBody(body []byte) []byte {
++func codexBody(body []byte) []byte { return codexBodyUsing(body, codexInstructions) }
++
++func codexBodyUsing(body []byte, instructions func(string) string) []byte {
+@@ -313 +319 @@ func codexBody(body []byte) []byte {
+-	codex := codexInstructions(model)
++	codex := instructions(model)
+diff --git a/internal/provider/embedded_codex.go b/internal/provider/embedded_codex.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..f66c4892af943baacd894bf1132719132d85f643
+--- /dev/null
++++ b/internal/provider/embedded_codex.go
+@@ -0,0 +1,259 @@
++package provider
++
++import (
++	"context"
++	"encoding/json"
++	"errors"
++	"fmt"
++	"os"
++	"path/filepath"
++	"sync"
++	"time"
++
++	"github.com/yetone/magpie/internal/appdir"
++	"github.com/yetone/magpie/internal/catalog"
++	"github.com/yetone/magpie/internal/codexcat"
++	"github.com/yetone/magpie/internal/embedded"
++)
++
++var embeddedCodexMu sync.Mutex
++
++// The opened root confines private operations even if another process moves
++// or replaces a directory after the check. Temp files are renamed within it.
++func embeddedPrivateWrite(dir, name string, b []byte) error {
++	if err := os.MkdirAll(embedded.DataDir, 0700); err != nil {
++		return err
++	}
++	root, err := os.OpenRoot(embedded.DataDir)
++	if err != nil {
++		return err
++	}
++	defer root.Close()
++	rel := name
++	if dir != embedded.DataDir {
++		if dir != appdir.EmbeddedCodexHome() || name != "auth.json" {
++			return errors.New("invalid private Codex path")
++		}
++		if err := root.Mkdir("codex", 0700); err != nil && !errors.Is(err, os.ErrExist) {
++			return err
++		}
++		info, err := root.Lstat("codex")
++		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
++			return errors.New("private Codex directory is unavailable or symlinked")
++		}
++		rel = filepath.Join("codex", name)
++	} else if name != "codex-source.json" {
++		return errors.New("invalid private Codex path")
++	}
++	info, err := root.Lstat(rel)
++	if err == nil && !info.Mode().IsRegular() {
++		return errors.New("private Codex file is not a regular file")
++	}
++	if err != nil && !errors.Is(err, os.ErrNotExist) {
++		return err
++	}
++	tmp := filepath.Join(filepath.Dir(rel), "."+name+"."+randomToken(12))
++	f, err := root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
++	if err != nil {
++		return err
++	}
++	_, err = f.Write(b)
++	if err == nil {
++		err = f.Sync()
++	}
++	if closeErr := f.Close(); err == nil {
++		err = closeErr
++	}
++	if err == nil {
++		err = root.Rename(tmp, rel)
++	}
++	if err != nil {
++		_ = root.Remove(tmp)
++	}
++	return err
++}
++
++func embeddedPrivateRead(path string) ([]byte, error) {
++	root, err := os.OpenRoot(embedded.DataDir)
++	if err != nil {
++		return nil, err
++	}
++	defer root.Close()
++	var rel string
++	switch path {
++	case filepath.Join(embedded.DataDir, "codex-source.json"):
++		rel = "codex-source.json"
++	case filepath.Join(appdir.EmbeddedCodexHome(), "auth.json"):
++		info, err := root.Lstat("codex")
++		if err != nil {
++			return nil, err
++		}
++		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
++			return nil, errors.New("private Codex directory is unavailable or symlinked")
++		}
++		rel = filepath.Join("codex", "auth.json")
++	default:
++		return nil, errors.New("invalid private Codex path")
++	}
++	info, err := root.Lstat(rel)
++	if err != nil {
++		return nil, err
++	}
++	if !info.Mode().IsRegular() {
++		return nil, errors.New("private Codex file is not a regular file")
++	}
++	return root.ReadFile(rel)
++}
++
++func embeddedRemoveSelection() error {
++	root, err := os.OpenRoot(embedded.DataDir)
++	if err != nil {
++		return err
++	}
++	defer root.Close()
++	err = root.Remove("codex-source.json")
++	if errors.Is(err, os.ErrNotExist) {
++		return nil
++	}
++	return err
++}
++
++// embeddedCodexSource returns the selected shared source, or the private
++// owned store if no shared source was selected. Invalid selection fails closed.
++func embeddedCodexSource() (string, bool, error) {
++	b, err := embeddedPrivateRead(filepath.Join(embedded.DataDir, "codex-source.json"))
++	if errors.Is(err, os.ErrNotExist) {
++		return appdir.EmbeddedCodexHome(), false, nil
++	}
++	if err != nil {
++		return "", false, err
++	}
++	var s EmbeddedCodexSource
++	if json.Unmarshal(b, &s) != nil || s.Source != "codex-file" || !filepath.IsAbs(s.Ref) {
++		return "", false, errors.New("invalid selected Codex source")
++	}
++	return s.Ref, true, nil
++}
++
++func embeddedCodexRead(dir string, shared bool) ([]byte, error) {
++	if shared {
++		b, canonical, err := embeddedCodexFile(dir)
++		if err != nil {
++			return nil, err
++		}
++		if canonical != dir {
++			return nil, errors.New("selected Codex source changed")
++		}
++		return b, nil
++	}
++	return embeddedPrivateRead(filepath.Join(dir, "auth.json"))
++}
++
++func embeddedCodexToken(ctx context.Context, dir string, shared bool, stale string) (string, string, error) {
++	embeddedCodexMu.Lock()
++	defer embeddedCodexMu.Unlock()
++	if err := embeddedAccountsAllowed(); err != nil {
++		return "", "", err
++	}
++	selected, isShared, err := embeddedCodexSource()
++	if err != nil || selected != dir || isShared != shared {
++		return "", "", errors.New("selected Codex account changed")
++	}
++	b, err := embeddedCodexRead(dir, shared)
++	var a codexAuth
++	if err != nil || json.Unmarshal(b, &a) != nil || a.Tokens.AccessToken == "" {
++		return "", "", errors.New("Codex sign-in is unavailable")
++	}
++	exp, _ := jwtClaims(a.Tokens.AccessToken)["exp"].(float64)
++	if stale == "" && (exp == 0 || time.Until(time.Unix(int64(exp), 0)) > 5*time.Minute) || stale != "" && stale != a.Tokens.AccessToken {
++		return a.Tokens.AccessToken, codexAccountID(a), nil
++	}
++	if shared {
++		return "", "", errors.New("shared Codex sign-in needs renewal in Codex")
++	}
++	var raw map[string]any
++	if json.Unmarshal(b, &raw) != nil {
++		return "", "", errors.New("invalid Codex sign-in")
++	}
++	reason := codexRefreshExpiry
++	if stale != "" {
++		reason = codexRefreshRecovery
++	}
++	token, err := codexRefresh(ctx, raw, reason)
++	if err != nil {
++		return "", "", err
++	}
++	fresh, err := json.MarshalIndent(raw, "", "  ")
++	if err != nil {
++		return "", "", err
++	}
++	if err := embeddedPrivateWrite(dir, "auth.json", append(fresh, '\n')); err != nil {
++		return "", "", fmt.Errorf("could not save rotated Codex token: %w", err)
++	}
++	return token, codexAccountID(a), nil
++}
++
++func addEmbeddedCodexLogin(l savedLogin) (bool, error) {
++	if err := embeddedAccountsAllowed(); err != nil {
++		return false, err
++	}
++	if l.Agent != "codex" {
++		return false, errors.New("unsupported embedded sign-in")
++	}
++	embeddedCodexMu.Lock()
++	defer embeddedCodexMu.Unlock()
++	if err := embeddedPrivateWrite(appdir.EmbeddedCodexHome(), "auth.json", append(l.Auth, '\n')); err != nil {
++		return false, err
++	}
++	if err := embeddedRemoveSelection(); err != nil {
++		return false, err
++	}
++	Changed()
++	return true, nil
++}
++
++func embeddedCodexAccount() (Provider, bool) {
++	if embeddedAccountsAllowed() != nil {
++		return Provider{}, false
++	}
++	dir, shared, err := embeddedCodexSource()
++	if err != nil {
++		return Provider{}, false
++	}
++	b, err := embeddedCodexRead(dir, shared)
++	var a codexAuth
++	if err != nil || json.Unmarshal(b, &a) != nil || a.AuthMode == "apikey" || a.Tokens.AccessToken == "" {
++		return Provider{}, false
++	}
++	claims := jwtClaims(a.Tokens.IDToken)
++	user := codexUser(claims)
++	if user == "" {
++		user = a.Tokens.AccountID
++	}
++	if user == "" {
++		user = "ChatGPT"
++	}
++	cacheID := accountModels("codex", user+"\x00"+a.Tokens.AccountID+"\x00"+dir)
++	acct := &Account{Agent: "codex", User: user, Plan: claimString(claims, "https://api.openai.com/auth", "chatgpt_plan_type"), Stream: true, embeddedCodex: true, modelsCacheID: cacheID, models: func() []catalog.Model { ms, _, _ := catalog.Live(cacheID); return ms }, listedOnly: true}
++	promptsPath := catalog.LivePath(cacheID) + ".prompts"
++	acct.body = func(body []byte) []byte {
++		return codexBodyUsing(body, func(model string) string {
++			if s, ok := savedPrompts.get(promptsPath, model, func(b []byte) map[string]string { var m map[string]string; _ = json.Unmarshal(b, &m); return m }); ok {
++				return s
++			}
++			return codexcat.Official(model)
++		})
++	}
++	acct.sign = codexSign(func(ctx context.Context) (string, string, error) { return embeddedCodexToken(ctx, dir, shared, "") })
++	acct.renew = func(ctx context.Context, stale string) (string, string, error) {
++		return embeddedCodexToken(ctx, dir, shared, stale)
++	}
++	acct.fetch = func(ctx context.Context) ([]catalog.Model, error) {
++		ms, err := codexModelsWithPrompts(ctx, acct.sign, func(b []byte) { saveCodexPromptsAt(promptsPath, b) })
++		if err != nil {
++			return nil, err
++		}
++		return ms, catalog.SaveLive(cacheID, CodexBase, ms)
++	}
++	return Provider{ID: "codex", Name: "Codex", Icon: "codex-color", Responses: CodexBase, Website: "https://chatgpt.com/codex", Account: acct}, true
++}
+diff --git a/internal/provider/embedded_codex_sources.go b/internal/provider/embedded_codex_sources.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..26b7ea3df01a4f35f01081ea2e675558ffa05aa7
+--- /dev/null
++++ b/internal/provider/embedded_codex_sources.go
+@@ -0,0 +1,117 @@
++package provider
++
++import (
++	"encoding/json"
++	"errors"
++	"fmt"
++	"os"
++	"path/filepath"
++
++	"github.com/yetone/magpie/internal/appdir"
++	"github.com/yetone/magpie/internal/embedded"
++	"github.com/yetone/magpie/internal/settings"
++)
++
++func embeddedAccountsAllowed() error {
++	if !embedded.Enabled {
++		return errors.New("embedded mode is required")
++	}
++	if embedded.AccountsOff {
++		return errAccountDiscoveryOff
++	}
++	s, err := settings.LoadChecked()
++	if err != nil {
++		return fmt.Errorf("account privacy setting unavailable: %w", err)
++	}
++	if s.NoAccountDiscovery {
++		return errAccountDiscoveryOff
++	}
++	return nil
++}
++
++// EmbeddedCodexSource describes a discovered file-backed Codex sign-in.
++// Ref is its canonical home, never a credential. Discovering sources reads
++// local credentials and must only be called in response to an explicit request.
++type EmbeddedCodexSource struct {
++	Source string `json:"source"`
++	Ref    string `json:"ref"`
++	User   string `json:"user"`
++	Plan   string `json:"plan,omitempty"`
++}
++
++func embeddedCodexFile(home string) ([]byte, string, error) {
++	home, err := filepath.EvalSymlinks(home)
++	if err != nil || !filepath.IsAbs(home) {
++		return nil, "", errors.New("Codex source is not an existing absolute directory")
++	}
++	cfg, err := readCodexStoreSetting(home)
++	if err != nil || cfg.Mode != "file" || cfg.Secrets {
++		return nil, "", errors.New("Codex source does not use a supported file credential store")
++	}
++	path := filepath.Join(home, "auth.json")
++	info, err := os.Lstat(path)
++	if err != nil || !info.Mode().IsRegular() {
++		return nil, "", errors.New("Codex credential file is unavailable or is a symlink")
++	}
++	b, err := os.ReadFile(path)
++	return b, home, err
++}
++
++// DiscoverEmbeddedCodexSources reads only file-backed Codex homes and returns
++// metadata without tokens. It is never run during startup or ordinary listing.
++func DiscoverEmbeddedCodexSources() ([]EmbeddedCodexSource, error) {
++	if err := embeddedAccountsAllowed(); err != nil {
++		return nil, err
++	}
++	out := []EmbeddedCodexSource{}
++	seen := map[string]bool{}
++	for _, dir := range appdir.CodexHomes() {
++		b, home, err := embeddedCodexFile(dir)
++		if err != nil || seen[home] {
++			continue
++		}
++		var auth codexAuth
++		if json.Unmarshal(b, &auth) != nil || auth.AuthMode == "apikey" || auth.Tokens.AccessToken == "" {
++			continue
++		}
++		claims := jwtClaims(auth.Tokens.IDToken)
++		user := codexUser(claims)
++		if user == "" {
++			user = auth.Tokens.AccountID
++		}
++		if user == "" {
++			continue
++		}
++		seen[home] = true
++		out = append(out, EmbeddedCodexSource{Source: "codex-file", Ref: home, User: user, Plan: claimString(claims, "https://api.openai.com/auth", "chatgpt_plan_type")})
++	}
++	return out, nil
++}
++
++// SelectEmbeddedCodexSource records a reference, not a copy of the tokens.
++// The caller must first obtain consent to read this shared sign-in. Magpie
++// never refreshes or writes it; Codex must renew an expired token. Only a
++// source returned by a fresh discovery can be selected.
++func SelectEmbeddedCodexSource(ref string) error {
++	if !embedded.Enabled {
++		return errors.New("embedded mode is required")
++	}
++	sources, err := DiscoverEmbeddedCodexSources()
++	if err != nil {
++		return err
++	}
++	for _, source := range sources {
++		if source.Ref == ref {
++			b, err := json.Marshal(source)
++			if err != nil {
++				return err
++			}
++			if err := embeddedPrivateWrite(embedded.DataDir, "codex-source.json", append(b, '\n')); err != nil {
++				return err
++			}
++			Changed()
++			return nil
++		}
++	}
++	return fmt.Errorf("Codex source was not found in the current discovery")
++}
+diff --git a/internal/provider/embedded_codex_sources_test.go b/internal/provider/embedded_codex_sources_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..fabfb2fc9c0c43da6b0b98bf0fdad494ac85d62d
+--- /dev/null
++++ b/internal/provider/embedded_codex_sources_test.go
+@@ -0,0 +1,106 @@
++package provider
++
++import (
++	"context"
++	"fmt"
++	"net/http"
++	"net/http/httptest"
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/yetone/magpie/internal/embedded"
++)
++
++func TestEmbeddedCodexSourceSelectionDoesNotCopyCredentials(t *testing.T) {
++	home, data := t.TempDir(), t.TempDir()
++	t.Setenv("HOME", home)
++	t.Setenv("MAGPIE_NO_ACCOUNTS", "1")
++	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
++	oldEnabled, oldData := embedded.Enabled, embedded.DataDir
++	embedded.Enabled, embedded.DataDir = true, data
++	t.Cleanup(func() { embedded.Enabled, embedded.DataDir = oldEnabled, oldData })
++	dir := filepath.Join(home, ".codex")
++	if err := os.MkdirAll(dir, 0700); err != nil {
++		t.Fatal(err)
++	}
++	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte("cli_auth_credentials_store = \"file\"\n[features]\nsecret_auth_storage = false\n"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	credential := []byte(`{"tokens":{"access_token":"synthetic-access","refresh_token":"synthetic-refresh","account_id":"synthetic-user"}}`)
++	if err := os.WriteFile(filepath.Join(dir, "auth.json"), credential, 0600); err != nil {
++		t.Fatal(err)
++	}
++	sources, err := DiscoverEmbeddedCodexSources()
++	if err != nil || len(sources) != 1 || sources[0].User != "synthetic-user" {
++		t.Fatalf("discovery: %+v, %v", sources, err)
++	}
++	if err := SelectEmbeddedCodexSource(sources[0].Ref); err != nil {
++		t.Fatal(err)
++	}
++	p, ok := embeddedCodexAccount()
++	if !ok {
++		t.Fatal("selected source was not available")
++	}
++	if ls := Logins("codex"); len(ls) != 1 || !ls[0].Own || ls[0].User != "synthetic-user" {
++		t.Fatalf("shared login metadata: %+v", ls)
++	}
++	req := httptest.NewRequest(http.MethodPost, "http://example.invalid/responses", nil)
++	if err := p.Sign(context.Background(), req, Responses, nil); err != nil {
++		t.Fatal(err)
++	}
++	if got := req.Header.Get("Authorization"); got != "Bearer synthetic-access" {
++		t.Fatalf("selected source authorization: %q", got)
++	}
++	b, err := os.ReadFile(filepath.Join(data, "codex-source.json"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	if strings.Contains(string(b), "synthetic-refresh") || strings.Contains(string(b), "synthetic-access") {
++		t.Fatal("credentials copied into source record")
++	}
++	got, err := os.ReadFile(filepath.Join(dir, "auth.json"))
++	if err != nil || string(got) != string(credential) {
++		t.Fatalf("discovery changed source: %v", err)
++	}
++	if err := SelectEmbeddedCodexSource(filepath.Join(home, "unlisted")); err == nil {
++		t.Fatal("selected an undiscovered source")
++	}
++	expired := fmt.Sprintf(`{"tokens":{"access_token":%q,"refresh_token":"synthetic-refresh","account_id":"synthetic-user"}}`, embeddedTestToken(time.Now().Add(-time.Hour).Unix()))
++	if err := os.WriteFile(filepath.Join(dir, "auth.json"), []byte(expired), 0600); err != nil {
++		t.Fatal(err)
++	}
++	req = httptest.NewRequest(http.MethodPost, "http://example.invalid/responses", nil)
++	if err := p.Sign(context.Background(), req, Responses, nil); err == nil || !strings.Contains(err.Error(), "renewal in Codex") {
++		t.Fatalf("expired shared source: %v", err)
++	}
++	after, err := os.ReadFile(filepath.Join(dir, "auth.json"))
++	if err != nil || string(after) != expired {
++		t.Fatalf("expired shared source changed: %v", err)
++	}
++}
++
++func TestEmbeddedCodexSourceRejectsKeychainAndSymlink(t *testing.T) {
++	dir := t.TempDir()
++	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte("cli_auth_credentials_store = \"keyring\"\n"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	if _, _, err := embeddedCodexFile(dir); err == nil {
++		t.Fatal("accepted a keychain-backed source")
++	}
++	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte("cli_auth_credentials_store = \"file\"\n[features]\nsecret_auth_storage = false\n"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	target := filepath.Join(t.TempDir(), "other-auth.json")
++	if err := os.WriteFile(target, []byte(`{}`), 0600); err != nil {
++		t.Fatal(err)
++	}
++	if err := os.Symlink(target, filepath.Join(dir, "auth.json")); err != nil {
++		t.Skipf("symlinks unavailable: %v", err)
++	}
++	if _, _, err := embeddedCodexFile(dir); err == nil {
++		t.Fatal("accepted a symlinked credential file")
++	}
++}
+diff --git a/internal/provider/embedded_codex_test.go b/internal/provider/embedded_codex_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..aeb271a5ab3b4cd6a52c744672b185ba2bc354af
+--- /dev/null
++++ b/internal/provider/embedded_codex_test.go
+@@ -0,0 +1,358 @@
++package provider
++
++import (
++	"context"
++	"encoding/base64"
++	"encoding/json"
++	"fmt"
++	"net"
++	"net/http"
++	"net/http/httptest"
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/yetone/magpie/internal/embedded"
++)
++
++func embeddedTestToken(exp int64) string {
++	payload := fmt.Sprintf(`{"exp":%d}`, exp)
++	return "e30." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + ".x"
++}
++
++func TestEmbeddedCodexOwnedRefreshAndSign(t *testing.T) {
++	home, data := t.TempDir(), t.TempDir()
++	t.Setenv("HOME", home)
++	t.Setenv("MAGPIE_NO_ACCOUNTS", "1")
++	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
++	oldEnabled, oldData := embedded.Enabled, embedded.DataDir
++	embedded.Enabled, embedded.DataDir = true, data
++	t.Cleanup(func() { embedded.Enabled, embedded.DataDir = oldEnabled, oldData; Changed() })
++	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0700); err != nil {
++		t.Fatal(err)
++	}
++	sentinel := []byte("global credentials remain untouched")
++	sentinelPath := filepath.Join(home, ".codex", "auth.json")
++	if err := os.WriteFile(sentinelPath, sentinel, 0600); err != nil {
++		t.Fatal(err)
++	}
++	token := embeddedTestToken(time.Now().Add(-time.Hour).Unix())
++	auth := fmt.Sprintf(`{"auth_mode":"chatgpt","tokens":{"access_token":%q,"refresh_token":"synthetic-refresh","account_id":"synthetic-user"}}`, token)
++	if _, err := addEmbeddedCodexLogin(savedLogin{Agent: "codex", Auth: []byte(auth)}); err != nil {
++		t.Fatal(err)
++	}
++	fresh := embeddedTestToken(time.Now().Add(time.Hour).Unix())
++	calls := 0
++	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		calls++
++		w.Header().Set("Content-Type", "application/json")
++		fmt.Fprintf(w, `{"access_token":%q,"refresh_token":"rotated-synthetic"}`, fresh)
++	}))
++	defer server.Close()
++	reset := CodexTokenURLForTest(server.URL)
++	defer reset()
++	p, ok := find(All(), "codex")
++	if !ok {
++		t.Fatal("owned account not available through provider listing")
++	}
++	if ls := Logins("codex"); len(ls) != 1 || ls[0].User != "synthetic-user" || !ls[0].On {
++		t.Fatalf("login metadata: %+v", ls)
++	}
++	req := httptest.NewRequest(http.MethodPost, "http://example.invalid/responses", nil)
++	if err := p.Sign(context.Background(), req, Responses, nil); err != nil {
++		t.Fatal(err)
++	}
++	if got := req.Header.Get("Authorization"); got != "Bearer "+fresh {
++		t.Fatalf("authorization %q", got)
++	}
++	if calls != 1 {
++		t.Fatalf("refresh calls = %d", calls)
++	}
++	b, err := os.ReadFile(sentinelPath)
++	if err != nil || string(b) != string(sentinel) {
++		t.Fatalf("global credential changed: %v", err)
++	}
++	b, err = os.ReadFile(filepath.Join(data, "codex", "auth.json"))
++	if err != nil || !strings.Contains(string(b), "rotated-synthetic") {
++		t.Fatalf("private rotation not saved: %v", err)
++	}
++}
++
++func TestEmbeddedCodexPrivacyGate(t *testing.T) {
++	data := t.TempDir()
++	oldEnabled, oldData, oldOff := embedded.Enabled, embedded.DataDir, embedded.AccountsOff
++	embedded.Enabled, embedded.DataDir, embedded.AccountsOff = true, data, true
++	t.Cleanup(func() {
++		embedded.Enabled, embedded.DataDir, embedded.AccountsOff = oldEnabled, oldData, oldOff
++		Changed()
++	})
++	if _, err := DiscoverEmbeddedCodexSources(); err == nil {
++		t.Fatal("discovery ignored original privacy switch")
++	}
++	if _, err := StartSignIn("codex"); err == nil {
++		t.Fatal("sign-in ignored original privacy switch")
++	}
++	if _, ok := embeddedCodexAccount(); ok {
++		t.Fatal("account ignored original privacy switch")
++	}
++}
++
++func TestEmbeddedCodexOAuthCallback(t *testing.T) {
++	home, data := t.TempDir(), t.TempDir()
++	t.Setenv("HOME", home)
++	t.Setenv("MAGPIE_NO_ACCOUNTS", "1")
++	oldEnabled, oldData, oldOff := embedded.Enabled, embedded.DataDir, embedded.AccountsOff
++	embedded.Enabled, embedded.DataDir, embedded.AccountsOff = true, data, false
++	t.Cleanup(func() {
++		embedded.Enabled, embedded.DataDir, embedded.AccountsOff = oldEnabled, oldData, oldOff
++		Changed()
++	})
++	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		if err := r.ParseForm(); err != nil || r.Form.Get("code_verifier") == "" || r.Form.Get("code") != "test-code" {
++			http.Error(w, "invalid grant", 400)
++			return
++		}
++		_ = json.NewEncoder(w).Encode(map[string]string{"id_token": fakeJWT(map[string]any{"email": "synthetic@example.invalid"}), "access_token": embeddedTestToken(time.Now().Add(time.Hour).Unix()), "refresh_token": "test-refresh"})
++	}))
++	defer fake.Close()
++	oldURL, oldAddr := codexTokenURL, codexCallbackAddr
++	t.Cleanup(func() { codexTokenURL, codexCallbackAddr = oldURL, oldAddr })
++	codexTokenURL = fake.URL
++	ln, err := net.Listen("tcp", "127.0.0.1:0")
++	if err != nil {
++		t.Fatal(err)
++	}
++	codexCallbackAddr = ln.Addr().String()
++	ln.Close()
++	st, err := StartSignIn("codex")
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(func() { CancelSignIn(st.ID) })
++	finishInBrowser(t, st, "test-code")
++	done := waitDone(t, st.ID)
++	if done.State != "done" || done.User != "synthetic@example.invalid" {
++		t.Fatalf("sign-in state: %+v", done)
++	}
++	if _, err := os.Stat(filepath.Join(data, "codex", "auth.json")); err != nil {
++		t.Fatalf("private credential: %v", err)
++	}
++	if _, err := os.Stat(filepath.Join(home, ".codex", "auth.json")); !os.IsNotExist(err) {
++		t.Fatalf("global credential touched: %v", err)
++	}
++	if _, ok := embeddedCodexAccount(); !ok {
++		t.Fatal("account unavailable after OAuth")
++	}
++}
++
++func TestEmbeddedCodexCancelDoesNotStoreCredentials(t *testing.T) {
++	data := t.TempDir()
++	oldEnabled, oldData, oldOff := embedded.Enabled, embedded.DataDir, embedded.AccountsOff
++	embedded.Enabled, embedded.DataDir, embedded.AccountsOff = true, data, false
++	t.Cleanup(func() {
++		embedded.Enabled, embedded.DataDir, embedded.AccountsOff = oldEnabled, oldData, oldOff
++		Changed()
++	})
++	ln, err := net.Listen("tcp", "127.0.0.1:0")
++	if err != nil {
++		t.Fatal(err)
++	}
++	oldAddr := codexCallbackAddr
++	codexCallbackAddr = ln.Addr().String()
++	ln.Close()
++	t.Cleanup(func() { codexCallbackAddr = oldAddr })
++	st, err := StartSignIn("codex")
++	if err != nil {
++		t.Fatal(err)
++	}
++	CancelSignIn(st.ID)
++	state, ok := SignInStatus(st.ID)
++	if !ok || state.State != "canceled" {
++		t.Fatalf("cancel state: %+v", state)
++	}
++	if _, err := os.Stat(filepath.Join(data, "codex", "auth.json")); !os.IsNotExist(err) {
++		t.Fatalf("credentials after cancel: %v", err)
++	}
++}
++
++func TestEmbeddedCodexModelsUsePrivateCache(t *testing.T) {
++	home, data := t.TempDir(), t.TempDir()
++	t.Setenv("HOME", home)
++	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
++	t.Setenv("MAGPIE_NO_ACCOUNTS", "1")
++	oldEnabled, oldData, oldOff := embedded.Enabled, embedded.DataDir, embedded.AccountsOff
++	embedded.Enabled, embedded.DataDir, embedded.AccountsOff = true, data, false
++	t.Cleanup(func() {
++		embedded.Enabled, embedded.DataDir, embedded.AccountsOff = oldEnabled, oldData, oldOff
++		Changed()
++	})
++	auth := fmt.Sprintf(`{"tokens":{"access_token":%q,"refresh_token":"private-refresh","account_id":"account"}}`, embeddedTestToken(time.Now().Add(time.Hour).Unix()))
++	if _, err := addEmbeddedCodexLogin(savedLogin{Agent: "codex", Auth: []byte(auth)}); err != nil {
++		t.Fatal(err)
++	}
++	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0700); err != nil {
++		t.Fatal(err)
++	}
++	cache := filepath.Join(home, ".codex", "models_cache.json")
++	if err := os.WriteFile(cache, []byte(`{"models":[{"slug":"unrelated-global-model","visibility":"list"}]}`), 0600); err != nil {
++		t.Fatal(err)
++	}
++	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		if r.Header.Get("chatgpt-account-id") != "account" {
++			http.Error(w, "wrong account", 400)
++			return
++		}
++		fmt.Fprint(w, `{"models":[{"slug":"synthetic-model","visibility":"list","base_instructions":"first-account-instructions"}]}`)
++	}))
++	defer fake.Close()
++	oldBase := CodexBase
++	CodexBase = fake.URL
++	t.Cleanup(func() { CodexBase = oldBase })
++	p, ok := embeddedCodexAccount()
++	if !ok {
++		t.Fatal("no account")
++	}
++	if ms := p.Account.models(); len(ms) != 0 {
++		t.Fatalf("read unrelated global cache: %+v", ms)
++	}
++	ms, err := p.Account.fetch(context.Background())
++	if err != nil || len(ms) != 1 || ms[0].ID != "synthetic-model" {
++		t.Fatalf("model fetch: %+v, %v", ms, err)
++	}
++	if body := string(p.Account.body([]byte(`{"model":"synthetic-model","input":"hi"}`))); !strings.Contains(body, "first-account-instructions") {
++		t.Fatalf("first account instructions missing: %s", body)
++	}
++	ms = p.Account.models()
++	if len(ms) != 1 || ms[0].ID != "synthetic-model" {
++		t.Fatalf("private model cache: %+v", ms)
++	}
++	b, err := os.ReadFile(cache)
++	if err != nil || !strings.Contains(string(b), "unrelated-global-model") {
++		t.Fatalf("global cache changed: %v", err)
++	}
++	shared := filepath.Join(home, ".codex-other")
++	if err := os.Mkdir(shared, 0700); err != nil {
++		t.Fatal(err)
++	}
++	if err := os.WriteFile(filepath.Join(shared, "config.toml"), []byte("cli_auth_credentials_store = \"file\"\n[features]\nsecret_auth_storage = false\n"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	sharedAuth := fmt.Sprintf(`{"tokens":{"access_token":%q,"account_id":"other-account"}}`, embeddedTestToken(time.Now().Add(time.Hour).Unix()))
++	if err := os.WriteFile(filepath.Join(shared, "auth.json"), []byte(sharedAuth), 0600); err != nil {
++		t.Fatal(err)
++	}
++	if err := SelectEmbeddedCodexSource(shared); err != nil {
++		t.Fatal(err)
++	}
++	second, ok := embeddedCodexAccount()
++	if !ok {
++		t.Fatal("selected account unavailable")
++	}
++	if ms := second.Account.models(); len(ms) != 0 {
++		t.Fatalf("new account inherited previous list: %+v", ms)
++	}
++	if ms := second.Available(); len(ms) != 0 {
++		t.Fatalf("provider exposed previous account models: %+v", ms)
++	}
++	if body := string(second.Account.body([]byte(`{"model":"synthetic-model","input":"hi"}`))); strings.Contains(body, "first-account-instructions") {
++		t.Fatalf("new account inherited prior instructions: %s", body)
++	}
++}
++
++func TestEmbeddedCodexRejectsSymlinkedPrivateStores(t *testing.T) {
++	data, external := t.TempDir(), t.TempDir()
++	oldEnabled, oldData, oldOff := embedded.Enabled, embedded.DataDir, embedded.AccountsOff
++	embedded.Enabled, embedded.DataDir, embedded.AccountsOff = true, data, false
++	t.Cleanup(func() {
++		embedded.Enabled, embedded.DataDir, embedded.AccountsOff = oldEnabled, oldData, oldOff
++		Changed()
++	})
++	target := filepath.Join(external, "auth.json")
++	sentinel := []byte("unrelated credentials")
++	if err := os.WriteFile(target, sentinel, 0600); err != nil {
++		t.Fatal(err)
++	}
++	dir := filepath.Join(data, "codex")
++	if err := os.Symlink(external, dir); err != nil {
++		t.Skipf("symlinks unavailable: %v", err)
++	}
++	login := savedLogin{Agent: "codex", Auth: []byte(`{"tokens":{"access_token":"test"}}`)}
++	if _, err := addEmbeddedCodexLogin(login); err == nil {
++		t.Fatal("accepted a symlinked private directory")
++	}
++	if err := os.Remove(dir); err != nil {
++		t.Fatal(err)
++	}
++	if err := os.Mkdir(dir, 0700); err != nil {
++		t.Fatal(err)
++	}
++	if err := os.Symlink(target, filepath.Join(dir, "auth.json")); err != nil {
++		t.Fatal(err)
++	}
++	if _, err := addEmbeddedCodexLogin(login); err == nil {
++		t.Fatal("accepted a symlinked private credential")
++	}
++	if _, err := embeddedPrivateRead(filepath.Join(dir, "auth.json")); err == nil {
++		t.Fatal("read a symlinked private credential")
++	}
++	got, err := os.ReadFile(target)
++	if err != nil || string(got) != string(sentinel) {
++		t.Fatalf("external credential changed: %v", err)
++	}
++	if err := os.Symlink(target, filepath.Join(data, "codex-source.json")); err != nil {
++		t.Fatal(err)
++	}
++	if err := embeddedPrivateWrite(data, "codex-source.json", []byte("{}")); err == nil {
++		t.Fatal("accepted a symlinked source record")
++	}
++	got, err = os.ReadFile(target)
++	if err != nil || string(got) != string(sentinel) {
++		t.Fatalf("external credential changed via source record: %v", err)
++	}
++}
++
++func TestEmbeddedCodexConcurrentDirectoryReplacementStaysPrivate(t *testing.T) {
++	data, external := t.TempDir(), t.TempDir()
++	oldEnabled, oldData := embedded.Enabled, embedded.DataDir
++	embedded.Enabled, embedded.DataDir = true, data
++	t.Cleanup(func() { embedded.Enabled, embedded.DataDir = oldEnabled, oldData })
++	target := filepath.Join(external, "auth.json")
++	sentinel := []byte("unrelated credentials")
++	if err := os.WriteFile(target, sentinel, 0600); err != nil {
++		t.Fatal(err)
++	}
++	dir, parked := filepath.Join(data, "codex"), filepath.Join(data, "parked")
++	if err := os.Mkdir(dir, 0700); err != nil {
++		t.Fatal(err)
++	}
++	probe := filepath.Join(data, "symlink-probe")
++	if err := os.Symlink(external, probe); err != nil {
++		t.Skipf("symlinks unavailable: %v", err)
++	}
++	if err := os.Remove(probe); err != nil {
++		t.Fatal(err)
++	}
++	done := make(chan struct{})
++	go func() {
++		defer close(done)
++		for i := 0; i < 300; i++ {
++			if os.Rename(dir, parked) != nil {
++				continue
++			}
++			if os.Symlink(external, dir) == nil {
++				_ = os.Remove(dir)
++			}
++			_ = os.Rename(parked, dir)
++		}
++	}()
++	for i := 0; i < 300; i++ {
++		_ = embeddedPrivateWrite(dir, "auth.json", []byte("private"))
++	}
++	<-done
++	got, err := os.ReadFile(target)
++	if err != nil || string(got) != string(sentinel) {
++		t.Fatalf("external credential changed under directory replacement: %v", err)
++	}
++}
+diff --git a/internal/provider/logins.go b/internal/provider/logins.go
+index 08bcb3b8dd082def6cc27cd8bcc3f6d4b4b2a030..c5280ca8a5180bfba1114ddcc5936b85f30db3c6 100644
+--- a/internal/provider/logins.go
++++ b/internal/provider/logins.go
+@@ -31,0 +32 @@ import (
++	"github.com/yetone/magpie/internal/embedded"
+@@ -1013,0 +1015,14 @@ func Logins(agent string) []Login {
++	if embedded.Enabled {
++		if agent != "" && agent != "codex" {
++			return nil
++		}
++		p, ok := embeddedCodexAccount()
++		if !ok {
++			return nil
++		}
++		_, shared, err := embeddedCodexSource()
++		if err != nil {
++			return nil
++		}
++		return []Login{{Agent: "codex", User: p.Account.User, Plan: p.Account.Plan, Active: true, On: true, Own: shared}}
++	}
+diff --git a/internal/provider/models.go b/internal/provider/models.go
+index a0ed50f49b200952c29f1055345f9862cab8858f..feb8ab4440cb9c8749f140b8d8630174aefb7c7e 100644
+--- a/internal/provider/models.go
++++ b/internal/provider/models.go
+@@ -153,0 +154,7 @@ func (p Provider) Listed() (time.Time, bool) {
++func (p Provider) modelListID() string {
++	if p.Account != nil && p.Account.embeddedCodex {
++		return p.Account.modelCacheID()
++	}
++	return p.ID
++}
++
+@@ -163 +170,2 @@ func (p Provider) live() ([]catalog.Model, time.Time, bool) {
+-	l := heldOf("fetched:"+p.ID, func() live { ms, at, ok := catalog.Live(p.ID); return live{ms, at, ok} })
++	id := p.modelListID()
++	l := heldOf("fetched:"+id, func() live { ms, at, ok := catalog.Live(id); return live{ms, at, ok} })
+@@ -219 +227,2 @@ func (p Provider) liveAll() ([]catalog.Model, bool) {
+-	l := heldOf("fetched-all:"+p.ID, func() live { ms, ok := catalog.LiveAll(p.ID); return live{ms, ok} })
++	id := p.modelListID()
++	l := heldOf("fetched-all:"+id, func() live { ms, ok := catalog.LiveAll(id); return live{ms, ok} })
+diff --git a/internal/provider/provider.go b/internal/provider/provider.go
+index 14c3cd42e6da5eb0e26cfe45a3ee214779d0e51d..47e0992be9737952f1d41b5d0e30953a411bffa3 100644
+--- a/internal/provider/provider.go
++++ b/internal/provider/provider.go
+@@ -856 +856 @@ func sharedAll() []Provider {
+-		if p.Account != nil && off() && !p.publicAccount() {
++		if p.Account != nil && off() && !p.publicAccount() && (!p.Account.embeddedCodex || embeddedAccountsAllowed() != nil) {
+@@ -859 +859 @@ func sharedAll() []Provider {
+-				if p.Account == nil || p.publicAccount() {
++				if p.Account == nil || p.publicAccount() || p.Account.embeddedCodex && embeddedAccountsAllowed() == nil {
+diff --git a/internal/provider/signin.go b/internal/provider/signin.go
+index 08fb27ac35c991cf08f828596a1e7ff18635d14a..0c675affd4ec683ac2bac475e52812b82f93f960 100644
+--- a/internal/provider/signin.go
++++ b/internal/provider/signin.go
+@@ -32,0 +33 @@ import (
++	"github.com/yetone/magpie/internal/embedded"
+@@ -245 +246,8 @@ func StartSignInWith(agent string, o SignInOptions) (SignInState, error) {
+-	if settings.AccountDiscoveryOff() {
++	if embedded.Enabled {
++		if err := embeddedAccountsAllowed(); err != nil {
++			return SignInState{}, err
++		}
++		if agent != "codex" || site != "" {
++			return SignInState{}, errors.New("embedded mode supports only Codex browser sign-in")
++		}
++	} else if settings.AccountDiscoveryOff() {
+@@ -250 +258 @@ func StartSignInWith(agent string, o SignInOptions) (SignInState, error) {
+-	if PluginServes(agent) {
++	if !embedded.Enabled && PluginServes(agent) {
+@@ -258 +266,5 @@ func StartSignInWith(agent string, o SignInOptions) (SignInState, error) {
+-	cli, install := missingCLI(agent)
++	var cli agentCLI
++	install := false
++	if !embedded.Enabled {
++		cli, install = missingCLI(agent)
++	}
+@@ -888,0 +901,3 @@ func addLogin(l savedLogin) (using bool, err error) {
++	if embedded.Enabled {
++		return addEmbeddedCodexLogin(l)
++	}

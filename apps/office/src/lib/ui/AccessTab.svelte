@@ -28,6 +28,7 @@
   import { AgentTools } from './agent-tools.svelte.ts';
   import { call } from './api.ts';
   import FoldersList from './FoldersList.svelte';
+  import MagpieModelPicker from './MagpieModelPicker.svelte';
   import RunsOn from './RunsOn.svelte';
   import ServiceActions from './ServiceActions.svelte';
   import ToolTiles from './ToolTiles.svelte';
@@ -230,7 +231,7 @@
    * has none to pick.
    */
   const accountList = $derived(
-    profile.agent === 'gemini'
+    profile.agent === 'gemini' || profile.agent === 'pi'
       ? []
       : [
           {
@@ -290,7 +291,18 @@
   async function pickAgent(agent: Agent) {
     problem = refused = '';
     try {
-      await call(`/api/staff/${profile.id}`, { agent }, 'PATCH');
+      const model = [profile.model, profile.officeModel, agentTools.officeModel].find((value) =>
+        value?.startsWith('magpie:')
+      );
+      if (agent === 'pi' && !model) {
+        problem = 'Choose an office Magpie model in Setup before using Pi.';
+        return;
+      }
+      await call(
+        `/api/staff/${profile.id}`,
+        { agent, ...(agent === 'pi' ? { model } : {}) },
+        'PATCH'
+      );
     } catch (e) {
       problem = e instanceof Error ? e.message : String(e);
     }
@@ -300,6 +312,7 @@
   function stateOf(id: Agent): string {
     const t = agentTools.tools.find((x) => x.id === id);
     if (!t) return '';
+    if (id === 'pi') return t.installed && !t.tooOld ? 'Included' : 'Unavailable';
     if (id === 'claude') return !t.installed ? 'Install' : t.tooOld ? 'Update' : 'Ready';
     const a = toolAction(t);
     if (a === 'install') return 'Install';
@@ -315,7 +328,7 @@
     manager && EFFORT_ORDER.indexOf(e) < EFFORT_ORDER.indexOf(MANAGER_EFFORT_FLOOR);
 
   /** The levels its runs take, on its own model when it has one. */
-  const efforts = $derived(effortsOf(profile.agent, profile.model));
+  const efforts = $derived(profile.agent === 'pi' ? [] : effortsOf(profile.agent, profile.model));
 
   async function setModel(model: string | null) {
     problem = refused = '';
@@ -488,13 +501,24 @@
         />
         <RunsOn
           value={profile.agent}
+          model={profile.model ?? profile.officeModel ?? null}
           actionsOnly
           installOnly={profile.agent !== 'gemini'}
           class="text-[11px]"
         />
+        <MagpieModelPicker
+          agent={profile.agent}
+          value={profile.model}
+          officeModel={profile.officeModel}
+          onpick={setModel}
+        />
         {#if accountList.length}
           <div>
-            <h3 class="text-xs font-semibold text-ink">Signed in with</h3>
+            <h3 class="text-xs font-semibold text-ink">Direct execution account</h3>
+            <p class="mt-1 text-[10px] text-muted">
+              This account folder belongs to the agent tool. Magpie provider accounts are managed in
+              Setup.
+            </p>
             <div class="mt-1 grid grid-cols-2 gap-1.5" role="radiogroup" aria-label="Account">
               {#each accountList as a (a.id)}
                 {@const on = onAccount === a.id}
@@ -637,7 +661,7 @@
           <div>
             <h3 class="text-xs font-semibold text-ink">Model</h3>
             <div class="mt-1 grid grid-cols-2 gap-1.5" role="radiogroup" aria-label="Model">
-              {#each [{ id: '', name: 'Office default', about: office ? `Now ${office.name}` : "The office's" }, ...MODELS[profile.agent].map( (m) => ({ id: m.id, name: m.name, about: levelsOf(m.id) }) )] as m (m.id)}
+              {#each [{ id: '', name: 'Office default', about: profile.officeModel?.startsWith('magpie:') ? `Magpie: ${profile.officeModel.slice(7)}` : office ? `Now ${office.name}` : "The office's" }, ...MODELS[profile.agent].map( (m) => ({ id: m.id, name: m.name, about: levelsOf(m.id) }) )] as m (m.id)}
                 {@const on = (profile.model ?? '') === m.id}
                 <button
                   class="flex items-center gap-2 rounded-lg px-2.5 py-2 text-start {on

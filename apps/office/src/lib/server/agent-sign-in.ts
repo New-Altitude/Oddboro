@@ -16,7 +16,7 @@
 // the same second. The session at xAI or OpenAI lasts until it ends or the
 // owner removes it in their account. Server only.
 import { execFile } from 'node:child_process';
-import { rmSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { OFFICE_ACCOUNT, type Agent } from '@oddboro/ledger';
 import { claudeCommand, npmCommand } from '@oddboro/ledger/platform';
@@ -27,9 +27,10 @@ import { clearGeminiKey, geminiAccount, setGeminiKey } from './gemini.ts';
 import { grokAccount, grokCommand, grokHome, grokSignIn } from './grok.ts';
 import { vendorEnv } from './launch.ts';
 import { onPath } from './on-path.ts';
+import { piWorkerCommand } from './pi-worker-path.ts';
 
 /** Every tool whose install and sign-in are here: each but Claude Code, whose install is Setup's. */
-export type SignInTool = Exclude<Agent, 'claude'>;
+export type SignInTool = Exclude<Agent, 'claude' | 'pi'>;
 
 type Account = { email?: string };
 /** A command and its arguments, as spawn takes them. */
@@ -93,7 +94,7 @@ export const SIGN_INS: Record<SignInTool, BrowserSignIn | KeySignIn> = {
 };
 
 /** One install or sign-in at a time per tool, Claude Code's (Setup's install and every sign-in) among them. */
-export const SLOTS: Record<Agent, Slot> = {
+export const SLOTS: Record<Exclude<Agent, 'pi'>, Slot> = {
   claude: commandSlot(),
   grok: commandSlot(),
   codex: commandSlot(),
@@ -120,7 +121,7 @@ export type SignInState = {
 };
 
 /** Whether `account`'s sign-in is the one waiting on its page, and that page's address. */
-function waitingFor(tool: Agent, account: string): SignInState['waiting'] {
+function waitingFor(tool: Exclude<Agent, 'pi'>, account: string): SignInState['waiting'] {
   const running = SLOTS[tool].running;
   if (running?.action !== 'sign-in' || (signingIn[tool] ?? OFFICE_ACCOUNT) !== account)
     return undefined;
@@ -183,6 +184,7 @@ export function claudeSignIn(account: string = OFFICE_ACCOUNT): {
  * after the folder).
  */
 export async function signOut(tool: Agent, account: string = OFFICE_ACCOUNT): Promise<void> {
+  if (tool === 'pi') return;
   if (tool === 'claude') {
     const command = agentCommand('claude');
     if (command)
@@ -215,6 +217,10 @@ export async function signOut(tool: Agent, account: string = OFFICE_ACCOUNT): Pr
  * Undefined when it is not installed.
  */
 export function agentCommand(tool: Agent): Command | undefined {
+  if (tool === 'pi') {
+    const command = piWorkerCommand();
+    return existsSync(command[1][0]) ? command : undefined;
+  }
   if (tool === 'grok') {
     const grok = grokCommand();
     return grok ? [grok, []] : undefined;

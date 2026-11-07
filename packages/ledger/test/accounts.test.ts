@@ -95,3 +95,19 @@ test('an added account can be renamed, never to nothing', async () => {
   await assert.rejects(A.renameAccount('nope', 'X'), /No such account/);
   await A.removeAccount(a.id);
 });
+
+test('bare Magpie model IDs persist for a Pi Odd without admitting direct models', async () => {
+  const { setAgentModel, setModel, staffer } = await import('../src/office.ts');
+  await db.insert(staff).values(odd('model-check', 'claude'));
+  assert.equal(await setAgentModel('model-check', 'pi', 'magpie:bare-model-id'), undefined);
+  assert.equal((await staffer('model-check'))?.model, 'magpie:bare-model-id');
+  session('model-check');
+  assert.equal(await setModel('model-check', 'magpie:provider/model'), undefined);
+  assert.equal((await staffer('model-check'))?.model, 'magpie:provider/model');
+  assert.equal(existsSync(chatSession('model-check')), false);
+  assert.equal(await setModel('model-check', 'magpie:bare-model-id'), undefined);
+  assert.equal((await staffer('model-check'))?.model, 'magpie:bare-model-id');
+  assert.ok(await setAgentModel('model-check', 'pi', 'gpt-6-astra'));
+  assert.ok(await setModel('model-check', 'magpie:bad\nmodel'));
+  assert.equal((await staffer('model-check'))?.model, 'magpie:bare-model-id');
+});

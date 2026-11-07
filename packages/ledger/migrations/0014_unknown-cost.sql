@@ -1,0 +1,1 @@
+ALTER TABLE "usage" ALTER COLUMN "cost_usd" DROP NOT NULL;

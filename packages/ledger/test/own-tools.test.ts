@@ -45,6 +45,7 @@ beforeEach(async () => {
 
 test('commandsHow per tool and system', () => {
   const want: Record<Agent, Record<'darwin' | 'linux' | 'win32', string>> = {
+    pi: { darwin: 'never', linux: 'never', win32: 'never' },
     claude: { darwin: 'switch', linux: 'never', win32: 'never' },
     codex: { darwin: 'switch', linux: 'switch', win32: 'never' },
     grok: { darwin: 'never', linux: 'never', win32: 'never' },
@@ -73,6 +74,7 @@ test('commandsHow per tool and system', () => {
       );
     }
   assert.deepEqual(COMMANDS_WHY, {
+    pi: 'Pi does not run commands.',
     claude: 'Not tested on this system yet.',
     codex: 'Not safe on Windows yet: Codex cannot keep commands in this Odd’s folders here.',
     grok: "Not with Grok yet: its sandbox can't keep commands off the internet on every system.",

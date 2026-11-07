@@ -163,6 +163,7 @@ type CodexRun = {
   effort?: Effort;
   /** The Odd's own model; without one, the office's (`OFFICE_CODEX_MODEL`) or the tool's default. */
   model?: string;
+  connection?: { baseUrl: string; apiKey: string; model: string };
 };
 
 type CodexLaunch = { args: string[]; env: NodeJS.ProcessEnv; stdin: string; done: () => void };
@@ -433,6 +434,18 @@ export function codexLaunch(r: CodexRun): CodexLaunch {
     // `set` only, since a second would replace the first.
     ...set('shell_environment_policy.set', shell),
     ...set('web_search', r.web ? 'live' : 'disabled'),
+    ...(r.connection
+      ? [
+          ...set('model_provider', 'magpie'),
+          ...set('model_providers.magpie', {
+            name: 'magpie',
+            base_url: `${r.connection.baseUrl.replace(/\/$/, '')}/v1`,
+            env_key: 'MAGPIE_API_KEY',
+            wire_api: 'responses',
+            supports_websockets: false
+          })
+        ]
+      : []),
     ...set('developer_instructions', r.system),
     // The shell only with Run commands; the office's file tools are the way to files.
     ...set('features.shell_tool', r.commands),
@@ -456,8 +469,9 @@ export function codexLaunch(r: CodexRun): CodexLaunch {
     env: {
       ...codexEnv(h),
       TMPDIR: temp,
-      // Codex's shell inherits only the core variables, so commands never see it.
-      ...(gatewayToken(r.servers) ? { [GATEWAY_TOKEN]: gatewayToken(r.servers) } : {})
+      // Codex's shell inherits only the core variables, so commands never see either key.
+      ...(gatewayToken(r.servers) ? { [GATEWAY_TOKEN]: gatewayToken(r.servers) } : {}),
+      ...(r.connection ? { MAGPIE_API_KEY: r.connection.apiKey } : {})
     },
     stdin: r.input,
     done: () => rmSync(temp, { recursive: true, force: true })
