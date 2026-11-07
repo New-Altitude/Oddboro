@@ -298,10 +298,11 @@ ODDBORO_RELEASE_URL=http://127.0.0.1:4598 \
   node apps/desktop/scripts/release.ts --version 0.0.91 --test --out /tmp/oddboro-0.0.91
 ```
 
-## Placeholders
+## Icons and signing
 
-- The icons. A night rounded square with an ember ring, drawn as a stand-in
-  until Oddboro has a mark. Regenerate with
+- The icons are Oddboro's mark: a night rounded square with an ember ring.
+  `logo.png` in the site and the office is the same ring on night to the
+  edges. Regenerate with
   `npm run tauri -w @oddboro/desktop -- icon <1024px png> -o src-tauri/icons`,
   then delete the `android/`, `ios/`, `Square*`, `StoreLogo.png` and
   `64x64.png` files it also writes. `icon.ico` stays: Windows builds embed

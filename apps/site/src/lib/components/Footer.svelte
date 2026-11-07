@@ -12,7 +12,7 @@
   >
     <div>
       <div class="flex items-center gap-2.5">
-        <img src="/favicon.svg" alt="" width="24" height="24" class="pixel rounded-[5px]" />
+        <img src="/logo.png" alt="" width="24" height="24" class="rounded-[5px]" />
         <span class="font-pixel text-ink text-lg leading-none">{SITE.name}</span>
       </div>
       <p class="text-muted mt-3 text-sm">{SITE.tagline}</p>

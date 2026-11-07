@@ -19,7 +19,7 @@
 <header class="glass border-hairline sticky top-0 z-40 border-b">
   <div class="mx-auto flex h-16 max-w-7xl items-center gap-6 px-4 sm:px-6 lg:px-8">
     <a href="/" class="flex items-center gap-2.5 rounded-md" aria-label="{SITE.name} home">
-      <img src="/favicon.svg" alt="" width="28" height="28" class="pixel rounded-[6px]" />
+      <img src="/logo.png" alt="" width="28" height="28" class="rounded-[6px]" />
       <span class="font-pixel text-ink hidden text-xl leading-none tracking-wide sm:inline">
         {SITE.name}
       </span>

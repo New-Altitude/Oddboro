@@ -14,7 +14,7 @@ lamp and screen adds back its own pool. Every colour has to survive both.
 
 ## The name in the art
 
-Oddboro has no mark yet. Three sprites carry the name, and each says so in its
+Three sprites carry the name with a placeholder, and each says so in its
 comment:
 
 - `lobby-sign` spells ODDBORO in backlit `G` letters over a `t` rule.
@@ -22,9 +22,12 @@ comment:
 - `street-bus-shelter` has a placeholder poster: a glowing O roundel over two
   lines of type, since seven letters do not fit its eight pixels.
 
-The favicons in `apps/office/static/` and `apps/site/static/` draw the same
-O roundel. When a mark exists, redraw all five, then rerun `npm run art -w
-@oddboro/site`. Never draw a product name or mark from before Oddboro.
+Oddboro's mark is the ember ring on night: the Mac app's icon, and
+`logo.png` in `apps/office/static/` and `apps/site/static/` (the favicons, the
+site's header and footer, and Google's sign-in screen). The three sprites
+above still carry the placeholder. Redraw them to match the mark, then rerun
+`npm run art -w @oddboro/site`. Never draw a product name or mark from before
+Oddboro.
 
 ## Palette roles
 

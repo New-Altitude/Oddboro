@@ -299,5 +299,5 @@ src/lib/hero/                Hero.svelte, HeadlineOdd.svelte, choreo.ts, scene.j
 src/lib/server/legal.ts      Renders src/content/legal/*.md with markdown-it at prerender.
 src/content/legal/           privacy.md and terms.md. The legal writer owns these.
 src/routes/                  /, /releases/, /connectors/open-brain/, /privacy/, /terms/, /sitemap.xml. +layout.ts prerenders everything.
-static/                      favicon.svg (a placeholder O roundel until Oddboro has a mark), robots.txt, art/ (night) and art/day/.
+static/                      logo.png (the mark: favicon, header, footer; Google's sign-in screen shows the same), robots.txt, art/ (night) and art/day/.
 ```
