@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { L, chatOf } from './office-under-test.ts';
+import { L, chat, chatOf } from './office-under-test.ts';
 import { saveSession, sectionsOf } from './resume.ts';
 
 const { sayInChat } = await import('./staff.ts');
@@ -67,4 +67,16 @@ test('the manager takes a first brief and picks up an older chat with current to
   assert.ok(now.args.includes('mcp__editor__consult'));
   assert.ok(now.system.startsWith(desk));
   assert.equal((await L.staffer(id))?.desk, desk);
+});
+
+test('a custom answer to the second question goes straight to the manager with the first choice', async () => {
+  const manager = await L.hireManager({ preset: 'jamal' });
+  sayInChat(manager.id, L.customHello(manager.name, 'Ada'));
+  const first = L.FIRST_QUESTIONS[0].answers[2];
+  await chat(manager.id, first, () => {});
+  const brief = 'Draft the rota in the morning and ask me only if two shifts overlap.';
+  const run = await chatOf(manager.id, brief);
+  assert.ok(run.message.includes(first));
+  assert.ok(run.message.endsWith(brief));
+  assert.doesNotMatch(run.message, /My report lands at 7/);
 });

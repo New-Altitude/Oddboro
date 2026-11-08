@@ -74,7 +74,7 @@ import {
   ownerName,
   ownerNoteOf,
   firstQuestionIn,
-  FIRST_QUESTIONS,
+  nextFirstQuestion,
   recordUsage,
   setPlanLimits,
   startFirstDay,
@@ -1293,12 +1293,12 @@ export async function chat(
   // Stamped when sent, so what the staffer delivers while replying lands between the two.
   const sent = new Date().toISOString();
   try {
-    // A first answer in the owner's own words may already be a brief. Let
-    // the manager use it now. The preset path still takes just three taps.
+    // A reply in the owner's own words may already be a brief. Let the
+    // manager use it now. The preset path still takes just three taps.
     const last = history(id).at(-1);
     const asked = last?.from === 'staff' ? firstQuestionIn(last.text) : -1;
-    if ((asked === 0 && FIRST_QUESTIONS[0].answers.includes(message.trim())) || asked === 1) {
-      const next = FIRST_QUESTIONS[asked + 1].ask;
+    const next = nextFirstQuestion(asked, message);
+    if (next) {
       addToChat(id, { at: sent, from: 'owner', text: message });
       addToChat(id, { at: new Date().toISOString(), from: 'staff', text: next, told: true });
       onEvent({ type: 'done', text: next });

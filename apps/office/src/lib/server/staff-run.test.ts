@@ -1192,21 +1192,24 @@ test("a manager's first three questions come one at a time: the office asks the 
   const said: { type: string; text?: string }[] = [];
   const answer = (text: string) => chat('mona', text, (e) => said.push(e));
 
-  // A tap and a typed answer go the same way: no run, and the next question at once.
-  await answer(L.FIRST_QUESTIONS[0].answers[1]);
-  await answer('Mostly keep my calendar sane');
+  // Each tap gets an acknowledgment and the next set of choices without a run.
+  const [first, second, third] = L.FIRST_QUESTIONS;
+  await answer(first.answers[1]);
+  await answer(second.answers[0]);
+  const afterFirst = `Let's start with the project that keeps slipping.\n\n${second.ask}`;
+  const afterSecond = `We'll bring you drafts to review.\n\n${third.ask}`;
   assert.deepEqual(said, [
-    { type: 'done', text: L.FIRST_QUESTIONS[1].ask },
-    { type: 'done', text: L.FIRST_QUESTIONS[2].ask }
+    { type: 'done', text: afterFirst },
+    { type: 'done', text: afterSecond }
   ]);
   assert.deepEqual(
     history('mona').map((e) => [e.from, e.text]),
     [
       ['staff', L.MANAGERS[0].hello('Ada')],
-      ['owner', L.FIRST_QUESTIONS[0].answers[1]],
-      ['staff', L.FIRST_QUESTIONS[1].ask],
-      ['owner', 'Mostly keep my calendar sane'],
-      ['staff', L.FIRST_QUESTIONS[2].ask]
+      ['owner', first.answers[1]],
+      ['staff', afterFirst],
+      ['owner', second.answers[0]],
+      ['staff', afterSecond]
     ]
   );
 
@@ -1216,7 +1219,7 @@ test("a manager's first three questions come one at a time: the office asks the 
     L.FIRST_QUESTIONS[0].ask,
     L.FIRST_QUESTIONS[0].answers[1],
     L.FIRST_QUESTIONS[1].ask,
-    'Mostly keep my calendar sane',
+    second.answers[0],
     L.FIRST_QUESTIONS[2].ask
   ])
     assert.ok(run.message.includes(line), `the manager's run hears "${line}"`);
