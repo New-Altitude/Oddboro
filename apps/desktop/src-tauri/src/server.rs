@@ -10,7 +10,7 @@ use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering::SeqCst};
 use std::sync::{Condvar, Mutex};
 use std::thread::{self, sleep};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// The server's entry point, relative to the staged code.
 pub const ENTRY: &str = "apps/office/build/index.js";
@@ -548,14 +548,36 @@ fn open_log(path: &Path) -> io::Result<File> {
     OpenOptions::new().create(true).append(true).open(path)
 }
 
-/// Writes one line of the shell's own to the log.
+/// Writes one line of the shell's own to the log, with the time in UTC.
 pub fn note(path: &Path, line: &str) {
     if let Some(dir) = path.parent() {
         let _ = fs::create_dir_all(dir);
     }
     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
-        let _ = writeln!(file, "oddboro: {line}");
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default();
+        let stamp = utc(now.as_secs(), now.subsec_millis());
+        let _ = writeln!(file, "oddboro: {stamp} {line}");
     }
+}
+
+/// Seconds since 1970 as `2026-11-08T06:15:40.123Z`. The date comes from
+/// Howard Hinnant's `civil_from_days`, so the shell needs no date library.
+fn utc(secs: u64, millis: u32) -> String {
+    let days = i64::try_from(secs / 86_400).unwrap_or(0);
+    let rest = secs % 86_400;
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    let (hour, minute, second) = (rest / 3600, rest % 3600 / 60, rest % 60);
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z")
 }
 
 /// The last `count` lines of the log, each cut to 200 characters.
@@ -600,5 +622,13 @@ mod tests {
             Route::Notify("Rowan", "The report is ready")
         );
         assert_eq!(route("listening on 127.0.0.1:4500"), Route::Log);
+    }
+
+    #[test]
+    fn log_times_read_as_utc_dates() {
+        assert_eq!(utc(0, 0), "1970-01-01T00:00:00.000Z");
+        assert_eq!(utc(951_782_400, 5), "2000-02-29T00:00:00.005Z");
+        assert_eq!(utc(1_794_095_284, 123), "2026-11-07T23:48:04.123Z");
+        assert_eq!(utc(4_102_444_799, 999), "2099-12-31T23:59:59.999Z");
     }
 }
