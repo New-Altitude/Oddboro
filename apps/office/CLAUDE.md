@@ -9,6 +9,10 @@ in `vite.config.ts`), so each package finds its own files beside its code and
 the app ships them whole (`apps/desktop/scripts/stage.ts`). In the app
 (`ODDBORO_APP=1`) `hooks.server.ts` quits on SIGTERM and when stdin closes.
 
+`npm test -w @oddboro/office` builds the sprites first (`pretest`, about 5
+seconds): the office reads their `dist/meta.json`, which a clean checkout
+lacks.
+
 The keychain is the system's own secret store (`@oddboro/ledger/secrets`,
 through `src/lib/server/keychain.ts`). In the Mac app the shell keeps it:
 `init` in `hooks.server.ts` calls `useShellSecrets()`, which loads every
