@@ -178,6 +178,23 @@ function writeLatest(version: string, file: string): void {
   writeFileSync(join(OUT, 'latest.json'), JSON.stringify(latest, null, 2) + '\n');
 }
 
+/** The name can say one version and the file hold another: 0.0.6's installer was 0.0.5's (#40). */
+function checkFileVersion(file: string, version: string): void {
+  const got = read('powershell', [
+    '-NoProfile',
+    '-Command',
+    `(Get-Item -LiteralPath '${file.replace(/'/g, "''")}').VersionInfo.ProductVersion`
+  ]).trim();
+  if (got !== version && got !== `${version}.0`)
+    throw new Error(`${file} is version ${got || 'unknown'}, not ${version}`);
+}
+
+function checkBundleVersion(app: string, version: string): void {
+  const plist = join(app, 'Contents', 'Info.plist');
+  const got = read('plutil', ['-extract', 'CFBundleShortVersionString', 'raw', '-o', '-', plist]);
+  if (got.trim() !== version) throw new Error(`${app} is version ${got.trim()}, not ${version}`);
+}
+
 /** Fails when the shell's binary still names the home folder of whoever built it. */
 function checkNoHome(binary: string): void {
   if (readFileSync(binary).includes(homedir()))
@@ -246,8 +263,10 @@ function buildWindows(version: string): void {
     { RUSTFLAGS }
   );
   checkNoHome(join(RELEASE, 'oddboro.exe'));
+  checkFileVersion(join(RELEASE, 'oddboro.exe'), version);
   const built = join(RELEASE, 'bundle', 'nsis');
   const setup = builtFile(built, version, '-setup.exe');
+  checkFileVersion(join(built, setup), version);
 
   rmSync(OUT, { recursive: true, force: true });
   mkdirSync(OUT, { recursive: true });
@@ -278,6 +297,7 @@ function buildMac(version: string): void {
   );
   run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', APP]);
   checkNoHome(join(APP, 'Contents/MacOS/oddboro'));
+  checkBundleVersion(APP, version);
   const node = read('codesign', [
     '-d',
     '--entitlements',

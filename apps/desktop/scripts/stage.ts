@@ -78,14 +78,22 @@ function build(): void {
   npm(['run', 'build', '-w', '@oddboro/office']);
 }
 
-/**
- * Every third-party runtime dependency, pinned to the version installed here.
- * The office's own are bundled into its build (they sit under its
- * devDependencies), so in practice these are the workspace packages'.
- */
+/** The office's build bundles what it runs, so a package listed here ships twice (#13). */
+function checkOfficeDependencies(): void {
+  const listed = Object.keys(
+    readJson(join(ROOT, 'apps', 'office', 'package.json')).dependencies ?? {}
+  ).filter((name) => !name.startsWith('@oddboro/'));
+  if (listed.length)
+    throw new Error(
+      `apps/office lists ${listed.join(', ')} under dependencies. The office's build ` +
+        'bundles what it runs, so move them to devDependencies.'
+    );
+}
+
+/** Pinned to the versions installed here. The office is left out: its build bundles its own. */
 function dependencies(): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const dir of ['apps/office', ...PACKAGES.map((p) => `packages/${p}`)]) {
+  for (const dir of PACKAGES.map((p) => `packages/${p}`)) {
     for (const name of Object.keys(readJson(join(ROOT, dir, 'package.json')).dependencies ?? {})) {
       if (name.startsWith('@oddboro/')) continue;
       out[name] = readJson(join(ROOT, 'node_modules', name, 'package.json')).version;
@@ -160,6 +168,26 @@ function prune(dir: string, rel = ''): void {
     } else if (r.length > LONGEST)
       throw new Error(`stage/${r} is ${r.length} characters, too long for the Windows installer`);
   }
+}
+
+/** 500 kB is Vite's own warning size. 0.0.5's first page loaded a 785 kB chunk (#13). */
+function checkChunks(dir: string): void {
+  const over: string[] = [];
+  const walk = (d: string) => {
+    for (const name of readdirSync(d)) {
+      const path = join(d, name);
+      const s = statSync(path);
+      if (s.isDirectory()) walk(path);
+      else if (name.endsWith('.js') && s.size > 500 * 1024)
+        over.push(`${path.slice(dir.length + 1)} is ${Math.round(s.size / 1024)} kB`);
+    }
+  };
+  walk(dir);
+  if (over.length)
+    throw new Error(
+      `The page has chunks over 500 kB:\n  ${over.join('\n  ')}\n` +
+        'Load what they hold with import() when it is needed.'
+    );
 }
 
 function stageOffice(): void {
@@ -260,6 +288,7 @@ async function smoke(): Promise<void> {
   }
 }
 
+checkOfficeDependencies();
 build();
 rmSync(STAGE, { recursive: true, force: true });
 mkdirSync(STAGE, { recursive: true });
@@ -275,6 +304,7 @@ npm(['install', '--omit=dev', '--no-audit', '--no-fund', '--loglevel=error'], ST
 for (const p of PACKAGES) stagePackage(p);
 stageOffice();
 prune(STAGE);
+checkChunks(join(STAGE, 'apps', 'office', 'build', 'client'));
 await fetchNode();
 console.log(`Staged the server in ${STAGE}.`);
 if (process.argv.includes('--smoke')) await smoke();

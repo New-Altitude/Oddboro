@@ -92,14 +92,17 @@ jobs:
           rustup toolchain install stable --profile minimal --target aarch64-apple-darwin
           rustup default stable
 
+      # Compiled code only, never finished builds: 0.0.6 shipped the 0.0.5
+      # installer a cache brought back (#40). v2 drops the caches that held them.
       - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             apps/desktop/src-tauri/target
-          key: cargo-${{ runner.os }}-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock') }}
-          restore-keys: cargo-${{ runner.os }}-
+            !apps/desktop/src-tauri/target/**/bundle
+          key: cargo-v2-${{ runner.os }}-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock') }}
+          restore-keys: cargo-v2-${{ runner.os }}-
 
       - run: npm ci --no-audit --no-fund
 
@@ -204,8 +207,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             apps/desktop/src-tauri/target
-          key: cargo-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock') }}
-          restore-keys: cargo-${{ runner.os }}-${{ matrix.arch }}-
+            !apps/desktop/src-tauri/target/**/bundle
+          key: cargo-v2-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock') }}
+          restore-keys: cargo-v2-${{ runner.os }}-${{ matrix.arch }}-
 
       - run: npm ci --no-audit --no-fund
 
@@ -271,8 +275,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             apps/desktop/src-tauri/target
-          key: cargo-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock') }}
-          restore-keys: cargo-${{ runner.os }}-${{ matrix.arch }}-
+            !apps/desktop/src-tauri/target/**/bundle
+          key: cargo-v2-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock') }}
+          restore-keys: cargo-v2-${{ runner.os }}-${{ matrix.arch }}-
 
       - run: npm ci --no-audit --no-fund
 
@@ -319,21 +324,36 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+
       - uses: actions/download-artifact@v4
         with:
-          path: built
+          path: ${{ runner.temp }}/built
+
+      - name: Test the release check
+        run: node --test apps/desktop/test/*.test.ts
+
+      - name: Check what the builds made
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          node apps/desktop/scripts/check-release.ts --version "$VERSION" \
+            --dir "$RUNNER_TEMP/built" \
+            --url "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION" \
+            --latest "$RUNNER_TEMP/latest.json" --assets "$RUNNER_TEMP/assets.txt"
 
       - name: Draft the release
         env:
           VERSION: ${{ needs.version.outputs.version }}
           NOTES: ${{ needs.version.outputs.notes }}
         run: |
-          # One latest.json for every machine: each build wrote its own.
-          jq -s '.[0] + { platforms: (map(.platforms) | add) }' \
-            built/mac/latest.json built/linux-x86_64/latest.json built/linux-aarch64/latest.json \
-            built/windows-x64/latest.json built/windows-arm64/latest.json \
-            > latest.json
+          cd "$RUNNER_TEMP"
           printf '%s\n' "$NOTES" > notes.md
+          mapfile -t assets < assets.txt
           # The draft this one replaces. A draft has no tag yet, so only the
           # release goes; the old builds stay until the new ones are ready.
           gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
@@ -343,20 +363,4 @@ jobs:
               done
           gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
             --title "Oddboro $VERSION" --notes-file notes.md \
-            built/mac/Oddboro.dmg \
-            "built/mac/Oddboro_${VERSION}_aarch64.dmg" \
-            "built/mac/Oddboro_${VERSION}_aarch64.app.tar.gz" \
-            "built/mac/Oddboro_${VERSION}_aarch64.app.tar.gz.sig" \
-            built/linux-x86_64/Oddboro-x86_64.AppImage \
-            "built/linux-x86_64/Oddboro_${VERSION}_x86_64.AppImage" \
-            "built/linux-x86_64/Oddboro_${VERSION}_x86_64.AppImage.sig" \
-            built/linux-aarch64/Oddboro-aarch64.AppImage \
-            "built/linux-aarch64/Oddboro_${VERSION}_aarch64.AppImage" \
-            "built/linux-aarch64/Oddboro_${VERSION}_aarch64.AppImage.sig" \
-            built/windows-x64/Oddboro-x64-setup.exe \
-            "built/windows-x64/Oddboro_${VERSION}_x64-setup.exe" \
-            "built/windows-x64/Oddboro_${VERSION}_x64-setup.exe.sig" \
-            built/windows-arm64/Oddboro-arm64-setup.exe \
-            "built/windows-arm64/Oddboro_${VERSION}_arm64-setup.exe" \
-            "built/windows-arm64/Oddboro_${VERSION}_arm64-setup.exe.sig" \
-            latest.json
+            "${assets[@]}" latest.json
