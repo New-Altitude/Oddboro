@@ -1,7 +1,7 @@
 // The Office Manager's first three questions to a new owner, asked in chat
 // one at a time, each with answers the owner taps. The hello ends with the
-// first. An answer, tapped or typed, lands as the owner's message: the office
-// asks the next question itself, with no run, and the third answer goes to the
+// first. A first answer in the owner's own words goes straight to the manager.
+// With a suggested first answer the office asks the next two; the third answer goes to the
 // manager, who reads all three in the chat and carries on. Which question
 // waits is read from the chat's last line, so nothing else is stored. The
 // first answer to each is the default the office keeps until the owner says

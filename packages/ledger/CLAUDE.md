@@ -359,8 +359,9 @@ hand-off or number, which ledger tests and the office's format test share.
   on their own inside the office (never sending: the question says nothing
   leaves without the owner's yes), and what to hear about between morning
   reports. Each has three to five answers to tap, the default first (draft and
-  bring it to them; only what needs them). The office
-  asks the next question itself; the manager reads all three answers and keeps
+  bring it to them; only what needs them). A first answer outside the choices
+  runs the manager at once. With a suggested first answer the office asks the
+  next questions itself; the manager reads all three answers and keeps
   each about how the office works as a lesson for every Odd.
   `test/managers.test.ts` holds every manager to it.
 - A new hire with a job gets a `first_day` follow-up (`startFirstDay`) that

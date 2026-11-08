@@ -174,7 +174,7 @@ import { NOT_SIGNED_IN, shellEnv, SIGN_IN_WHERE, stopGroups } from './launch.ts'
 import { tooOldLine } from './versions.ts';
 import { claudeSandbox, NETWORK_REFUSED, NETWORK_REFUSED_LINE } from './sandbox.ts';
 import { agentCommand } from './agent-sign-in.ts';
-import { ACT_WRITE, house, stillOnDeskSection } from './house.ts';
+import { ACT_WRITE, house, managerWork, stillOnDeskSection } from './house.ts';
 
 /** The owner's data folder, which every staffer may read, whatever tool it runs on. */
 const DATA = home('data');
@@ -677,6 +677,9 @@ async function prompt(
     (opts.thread
       ? opts.led.flatMap((story) => threadBrief({ story, shown: opts.shown })).join('\n')
       : goalsLedBrief(opts.led)) +
+    (who.role === MANAGER_ROLE
+      ? managerWork(existsSync(join(dir, 'notes', 'pending-judgments.md')))
+      : '') +
     stillOnDeskSection(await stillOnDesk(who.id)) +
     house({
       has: (t) => hasTool(who.tools, t),
@@ -1290,12 +1293,11 @@ export async function chat(
   // Stamped when sent, so what the staffer delivers while replying lands between the two.
   const sent = new Date().toISOString();
   try {
-    // An answer to a manager's first or second question (`FIRST_QUESTIONS`):
-    // the office asks the next one itself, at once and with no run. The third
-    // answer runs the manager, which reads all three in the chat.
+    // A first answer in the owner's own words may already be a brief. Let
+    // the manager use it now. The preset path still takes just three taps.
     const last = history(id).at(-1);
     const asked = last?.from === 'staff' ? firstQuestionIn(last.text) : -1;
-    if (asked >= 0 && asked < FIRST_QUESTIONS.length - 1) {
+    if ((asked === 0 && FIRST_QUESTIONS[0].answers.includes(message.trim())) || asked === 1) {
       const next = FIRST_QUESTIONS[asked + 1].ask;
       addToChat(id, { at: sent, from: 'owner', text: message });
       addToChat(id, { at: new Date().toISOString(), from: 'staff', text: next, told: true });
@@ -1456,7 +1458,7 @@ function followUpBrief(
       '',
       '1. Read the office: office_report for each Odd, what it does, its level and the tools it holds or is waiting on, and list_goals for the goals they already serve.',
       `2. Work out who does what, how often, and with which tools (find_connectors). Give the work to Odds already here when one fits, with a new job or a change to one. Give a part to an Odd whose level and tools cover it. For a tool an Odd lacks, put any level raise in owner_steps, as a step on ${modelSection("that Odd's")}. Have the Odd ask for the tool itself with ask_for_access when its officeTools include it, or put connecting it in owner_steps when they do not. For ${SWITCH_NAMES.commands} or ${SWITCH_NAMES.web}, put switching it on in ${officeSection("that Odd's")}, in owner_steps only when office_report says {owner} can switch it on for that Odd. Keep every other step only {owner} can do in owner_steps too. Hire only for work nobody here fits.`,
-      '3. If you need answers from {owner} before you can plan it, write the questions to a file in your folder, put it on their desk with give_owner_a_task, attached, then stop. You pick up when they finish it.',
+      '3. Read the brief and any answers already given. If a missing answer changes the plan, write only those questions to a file in your folder, put it on their desk with give_owner_a_task, attached, then stop. You pick up when they finish it.',
       "4. Otherwise bring the whole plan in one ask with propose_goal_plan. Write each hire's job description to a file first, and pass any intake as its intake_file.",
       '5. Once {owner} approves the plan, you pick up here on the goal and lead the work: you hand each piece to the Odd who does it. So its owner steps hold only what truly needs {owner}, such as signing in to a tool, never passing work or a request to an Odd.',
       '6. If the office already meets this goal as it is, say so and stop.'

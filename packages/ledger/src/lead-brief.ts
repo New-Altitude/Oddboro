@@ -34,6 +34,7 @@ type Step = { title: string; to: string; outcome?: Outcome; text?: string };
 export type ThreadStory = {
   thread: ThreadRow;
   goal?: string;
+  doneWhen?: string;
   steps: Step[];
   /** The newest result that came back, by hand-back id. */
   latest?: { id: number; from: string; text: string };
@@ -73,7 +74,10 @@ export async function threadStory(t: ThreadRow): Promise<ThreadStory> {
   const last = backs.at(-1);
   const from = last && rows.find((r) => r.id === last.handOff?.id)?.name;
   const [goal] = t.goalId
-    ? await db.select({ title: goals.title }).from(goals).where(eq(goals.id, t.goalId))
+    ? await db
+        .select({ title: goals.title, doneWhen: goals.doneWhen })
+        .from(goals)
+        .where(eq(goals.id, t.goalId))
     : [];
   const [plan] = await db
     .select({ plan: asks.plan, reason: asks.reason })
@@ -94,6 +98,7 @@ export async function threadStory(t: ThreadRow): Promise<ThreadStory> {
   return {
     thread: t,
     goal: goal?.title,
+    doneWhen: goal?.doneWhen ?? undefined,
     steps,
     latest: last && from ? { id: last.id, from, text: last.note ?? '' } : undefined,
     waiting: waitingFor(await waitingOn(db, [t.id]), t.id),
@@ -139,6 +144,7 @@ export function threadKnown(b: { story: ThreadStory; shown?: number[] }): string
     '',
     `You lead this work: you started it, and you pick each next step and who does it.${goal ? ` It serves the goal "${goal}".` : ''}`,
     '',
+    ...(b.story.doneWhen ? [`Done when: ${b.story.doneWhen}`, ''] : []),
     // Without it, a chat said a goal's stopped work was under way.
     ...(t.status !== 'open' ? [`Where it stands: ${LISTED[t.status]}.`, ''] : []),
     'Steps so far:',
