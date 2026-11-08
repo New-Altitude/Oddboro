@@ -117,7 +117,10 @@ const CLI = join(
 );
 const tauri = (argv: string[], env: Record<string, string | undefined> = {}) =>
   run(process.execPath, [CLI, ...argv], env);
-const stage = () => run(process.execPath, [join(DESKTOP, 'scripts', 'stage.ts'), '--smoke']);
+const stage = () => {
+  run(process.execPath, [join(DESKTOP, 'scripts', 'stage.ts')]);
+  run(process.execPath, [join(DESKTOP, 'scripts', 'smoke.ts'), '--stage']);
+};
 
 const KEY = process.env.TAURI_SIGNING_PRIVATE_KEY;
 if (!KEY) throw new Error('Set TAURI_SIGNING_PRIVATE_KEY to sign the updater archive');

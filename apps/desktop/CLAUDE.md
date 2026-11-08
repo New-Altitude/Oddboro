@@ -37,8 +37,15 @@ an update (`update.rs`).
 5. Writes Node's stdout and stderr to `~/Library/Logs/Oddboro/office.log` on
    a Mac, `~/.local/state/oddboro/office.log` on Linux (`XDG_STATE_HOME`
    wins when set) and `%LOCALAPPDATA%\Oddboro\Logs\office.log` on Windows,
-   with its own lines prefixed `oddboro:`. Past 10 MB the log
-   moves to `office.log.1` when Node next starts.
+   or wherever `ODDBORO_LOG` says. Its own lines start `oddboro: ` and the
+   time in UTC: first `Oddboro <version> (<target>) opening` with the pid,
+   port, home and webview version, then the update check, `started node`,
+   `office page loaded: <url>` once the window has the page, and the words
+   of every dialog it shows (`dialog: ...`), written before the dialog waits
+   for OK. The office adds `office:` lines (each startup step's time,
+   `ready`, a new version's `first start of X after Y`) and `page:` lines
+   (the page's boot and its errors), as `apps/office/CLAUDE.md` says. Past
+   10 MB the log moves to `office.log.1` when Node next starts.
 6. Restarts Node when it dies: after 1s, 5s, then 30s, at most 5 times in 10
    minutes. Then it shows the log tail and quits. After a restart the main
    window reloads.
@@ -77,6 +84,10 @@ an update (`update.rs`).
 
 The page gets no Tauri IPC: there are no capability files, and remote pages
 never get IPC without one.
+
+When the shell gives up, its exit code says why: 2 another office has the
+port, 3 no Node, 4 no office server, 5 a bad server URL, 6 the server would
+not start or keep running, 7 no window. 0 is a quit.
 
 ## The contract with the server
 
@@ -223,10 +234,9 @@ Every update is required. `src-tauri/src/update.rs` runs them with
   files of them, #13), and if any page chunk is over 500 kB. It fetches the Node
   binary for this machine's Node version, system and chip, and checks it
   against nodejs.org's sums (Windows's comes as a zip, unpacked with
-  Windows's own `tar`). `--smoke` starts the stage on port 4590 with a
-  throwaway home, waits for it to answer, and checks it quits when asked
-  (SIGTERM, or a closed stdin on Windows):
-  `node apps/desktop/scripts/stage.ts --smoke`.
+  Windows's own `tar`). `scripts/smoke.ts --stage` then checks the stage.
+- `scripts/smoke.ts` and `scripts/driver.ts`. The smoke test, and what
+  drives the installed app for it. See "Smoke tests".
 - `stage/` must hold no folder symlinks. The bundler walks it without
   following them, so a linked folder never reaches the app.
 - `stage/`, `src-tauri/binaries/`, `src-tauri/target/` and `src-tauri/gen/`
@@ -247,7 +257,7 @@ a signed `tauri build --bundles app` run beside the owner's office on 4510.
 that changes what goes into the app: `apps/desktop`, `apps/office`,
 `packages`, `.nvmrc` or the workflow itself, but not a `CLAUDE.md`. A merge
 that touches only the site or the docs builds nothing. Neither does a
-lockfile-only update, so run it by hand for one that should ship. Five jobs:
+lockfile-only update, so run it by hand for one that should ship. Six jobs:
 
 1. `version` picks the next patch version from the highest PUBLISHED release
    tag (none gives `0.0.1`), and writes GitHub's generated notes. A draft
@@ -274,7 +284,10 @@ lockfile-only update, so run it by hand for one that should ship. Five jobs:
    SmartScreen warns before it runs.
    Before it signs, `release.ts` checks the build's own version: the Windows
    app and installer's file version, and the Mac app's `Info.plist`.
-5. `draft` tests and runs `scripts/check-release.ts` on what the five builds
+5. `smoke` installs each build and runs it on its own kind of machine, plus
+   the x86_64 AppImage on Ubuntu 24.04 (see "Smoke tests"). No secrets. One
+   failure, and no draft.
+6. `draft` tests and runs `scripts/check-release.ts` on what the five builds
    uploaded, and creates nothing unless every build passes: exactly the files
    this version should have, each site copy byte for byte the versioned file,
    each `latest.json` naming this version, its own machine and this release's
@@ -293,12 +306,48 @@ lockfile-only update, so run it by hand for one that should ship. Five jobs:
    so every release carries them), the versioned `.dmg`, the Mac updater
    archive and its `.sig`, each versioned AppImage and installer and its
    `.sig`, and `latest.json`.
-6. The owner reads the draft and presses Publish. Installed apps pick it up at
+7. The owner reads the draft and presses Publish. Installed apps pick it up at
    their next check, and the next build takes the next version. Until then,
    each merge replaces the draft, so it always holds the newest `main`.
 
 The repo must be public for installed apps to reach the release. While it is
 private, `latest.json` answers 404 to them.
+
+### Smoke tests
+
+`scripts/smoke.ts` checks a real build the way an owner meets it, one row of
+a table per step; a failed required row fails the run. It runs the app on
+port 4590, database port 54590, a throwaway home and its own log
+(`ODDBORO_LOG`), and points `ODDBORO_UPDATE_URL` at an address that refuses,
+so the build never updates itself away. The rows: it installs; the version
+matches (the uninstall entry, `oddboro.exe` and the Start menu shortcut on
+Windows; `Info.plist`, `codesign`, `spctl` and the stapled ticket on a Mac);
+it starts with no dialog; the real window shows the welcome and Next moves it
+to the name step; a write with no `Origin` gets 403 and the page's own shape
+404 (#25); the setup checks pass, with a stand-in Claude Code found where an
+install puts it (PR #18, CI only); it onboards; the log has the window
+loading the page and the page booting, with no page errors; it quits with
+Node and both ports gone; it starts twice more with its data; on Windows it
+uninstalls.
+
+`scripts/driver.ts` drives it, each system its own way: the NSIS installer
+with `/S` and UI Automation on Windows (WebView2 on GitHub's runners drops
+DevTools' argument), the `.dmg` copied to a resolved folder and
+Accessibility through System Events on a Mac (a path through a symlink stops
+the app), the AppImage under Xvfb with a GNOME keyring and WebDriver through
+`tauri-driver` on Linux. A dialog fails the run with its words.
+
+```sh
+node apps/desktop/scripts/smoke.ts --stage                       # the staged server, after stage.ts
+node apps/desktop/scripts/smoke.ts --installed                    # the app on this computer, apart from its office
+node apps/desktop/scripts/smoke.ts --from <folder> --version 0.0.9   # a build job's output, as release.yml runs it
+```
+
+`--artifact <file>` takes one installer, AppImage or `.dmg`. On Windows it
+replaces and then uninstalls the Oddboro installed for this user, so off a
+runner it asks for `--replace-installed`. Quit Oddboro first: Linux and
+Windows keep to one at a time. Results go to `--out`: `results.json`,
+`summary.md`, `office.log`, `shell.log` and a screenshot.
 
 ### Secrets
 
