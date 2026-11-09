@@ -1,0 +1,37 @@
+name: Project sessions
+
+on:
+  pull_request:
+    paths:
+      - 'apps/office/src/lib/server/project-sessions/**'
+      - 'apps/office/src/lib/ui/Project*.svelte'
+      - 'apps/office/src/routes/api/project-sessions/**'
+      - 'packages/ledger/src/project-session*.ts'
+      - 'packages/ledger/project-plugin/**'
+      - 'packages/ledger/test/project-sessions.test.ts'
+      - 'scripts/prepare-pty.mjs'
+      - 'apps/desktop/scripts/stage.ts'
+      - '.github/workflows/project-sessions.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stage:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-22.04, ubuntu-22.04-arm, windows-latest, windows-11-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+      - run: npm ci --no-audit --no-fund
+      - run: node --test --experimental-test-module-mocks packages/ledger/test/project-sessions.test.ts apps/office/src/lib/server/project-sessions/native.test.ts
+      - run: node apps/desktop/scripts/stage.ts --smoke
+      - name: Check terminal input and resize using bundled Node
+        run: node apps/desktop/scripts/check-project-terminal.mjs

@@ -12,6 +12,7 @@
 // It also fetches the Node binary the app carries, checked against nodejs.org's
 // published sums. `--smoke` then starts the staged office on a spare port and
 // home, and stops it once it answers.
+import { preparePty } from '../../../scripts/prepare-pty.mjs';
 import { execFileSync, execSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
@@ -272,6 +273,7 @@ writeFileSync(
   ) + '\n'
 );
 npm(['install', '--omit=dev', '--no-audit', '--no-fund', '--loglevel=error'], STAGE);
+preparePty(STAGE);
 for (const p of PACKAGES) stagePackage(p);
 stageOffice();
 prune(STAGE);

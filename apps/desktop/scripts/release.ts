@@ -33,6 +33,7 @@
 // build only, and puts the files back after. `--test` is for trying updates
 // on this machine: no notarizing, and the app accepts an http latest.json
 // from ODDBORO_UPDATE_URL. Never ship a --test build.
+import { preparePty } from '../../../scripts/prepare-pty.mjs';
 import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
@@ -267,6 +268,9 @@ function buildMac(version: string): void {
   // 1. The server, staged and smoke-tested.
   stage();
 
+  // The hardened Node sidecar loads only libraries carrying the app's team ID.
+  for (const file of preparePty(join(DESKTOP, 'stage')))
+    run('codesign', ['--force', '--options', 'runtime', '--timestamp', '--sign', IDENTITY, file]);
   // 2. The app, signed by Tauri: the app, its Node sidecar, the hardened
   //    runtime and Entitlements.plist on both, and the updater archive.
   const configs = ['src-tauri/tauri.bundle.conf.json', 'src-tauri/tauri.release.conf.json'];
