@@ -9,8 +9,10 @@ on:
       - 'packages/ledger/src/project-session*.ts'
       - 'packages/ledger/project-plugin/**'
       - 'packages/ledger/test/project-sessions.test.ts'
+      - 'packages/ledger/test/pglite.ts'
       - 'scripts/prepare-pty.mjs'
       - 'apps/desktop/scripts/stage.ts'
+      - 'apps/desktop/scripts/check-project-terminal.mjs'
       - '.github/workflows/project-sessions.yml'
   workflow_dispatch:
 
