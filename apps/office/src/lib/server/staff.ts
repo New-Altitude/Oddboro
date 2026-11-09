@@ -19,11 +19,12 @@
 // level (every tool), each through the office's gateway (gateway.ts), which
 // keeps the keys and sign-ins. Hosted servers get a fresh OAuth token per run.
 import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   appendFileSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
@@ -48,6 +49,7 @@ import {
   servesNoThread,
   thread as threadById,
   threadBrief,
+  workFile,
   threadFolder,
   threadPart,
   threadsFor,
@@ -110,6 +112,8 @@ import {
   type Agent,
   type Delivery,
   type StaffRow,
+  type RunRow,
+  job as jobById,
   type UsageKind,
   clockTime,
   pokeMissed,
@@ -147,17 +151,15 @@ import {
   type CallPlace,
   type ConnectorRow
 } from '@oddboro/ledger';
-import { workPath } from '@oddboro/ledger/work-paths';
+import { workName, workPath } from '@oddboro/ledger/work-paths';
 import { filterWords } from '@oddboro/ledger/filters';
 import { bus, emit } from './events.ts';
 import { deniedEdits, denyRules, readStaffFile } from './files.ts';
 import { floorTool, type Work, type WorkAbout } from '../staff/work.ts';
 import { closeGateway, openGateway } from './gateway.ts';
-import { awsReady } from './aws.ts';
-import { bearer } from './oauth.ts';
+import { sourceReady } from './access.ts';
 import {
   apiKey,
-  claudeAccount,
   claudeAccountOf,
   claudeRunHome,
   claudeSettings,
@@ -178,7 +180,9 @@ import { endedEarly, LAUNCHES, streamTools, type Launch } from './cli.ts';
 import { NOT_SIGNED_IN, shellEnv, SIGN_IN_WHERE, stopGroups, type RunImage } from './launch.ts';
 import { tooOldLine } from './versions.ts';
 import { claudeSandbox, NETWORK_REFUSED, NETWORK_REFUSED_LINE } from './sandbox.ts';
-import { agentCommand, claudeSignInState, signInState } from './agent-sign-in.ts';
+import { grokHome } from './grok.ts';
+import { scheduledFiles } from './scheduled-files.ts';
+import { agentCommand, missingSignIn, type ChatSignIn } from './agent-sign-in.ts';
 import { ACT_WRITE, house, managerWork, stillOnDeskSection } from './house.ts';
 
 /** The owner's data folder, which every staffer may read, whatever tool it runs on. */
@@ -220,7 +224,7 @@ export type ChatEntry = {
   /** On a reply a chat run wrote: milliseconds from the owner's message to the reply. */
   took?: number;
 };
-export type ChatSignIn = { agent: Agent; account: string; how: 'key' | 'browser' };
+export type { ChatSignIn } from './agent-sign-in.ts';
 export type ChatEvent =
   | { type: 'reply'; runId: string; turnId: string }
   | { type: 'delta'; text: string }
@@ -550,13 +554,7 @@ async function access(who: StaffRow, ceiling: Level, ms: number, place?: CallPla
   for (const a of caps.outside) {
     if (a.heldBack) continue;
     const c = a.connector;
-    // A sign-in that ran out shows only now, as the office asks for a fresh token.
-    if (c.config.oauth && !(await bearer(c.id).catch(() => undefined))) {
-      a.heldBack = 'sign-in ran out';
-      continue;
-    }
-    // So does an AWS sign-in that ended, for AWS itself and any tool whose key is kept there.
-    if (!(await awsReady(c))) {
+    if (!(await sourceReady(c))) {
       a.heldBack = 'sign-in ran out';
       continue;
     }
@@ -749,7 +747,7 @@ async function prompt(
   );
 }
 
-type Run = { ok: boolean; text: string; interrupted?: true };
+type Run = { ok: boolean; text: string; interrupted?: true; checkedFiles?: RunRow['checkedFiles'] };
 const stopped = (): Run => ({ ok: false, text: 'Stopped at your request.', interrupted: true });
 
 type Window = { utilization?: number; resetsAt?: number };
@@ -888,6 +886,15 @@ async function run(
     signal?: AbortSignal;
     /** A chat reserves its run key before launch so it can stop during setup too. */
     runId?: string;
+    /** A scheduled file exchange gives no authority to lead or wake the thread. */
+    jobFiles?: {
+      thread: number;
+      input?: string;
+      output: string;
+      record: string;
+      inputHash?: string;
+      sources?: string[];
+    };
     sessionFile?: string;
     extra?: string;
     /** The owner's own message, when this is a chat. */
@@ -949,7 +956,22 @@ async function run(
           via: opts.via
         }
   );
-  // Prompts name the owner as {owner}: each install's staff use its own name.
+  // A source can sign out between the check of both jobs and this run.
+  const unavailable = caps.outside.filter(
+    (a) => a.heldBack && opts.jobFiles?.sources?.includes(a.connector.id)
+  );
+  if (unavailable.length) {
+    await closeGateway(gate);
+    return {
+      ok: false,
+      text: unavailable
+        .map(
+          (a) =>
+            `${who.name} needs ${a.connector.name} for the scheduled file. Ask in ${who.name}'s chat to reconnect it (${a.heldBack}).`
+        )
+        .join('\n')
+    };
+  }
   const owner = await ownerName();
   const say = (s: string) => s.replaceAll('{owner}', owner);
   // Claude Code keeps a session's first system prompt on --resume, so a
@@ -964,6 +986,7 @@ async function run(
     : inChat
       ? await ledStories(who.id, 'chat')
       : [];
+  const fileThread = opts.threadId ?? opts.jobFiles?.thread;
   const reads = opts.threadId ? [opts.threadId] : led.map((s) => s.thread.id);
   // The owner's switches and folders as this run's tool takes them (the
   // ledger's `ownTools`, which `capabilities` worked out once), less a network
@@ -1020,7 +1043,7 @@ async function run(
     })
   );
   // On a thread, the run writes only its own part of the thread's folder.
-  const part = opts.threadId ? threadPart(opts.threadId, who.id) : undefined;
+  const part = fileThread ? threadPart(fileThread, who.id) : undefined;
   if (part) mkdirSync(part, { recursive: true });
   const writes = [dir, ...(part ? [part] : []), ...extraWrites];
   const denied = deniedEdits({
@@ -1034,6 +1057,7 @@ async function run(
   // files, holding the same folders on every system: it reads what the run
   // reads, writes what it writes, and never writes what `deniedEdits` names.
   const officeFiles = filesViaOffice(who.agent, process.platform);
+  const fileReads = readsBeyond(dir, reads, extraReads, claudeDir);
   if (officeFiles) {
     servers.files = {
       command: process.execPath,
@@ -1041,10 +1065,12 @@ async function run(
       env: {
         ODDBORO_FILES: JSON.stringify({
           cwd: dir,
-          reads: readsBeyond(dir, reads, extraReads, claudeDir),
+          reads: fileReads,
+          input: opts.jobFiles?.input,
           writes,
           noWrite: denied
-        })
+        }),
+        ...(opts.jobFiles ? { ODDBORO_FILE_CHECK: JSON.stringify(opts.jobFiles) } : {})
       }
     };
     allowed.push('mcp__files');
@@ -1192,7 +1218,7 @@ async function run(
           key,
           staffId: who.id,
           dir,
-          reads: readsBeyond(dir, reads, extraReads, claudeDir),
+          reads: opts.jobFiles?.input ? [...fileReads, opts.jobFiles.input] : fileReads,
           part,
           writes,
           granted: extraWrites,
@@ -1385,25 +1411,6 @@ async function run(
     child.stdin.on('error', () => {});
     child.stdin.end(launch.stdin);
   });
-}
-
-// Check the account the failed run actually used. Older Claude installs may use the owner's login.
-async function missingChatSignIn(who: StaffRow, failure: string): Promise<ChatSignIn | undefined> {
-  const agent = who.agent;
-  const account = await accountOf(who);
-  if (agent === 'claude') {
-    if (account === OFFICE_ACCOUNT && claudeSettings().auth === 'key')
-      return apiKey() ? undefined : { agent, account, how: 'key' };
-    const signed = await claudeSignInState(
-      account,
-      account === OFFICE_ACCOUNT ? claudeAccount : undefined
-    );
-    return signed.signedIn || signed.ownLogin ? undefined : { agent, account, how: signed.how };
-  }
-  const state = signInState(agent, account);
-  // Grok can reject an expired sign-in whose account file still exists.
-  if (!state.signedIn || (agent === 'grok' && failure === `Grok ${NOT_SIGNED_IN}`))
-    return { agent, account, how: state.how };
 }
 
 /** Keep an owner turn before any run. Imports can stop here until the owner asks for a reply. */
@@ -1646,7 +1653,7 @@ export async function replyToOwnerTurn(
       onEvent({ type: 'done', text: r.text });
     } else {
       // Only offer a sign-in retry when this reply has not already used a tool.
-      const signIn = usedTool ? undefined : await missingChatSignIn(who, r.text);
+      const signIn = usedTool ? undefined : await missingSignIn(who, r.text);
       onEvent({ type: 'error', message: r.text, ...(signIn && { signIn }) });
     }
   } finally {
@@ -1658,10 +1665,10 @@ export async function replyToOwnerTurn(
 
 /** Run one job in a fresh session. The staffer walks to its room while it runs. */
 export async function runJob(job: JobRow, trigger: RunTrigger = 'schedule'): Promise<Run> {
-  const who = await staffer(job.staffId);
-  if (!who) return { ok: false, text: `No Odd named ${job.staffId}` };
+  const named = await staffer(job.staffId);
+  if (!named) return { ok: false, text: `No Odd named ${job.staffId}` };
   return slot(
-    who.id,
+    named.id,
     {
       kind: 'job',
       label: job.name,
@@ -1671,17 +1678,92 @@ export async function runJob(job: JobRow, trigger: RunTrigger = 'schedule'): Pro
         kind: 'job',
         id: job.id,
         title: job.name,
-        leadId: who.id,
-        lead: who.name
+        leadId: named.id,
+        lead: named.name
       }
     },
-    (onEvent) =>
-      run(who, job.instructions, {
-        kind: 'job',
+    async (onEvent) => {
+      const who = await staffer(job.staffId);
+      if (!who) return { ok: false, text: `No Odd named ${job.staffId}` };
+      const opts = {
+        kind: 'job' as const,
         onEvent,
         timeoutMs: JOB_TIMEOUT_MS,
         extra: `\n## This run\n\nYou are running your job "${job.name}". {owner} is not in a chat with you.${trigger === 'manual' ? ' They started this run by hand just now, so they are at their screen: send anything the job has for them now (poke_owner with in_minutes 0), whatever quiet hours you keep for them.' : ''} Do the job, then reply with what you did in a few plain lines. Your reply goes in the ledger${job.report ? ' and on their desk as a report' : ''}.\n`
-      })
+      };
+      if (!job.files) return run(who, job.instructions, opts);
+      const current = await jobById(job.id);
+      if (
+        !current ||
+        current.changedAt.getTime() !== job.changedAt.getTime() ||
+        (trigger === 'schedule' && !current.enabled)
+      )
+        return {
+          ok: false,
+          text: `${who.name}'s job changed before it could start. Its next run uses the new settings.`
+        };
+      const f = await scheduledFiles(who, job, job.files, 'run');
+      if (f.blocks.length) return { ok: false, text: f.blocks.join('\n') };
+      // Grok's file server runs inside its kernel sandbox. Use its existing
+      // private temp folder, which its model's file tools cannot open.
+      const checks =
+        who.agent === 'grok' ? grokHome(await accountOf(who)).temp : home('file-checks');
+      mkdirSync(checks, { recursive: true, mode: 0o700 });
+      const dir = mkdtempSync(join(checks, 'run-'));
+      const record = join(dir, 'written');
+      try {
+        const r = await run(who, job.instructions, {
+          ...opts,
+          draftOnly: true,
+          extra: opts.extra + f.brief,
+          jobFiles: {
+            ...job.files,
+            input: f.input,
+            output: f.output,
+            inputHash: f.source?.sha256,
+            record
+          }
+        });
+        if (!r.ok) return r;
+        // Another clock can finish, or the owner can withdraw the work, while
+        // the model is reading. Publish a check only for the same assignment.
+        const after = await scheduledFiles(who, job, job.files, 'review');
+        if (after.blocks.length) return { ok: false, text: after.blocks.join('\n') };
+        if (
+          after.source?.run !== f.source?.run ||
+          (await jobById(job.id))?.changedAt.getTime() !== job.changedAt.getTime()
+        )
+          return {
+            ok: false,
+            text: `${who.name}'s scheduled files changed during "${job.name}". The next scheduled run will check the current files.`
+          };
+        const actual = await workFile(
+          who.id,
+          workName(job.files.thread, `${who.id}/${job.files.output}`)
+        );
+        const digest = existsSync(record) ? readFileSync(record, 'utf8') : '';
+        if (
+          !actual ||
+          !digest ||
+          digest !== createHash('sha256').update(readFileSync(actual)).digest('hex')
+        )
+          return {
+            ok: false,
+            text: `${who.name} did not leave a checked result for "${job.name}". Ask ${who.name} in chat to check the file steps for ${job.files.output} before the next run.`
+          };
+        return {
+          ...r,
+          checkedFiles: {
+            input: job.files.input,
+            inputRun: f.source?.run,
+            output: `${who.id}/${job.files.output}`,
+            sha256: digest
+          }
+        };
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
   );
 }
 

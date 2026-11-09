@@ -604,6 +604,12 @@ hand-off or number, which ledger tests and the office's format test share.
 - An Odd sees only the goals it serves (`staff_goals`): `my_goals` and its
   prompt read `goalsFor`, never `allGoals`. `log_progress` refuses a goal it
   does not serve. `list_goals` is the Office Manager's.
+- A job may name files on one piece of work. A plan binds them to its goal's
+  thread. `edit_my_job` can attach an existing job to work the Odd serves or
+  rename it in place. Sharing applies to the listed sources in that output.
+  A read of a scheduled input needs the latest scheduled writer's checked
+  bytes from the current cycle. `runs.checked_files` keeps the source run
+  and the output digest. Earlier runs and a model's summary have no such proof.
 - A schedule is every n minutes, daily, weekdays, or once a week on a day
   (`{ every: 'week', day: 'Fri', at: '16:00' }`).
 - `src/mcp.ts` registers every tool through `tool()`, never

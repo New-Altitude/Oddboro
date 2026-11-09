@@ -22,6 +22,8 @@ export type FileWalls = {
   cwd: string;
   /** Folders the run reads, with everything in them. Every folder in `writes` is read too. */
   reads: string[];
+  /** One scheduled input, by the real path checked before the run. Never follow a replacement link. */
+  input?: string;
   /** Folders the run writes, with everything in them. */
   writes: string[];
   /**
@@ -137,7 +139,7 @@ export function resolveIn(walls: FileWalls, input: string, want: 'read' | 'write
   const roots = (want === 'read' ? [...walls.reads, ...walls.writes] : walls.writes)
     .map(realRoot)
     .filter((r): r is string => !!r);
-  if (!roots.some((r) => within(real, r)))
+  if (!(want === 'read' && real === walls.input) && !roots.some((r) => within(real, r)))
     return {
       refused:
         want === 'read'
@@ -169,7 +171,13 @@ export function wallsFromEnv(env: NodeJS.ProcessEnv): FileWalls {
     const list = (v: unknown) =>
       Array.isArray(v) ? v.filter((p): p is string => typeof p === 'string' && isAbsolute(p)) : [];
     if (typeof w.cwd !== 'string' || !isAbsolute(w.cwd) || !existsSync(w.cwd)) throw new Error();
-    return { cwd: w.cwd, reads: list(w.reads), writes: list(w.writes), noWrite: list(w.noWrite) };
+    return {
+      cwd: w.cwd,
+      ...(typeof w.input === 'string' && isAbsolute(w.input) ? { input: w.input } : {}),
+      reads: list(w.reads),
+      writes: list(w.writes),
+      noWrite: list(w.noWrite)
+    };
   } catch {
     // No walls: nothing is readable or writable.
     return { cwd: resolve('/'), reads: [], writes: [], noWrite: [] };

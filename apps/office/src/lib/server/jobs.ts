@@ -7,6 +7,7 @@
 // update is about to install (`held()` in update.ts) it starts no scheduled
 // job: a due one waits and runs once the app is back.
 import {
+  claimScheduledRun,
   closeStaleRuns,
   enabledJobs,
   finishRun,
@@ -28,12 +29,15 @@ import { held } from './update.ts';
 // this before checking the time again. Each check is one comparison per job.
 const LONGEST_WAIT_MS = 10 * 60_000;
 
-const g = globalThis as unknown as { jobClock?: { timer?: ReturnType<typeof setTimeout> } };
+const g = globalThis as unknown as {
+  jobClock?: { timer?: ReturnType<typeof setTimeout>; revision: number; stop: () => void };
+};
 const running = new Set<number>();
 
 async function plan(): Promise<void> {
-  const clock = g.jobClock!;
-  clearTimeout(clock.timer);
+  const clock = g.jobClock;
+  if (!clock) return;
+  const revision = ++clock.revision;
   const now = new Date();
   let soonest = now.getTime() + LONGEST_WAIT_MS;
   for (const j of await enabledJobs()) {
@@ -55,6 +59,8 @@ async function plan(): Promise<void> {
       void wakeThread(t.id).catch((e: unknown) => console.error(`Thread ${t.id} did not wake:`, e));
     else soonest = Math.min(soonest, t.resumeAt.getTime());
   }
+  if (g.jobClock !== clock || clock.revision !== revision) return;
+  clearTimeout(clock.timer);
   clock.timer = setTimeout(() => void plan(), Math.max(1000, soonest - Date.now()));
 }
 
@@ -66,10 +72,15 @@ export async function start(j: JobRow, trigger: RunTrigger): Promise<void> {
   if (running.has(j.id)) return;
   running.add(j.id);
   try {
-    if (trigger === 'schedule') await setNextRun(j.id, nextRun(j.schedule, new Date()));
-    const run = await startRun(j, trigger);
-    const r = await runJob(j, trigger);
-    await finishRun(run, j, r.ok, r.text);
+    const run =
+      trigger === 'schedule' ? await claimScheduledRun(j, new Date()) : await startRun(j, trigger);
+    if (!run) return;
+    const r = await runJob(j, trigger).catch((e: unknown) => ({
+      ok: false,
+      text: e instanceof Error ? e.message : String(e),
+      checkedFiles: undefined
+    }));
+    await finishRun(run, j, r.ok, r.text, r.checkedFiles);
   } finally {
     running.delete(j.id);
   }
@@ -81,12 +92,19 @@ export async function runNow(id: number): Promise<void> {
 }
 
 /** Start the clock once per process. */
-export function startClock(): void {
-  if (g.jobClock) return;
-  g.jobClock = {};
-  listen();
-  bus.on('event', (e: OfficeEvent) => {
+export function startClock(): () => void {
+  if (g.jobClock) return g.jobClock.stop;
+  const changed = (e: OfficeEvent) => {
     if (e.type === 'change' && ['jobs', 'pokes', 'threads'].includes(e.table)) void plan();
-  });
+  };
+  const stop = () => {
+    clearTimeout(g.jobClock?.timer);
+    bus.off('event', changed);
+    delete g.jobClock;
+  };
+  g.jobClock = { stop, revision: 0 };
+  listen();
+  bus.on('event', changed);
   void closeStaleRuns().then(plan);
+  return stop;
 }

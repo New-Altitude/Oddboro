@@ -10,12 +10,14 @@
     request,
     name,
     onready,
-    onedit
+    onedit,
+    retryLabel = 'Retry message'
   }: {
     request: ChatSignIn;
     name: string;
     onready: () => void;
-    onedit: () => void;
+    onedit?: () => void;
+    retryLabel?: string;
   } = $props();
   const tools = new AgentTools();
   const agent = $derived(request.agent);
@@ -113,10 +115,10 @@
     {#if signIn?.signedIn || signIn?.ownLogin}<button
         class="ms-2 text-sea"
         disabled={busy}
-        onclick={onready}>Retry message</button
+        onclick={onready}>{retryLabel}</button
       >{/if}
   {/if}
-  <button class="block text-muted" onclick={onedit}>Back to message</button>
+  {#if onedit}<button class="block text-muted" onclick={onedit}>Back to message</button>{/if}
   {#if problem || tools.problems[agent]}<p class="text-coral" role="alert">
       {problem || tools.problems[agent]}
     </p>{/if}

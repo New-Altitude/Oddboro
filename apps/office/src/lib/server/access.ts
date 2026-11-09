@@ -18,11 +18,17 @@ import {
   type ConnectorRow,
   type GoogleProduct
 } from '@oddboro/ledger';
-import { secretNamesClient, toolKeys } from './aws.ts';
+import { awsReady, secretNamesClient, toolKeys } from './aws.ts';
 import { cleanEnv } from './claude.ts';
 import { driveServer } from './google/drive.ts';
 import { gmailServer } from './google/gmail.ts';
 import { bearer, startSignIn } from './oauth.ts';
+
+/** Check the sign-in the run will use, including an AWS role that holds another tool's key. */
+export async function sourceReady(c: ConnectorRow): Promise<boolean> {
+  if (c.config.oauth && !(await bearer(c.id).catch(() => undefined))) return false;
+  return awsReady(c);
+}
 
 export type ToolInfo = { name: string; description: string; readOnly: boolean };
 
