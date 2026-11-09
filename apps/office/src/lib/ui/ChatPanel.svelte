@@ -5,6 +5,8 @@
   import { FIRST_QUESTIONS, firstQuestionIn } from '@oddboro/ledger/first-questions';
   import { clockTime } from '@oddboro/ledger/time';
   import Markdown from './Markdown.svelte';
+  import BugReport from './BugReport.svelte';
+  import { bugRequest } from '../bug-report.ts';
   import Lesson from './Lesson.svelte';
   import { call } from './api.ts';
   import { when, workLine } from './format.ts';
@@ -181,6 +183,7 @@
   });
   let lines = $state<Line[]>([]);
   let draft = $state('');
+  let report = $state<{ text: string; command?: string }>();
   let sending = $state(false);
   let status = $state('');
   let loaded = $state(false);
@@ -300,6 +303,12 @@
     e.preventDefault();
     const message = draft.trim();
     if (!message || sending) return;
+    const last = lines.at(-1);
+    const details = bugRequest(message, replyTo?.title ?? (last?.text || last?.item?.title || ''));
+    if (details !== undefined) {
+      report = { text: details, command: draft };
+      return;
+    }
     const re = replyTo;
     draft = '';
     replyTo = undefined;
@@ -554,6 +563,10 @@
       >
       {#if copied === i}<span class="tip shown" aria-live="polite">Copied</span>{/if}
     </button>
+    <button
+      class="hover:text-ink"
+      onclick={() => (report = { text: line.text || line.item?.title || '' })}>Report bug</button
+    >
   </div>
 {/snippet}
 
@@ -823,6 +836,18 @@
     >
   </form>
 </div>
+
+{#if report}
+  <BugReport
+    initial={report.text}
+    staff={profile.id}
+    onclose={() => (report = undefined)}
+    onfiled={() => {
+      if (report?.command === draft) draft = '';
+      if (!sending) load(profile.id);
+    }}
+  />
+{/if}
 
 <style>
   .grip {
