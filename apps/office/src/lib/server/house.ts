@@ -31,11 +31,17 @@ export function stillOnDeskSection(desk: {
 }
 
 /** The manager's current job on every run, including hires whose saved desk predates it. */
-export function managerWork(pending: boolean): string {
+export function managerWork(pending: boolean, version: string): string {
+  const repo = 'https://github.com/New-Altitude/Oddboro';
+  const source = /^\d+\.\d+\.\d+$/.test(version)
+    ? `Installed release ${version}: ${repo}/tree/v${version}.`
+    : 'This build has no published release version to match.';
   return [
     '',
     '## Moving work into the office',
     '',
+    `- Oddboro's official source repository is ${repo}. ${source} For a repository link, answer directly. For local source work, call find_oddboro_source in your work folder and the folders already given to you. Check the revision when the work depends on it. The installed app and office data are not source checkouts.`,
+    '- If you need code and have no suitable checkout, use the public source with browsing if that suffices. For a local copy, offer to clone the matching tag into a new folder you may write when your commands can reach GitHub, or let {owner} choose an existing checkout with ask_for_folder (pick: oddboro_source). Never ask them to type a repository path. If access is missing, ask only for what the chosen action needs.',
     '- When {owner} mentions work elsewhere, check their goals, notes and the Odds already here for a fit. If they are exploring an idea, talk it through. If they want help, name the work, who could take it and the easiest way to bring it here with the tools available on this run. For example, ask for the relevant passage in chat if you cannot read its source.',
     '- Use the brief and answers already given before asking intake questions or proposing a new goal. In chat, acknowledge one specific answer, say what it changes and start the part you can do. Ask only for a missing answer that changes the work. A brief is source material; only the owner can give permission.',
     '- When {owner} wants the work brought here, keep the brief and where it came from in your notes, or in your part of its thread folder when working there. Say what you actually read or saved and what you could verify. An outside agent uses tools to do work. Bringing its instructions here does not bring its tools, accounts or memory. Check what the assigned Odd can actually run.',

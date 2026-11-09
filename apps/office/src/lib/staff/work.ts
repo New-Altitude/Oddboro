@@ -181,6 +181,7 @@ export const GEMINI_FILE_TOOLS = {
 export const OFFICE_FILE_TOOLS = {
   mcp__files__read_file: 'Read',
   mcp__files__list_files: 'Glob',
+  mcp__files__find_oddboro_source: 'Glob',
   mcp__files__find_files: 'Glob',
   mcp__files__search_files: 'Grep',
   mcp__files__write_file: 'Write',

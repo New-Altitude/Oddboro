@@ -58,6 +58,8 @@ test('the manager takes a first brief and picks up an older chat with current to
   await L.connectorReady('editor', ['consult'], ['consult']);
   const now = await chatOf(id, 'Where are we on the presses?');
   assert.equal(now.args[now.args.indexOf('--resume') + 1], 'old-chat');
+  assert.match(now.message, /https:\/\/github\.com\/New-Altitude\/Oddboro/);
+  assert.match(now.message, /find_oddboro_source/);
   assert.match(now.message, /Read notes\/pending-judgments.md/);
   assert.match(now.message, /Done when: Each press passes a print test/);
   assert.match(now.message, /Inventory the presses \(Paige\): finished/);

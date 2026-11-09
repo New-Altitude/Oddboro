@@ -165,7 +165,7 @@ import {
   modelArgs
 } from './claude.ts';
 import { notifyMac } from './notify.ts';
-import { downtime, installsAt } from './update.ts';
+import { downtime, installsAt, VERSION } from './update.ts';
 import { catchUp, NOW, parseSession, saveSession, sectionsOf, sessionIdIn } from './resume.ts';
 import { changedSince, replay, replayed, replayedAt, replaySince } from './replay.ts';
 import { checkInput, ChatInputError, keepFiles, inputFiles } from './chat-files.ts';
@@ -730,7 +730,7 @@ async function prompt(
       ? opts.led.flatMap((story) => threadBrief({ story, shown: opts.shown })).join('\n')
       : goalsLedBrief(opts.led)) +
     (who.role === MANAGER_ROLE
-      ? managerWork(existsSync(join(dir, 'notes', 'pending-judgments.md')))
+      ? managerWork(existsSync(join(dir, 'notes', 'pending-judgments.md')), VERSION)
       : '') +
     stillOnDeskSection(await stillOnDesk(who.id)) +
     house({
@@ -1823,7 +1823,7 @@ function followUpBrief(
           : []),
         ...(a.folder
           ? [
-              `- The folder you asked for: ${shownFolder(a.folder.path)} (${FOLDER_SAID[a.folder.level]})`
+              `- The folder you asked for: ${a.folder.path ? shownFolder(a.folder.path) : 'the Oddboro source checkout'} (${FOLDER_SAID[a.folder.level]})`
             ]
           : []),
         ...(a.call

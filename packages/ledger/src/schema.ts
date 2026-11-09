@@ -125,7 +125,8 @@ export type AccessRequest = { connector: string; level: Level; another?: GoogleP
  * the one they picked, which may be narrower than the Odd asked.
  */
 export type FolderRequest = {
-  path: string;
+  /** Null when the owner will choose an existing Oddboro checkout. */
+  path: string | null;
   level: FolderAccess;
   given?: { path: string; level: FolderAccess };
 };

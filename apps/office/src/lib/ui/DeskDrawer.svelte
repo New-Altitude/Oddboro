@@ -163,9 +163,11 @@
     reworks = null;
     skip = {};
     secret = {};
-    changing = false;
     const asked = i?.kind === 'ask' ? i.row : undefined;
-    folderPath = asked?.folder ? (untrack(() => desk.folders[asked.id]) ?? asked.folder.path) : '';
+    changing = asked?.folder?.path === null;
+    folderPath = asked?.folder
+      ? (untrack(() => desk.folders[asked.id]) ?? asked.folder.path ?? '')
+      : '';
     folderLevel = asked?.folder?.level ?? 'read';
     if (i?.kind === 'ask')
       call<{ precedent: LedgerRow[]; revises: AskRow | null }>(`/api/asks/${i.row.id}`)

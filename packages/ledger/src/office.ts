@@ -27,6 +27,7 @@ import { alias } from 'drizzle-orm/pg-core';
 import { db, sql as pg } from './db.ts';
 import { deleteSecret, getSecret } from './secrets.ts';
 import { embed } from './embed.ts';
+import { isOddboroCheckout } from './oddboro-source.ts';
 import { chatSession, CODE, home } from './home.ts';
 import {
   answeredAll,
@@ -1246,6 +1247,8 @@ export async function giveFolder(
   if (a.status !== 'open') return { refused: 'You already answered this ask.', status: 409 };
   const checked = checkFolder(path);
   if ('refused' in checked) return { refused: checked.refused, status: 400 };
+  if (a.folder.path === null && !isOddboroCheckout(checked.real))
+    return { refused: 'Choose the root folder of an Oddboro source checkout.', status: 400 };
   const given = { path: checked.real, level };
   try {
     const done = await decide(id, 'approve', reason, { folder: { ...a.folder, given } });
@@ -2808,7 +2811,7 @@ export async function desk(): Promise<Desk> {
     reports: r,
     attachments: f.map((x) => x.attachments),
     folders: Object.fromEntries(
-      shown.flatMap((x) => (x.folder ? [[x.id, shownFolder(x.folder.path)]] : []))
+      shown.flatMap((x) => (x.folder?.path ? [[x.id, shownFolder(x.folder.path)]] : []))
     )
   };
 }
@@ -2919,7 +2922,7 @@ export async function deliveries(staffId: string, limit = 200): Promise<Delivery
       ...(folder && {
         folder: {
           ...folder,
-          path: shownFolder(folder.path),
+          path: folder.path && shownFolder(folder.path),
           ...(folder.given && { given: { ...folder.given, path: shownFolder(folder.given.path) } })
         },
         why

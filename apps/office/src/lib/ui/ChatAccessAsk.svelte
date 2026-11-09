@@ -17,7 +17,7 @@
   // The parent keys this editor by ask id. Office updates and picker focus keep the owner's edits.
   let path = $state(untrack(() => item.folder?.path ?? ''));
   let level = $state(untrack(() => item.folder?.level ?? 'read'));
-  let changing = $state(false);
+  let changing = $state(untrack(() => item.folder?.path === null));
   let picking = $state(false);
   let busy = $state(false);
   let problem = $state('');

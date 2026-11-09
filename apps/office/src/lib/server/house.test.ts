@@ -3,9 +3,17 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { OFFICE_SECTION, SETTINGS_TAB } from '@oddboro/ledger/access';
-import { house, stillOnDeskSection } from './house.ts';
+import { house, managerWork, stillOnDeskSection } from './house.ts';
 
 const section = house({ has: () => false, now: '9:00', zone: 'London time' });
+
+test('the manager can name the repository offline and match a packaged release', () => {
+  const repo = 'https://github.com/New-Altitude/Oddboro';
+  assert.ok(managerWork(false, '1.2.3').includes(repo + '/tree/v1.2.3'));
+  const dev = managerWork(false, '');
+  assert.ok(dev.includes(repo));
+  assert.ok(!dev.includes('/tree/v'));
+});
 
 test('every run is told that only its reply and its tool calls reach the owner', () => {
   assert.match(

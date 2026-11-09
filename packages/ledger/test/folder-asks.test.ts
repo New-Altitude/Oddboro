@@ -5,7 +5,7 @@
 // Settings tab, and only then approves the ask. Two runs asking for one folder
 // are twins, as access asks are. Run with `npm test -w @oddboro/ledger`.
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, beforeEach, test } from 'node:test';
@@ -117,6 +117,35 @@ test('the tool raises one folder ask with the real path, and refuses a repeat fr
   const again = await call(c, { path: taxes, level: 'read', why: 'w' });
   assert.ok(again.error && again.text.includes(`revises: ${a.id}`), again.text);
   assert.equal((await folderAsks()).length, 1);
+});
+
+test('an Oddboro source ask opens with no path and resumes only after the owner picks a checkout', async () => {
+  const c = await theo('k-source');
+  const request = { pick: 'oddboro_source', level: 'read', why: 'Read the source for this fix.' };
+  assert.ok((await call(c, { ...request, path: taxes })).error);
+  assert.ok(!(await call(c, request)).error);
+  const [a] = await folderAsks();
+  assert.deepEqual(a.folder, { path: null, level: 'read' });
+  assert.ok((await call(c, request)).error);
+  assert.deepEqual(await folders(), []);
+  assert.deepEqual(await O.giveFolder(a.id, HOME, 'read'), {
+    refused: O.FOLDER_REFUSED.home,
+    status: 400
+  });
+  assert.ok('refused' in (await O.giveFolder(a.id, taxes, 'read')));
+  assert.equal((await row(a.id)).status, 'open');
+  const src = folder('Developer', 'worktree');
+  folder('Developer', 'worktree', 'apps', 'office', 'src', 'lib', 'server');
+  writeFileSync(join(src, '.git'), 'gitdir: elsewhere');
+  writeFileSync(join(src, 'package.json'), '{"name":"oddboro-platform"}');
+  writeFileSync(join(src, 'apps', 'office', 'src', 'lib', 'server', 'staff.ts'), '');
+  assert.deepEqual(await O.giveFolder(a.id, src, 'read'), { given: { path: src, level: 'read' } });
+  assert.deepEqual(await folders(), [{ path: src, write: false }]);
+  assert.equal((await row(a.id)).status, 'approved');
+  assert.deepEqual(
+    (await db.select().from(followUps)).map((f) => f.askId),
+    [a.id]
+  );
 });
 
 test('Give access gives the folder with one ledger line, approves the ask and starts the run that needs it', async () => {

@@ -1057,36 +1057,45 @@ tool(
 tool(
   'ask_for_folder',
   {
-    description: `Ask ${OWNER} for a folder on this computer, outside the office, to read or to read and change. Ask with this instead of giving ${OWNER} steps for your ${SETTINGS_TAB} tab: they give it with one click, or a narrower one. Ask for the narrowest folder and the lowest level the work needs: read to look, write only to change files there. You reach it from your next run, which starts when they give it. my_access lists the folders you have.${raisedNote}`,
+    description: `Ask ${OWNER} for a folder on this computer, outside the office, to read or to read and change. Ask with this instead of giving ${OWNER} steps for your ${SETTINGS_TAB} tab: they give it with one click, or a narrower one. Ask for the narrowest folder and the lowest level the work needs: read to look, write only to change files there. You reach it from your next run, which starts when they give it. my_access lists the folders you have. To let the owner choose an existing Oddboro source checkout, pass pick: oddboro_source instead of path.${raisedNote}`,
     inputSchema: {
       path: z
         .string()
         .trim()
         .min(1)
         .max(1000)
+        .optional()
         .describe('The folder\'s full path, starting with / or ~, e.g. "~/Documents/Taxes".'),
+      pick: z.literal('oddboro_source').optional(),
       level: z.enum(['read', 'write']).describe('read to look, write to change files there.'),
       why: z.string().max(1000).describe('What work needs it, in one or two plain sentences.'),
       revises: revisesArg
     }
   },
-  async ({ path, level, why, revises }) => {
+  async ({ path, pick, level, why, revises }) => {
     const on = await placed({});
     if ('problem' in on) return refused(on.problem);
-    if (!isAbsolute(path) && !/^~(?=$|\/)/.test(path))
-      return refused("Give the folder's full path, starting with / or ~.");
-    const checked = checkFolder(path);
-    if ('refused' in checked) return refused(checked.refused);
-    const held = folderAskRefused((await staffer(ME)) ?? me, checked.real, level);
-    if (held) return refused(held);
-    const shown = shownFolder(checked.real);
+    if (!!path === !!pick) return refused('Give a folder path or pick oddboro_source.');
+    let wanted: string | null = null;
+    if (path) {
+      if (!isAbsolute(path) && !/^~(?=$|[\\/])/.test(path))
+        return refused("Give the folder's full path, starting with / or ~.");
+      const checked = checkFolder(path);
+      if ('refused' in checked) return refused(checked.refused);
+      const held = folderAskRefused((await staffer(ME)) ?? me, checked.real, level);
+      if (held) return refused(held);
+      wanted = checked.real;
+    }
+    const shown = wanted ? shownFolder(wanted) : 'an Oddboro source checkout';
     const { ask } = await raiseAsk(ME, {
       ...on,
       kind: 'folder',
       title: `${level === 'write' ? 'Read and change' : 'Read'} ${shown}`,
       why,
-      ifApproved: `The office gives ${me.name} ${shown} (${FOLDER_SAID[level]}), or the folder and level you pick, and ${me.name} picks up the work with it.`,
-      folder: { path: checked.real, level },
+      ifApproved: pick
+        ? `You choose the Oddboro source checkout ${me.name} may use (${FOLDER_SAID[level]}).`
+        : `The office gives ${me.name} ${shown} (${FOLDER_SAID[level]}), or the folder and level you pick, and ${me.name} picks up the work with it.`,
+      folder: { path: wanted, level },
       revises,
       via: VIA
     });
