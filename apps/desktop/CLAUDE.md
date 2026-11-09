@@ -96,6 +96,7 @@ never get IPC without one.
 | `ODDBORO_PORT`                 | the same                                                   |
 | `HOST`                         | `127.0.0.1`                                                |
 | `ORIGIN`                       | `http://127.0.0.1:<port>`                                  |
+| `BODY_SIZE_LIMIT`              | `12M` for chat uploads; other routes keep 512 KiB          |
 | `ODDBORO_HOME`                 | `~/.oddboro` (`%USERPROFILE%\.oddboro`), unless set        |
 | `ODDBORO_CODE`                 | `<resources>/server`                                       |
 | `ODDBORO_DB_PORT`              | passed through when the shell's env sets it                |

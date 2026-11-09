@@ -157,7 +157,7 @@ type CodexRun = {
   commands: boolean;
   /** Whether the run's commands reach the internet (`network` in its profile). */
   network: boolean;
-  /** Pictures sent with the message (an office run only), each as `--image=<file>`. */
+  /** Pictures sent with the message, each as `--image=<file>`. */
   images?: RunImage[];
   /** How hard the model thinks, as `model_reasoning_effort`: an Odd's level or an office run's. */
   effort?: Effort;
@@ -419,9 +419,6 @@ export function codexLaunch(r: CodexRun): CodexLaunch {
   const model = r.model ?? process.env.OFFICE_CODEX_MODEL;
   const args = [
     'exec',
-    // Joined to its flag: `--image` takes many values, so a bare file after
-    // it would also take the "-" that reads the message.
-    ...(r.images ?? []).map((i) => `--image=${i.path}`),
     '--json',
     // The Odd's folder is not a git repository.
     '--skip-git-repo-check',
@@ -449,7 +446,11 @@ export function codexLaunch(r: CodexRun): CodexLaunch {
     ...(r.effort ? set('model_reasoning_effort', r.effort) : []),
     ...(model ? ['-m', model] : []),
     // "-" reads the message from stdin, so one that starts with a dash is never a flag.
-    ...(r.resume ? ['resume', r.resume, '-'] : ['-'])
+    ...(r.resume ? ['resume'] : []),
+    // Resume takes its own image flags. Join each path so it cannot take the prompt too.
+    ...(r.images ?? []).map((i) => `--image=${i.path}`),
+    ...(r.resume ? [r.resume] : []),
+    '-'
   ];
   return {
     args,

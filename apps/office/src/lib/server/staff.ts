@@ -166,11 +166,14 @@ import { notifyMac } from './notify.ts';
 import { downtime, installsAt } from './update.ts';
 import { catchUp, NOW, parseSession, saveSession, sectionsOf, sessionIdIn } from './resume.ts';
 import { changedSince, replay, replayed, replayedAt, replaySince } from './replay.ts';
+import { checkInput, ChatInputError, keepFiles, inputFiles } from './chat-files.ts';
+import type { ChatAttachment, ChatSource, OwnerInput } from '../staff/chat-input.ts';
+import { claudeInput } from './claude.ts';
 import { chatPreface } from './chat-preface.ts';
 import { officeEnv } from './run-env.ts';
 import { firstDayOf } from './first-day.ts';
 import { endedEarly, LAUNCHES, streamTools, type Launch } from './cli.ts';
-import { NOT_SIGNED_IN, shellEnv, SIGN_IN_WHERE, stopGroups } from './launch.ts';
+import { NOT_SIGNED_IN, shellEnv, SIGN_IN_WHERE, stopGroups, type RunImage } from './launch.ts';
 import { tooOldLine } from './versions.ts';
 import { claudeSandbox, NETWORK_REFUSED, NETWORK_REFUSED_LINE } from './sandbox.ts';
 import { agentCommand } from './agent-sign-in.ts';
@@ -198,6 +201,9 @@ export type ChatEntry = {
   at: string;
   from: 'owner' | 'staff';
   text: string;
+  turnId?: string;
+  source?: ChatSource;
+  attachments?: ChatAttachment[];
   poke?: true;
   told?: true;
   re?: ChatRef;
@@ -836,6 +842,9 @@ async function run(
     extra?: string;
     /** The owner's own message, when this is a chat. */
     ownerSaid?: string;
+    /** Owner text and files are literal, including any {owner} in them. */
+    literal?: string;
+    images?: RunImage[];
     /** The ask the owner approved that this run carries out: the only one its self-edits may cite. */
     approvedAsk?: number;
     /** The owner's note a follow-up carries out, which a lesson may quote. */
@@ -1017,6 +1026,7 @@ async function run(
       'stream-json',
       '--verbose',
       '--include-partial-messages',
+      ...(opts.images?.length ? ['--input-format', 'stream-json'] : []),
       // With the office carrying its files, no file tool of its own; with no
       // other tool either, an empty list, which Claude Code takes as none.
       '--tools',
@@ -1069,7 +1079,7 @@ async function run(
       ...(prior ? ['--resume', prior] : ['--session-id', randomUUID()])
     ];
   }
-  const input = preface + say(message);
+  const input = preface + [say(message), opts.literal].filter(Boolean).join('\n\n');
   /**
    * The run's servers, the gateway's token among them, go to Claude Code in a
    * file only the owner can read, in a folder no run reads, removed when the
@@ -1085,8 +1095,15 @@ async function run(
   /** A Claude Code run; with commands, their temp folder and the git template in it, made now and removed when the run ends. */
   function claudeLaunch(): Launch {
     const env = staffEnv(toolDir || undefined);
+    const stdin = claudeInput(
+      input,
+      opts.images?.map((i) => ({
+        mediaType: i.mediaType,
+        data: readFileSync(i.path).toString('base64')
+      }))
+    );
     const dropMcp = writeMcpFile();
-    if (!tmp) return { args: claudeArgs(env), env, stdin: input, done: dropMcp };
+    if (!tmp) return { args: claudeArgs(env), env, stdin, done: dropMcp };
     mkdirSync(tmp, { recursive: true, mode: 0o700 });
     const shell = shellEnv(tmp);
     mkdirSync(shell.GIT_TEMPLATE_DIR, { mode: 0o700 });
@@ -1097,7 +1114,7 @@ async function run(
     return {
       args: claudeArgs(env),
       env,
-      stdin: input,
+      stdin,
       done: () => {
         dropMcp();
         rmSync(tmp, { recursive: true, force: true });
@@ -1130,6 +1147,7 @@ async function run(
           edited: opts.ownerEdit?.path,
           system: system.replaceAll(NOW, time),
           input,
+          images: opts.images,
           resume: prior,
           servers,
           allowed,
@@ -1142,10 +1160,15 @@ async function run(
           account
         });
   if ('refused' in launch) {
+    void closeGateway(gate);
     opts.onEvent?.({ type: 'error', message: launch.refused });
     return { ok: false, text: launch.refused };
   }
   const tool = AGENT_NAMES[who.agent];
+  const startError = (e: Error & { code?: string }) =>
+    who.agent === 'grok' && (e.code === 'E2BIG' || e.code === 'ENAMETOOLONG')
+      ? 'This message is too large for Grok. The office kept it. Choose another tool for this Odd and get a reply.'
+      : `Could not start ${tool}: ${e.message}`;
 
   return new Promise((done) => {
     runsGoing.add(key);
@@ -1153,12 +1176,26 @@ async function run(
     // install folder or an npm Claude Code on Windows; by name when there is
     // none, so the run fails naming it.
     const [cmd, before] = agentCommand(who.agent) ?? [who.agent, []];
-    const child = spawn(cmd, [...before, ...launch.args], {
-      cwd: dir,
-      env: launch.env,
-      detached: !!launch.ownGroup,
-      windowsHide: true
-    });
+    let child;
+    try {
+      child = spawn(cmd, [...before, ...launch.args], {
+        cwd: dir,
+        env: launch.env,
+        detached: !!launch.ownGroup,
+        windowsHide: true
+      });
+    } catch (e) {
+      // Grok puts the whole message on the command line. A large picture
+      // can exceed the system's limit before there is even a child process.
+      runsGoing.delete(key);
+      launch.done();
+      void closeGateway(gate);
+      bus.emit(RUN_ENDED);
+      const text = startError(e as NodeJS.ErrnoException);
+      opts.onEvent?.({ type: 'error', message: text });
+      done({ ok: false, text });
+      return;
+    }
     /** Stop the tool, and with a group of its own, whatever its commands left running. */
     const stop = () => {
       if (!launch.ownGroup) return child.kill();
@@ -1265,9 +1302,7 @@ async function run(
     });
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (c: string) => (stderr += c));
-    child.on('error', (err) =>
-      finish({ ok: false, text: `Could not start ${tool}: ${err.message}` })
-    );
+    child.on('error', (err) => finish({ ok: false, text: startError(err) }));
     child.on('close', (code) => {
       if (launch.ownGroup) stop();
       finish({
@@ -1275,11 +1310,53 @@ async function run(
         text: `${tool} stopped (exit ${code}). ${stderr.trim().split('\n').slice(-2).join(' ')}`
       });
     });
+    // A tool that stops before reading a long brief closes its pipe first.
+    child.stdin.on('error', () => {});
     child.stdin.end(launch.stdin);
   });
 }
 
-/** Send one chat message. Resolves when the reply is complete; events stream through `onEvent`. */
+/** Keep an owner turn before any run. Imports can stop here until the owner asks for a reply. */
+export async function keepOwnerTurn(
+  id: string,
+  input: OwnerInput,
+  replyTo?: Pick<ChatRef, 'kind' | 'id'>
+): Promise<ChatEntry> {
+  const attachments = checkInput(input);
+  if (!(await isStaff(id))) throw new ChatInputError('No such Odd');
+  const re = replyTo ? (await replyBrief(id, replyTo)).ref : undefined;
+  const { turnId, message, source } = input;
+  // From the lookup through the append there is no await. A repeat, even
+  // from another open page, can never add a second copy of the turn.
+  const old = history(id).find((e) => e.from === 'owner' && e.turnId === turnId);
+  if (old) {
+    if (
+      old.text !== message ||
+      old.source?.kind !== source.kind ||
+      old.source.id !== source.id ||
+      old.source.revision !== source.revision ||
+      old.re?.kind !== re?.kind ||
+      old.re?.id !== re?.id ||
+      JSON.stringify(old.attachments ?? []) !== JSON.stringify(attachments)
+    )
+      throw new ChatInputError('This message ID already belongs to another message.');
+    return old;
+  }
+  keepFiles(id, attachments, input.files ?? []);
+  const line: ChatEntry = {
+    at: new Date().toISOString(),
+    from: 'owner',
+    text: message,
+    turnId,
+    source,
+    ...(re ? { re } : {}),
+    ...(attachments.length ? { attachments } : {})
+  };
+  addToChat(id, line);
+  emit({ type: 'change', table: 'chat' });
+  return line;
+}
+
 export async function chat(
   id: string,
   message: string,
@@ -1287,20 +1364,62 @@ export async function chat(
   replyTo?: Pick<ChatRef, 'kind' | 'id'>
 ): Promise<void> {
   if (chatting.has(id)) throw new Error(`${id} is already replying`);
-  const who = await staffer(id);
-  if (!who) throw new Error(`No Odd named ${id}`);
+  const turnId = randomUUID();
+  await keepOwnerTurn(id, { turnId, message, source: { kind: 'chat' } }, replyTo);
+  return replyToOwnerTurn(id, turnId, onEvent);
+}
+
+export async function replyToOwnerTurn(
+  id: string,
+  turnId: string,
+  onEvent: (e: ChatEvent) => void
+): Promise<void> {
+  if (!/^[a-z0-9-]+$/.test(id)) throw new ChatInputError('No such Odd');
+  if (chatting.has(id)) throw new Error(`${id} is already replying`);
   chatting.add(id);
-  // Stamped when sent, so what the staffer delivers while replying lands between the two.
-  const sent = new Date().toISOString();
+  const started = Date.now();
   try {
-    // A reply in the owner's own words may already be a brief. Let the
-    // manager use it now. The preset path still takes just three taps.
-    const last = history(id).at(-1);
+    const who = await staffer(id);
+    if (!who) throw new ChatInputError('No such Odd');
+    const log = history(id);
+    const owner = log.find((e) => e.turnId === turnId && e.from === 'owner');
+    if (!owner) throw new ChatInputError('No such message');
+    const done = log.find((e) => e.turnId === turnId && e.from === 'staff');
+    if (done) return onEvent({ type: 'done', text: done.text });
+    const message = owner.text;
+    // A saved turn without a reply has not been answered. Only its own retry
+    // sends it to the tool; a later message must not retry it through replay.
+    const answered = new Set(
+      log.filter((e) => e.from === 'staff' && e.turnId).map((e) => e.turnId)
+    );
+    const past = log
+      .filter((e) => e.from !== 'owner' || !e.turnId || answered.has(e.turnId))
+      .map((e) =>
+        e.attachments?.length
+          ? {
+              ...e,
+              text: [e.text, `(Attached: ${e.attachments.map((f) => f.name).join(', ')})`]
+                .filter(Boolean)
+                .join('\n')
+            }
+          : e
+      );
+    const last = past.at(-1);
     const asked = last?.from === 'staff' ? firstQuestionIn(last.text) : -1;
-    const next = nextFirstQuestion(asked, message);
+    // Only a choice in this chat takes the preset path. An import, file or
+    // Desk reply needs the manager even if its words match a choice.
+    const next =
+      owner.source?.kind === 'chat' && !owner.attachments?.length && !owner.re
+        ? nextFirstQuestion(asked, message)
+        : undefined;
     if (next) {
-      addToChat(id, { at: sent, from: 'owner', text: message });
-      addToChat(id, { at: new Date().toISOString(), from: 'staff', text: next, told: true });
+      addToChat(id, {
+        at: new Date().toISOString(),
+        from: 'staff',
+        text: next,
+        told: true,
+        turnId
+      });
       onEvent({ type: 'done', text: next });
       return;
     }
@@ -1308,11 +1427,10 @@ export async function chat(
     // owner last wrote are not in the session: say so, so an answer to the
     // hello, "How did the call go?" or "What about Thursday?" makes sense to
     // the staffer.
-    const re = replyTo ? await replyBrief(id, replyTo) : undefined;
+    const re = owner.re ? await replyBrief(id, owner.re) : undefined;
     const landed = (await deliveries(id, 20)).filter(
       (d) => !(d.kind === re?.ref.kind && d.id === re.ref.id)
     );
-    const past = history(id);
     // A new session (the Odd moved to another tool, or its session is gone)
     // never saw the chat: it gets the latest of it word for word. The preface
     // leaves out the told and poke lines the replay holds, and keeps those the
@@ -1332,30 +1450,36 @@ export async function chat(
         past.filter((e, i) => !(inReplay.has(i) && (e.told || e.poke))),
         landed
       ),
-      ...(re ? [re.brief] : []),
-      message
+      ...(re ? [re.brief] : [])
     ].join('\n\n');
+    const { texts, images } = inputFiles(id, owner.attachments ?? []);
     const r = await run(who, prompt, {
       kind: 'chat',
       ownerSaid: message,
+      literal: [message, ...texts].filter(Boolean).join('\n\n') || 'See the attached picture.',
+      images,
       sessionFile: chatSession(id),
       timeoutMs: CHAT_TIMEOUT_MS,
-      onEvent
+      onEvent: (e) => {
+        if (e.type !== 'done') onEvent(e);
+      }
     });
     if (r.ok) {
-      addToChat(id, { at: sent, from: 'owner', text: message, re: re?.ref });
       // `took`: how long the owner waited for this reply, from when they sent.
       const at = new Date();
       addToChat(id, {
         at: at.toISOString(),
         from: 'staff',
         text: r.text,
-        took: at.getTime() - Date.parse(sent)
+        turnId,
+        took: at.getTime() - started
       });
       if (re?.ref.kind === 'report') await replyToReport(re.ref.id, message);
+      onEvent({ type: 'done', text: r.text });
     }
   } finally {
     chatting.delete(id);
+    emit({ type: 'change', table: 'chat' });
   }
 }
 

@@ -4,9 +4,16 @@
   import type { HandOffLine, HandOffStep, LessonLine, PokeRow, ThreadLine } from '@oddboro/ledger';
   import { FIRST_QUESTIONS, firstQuestionIn } from '@oddboro/ledger/first-questions';
   import { clockTime } from '@oddboro/ledger/time';
+  import {
+    newTurnId,
+    CHAT_ACCEPT,
+    CHAT_BYTES,
+    CHAT_FILES,
+    type ChatAttachment
+  } from '../staff/chat-input.ts';
   import Markdown from './Markdown.svelte';
   import Lesson from './Lesson.svelte';
-  import { call } from './api.ts';
+  import { call, failure } from './api.ts';
   import { when, workLine } from './format.ts';
   import { chatRequest, takeDraft, type Delivered } from './chat-about.svelte.ts';
   import type { StaffProfile } from '../staff/roster.ts';
@@ -42,6 +49,8 @@
   type Line = {
     from: 'owner' | 'staff';
     text: string;
+    turnId?: string;
+    attachments?: Pick<ChatAttachment, 'name'>[];
     pending?: boolean;
     failed?: boolean;
     /** Delivered later by the office, at `at`. */
@@ -60,18 +69,7 @@
     /** How long the run behind a reply took, in milliseconds. */
     took?: number;
   };
-  type Entry = {
-    at: string;
-    from: 'owner' | 'staff';
-    text: string;
-    poke?: true;
-    item?: Delivered & { status: string };
-    re?: Delivered;
-    lesson?: LessonLine;
-    handOff?: { line: HandOffLine; step: HandOffStep; back?: number };
-    thread?: { line: ThreadLine; steps: HandOffLine[] };
-    took?: number;
-  };
+  type Entry = Line & { at: string };
 
   /** Where a hand-off stands, in words, and whether the owner has to act. */
   function progress(h: HandOffLine): { text: string; yours: boolean } {
@@ -182,6 +180,16 @@
   let lines = $state<Line[]>([]);
   let draft = $state('');
   let sending = $state(false);
+  let remoteBusy = $state(false);
+  let files = $state<File[]>([]);
+  let picker: HTMLInputElement;
+  let problem = $state('');
+  let attempt:
+    { id: string; staff: string; message: string; re?: Delivered; files: File[] } | undefined;
+  const answered = $derived(
+    new Set(lines.filter((l) => l.from === 'staff' && !l.failed).map((l) => l.turnId))
+  );
+  let reading = 0;
   let status = $state('');
   let loaded = $state(false);
   let list: HTMLDivElement | undefined = $state();
@@ -253,9 +261,12 @@
   let upcoming = $state<PokeRow[]>([]);
 
   function load(id: string) {
+    const read = ++reading;
     fetch(`/api/staff/${id}/chat`)
       .then((r) => r.json())
       .then((d: { history: Entry[]; busy: boolean }) => {
+        if (read !== reading || id !== profile.id || sending) return;
+        remoteBusy = d.busy;
         lines = d.history.map((h) => ({ ...h }));
         loaded = true;
         scrollDown();
@@ -298,12 +309,39 @@
 
   async function send(e: SubmitEvent) {
     e.preventDefault();
-    const message = draft.trim();
-    if (!message || sending) return;
-    const re = replyTo;
-    draft = '';
-    replyTo = undefined;
-    await say(message, re);
+    if ((!draft.trim() && !files.length) || sending || remoteBusy) return;
+    await say(draft, replyTo, files);
+  }
+
+  function attach(selected: FileList | null) {
+    if (!selected || sending) return;
+    const next = [...files, ...selected];
+    if (
+      next.length > CHAT_FILES ||
+      next.reduce((n, f) => n + f.size, new TextEncoder().encode(draft).length) > CHAT_BYTES
+    ) {
+      problem = 'Use up to 8 files and 8 MiB of text and files per message.';
+      return;
+    }
+    files = next;
+    problem = '';
+  }
+
+  function paste(e: ClipboardEvent) {
+    if (!e.clipboardData?.files.length) return;
+    e.preventDefault();
+    attach(e.clipboardData.files);
+    const words = e.clipboardData.getData('text/plain');
+    if (words && box) {
+      box.setRangeText(words, box.selectionStart, box.selectionEnd, 'end');
+      draft = box.value;
+    }
+  }
+
+  function drop(e: DragEvent) {
+    if (!e.dataTransfer?.files.length) return;
+    e.preventDefault();
+    attach(e.dataTransfer.files);
   }
 
   /**
@@ -312,26 +350,74 @@
    */
   const answers = $derived.by(() => {
     const last = lines.at(-1);
-    if (sending || !last || last.from !== 'staff' || last.pending || last.failed) return [];
+    if (sending || remoteBusy || !last || last.from !== 'staff' || last.pending || last.failed)
+      return [];
     return FIRST_QUESTIONS[firstQuestionIn(last.text)]?.answers ?? [];
   });
 
   /** Send one message and stream the reply into the chat. */
-  async function say(message: string, re?: Delivered) {
+  async function say(message: string, re?: Delivered, chosen?: File[], retry?: string) {
+    if (sending || remoteBusy) return;
+    const staff = profile.id;
+    const picks = chosen ?? [];
+    // Keep the ID if the office received the POST but the page lost its response.
+    if (
+      !retry &&
+      (!attempt ||
+        attempt.staff !== staff ||
+        attempt.message !== message ||
+        attempt.re !== re ||
+        picks.length !== attempt.files.length ||
+        picks.some((f, i) => f !== attempt?.files[i]))
+    )
+      attempt = { id: newTurnId(), staff, message, re, files: [...picks] };
+    const turnId = retry ?? attempt!.id;
     sending = true;
+    ++reading;
+    problem = '';
     status = 'Thinking';
-    lines.push({ from: 'owner', text: message, re, at: new Date().toISOString() });
-    lines.push({ from: 'staff', text: '', pending: true });
-    const reply = lines[lines.length - 1];
-    scrollDown();
+    let reply: Line | undefined;
     onstart();
     try {
-      const res = await fetch(`/api/staff/${profile.id}/chat`, {
+      const turn = retry ? { turnId } : { turnId, message, re: re && { kind: re.kind, id: re.id } };
+      // Like every office action this is JSON. A form POST can be refused by
+      // SvelteKit when the page and the server see different schemes.
+      const attachments = await Promise.all(
+        picks.map(
+          (file) =>
+            new Promise<{ name: string; data: string }>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+              reader.onload = () =>
+                resolve({ name: file.name, data: String(reader.result).split(',')[1] });
+              reader.readAsDataURL(file);
+            })
+        )
+      );
+      const res = await fetch(`/api/staff/${staff}/chat`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ message, re: re && { kind: re.kind, id: re.id } })
+        body: JSON.stringify({ ...turn, ...(attachments.length ? { files: attachments } : {}) })
       });
-      if (!res.ok || !res.body) throw new Error((await res.text()) || `HTTP ${res.status}`);
+      if (!res.ok || !res.body) throw await failure(res);
+      if (chosen) {
+        draft = '';
+        files = [];
+        replyTo = undefined;
+      }
+      if (!retry) attempt = undefined;
+      if (!lines.some((line) => line.from === 'owner' && line.turnId === turnId))
+        lines.push({
+          from: 'owner',
+          text: message,
+          re,
+          turnId,
+          attachments: picks.map((f) => ({ name: f.name })),
+          at: new Date().toISOString()
+        });
+      lines.push({ from: 'staff', text: '', pending: true, turnId });
+      reply = lines[lines.length - 1];
+      scrollDown();
       const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
       let buffer = '';
       for (;;) {
@@ -357,6 +443,7 @@
             reply.pending = false;
             reply.at = new Date().toISOString();
           } else if (ev.type === 'error') {
+            problem = ev.message;
             reply.text = ev.message;
             reply.pending = false;
             reply.failed = true;
@@ -365,16 +452,17 @@
         }
       }
     } catch (err) {
-      reply.text = err instanceof Error ? err.message : String(err);
-      reply.failed = true;
+      problem = err instanceof Error ? err.message : String(err);
     } finally {
-      reply.pending = false;
+      if (reply) {
+        if (reply.pending && !problem)
+          problem = 'The reply was interrupted. Check the saved message below.';
+        reply.pending = false;
+      }
       sending = false;
       status = '';
       onend();
-      scrollDown();
-      // Show what the reply changed: a report it read, a lesson it kept.
-      if (!reply.failed) load(profile.id);
+      load(profile.id);
     }
   }
 
@@ -721,6 +809,13 @@
             <Markdown text={line.text} staff={profile.id} />
           {:else}
             {line.text}
+            {#each line.attachments ?? [] as file, n (n)}
+              <a
+                class="block text-sea underline"
+                href={`/api/staff/${profile.id}/chat/${line.turnId}/${n}`}
+                download={file.name}>{file.name}</a
+              >
+            {/each}
           {/if}
         </div>
         {#if line.pending}
@@ -730,6 +825,15 @@
           </div>
         {:else}
           {@render meta(line, i)}
+          {#if line.from === 'owner' && line.turnId && !answered.has(line.turnId) && !sending}
+            <button
+              class="ms-auto text-xs text-sea"
+              disabled={remoteBusy}
+              onclick={() => say('', undefined, undefined, line.turnId)}
+            >
+              {remoteBusy ? 'Waiting for a reply' : 'Get a reply'}
+            </button>
+          {/if}
         {/if}
       {/if}
     {/each}
@@ -808,8 +912,41 @@
       >
     </div>
   {/if}
+  {#if problem}<p role="alert" class="px-3 pb-1 text-xs text-coral">{problem}</p>{/if}
+  {#each files as file, i (i)}
+    <div class="flex items-center gap-2 px-3 text-xs text-muted">
+      <span class="truncate">{file.name}</span>
+      <button
+        disabled={sending}
+        aria-label={`Remove ${file.name}`}
+        onclick={() => (files = files.filter((_, n) => n !== i))}>Remove</button
+      >
+    </div>
+  {/each}
   <form class="flex items-end gap-2 px-3 pb-3" novalidate onsubmit={send}>
+    <input
+      type="file"
+      multiple
+      accept={CHAT_ACCEPT}
+      class="hidden"
+      bind:this={picker}
+      onchange={() => {
+        attach(picker.files);
+        picker.value = '';
+      }}
+    />
+    <button
+      type="button"
+      class="py-2 text-sm text-sea"
+      disabled={sending}
+      onclick={() => picker.click()}>Attach</button
+    >
     <textarea
+      onpaste={paste}
+      ondragover={(e) => {
+        if (e.dataTransfer?.types.includes('Files')) e.preventDefault();
+      }}
+      ondrop={drop}
       bind:this={box}
       class="min-h-[38px] flex-1 resize-none overflow-y-auto rounded-lg bg-raise px-3 py-2 text-sm leading-relaxed text-ink outline-none placeholder:text-faint"
       rows="1"
@@ -819,7 +956,7 @@
       disabled={sending}></textarea>
     <button
       class="rounded-lg bg-sea px-3 py-2 text-sm font-medium text-night disabled:opacity-40"
-      disabled={sending || !draft.trim()}>Send</button
+      disabled={sending || remoteBusy || (!draft.trim() && !files.length)}>Send</button
     >
   </form>
 </div>

@@ -18,6 +18,7 @@
 // owner's page through Caddy, which reaches the office over http while the
 // page is https, so `fromOwnerPage` compares what the browser itself says.
 import type { Handle } from '@sveltejs/kit/hooks';
+import { CHAT_REQUEST_BYTES } from '../staff/chat-input.ts';
 import { HOSTS } from './address.ts';
 import { fromRun, GATEWAY_PATH } from './gateway.ts';
 import { fromShell } from './update.ts';
@@ -57,8 +58,26 @@ const READS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 const refuse = (message: string) => new Response(message, { status: 403 });
 
+/** For a chunked request, count as it arrives and leave the body for the route. */
+async function fits(request: Request, limit: number): Promise<boolean> {
+  const length = request.headers.get('content-length');
+  if (length !== null) return Number(length) <= limit;
+  const reader = request.clone().body!.getReader();
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return true;
+      size += value.length;
+      if (size > limit) return false;
+    }
+  } finally {
+    void reader.cancel().catch(() => {});
+  }
+}
+
 /** The server's `handle`: every request passes here before a route sees it. */
-export const guardOffice: Handle = ({ event, resolve }) => {
+export const guardOffice: Handle = async ({ event, resolve }) => {
   const { request } = event;
   if (!toThisOffice(request)) return refuse('This office answers only at its own address');
   if (
@@ -66,7 +85,18 @@ export const guardOffice: Handle = ({ event, resolve }) => {
     fromOwnerPage(request) ||
     (event.url.pathname === '/api/update' && fromShell(request, event.getClientAddress())) ||
     (event.url.pathname.startsWith(`${GATEWAY_PATH}/`) && fromRun(request))
-  )
+  ) {
+    const chat =
+      request.method === 'POST' && /^\/api\/staff\/[a-z0-9-]+\/chat\/?$/.test(event.url.pathname);
+    // The app raises adapter-node's limit for screenshots. Keep its former
+    // limit everywhere else. The page sends JSON with Content-Length.
+    if (
+      request.body &&
+      (chat || process.env.ODDBORO_APP) &&
+      !(await fits(request, chat ? CHAT_REQUEST_BYTES : 512 * 1024))
+    )
+      return new Response('That request is too large', { status: 413 });
     return resolve(event);
+  }
   return refuse("Only the office's own page can do that");
 };

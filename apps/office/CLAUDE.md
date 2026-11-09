@@ -290,7 +290,15 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    with nothing in progress); it opens the info page at In progress, as
    `show: {tab: 'work'}` does. The chat stays mounted
    while the panel is open, so a
-   reply survives switching tabs or collapsing. The chat shows every ask, task
+   reply survives switching tabs or collapsing. A send first keeps the owner's
+   line in `chat.jsonl` with its source and turn ID (`keepOwnerTurn` in
+   `staff.ts`). Markdown, text files and pictures arrive by paste, drop or
+   Attach. The office keeps the originals by hash in `chat-files/<staff>/`,
+   outside the Odd's work folder. Each text file goes in the message; each
+   picture goes to Claude Code, Codex or Grok as an image. Gemini refuses a
+   picture. Get a reply on an unanswered line reuses its saved input, even
+   after a restart. A finished reply carries the same ID. Older lines need
+   none. The chat shows every ask, task
    and report the Odd put on the desk, where it landed (`chatLog` merges
    `deliveries()` into `chat.jsonl`), with where each stands now, and every
    hand-off it gave or got (`handOffsFor`). A hand-off it gave sits on the card

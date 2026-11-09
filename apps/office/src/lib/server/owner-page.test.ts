@@ -371,3 +371,22 @@ test('with no Sec-Fetch-Site, a foreign, unreadable or missing Origin is refused
   assert.equal(from({ origin: 'null', host }), false);
   assert.equal(from({ host }), false);
 });
+
+test('the app allows a screenshot in chat while other actions keep their smaller limit', async () => {
+  const before = process.env.ODDBORO_APP;
+  process.env.ODDBORO_APP = '1';
+  const body = 'x'.repeat(2 * 1024 * 1024);
+  try {
+    for (const header of [{}, { 'content-length': String(body.length) }]) {
+      const headers = { ...PAGE, ...header } as Record<string, string>;
+      const large = await send(ok, { path: '/api/staff/paige/chat', body, headers });
+      assert.equal(large.status, 200);
+      const other = await send(ok, { path: '/api/goals', body, headers });
+      assert.equal(other.status, 413);
+      assert.equal(other.ran, false);
+    }
+  } finally {
+    if (before === undefined) delete process.env.ODDBORO_APP;
+    else process.env.ODDBORO_APP = before;
+  }
+});

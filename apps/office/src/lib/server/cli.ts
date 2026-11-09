@@ -64,7 +64,7 @@ export type CliRun = {
   allowed: string[];
   /** The longest the run may take before the office cuts it. */
   timeoutMs: number;
-  /** Pictures sent with the message: an office run's (`runAsOffice`), never an Odd's. */
+  /** Pictures sent with this message, including when a chat resumes. */
   images?: RunImage[];
   /** An office run: no tools to read with, and no MCP. */
   bare?: boolean;
@@ -147,6 +147,11 @@ export const LAUNCHES: Record<
     };
   },
   gemini: async (r) => {
+    if (r.images?.length)
+      return {
+        refused:
+          'Gemini cannot receive pictures in this office. Use a text file or choose another tool.'
+      };
     if (r.commands) return { refused: COMMANDS_WHY.gemini };
     const missing = geminiKeyMissing();
     if (missing) return { refused: missing };

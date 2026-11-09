@@ -28,7 +28,7 @@ import {
   type UsageKind
 } from '@oddboro/ledger';
 import { notePlan, pluginsOff, staffEnv } from './staff.ts';
-import { claudeRunHome, modelArgs, spawnClaude } from './claude.ts';
+import { claudeInput, claudeRunHome, modelArgs, spawnClaude } from './claude.ts';
 import { endedEarly, LAUNCHES } from './cli.ts';
 import { SIGN_IN_WHERE, stopGroups, type RunImage } from './launch.ts';
 import { agentCommand } from './agent-sign-in.ts';
@@ -298,22 +298,6 @@ async function run(message: string, opts: OfficeRunOpts): Promise<OfficeRun> {
       })
     );
     child.stdin.on('error', () => {});
-    child.stdin.end(
-      opts.images?.length
-        ? `${JSON.stringify({
-            type: 'user',
-            message: {
-              role: 'user',
-              content: [
-                ...opts.images.map((i) => ({
-                  type: 'image',
-                  source: { type: 'base64', media_type: i.mediaType, data: i.data }
-                })),
-                { type: 'text', text: message }
-              ]
-            }
-          })}\n`
-        : message
-    );
+    child.stdin.end(claudeInput(message, opts.images));
   });
 }

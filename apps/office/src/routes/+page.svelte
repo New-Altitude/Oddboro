@@ -638,6 +638,7 @@
         refresh();
       if (
         [
+          'chat',
           'jobs',
           'runs',
           'grants',

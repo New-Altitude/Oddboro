@@ -128,6 +128,8 @@ impl Server {
             .env("ODDBORO_PORT", &port)
             .env("HOST", "127.0.0.1")
             .env("ORIGIN", self.url())
+            // Chat keeps the original screenshot. Other routes keep the 512 KiB limit.
+            .env("BODY_SIZE_LIMIT", "12M")
             .env("ODDBORO_HOME", &self.home)
             .env("ODDBORO_CODE", &self.code)
             // Tells the server to quit when this stdin closes.
