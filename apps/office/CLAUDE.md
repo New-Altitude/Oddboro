@@ -559,9 +559,12 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    The policy is proved against Gemini's own engine
    (`gemini-policy.test.ts`); a message starting with `/` goes in after a line
    break, so Gemini never runs it as a command.
-   A chat never waits: it resumes the
-   Odd's one chat session, so only a second chat does. Claude Code keeps a
-   session's first system prompt, so a resumed chat's message opens with the
+   A chat resumes the Odd's session without waiting for a background slot.
+   Stop reply names the run on that saved turn. A
+   correction keeps its own text and files before stopping that run, then waits
+   for it to close. Closing the window just stops the stream to that window.
+   A message about a job or goal in progress goes to its lead.
+   Claude Code keeps a session's first system prompt, so a resumed chat's message opens with the
    time and each section that changed since that session last saw it, in full
    (`catchUp` in `src/lib/server/resume.ts`; `session.json` keeps what it saw).
    A chat that starts a new session (after a move to another tool, or with

@@ -150,7 +150,7 @@ import { workPath } from '@oddboro/ledger/work-paths';
 import { filterWords } from '@oddboro/ledger/filters';
 import { bus, emit } from './events.ts';
 import { deniedEdits, denyRules, readStaffFile } from './files.ts';
-import { floorTool, type Work } from '../staff/work.ts';
+import { floorTool, type Work, type WorkAbout } from '../staff/work.ts';
 import { closeGateway, openGateway } from './gateway.ts';
 import { awsReady } from './aws.ts';
 import { bearer } from './oauth.ts';
@@ -202,6 +202,9 @@ export type ChatEntry = {
   from: 'owner' | 'staff';
   text: string;
   turnId?: string;
+  runId?: string;
+  interrupted?: true;
+  about?: WorkAbout;
   source?: ChatSource;
   attachments?: ChatAttachment[];
   poke?: true;
@@ -216,6 +219,7 @@ export type ChatEntry = {
   took?: number;
 };
 export type ChatEvent =
+  | { type: 'reply'; runId: string; turnId: string }
   | { type: 'delta'; text: string }
   | { type: 'tool'; name: string }
   | { type: 'done'; text: string }
@@ -229,7 +233,37 @@ export type ChatEvent =
  */
 const AT_ONCE = 3;
 const slots = new Map<string, { busy: number; queue: (() => void)[] }>();
-const chatting = new Set<string>();
+const greeting = new Set<string>();
+type Reply = {
+  runId: string;
+  turnId: string;
+  stop: AbortController;
+  end: ReturnType<typeof Promise.withResolvers<boolean>>;
+};
+const replies = new Map<string, Reply>();
+
+export function activeReply(id: string) {
+  const reply = replies.get(id);
+  return reply && { runId: reply.runId, turnId: reply.turnId };
+}
+
+export function correctionSource(id: string, runId: string): ChatSource {
+  const active = replies.get(id);
+  const turnId =
+    active?.runId === runId
+      ? active.turnId
+      : history(id).findLast((e) => e.runId === runId)?.turnId;
+  if (!turnId) throw new ChatInputError('That reply is no longer available.');
+  return { kind: 'correction', id: turnId, revision: runId };
+}
+
+/** A late Stop never reaches the next attempt, even on the same saved message. */
+export async function stopReply(id: string, runId: string): Promise<boolean> {
+  const reply = replies.get(id);
+  if (!reply || reply.runId !== runId) return false;
+  reply.stop.abort();
+  return reply.end.promise;
+}
 /** Staffer id to what it is running, for the floor: the first thing, and how many more. */
 export const working: Record<string, string> = {};
 /** Staffer id to its work in progress, waiting for a slot or running. */
@@ -239,7 +273,7 @@ let workIds = 0;
 /** Run `fn` in one of the staffer's slots, listed as work in progress until it ends. */
 async function slot<T>(
   id: string,
-  about: Pick<Work, 'kind' | 'label' | 'detail' | 'askId'>,
+  about: Pick<Work, 'kind' | 'label' | 'detail' | 'askId' | 'about'>,
   fn: (onEvent: (e: ChatEvent) => void) => Promise<T>
 ): Promise<T> {
   const item: Work = {
@@ -290,18 +324,24 @@ export async function isStaff(id: string): Promise<boolean> {
 }
 
 export function isBusy(id: string): boolean {
-  return chatting.has(id);
+  return greeting.has(id) || replies.has(id);
 }
 
 /** True while any staffer has a chat, job, follow-up or draft going. */
 export function runsActive(): boolean {
-  return chatting.size > 0 || Object.keys(inProgress).length > 0;
+  return greeting.size > 0 || replies.size > 0 || Object.keys(inProgress).length > 0;
 }
 
 function homeOf(id: string): string {
   const dir = join(HOMES, id);
   mkdirSync(join(dir, 'notes'), { recursive: true });
   return dir;
+}
+
+function workAbout(leadId: string, key: string): WorkAbout | undefined {
+  return Object.values(inProgress)
+    .flat()
+    .find((w) => !w.queued && w.about?.leadId === leadId && w.about.key === key)?.about;
 }
 
 const chatFile = (id: string) => join(homeOf(id), 'chat.jsonl');
@@ -703,7 +743,8 @@ async function prompt(
   );
 }
 
-type Run = { ok: boolean; text: string };
+type Run = { ok: boolean; text: string; interrupted?: true };
+const stopped = (): Run => ({ ok: false, text: 'Stopped at your request.', interrupted: true });
 
 type Window = { utilization?: number; resetsAt?: number };
 
@@ -838,6 +879,9 @@ async function run(
   message: string,
   opts: {
     kind: UsageKind;
+    signal?: AbortSignal;
+    /** A chat reserves its run key before launch so it can stop during setup too. */
+    runId?: string;
     sessionFile?: string;
     extra?: string;
     /** The owner's own message, when this is a chat. */
@@ -867,6 +911,7 @@ async function run(
     onEvent?: (e: ChatEvent) => void;
   }
 ): Promise<Run> {
+  if (opts.signal?.aborted) return stopped();
   const dir = homeOf(who.id);
   // The account its tool signs in with, and that account's folder. A session
   // saved in another folder (the Odd moved accounts) cannot resume here.
@@ -883,7 +928,7 @@ async function run(
   // Every run gets a key: a thread it hands off on keeps it, and holds the
   // Odd's pick-ups there until it ends (`runsGoing`), even when it is a
   // follow-up on no thread. A call the gateway holds for the owner carries it too.
-  const key = randomUUID();
+  const key = opts.runId ?? randomUUID();
   const { servers, allowed, caps, gate } = await access(
     who,
     ceiling,
@@ -1121,18 +1166,19 @@ async function run(
       }
     };
   }
+  const refusedBeforeStart = (text: string): Run => {
+    void closeGateway(gate);
+    if (opts.signal?.aborted) return stopped();
+    opts.onEvent?.({ type: 'error', message: text });
+    return { ok: false, text };
+  };
   // An added Claude account nobody signed in to: say where to sign in, rather than Claude Code's own advice.
   if (who.agent === 'claude' && account !== OFFICE_ACCOUNT && !(await claudeAccountOf(account))) {
-    const line = `Claude Code ${NOT_SIGNED_IN}`;
-    opts.onEvent?.({ type: 'error', message: line });
-    return { ok: false, text: line };
+    return refusedBeforeStart(`Claude Code ${NOT_SIGNED_IN}`);
   }
   // A tool older than the office runs fails on a switch it does not know, so it never starts.
   const tooOld = await tooOldLine(who.agent, SIGN_IN_WHERE);
-  if (tooOld) {
-    opts.onEvent?.({ type: 'error', message: tooOld });
-    return { ok: false, text: tooOld };
-  }
+  if (tooOld) return refusedBeforeStart(tooOld);
   const launch: Launch | { refused: string } =
     who.agent === 'claude'
       ? claudeLaunch()
@@ -1159,11 +1205,12 @@ async function run(
           model,
           account
         });
-  if ('refused' in launch) {
-    void closeGateway(gate);
-    opts.onEvent?.({ type: 'error', message: launch.refused });
-    return { ok: false, text: launch.refused };
+  if (opts.signal?.aborted) {
+    if (!('refused' in launch)) launch.done();
+    await closeGateway(gate);
+    return stopped();
   }
+  if ('refused' in launch) return refusedBeforeStart(launch.refused);
   const tool = AGENT_NAMES[who.agent];
   const startError = (e: Error & { code?: string }) =>
     who.agent === 'grok' && (e.code === 'E2BIG' || e.code === 'ENAMETOOLONG')
@@ -1176,12 +1223,13 @@ async function run(
     // install folder or an npm Claude Code on Windows; by name when there is
     // none, so the run fails naming it.
     const [cmd, before] = agentCommand(who.agent) ?? [who.agent, []];
+    const ownGroup = !!launch.ownGroup || (!!opts.signal && process.platform !== 'win32');
     let child;
     try {
       child = spawn(cmd, [...before, ...launch.args], {
         cwd: dir,
         env: launch.env,
-        detached: !!launch.ownGroup,
+        detached: ownGroup,
         windowsHide: true
       });
     } catch (e) {
@@ -1198,8 +1246,16 @@ async function run(
     }
     /** Stop the tool, and with a group of its own, whatever its commands left running. */
     const stop = () => {
-      if (!launch.ownGroup) return child.kill();
+      if (!ownGroup) return child.kill();
       if (child.pid) stopGroups(child.pid);
+    };
+    // A correction waits for close, including a runner's pipes, before starting
+    // another process on this session. Dropping the event stream never calls this.
+    const interrupt = () => {
+      clearTimeout(timer);
+      if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
+      stopGroups(child.pid, 'SIGKILL');
+      child.kill('SIGKILL');
     };
     let buffer = '';
     let stderr = '';
@@ -1211,11 +1267,13 @@ async function run(
     const finish = (end: Run) => {
       if (finished) return;
       finished = true;
+      opts.signal?.removeEventListener('abort', interrupt);
       // A Claude Code that refuses the open network fails this run: the owner
       // is told plainly, and from now on this office's Claude Code runs keep
       // their commands off the internet (`holdNetwork`).
       const refused =
         !end.ok &&
+        !end.interrupted &&
         who.agent === 'claude' &&
         own.network &&
         NETWORK_REFUSED.test(`${end.text}\n${stderr}`);
@@ -1234,7 +1292,8 @@ async function run(
       bus.emit(RUN_ENDED);
       if (session && opts.sessionFile)
         saveSession(opts.sessionFile, { sessionId: session, seen: sections, home: toolDir });
-      opts.onEvent?.(r.ok ? { type: 'done', text: r.text } : { type: 'error', message: r.text });
+      if (!end.interrupted)
+        opts.onEvent?.(r.ok ? { type: 'done', text: r.text } : { type: 'error', message: r.text });
       done(r);
     };
     const timer = setTimeout(() => {
@@ -1242,8 +1301,10 @@ async function run(
       finish({ ok: false, text: `No reply after ${opts.timeoutMs / 60_000} minutes.` });
     }, opts.timeoutMs);
 
+    opts.signal?.addEventListener('abort', interrupt, { once: true });
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => {
+      if (finished || opts.signal?.aborted) return;
       buffer += chunk;
       let nl: number;
       while ((nl = buffer.indexOf('\n')) >= 0) {
@@ -1304,6 +1365,7 @@ async function run(
     child.stderr.on('data', (c: string) => (stderr += c));
     child.on('error', (err) => finish({ ok: false, text: startError(err) }));
     child.on('close', (code) => {
+      if (opts.signal?.aborted && !finished) return finish(stopped());
       if (launch.ownGroup) stop();
       finish({
         ok: false,
@@ -1320,7 +1382,8 @@ async function run(
 export async function keepOwnerTurn(
   id: string,
   input: OwnerInput,
-  replyTo?: Pick<ChatRef, 'kind' | 'id'>
+  replyTo?: Pick<ChatRef, 'kind' | 'id'>,
+  aboutKey?: string
 ): Promise<ChatEntry> {
   const attachments = checkInput(input);
   if (!(await isStaff(id))) throw new ChatInputError('No such Odd');
@@ -1335,6 +1398,7 @@ export async function keepOwnerTurn(
       old.source?.kind !== source.kind ||
       old.source.id !== source.id ||
       old.source.revision !== source.revision ||
+      old.about?.key !== aboutKey ||
       old.re?.kind !== re?.kind ||
       old.re?.id !== re?.id ||
       JSON.stringify(old.attachments ?? []) !== JSON.stringify(attachments)
@@ -1342,6 +1406,8 @@ export async function keepOwnerTurn(
       throw new ChatInputError('This message ID already belongs to another message.');
     return old;
   }
+  const about = aboutKey ? workAbout(id, aboutKey) : undefined;
+  if (aboutKey && !about) throw new ChatInputError('That work is no longer running for this lead.');
   keepFiles(id, attachments, input.files ?? []);
   const line: ChatEntry = {
     at: new Date().toISOString(),
@@ -1350,6 +1416,7 @@ export async function keepOwnerTurn(
     turnId,
     source,
     ...(re ? { re } : {}),
+    ...(about && { about }),
     ...(attachments.length ? { attachments } : {})
   };
   addToChat(id, line);
@@ -1363,7 +1430,7 @@ export async function chat(
   onEvent: (e: ChatEvent) => void,
   replyTo?: Pick<ChatRef, 'kind' | 'id'>
 ): Promise<void> {
-  if (chatting.has(id)) throw new Error(`${id} is already replying`);
+  if (isBusy(id)) throw new Error(`${id} is already replying`);
   const turnId = randomUUID();
   await keepOwnerTurn(id, { turnId, message, source: { kind: 'chat' } }, replyTo);
   return replyToOwnerTurn(id, turnId, onEvent);
@@ -1372,27 +1439,51 @@ export async function chat(
 export async function replyToOwnerTurn(
   id: string,
   turnId: string,
-  onEvent: (e: ChatEvent) => void
+  onEvent: (e: ChatEvent) => void,
+  instead?: string
 ): Promise<void> {
   if (!/^[a-z0-9-]+$/.test(id)) throw new ChatInputError('No such Odd');
-  if (chatting.has(id)) throw new Error(`${id} is already replying`);
-  chatting.add(id);
+  const log = history(id);
+  const owner = log.find((e) => e.turnId === turnId && e.from === 'owner');
+  if (!owner) throw new ChatInputError('No such message');
+  const done = log.find((e) => e.turnId === turnId && e.from === 'staff');
+  if (done) return onEvent({ type: 'done', text: done.text });
+  const previous = replies.get(id);
+  if (
+    greeting.has(id) ||
+    (previous && (!instead || previous.runId !== instead || previous.turnId === turnId))
+  )
+    throw new Error('Another reply is in progress. Your message is saved.');
+  // If completion won the race, take the correction as the next turn. A stale
+  // tab cannot replace a newer reply or treat an unknown run as its target.
+  if (instead && !previous && log.findLast((e) => e.from === 'staff' && e.runId)?.runId !== instead)
+    throw new Error('That reply is no longer active. Your message is saved.');
+  const reply: Reply = {
+    runId: randomUUID(),
+    turnId,
+    stop: new AbortController(),
+    end: Promise.withResolvers<boolean>()
+  };
+  replies.set(id, reply);
   const started = Date.now();
+  let interrupted = false;
   try {
+    emit({ type: 'change', table: 'chat' });
+    if (previous) {
+      previous.stop.abort();
+      await previous.end.promise;
+    }
     const who = await staffer(id);
     if (!who) throw new ChatInputError('No such Odd');
-    const log = history(id);
-    const owner = log.find((e) => e.turnId === turnId && e.from === 'owner');
-    if (!owner) throw new ChatInputError('No such message');
-    const done = log.find((e) => e.turnId === turnId && e.from === 'staff');
-    if (done) return onEvent({ type: 'done', text: done.text });
     const message = owner.text;
+    // Include the reply that finished while the correction waited.
+    const settled = previous ? history(id) : log;
     // A saved turn without a reply has not been answered. Only its own retry
     // sends it to the tool; a later message must not retry it through replay.
     const answered = new Set(
-      log.filter((e) => e.from === 'staff' && e.turnId).map((e) => e.turnId)
+      settled.filter((e) => e.from === 'staff' && e.turnId).map((e) => e.turnId)
     );
-    const past = log
+    const past = settled
       .filter((e) => e.from !== 'owner' || !e.turnId || answered.has(e.turnId))
       .map((e) =>
         e.attachments?.length
@@ -1404,12 +1495,20 @@ export async function replyToOwnerTurn(
             }
           : e
       );
+    const corrected =
+      owner.source?.kind === 'correction'
+        ? past.find((e) => e.from === 'owner' && e.turnId === owner.source?.id)
+        : undefined;
     const last = past.at(-1);
     const asked = last?.from === 'staff' ? firstQuestionIn(last.text) : -1;
     // Only a choice in this chat takes the preset path. An import, file or
     // Desk reply needs the manager even if its words match a choice.
     const next =
-      owner.source?.kind === 'chat' && !owner.attachments?.length && !owner.re
+      !reply.stop.signal.aborted &&
+      !owner.about &&
+      owner.source?.kind === 'chat' &&
+      !owner.attachments?.length &&
+      !owner.re
         ? nextFirstQuestion(asked, message)
         : undefined;
     if (next) {
@@ -1418,11 +1517,13 @@ export async function replyToOwnerTurn(
         from: 'staff',
         text: next,
         told: true,
-        turnId
+        turnId,
+        runId: reply.runId
       });
       onEvent({ type: 'done', text: next });
       return;
     }
+    onEvent({ type: 'reply', runId: reply.runId, turnId });
     // Lines the office wrote in the chat, and work put on the desk, since the
     // owner last wrote are not in the session: say so, so an answer to the
     // hello, "How did the call go?" or "What about Thursday?" makes sense to
@@ -1450,12 +1551,24 @@ export async function replyToOwnerTurn(
         past.filter((e, i) => !(inReplay.has(i) && (e.told || e.poke))),
         landed
       ),
-      ...(re ? [re.brief] : [])
+      ...(re ? [re.brief] : []),
+      ...(owner.about
+        ? [
+            `The owner's message is about ${owner.about.kind} #${owner.about.id}, "${owner.about.title}", which you lead. The background run may still finish. Check what is done before acting on the correction.`
+          ]
+        : []),
+      ...(corrected
+        ? [
+            `The owner's message corrects your reply to their earlier message: ${corrected.text.slice(0, 240) || corrected.attachments?.map((f) => f.name).join(', ')}. Check what is already done before acting.`
+          ]
+        : [])
     ].join('\n\n');
     const { texts, images } = inputFiles(id, owner.attachments ?? []);
     const r = await run(who, prompt, {
       kind: 'chat',
       ownerSaid: message,
+      signal: reply.stop.signal,
+      runId: reply.runId,
       literal: [message, ...texts].filter(Boolean).join('\n\n') || 'See the attached picture.',
       images,
       sessionFile: chatSession(id),
@@ -1464,7 +1577,22 @@ export async function replyToOwnerTurn(
         if (e.type !== 'done') onEvent(e);
       }
     });
-    if (r.ok) {
+    if (r.interrupted) {
+      const subject =
+        owner.text.trim().replace(/\s+/g, ' ') || owner.attachments?.[0]?.name || 'your message';
+      const text = `You stopped the reply to “${subject.length > 100 ? subject.slice(0, 100) + '…' : subject}”.`;
+      addToChat(id, {
+        at: new Date().toISOString(),
+        from: 'staff',
+        turnId,
+        runId: reply.runId,
+        interrupted: true,
+        told: true,
+        text
+      });
+      interrupted = true;
+      onEvent({ type: 'done', text });
+    } else if (r.ok) {
       // `took`: how long the owner waited for this reply, from when they sent.
       const at = new Date();
       addToChat(id, {
@@ -1472,13 +1600,15 @@ export async function replyToOwnerTurn(
         from: 'staff',
         text: r.text,
         turnId,
+        runId: reply.runId,
         took: at.getTime() - started
       });
       if (re?.ref.kind === 'report') await replyToReport(re.ref.id, message);
       onEvent({ type: 'done', text: r.text });
     }
   } finally {
-    chatting.delete(id);
+    if (replies.get(id) === reply) replies.delete(id);
+    reply.end.resolve(interrupted);
     emit({ type: 'change', table: 'chat' });
   }
 }
@@ -1487,13 +1617,28 @@ export async function replyToOwnerTurn(
 export async function runJob(job: JobRow, trigger: RunTrigger = 'schedule'): Promise<Run> {
   const who = await staffer(job.staffId);
   if (!who) return { ok: false, text: `No Odd named ${job.staffId}` };
-  return slot(who.id, { kind: 'job', label: job.name, detail: 'Running a job' }, (onEvent) =>
-    run(who, job.instructions, {
+  return slot(
+    who.id,
+    {
       kind: 'job',
-      onEvent,
-      timeoutMs: JOB_TIMEOUT_MS,
-      extra: `\n## This run\n\nYou are running your job "${job.name}". {owner} is not in a chat with you.${trigger === 'manual' ? ' They started this run by hand just now, so they are at their screen: send anything the job has for them now (poke_owner with in_minutes 0), whatever quiet hours you keep for them.' : ''} Do the job, then reply with what you did in a few plain lines. Your reply goes in the ledger${job.report ? ' and on their desk as a report' : ''}.\n`
-    })
+      label: job.name,
+      detail: 'Running a job',
+      about: {
+        key: randomUUID(),
+        kind: 'job',
+        id: job.id,
+        title: job.name,
+        leadId: who.id,
+        lead: who.name
+      }
+    },
+    (onEvent) =>
+      run(who, job.instructions, {
+        kind: 'job',
+        onEvent,
+        timeoutMs: JOB_TIMEOUT_MS,
+        extra: `\n## This run\n\nYou are running your job "${job.name}". {owner} is not in a chat with you.${trigger === 'manual' ? ' They started this run by hand just now, so they are at their screen: send anything the job has for them now (poke_owner with in_minutes 0), whatever quiet hours you keep for them.' : ''} Do the job, then reply with what you did in a few plain lines. Your reply goes in the ledger${job.report ? ' and on their desk as a report' : ''}.\n`
+      })
   );
 }
 
@@ -1873,7 +2018,20 @@ export async function followThrough(
   // A colleague handed work on a goal's thread is told the goal in its brief.
   const goalServed =
     handed?.kind === 'hand_off' && thread?.goalId ? await findGoal(thread.goalId) : undefined;
-  const work = { kind: 'follow-up' as const, label, detail, askId: a?.id };
+  const goal = goalServed ?? (thread?.goalId ? await findGoal(thread.goalId) : g);
+  const leadId = thread?.hubId ?? who.id;
+  const about: WorkAbout | undefined =
+    goal?.status === 'active'
+      ? {
+          key: randomUUID(),
+          kind: 'goal',
+          id: goal.id,
+          title: goal.title,
+          leadId,
+          lead: leadId === who.id ? who.name : ((await staffer(leadId))?.name ?? leadId)
+        }
+      : undefined;
+  const work = { kind: 'follow-up' as const, label, detail, askId: a?.id, about };
   const res = await slot(who.id, work, (onEvent) =>
     run(who, label, {
       kind: 'follow-up',
@@ -1971,8 +2129,8 @@ export async function firstDay(id: string): Promise<void> {
   const [jobs, serving] = await Promise.all([jobsFor(id), goalsFor(id)]);
   // Only an active goal: it is the only kind its runs are shown (`whoFor`).
   const day = firstDayOf({ jobs: jobs.length, goal: serving.find((g) => g.status === 'active') });
-  if (!chatting.has(id)) {
-    chatting.add(id);
+  if (!isBusy(id)) {
+    greeting.add(id);
     try {
       const r = await slot(
         id,
@@ -1998,7 +2156,7 @@ export async function firstDay(id: string): Promise<void> {
       // The chat session wrote this hello, so it is not a told line.
       if (r.ok) addToChat(id, { at: new Date().toISOString(), from: 'staff', text: r.text });
     } finally {
-      chatting.delete(id);
+      greeting.delete(id);
     }
   }
   if (day.starts) await startFirstDay(id);

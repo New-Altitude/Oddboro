@@ -21,9 +21,9 @@
   import Lesson from './Lesson.svelte';
   import { call, failure } from './api.ts';
   import { when, workLine } from './format.ts';
-  import { chatRequest, takeDraft, type Delivered } from './chat-about.svelte.ts';
+  import { chatAbout, chatRequest, takeDraft, type Delivered } from './chat-about.svelte.ts';
   import type { StaffProfile } from '../staff/roster.ts';
-  import { runningFor, toolWords, type Work } from '../staff/work.ts';
+  import { runningFor, toolWords, type Work, type WorkAbout } from '../staff/work.ts';
   import { counting, dayBreaks, fullDate, stamp, took } from './chat-lines.ts';
   import { serviceNames } from './service-names.svelte.ts';
 
@@ -57,6 +57,7 @@
     text: string;
     turnId?: string;
     source?: ChatSource;
+    about?: WorkAbout;
     attachments?: Pick<ChatAttachment, 'name'>[];
     pending?: boolean;
     failed?: boolean;
@@ -162,6 +163,7 @@
   }
   async function reply(d: Delivered) {
     chatRequest.focus = { staff: profile.id, item: d };
+    about = undefined;
     replyTo = d;
     await tick();
     box?.focus();
@@ -188,11 +190,66 @@
   let draft = $state('');
   let sending = $state(false);
   let remoteBusy = $state(false);
+  type Reply = { runId: string; turnId: string };
+  let active = $state<Reply>();
+  let posting = $state(false);
+  let stopping = $state(false);
+  let about = $state<WorkAbout>();
+  let newest = 0;
+
+  function direct(work: WorkAbout) {
+    if (work.leadId === profile.id) {
+      about = work;
+      replyTo = undefined;
+      box?.focus();
+    } else {
+      chatRequest.work = { about: work, files: [...files] };
+      chatAbout(work.leadId, draft);
+    }
+  }
+  $effect(() => {
+    if (chatRequest.work?.about.leadId !== profile.id || !visible) return;
+    about = chatRequest.work.about;
+    files = chatRequest.work.files;
+    replyTo = undefined;
+    chatRequest.work = undefined;
+  });
+
+  async function stop() {
+    if (!active || stopping) return;
+    stopping = true;
+    try {
+      const { stopped } = await call<{ stopped: boolean }>(
+        `/api/staff/${profile.id}/chat`,
+        { runId: active.runId },
+        'DELETE'
+      );
+      if (!stopped) problem = 'That reply already ended.';
+    } catch (e) {
+      problem = e instanceof Error ? e.message : String(e);
+    } finally {
+      stopping = false;
+      if (!sending) load(profile.id);
+    }
+  }
+  const cannotSend = $derived(
+    posting || stopping || ((sending || remoteBusy) && (!active || !!about))
+  );
+
   let files = $state<File[]>([]);
   let picker: HTMLInputElement;
   let problem = $state('');
   let attempt:
-    { id: string; staff: string; message: string; re?: Delivered; files: File[] } | undefined;
+    | {
+        id: string;
+        staff: string;
+        message: string;
+        re?: Delivered;
+        files: File[];
+        about?: string;
+        instead?: string;
+      }
+    | undefined;
   const answered = $derived(
     new Set(lines.filter((l) => l.from === 'staff' && !l.failed).map((l) => l.turnId))
   );
@@ -305,9 +362,10 @@
     const read = ++reading;
     fetch(`/api/staff/${id}/chat`)
       .then((r) => r.json())
-      .then((d: { history: Entry[]; busy: boolean }) => {
+      .then((d: { history: Entry[]; busy: boolean; reply?: Reply }) => {
         if (read !== reading || id !== profile.id || sending) return;
         remoteBusy = d.busy;
+        active = d.reply;
         lines = d.history.map((h) => ({ ...h }));
         loaded = true;
         scrollDown();
@@ -350,12 +408,12 @@
 
   async function send(e: SubmitEvent) {
     e.preventDefault();
-    if ((!draft.trim() && !files.length) || sending || remoteBusy) return;
+    if ((!draft.trim() && !files.length) || cannotSend) return;
     await say(draft, replyTo, files);
   }
 
   function attach(selected: FileList | null) {
-    if (!selected || sending) return;
+    if (!selected) return;
     const next = [...files, ...selected];
     if (
       next.length > CHAT_FILES ||
@@ -398,7 +456,11 @@
 
   /** Send one message and stream the reply into the chat. */
   async function say(message: string, re?: Delivered, chosen?: File[], retry?: string) {
-    if (sending || remoteBusy) return;
+    // An import asks for its own saved turn. It never replaces a reply in progress.
+    if (cannotSend || (retry && (sending || remoteBusy))) return;
+    const instead = active?.runId;
+    const target = about;
+    const generation = ++newest;
     const staff = profile.id;
     const picks = chosen ?? [];
     // Keep the ID if the office received the POST but the page lost its response.
@@ -408,19 +470,38 @@
         attempt.staff !== staff ||
         attempt.message !== message ||
         attempt.re !== re ||
+        attempt.about !== target?.key ||
         picks.length !== attempt.files.length ||
         picks.some((f, i) => f !== attempt?.files[i]))
     )
-      attempt = { id: newTurnId(), staff, message, re, files: [...picks] };
+      attempt = {
+        id: newTurnId(),
+        staff,
+        message,
+        re,
+        files: [...picks],
+        about: target?.key,
+        instead
+      };
     const turnId = retry ?? attempt!.id;
+    posting = true;
+    active = undefined;
+    if (!sending) onstart();
     sending = true;
     ++reading;
     problem = '';
     status = 'Thinking';
     let reply: Line | undefined;
-    onstart();
     try {
-      const turn = retry ? { turnId } : { turnId, message, re: re && { kind: re.kind, id: re.id } };
+      const turn = retry
+        ? { turnId }
+        : {
+            turnId,
+            message,
+            instead: attempt?.instead,
+            about: target?.key,
+            re: re && { kind: re.kind, id: re.id }
+          };
       // Like every office action this is JSON. A form POST can be refused by
       // SvelteKit when the page and the server see different schemes.
       const attachments = await Promise.all(
@@ -442,9 +523,10 @@
       });
       if (!res.ok || !res.body) throw await failure(res);
       if (chosen) {
-        draft = '';
-        files = [];
-        replyTo = undefined;
+        if (draft === message) draft = '';
+        files = files.filter((f) => !picks.includes(f));
+        if (replyTo === re) replyTo = undefined;
+        if (about === target) about = undefined;
       }
       if (!retry) attempt = undefined;
       if (!lines.some((line) => line.from === 'owner' && line.turnId === turnId))
@@ -453,6 +535,7 @@
           text: message,
           re,
           turnId,
+          about: target,
           attachments: picks.map((f) => ({ name: f.name })),
           at: new Date().toISOString()
         });
@@ -471,11 +554,22 @@
           buffer = buffer.slice(cut + 2);
           if (!chunk.startsWith('data: ')) continue;
           const ev = JSON.parse(chunk.slice(6)) as
+            | { type: 'reply'; runId: string; turnId: string }
             | { type: 'delta'; text: string }
             | { type: 'tool'; name: string }
             | { type: 'done'; text: string }
             | { type: 'error'; message: string };
-          if (ev.type === 'delta') {
+          if (generation !== newest) {
+            if (ev.type === 'done' || ev.type === 'error') {
+              reply.pending = false;
+              reply.text = ev.type === 'done' ? ev.text : ev.message;
+            }
+            continue;
+          }
+          if (ev.type === 'reply') {
+            active = ev;
+            posting = false;
+          } else if (ev.type === 'delta') {
             reply.text += ev.text;
             status = '';
           } else if (ev.type === 'tool') status = toolWords(ev.name, serviceNames.byId);
@@ -493,17 +587,21 @@
         }
       }
     } catch (err) {
-      problem = err instanceof Error ? err.message : String(err);
+      if (generation === newest) problem = err instanceof Error ? err.message : String(err);
     } finally {
-      if (reply) {
-        if (reply.pending && !problem)
-          problem = 'The reply was interrupted. Check the saved message below.';
-        reply.pending = false;
+      if (generation === newest) {
+        if (reply) {
+          if (reply.pending && !problem)
+            problem = 'The reply was interrupted. Check the saved message below.';
+          reply.pending = false;
+        }
+        sending = false;
+        status = '';
+        active = undefined;
+        posting = false;
+        onend();
+        load(profile.id);
       }
-      sending = false;
-      status = '';
-      onend();
-      load(profile.id);
     }
   }
 
@@ -861,6 +959,9 @@
             <Markdown text={line.text} staff={profile.id} />
           {:else}
             {line.text}
+            {#if line.about}<span class="block text-xs text-muted"
+                >About {line.about.kind}: {line.about.title} · {line.about.lead}</span
+              >{/if}
             {#each line.attachments ?? [] as file, n (n)}
               <a
                 class="block text-sea underline"
@@ -916,15 +1017,17 @@
 
   {#if work.length}
     <!-- What the Odd is working on now, one line each; a click opens In progress. -->
-    <button
+    <div
       class="flex flex-col gap-0.5 border-t border-hairline px-3 py-1.5 text-start text-xs text-muted transition-colors hover:bg-raise"
-      title="Open In progress"
-      onclick={onwork}
     >
       {#each work as w (w.id)}
         <span class="flex w-full min-w-0 items-center gap-1.5">
           <span class="size-1.5 shrink-0 rounded-full {w.queued ? 'bg-faint' : 'bg-ember'}"></span>
-          <span class="min-w-0 truncate text-ink">{w.label}</span>
+          <button
+            class="min-w-0 truncate text-ink hover:underline"
+            title="Open In progress"
+            onclick={onwork}>{w.label}</button
+          >
           <span class="shrink-0 text-faint"
             >· {w.queued ? 'waiting for a free slot' : runningFor(w.since, clock)}</span
           >
@@ -933,9 +1036,18 @@
               >· {w.doing ? toolWords(w.doing, serviceNames.byId) : 'Thinking'}</span
             >
           {/if}
+          {#if w.about && !w.queued}
+            {@const target = w.about}
+            <button
+              class="ms-auto min-w-0 truncate text-sea"
+              title={`Message ${target.lead} about ${target.title}`}
+              onclick={() => direct(target)}
+              >{target.kind === 'goal' ? target.title + ' · ' : ''}Message {target.lead}</button
+            >
+          {/if}
         </span>
       {/each}
-    </button>
+    </div>
   {/if}
 
   <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions: a focusable separator is the ARIA pattern for a keyboard-resizable pane. -->
@@ -964,12 +1076,29 @@
       >
     </div>
   {/if}
+  {#if about}
+    <div class="flex gap-2 px-3 pb-1.5 text-xs text-muted">
+      <span>To {about.lead} about {about.kind}: {about.title}</span><button
+        aria-label="Clear work selection"
+        onclick={() => (about = undefined)}>✕</button
+      >
+    </div>
+  {/if}
+  {#if active}
+    <div class="flex items-center justify-between gap-2 px-3 pb-1.5 text-xs text-muted">
+      <span>Send a correction to stop this reply.</span><button
+        type="button"
+        class="text-coral"
+        disabled={posting || stopping}
+        onclick={stop}>Stop reply</button
+      >
+    </div>
+  {/if}
   {#if problem}<p role="alert" class="px-3 pb-1 text-xs text-coral">{problem}</p>{/if}
   {#each files as file, i (i)}
     <div class="flex items-center gap-2 px-3 text-xs text-muted">
       <span class="truncate">{file.name}</span>
       <button
-        disabled={sending}
         aria-label={`Remove ${file.name}`}
         onclick={() => (files = files.filter((_, n) => n !== i))}>Remove</button
       >
@@ -990,11 +1119,8 @@
         picker.value = '';
       }}
     />
-    <button
-      type="button"
-      class="py-2 text-sm text-sea"
-      disabled={sending}
-      onclick={() => picker.click()}>Attach</button
+    <button type="button" class="py-2 text-sm text-sea" onclick={() => picker.click()}
+      >Attach</button
     >
     <textarea
       onpaste={paste}
@@ -1007,11 +1133,11 @@
       rows="1"
       placeholder={replyTo ? `Reply to ${profile.name}` : `Message ${profile.name}`}
       bind:value={draft}
-      {onkeydown}
-      disabled={sending}></textarea>
+      {onkeydown}></textarea>
     <button
       class="rounded-lg bg-sea px-3 py-2 text-sm font-medium text-night disabled:opacity-40"
-      disabled={sending || remoteBusy || (!draft.trim() && !files.length)}>Send</button
+      disabled={cannotSend || (!draft.trim() && !files.length)}
+      >{active ? 'Send correction' : 'Send'}</button
     >
   </form>
 </div>

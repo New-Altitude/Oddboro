@@ -2,6 +2,15 @@
 // shows it: a job, a follow-up (an approved ask, a rework, feedback) or a
 // draft. Safe to import in the browser.
 
+export type WorkAbout = {
+  key: string;
+  kind: 'job' | 'goal';
+  id: number;
+  title: string;
+  leadId: string;
+  lead: string;
+};
+
 export type Work = {
   /** Unique while the office runs. */
   id: number;
@@ -15,6 +24,7 @@ export type Work = {
   /** True while it waits for a free slot. */
   queued: boolean;
   askId?: number;
+  about?: WorkAbout;
   /** The tool the staffer is using now, as Claude Code names it. */
   doing?: string;
   /** Tool calls so far. */

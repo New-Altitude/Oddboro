@@ -6,11 +6,14 @@
 // the desk selects it there (`showInChat`), and Reply starts a message about
 // it (`replyAbout`).
 
+import type { WorkAbout } from '../staff/work.ts';
+
 /** Something a staffer put on the owner's desk. */
 export type Delivered = { kind: 'ask' | 'task' | 'report'; id: number; title: string };
 
 export const chatRequest = $state<{
   staff?: string;
+  work?: { about: WorkAbout; files: File[] };
   drafts: Record<string, string>;
   /** The delivery selected in a staffer's chat. */
   focus?: { staff: string; item: Delivered };

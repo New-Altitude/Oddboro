@@ -6,6 +6,9 @@ import { error, json } from '@sveltejs/kit';
 import { CHAT_FILES, CHAT_REQUEST_BYTES, type OwnerInput } from '#lib/staff/chat-input.ts';
 import { ChatInputError } from '#lib/server/chat-files.ts';
 import {
+  activeReply,
+  correctionSource,
+  stopReply,
   keepOwnerTurn,
   replyToOwnerTurn,
   chatLog,
@@ -17,12 +20,22 @@ import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ params }) => {
   if (!(await isStaff(params.id))) error(404, 'No such Odd');
-  return json({ history: await chatLog(params.id), busy: isBusy(params.id) });
+  return json({
+    history: await chatLog(params.id),
+    busy: isBusy(params.id),
+    reply: activeReply(params.id)
+  });
+};
+
+export const DELETE: RequestHandler = async ({ params, request }) => {
+  if (!(await isStaff(params.id))) error(404, 'No such Odd');
+  const body = await request.json().catch(() => null);
+  if (typeof body?.runId !== 'string') error(400, 'Choose the reply to stop.');
+  return json({ stopped: await stopReply(params.id, body.runId) });
 };
 
 export const POST: RequestHandler = async ({ params, request }) => {
   if (!(await isStaff(params.id))) error(404, 'No such Odd');
-  if (isBusy(params.id)) error(409, 'Still replying to the last message');
   let files: OwnerInput['files'];
   if (Number(request.headers.get('content-length')) > CHAT_REQUEST_BYTES)
     error(413, 'Use up to 8 MiB of text and files per message.');
@@ -31,8 +44,18 @@ export const POST: RequestHandler = async ({ params, request }) => {
     re?: unknown;
     turnId?: unknown;
     files?: unknown;
+    about?: unknown;
+    instead?: unknown;
   } | null;
   if (!body || typeof body !== 'object') error(400, 'Send a chat message.');
+  const { instead, about } = body;
+  if (
+    (instead !== undefined && typeof instead !== 'string') ||
+    (about !== undefined && typeof about !== 'string')
+  )
+    error(400, 'Choose the work to correct.');
+  if (instead && (about || !('message' in body))) error(400, 'Choose one reply to correct.');
+  if (!instead && isBusy(params.id)) error(409, 'Still replying to the last message');
   if (body.files !== undefined) {
     if (
       !Array.isArray(body.files) ||
@@ -64,8 +87,14 @@ export const POST: RequestHandler = async ({ params, request }) => {
     try {
       await keepOwnerTurn(
         params.id,
-        { turnId, message: body.message, source: { kind: 'chat' }, files },
-        re
+        {
+          turnId,
+          message: body.message,
+          source: instead ? correctionSource(params.id, instead) : { kind: 'chat' },
+          files
+        },
+        re,
+        about
       );
     } catch (e) {
       if (e instanceof ChatInputError) error(400, e.message);
@@ -82,7 +111,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
       const send = (e: ChatEvent) => {
         if (open) controller.enqueue(encoder.encode(`data: ${JSON.stringify(e)}\n\n`));
       };
-      replyToOwnerTurn(params.id, turnId, send)
+      replyToOwnerTurn(params.id, turnId, send, instead)
         .catch((err: unknown) =>
           send({ type: 'error', message: err instanceof Error ? err.message : String(err) })
         )

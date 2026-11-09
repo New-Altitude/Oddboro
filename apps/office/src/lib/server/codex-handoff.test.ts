@@ -10,6 +10,7 @@ import { L, folder, history, odd } from './office-under-test.ts';
 const { previewHandoff } = await import('./codex-handoff.ts');
 const { POST } = await import('../../routes/api/staff/[id]/codex-handoff/+server.ts');
 const download = await import('../../routes/api/staff/[id]/chat/[turnId]/[index]/+server.ts');
+const { activeReply, stopReply } = await import('./staff.ts');
 const { POST: reply } = await import('../../routes/api/staff/[id]/chat/+server.ts');
 const script = import.meta.resolve('@oddboro/ledger/codex-handoff');
 const text = '  Preserve the spacing.\r\nCheck moisture before watering.\r\n';
@@ -81,13 +82,26 @@ test('a selection keeps its source, exact files and goal in one manager turn per
   assert.deepEqual(await read(0), Buffer.from(text));
   assert.deepEqual(await read(1), Buffer.from(notes));
   assert.deepEqual(await read(2), bytes);
-  const answer = await reply({
-    params: { id: 'robin' },
-    request: new Request('http://office/', {
-      method: 'POST',
-      body: JSON.stringify({ turnId: line.turnId })
-    })
-  } as Parameters<typeof reply>[0]);
+  const getReply = () =>
+    reply({
+      params: { id: 'robin' },
+      request: new Request('http://office/', {
+        method: 'POST',
+        body: JSON.stringify({ turnId: line.turnId })
+      })
+    } as Parameters<typeof reply>[0]);
+  const offline = await L.addAccount('claude', 'Garden');
+  await L.pg`update staff set account = ${offline.id} where id = 'robin'`;
+  const failed = await getReply();
+  const old = activeReply('robin')!;
+  assert.match(await failed.text(), /not signed in/);
+  assert.equal(history('robin').length, 1);
+  await L.pg`update staff set account = null where id = 'robin'`;
+  const answer = await getReply();
+  const retry = activeReply('robin')!;
+  assert.equal(retry.turnId, old.turnId);
+  assert.notEqual(retry.runId, old.runId);
+  assert.equal(await stopReply('robin', old.runId), false);
   await answer.text();
   const response = history('robin').find((l) => l.from === 'staff' && l.turnId === line.turnId);
   assert.ok(response);
