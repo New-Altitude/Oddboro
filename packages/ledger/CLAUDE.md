@@ -640,3 +640,5 @@ hand-off or number, which ledger tests and the office's format test share.
 - On Windows, reach the system through `powershell()` or `powershellSync()`
   with values passed as `env`, never pasted into the script, so nothing needs
   quoting.
+
+`src/project-sessions.ts` grants a native conversation to an Odd, claims requests and delivers results. `project-plugin/` and `src/project-session-tools.ts` connect one interactive Claude conversation. See [project sessions](../../docs/project-sessions.md).

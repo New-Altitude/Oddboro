@@ -1308,3 +1308,5 @@ sends every action as JSON, body or not.
   renderer in `packages/world` still multiplies, so its night renders differ
   a little from the office.
 - In dev, `window.floor` holds the `Floor` for poking at from the console.
+
+The Projects window and its local controller live in `src/lib/ui/ProjectSessions.svelte` and `src/lib/server/project-sessions/`. See [project sessions](../../docs/project-sessions.md) for native clients, handover and recovery.
