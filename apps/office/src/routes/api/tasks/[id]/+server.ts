@@ -44,7 +44,8 @@ export const POST: RequestHandler = async ({ params, request }) => {
   if (!t) error(404, 'No such task');
   const b = (await request.json().catch(() => ({}))) as Body;
   if (b.op === 'finish') {
-    await finishTask(id, b.done !== false, typeof b.note === 'string' ? b.note.trim() : null);
+    const finished = await finishTask(id, b.done !== false, text(b.note) || null);
+    if (!finished) error(409, 'This task was already answered');
     return json({ ok: true });
   }
   const step = typeof b.index === 'number' ? t.steps[b.index] : undefined;

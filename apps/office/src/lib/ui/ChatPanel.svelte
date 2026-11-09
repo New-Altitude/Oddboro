@@ -7,7 +7,15 @@
   import type { ChatSource } from '../staff/chat-input.ts';
   import type { ChatEntry } from '#lib/server/staff.ts';
   import { SvelteSet } from 'svelte/reactivity';
-  import type { HandOffLine, HandOffStep, LessonLine, PokeRow, ThreadLine } from '@oddboro/ledger';
+  import type {
+    Desk,
+    AskRow,
+    HandOffLine,
+    HandOffStep,
+    LessonLine,
+    PokeRow,
+    ThreadLine
+  } from '@oddboro/ledger';
   import { FIRST_QUESTIONS, firstQuestionIn } from '@oddboro/ledger/first-questions';
   import { clockTime } from '@oddboro/ledger/time';
   import {
@@ -18,6 +26,10 @@
     type ChatAttachment
   } from '../staff/chat-input.ts';
   import Markdown from './Markdown.svelte';
+  import ChatGoal from './ChatGoal.svelte';
+  import GoalProposal from './GoalProposal.svelte';
+  import { approvalTarget, approveWord, yesWord } from './chat-approval.ts';
+  import { mustDo } from './task-steps.ts';
   import Lesson from './Lesson.svelte';
   import { call, failure } from './api.ts';
   import { when, workLine } from './format.ts';
@@ -29,6 +41,9 @@
 
   type Props = {
     profile: StaffProfile;
+    desk: Desk;
+    staff: StaffProfile[];
+    onplan: (hires: AskRow[]) => void;
     /** Bumps when the office changes, e.g. a poke lands or is set. */
     version: number;
     /** Fires when a message goes out, so the floor can send the staffer to the owner's office. */
@@ -45,7 +60,19 @@
     onwork: () => void;
   };
 
-  let { profile, version, onstart, onend, visible, onitem, work, onwork }: Props = $props();
+  let {
+    profile,
+    desk,
+    staff,
+    onplan,
+    version,
+    onstart,
+    onend,
+    visible,
+    onitem,
+    work,
+    onwork
+  }: Props = $props();
 
   // A hidden list has no height to scroll, so catch up when it shows.
   $effect(() => {
@@ -65,7 +92,7 @@
     poke?: boolean;
     at?: string;
     /** Something the staffer put on the desk, shown where it landed. */
-    item?: Delivered & { status: string };
+    item?: Delivered & { status: string; note?: string | null };
     /** What the owner's message replied about. */
     re?: Delivered;
     /** A lesson the staffer kept, shown where it kept it. */
@@ -157,11 +184,56 @@
   /** The delivery the next message replies about. */
   let replyTo = $state<Delivered | undefined>();
 
+  let intent = $state<'reply' | 'proposal' | 'answer' | 'change'>('reply');
+  let saving = $state(false);
+  // Two plans can wait in the same chat. Each keeps its own checkboxes.
+  let skipped = $state<Record<number, Record<number, boolean>>>({});
+  const picks = (a: AskRow) => a.plan?.items.map((_, i) => i).filter((i) => !skipped[a.id]?.[i]);
+  const proposal = (d: Delivered) =>
+    d.kind === 'ask' &&
+    desk.asks.find(
+      (a) =>
+        a.staffId === profile.id &&
+        a.id === d.id &&
+        ((a.kind === 'goal' && a.goal) || (a.kind === 'plan' && a.plan))
+    );
+  const question = (d: Delivered) =>
+    d.kind === 'task' &&
+    desk.tasks.find(
+      (t) =>
+        t.staffId === profile.id &&
+        t.id === d.id &&
+        !t.askId &&
+        !t.steps.some(mustDo) &&
+        !desk.attachments.some((f) => f.taskId === t.id)
+    );
+
+  let lines = $state<Line[]>([]);
+  const waitingAsks = $derived(
+    lines.flatMap(({ item }) => (item?.kind === 'ask' && item.status === 'open' ? [item] : []))
+  );
+  const onlyProposal = $derived(
+    waitingAsks.length === 1 && proposal(waitingAsks[0]) ? waitingAsks[0] : undefined
+  );
+  // Remember what was on screen when the owner typed. A replacement arriving
+  // before Send, a prefilled draft or a line replayed from history is no yes.
+  let writtenDecision = $state('');
+  let approveTo = $state<Delivered>();
+  function typed(text: string) {
+    const words = text.trim();
+    if (!approveWord(writtenDecision) && approveWord(words)) approveTo = onlyProposal;
+    if (!approveWord(words)) approveTo = undefined;
+    writtenDecision = approveWord(words) || yesWord(words) ? words : '';
+  }
+
   function pick(d: Delivered) {
     chatRequest.focus = { staff: profile.id, item: d };
     onitem(d);
   }
-  async function reply(d: Delivered) {
+  async function reply(d: Delivered, how: typeof intent = 'reply') {
+    if (saving) return;
+    problem = '';
+    intent = how === 'reply' && proposal(d) ? 'proposal' : how;
     chatRequest.focus = { staff: profile.id, item: d };
     about = undefined;
     replyTo = d;
@@ -186,7 +258,6 @@
         ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
     );
   });
-  let lines = $state<Line[]>([]);
   let draft = $state('');
   let sending = $state(false);
   let remoteBusy = $state(false);
@@ -199,6 +270,8 @@
 
   function direct(work: WorkAbout) {
     if (work.leadId === profile.id) {
+      typed('');
+      intent = 'reply';
       about = work;
       replyTo = undefined;
       box?.focus();
@@ -233,10 +306,13 @@
     }
   }
   const cannotSend = $derived(
-    posting || stopping || ((sending || remoteBusy) && (!active || !!about))
+    saving || posting || stopping || ((sending || remoteBusy) && (!active || !!about))
   );
 
   let files = $state<File[]>([]);
+  const decisionMode = $derived(
+    !files.length && !about && !active && !sending && !remoteBusy && !posting && !stopping
+  );
   let picker: HTMLInputElement;
   let problem = $state('');
   let attempt:
@@ -406,10 +482,78 @@
     upcoming = upcoming.filter((x) => x.id !== p.id);
   }
 
+  /** The Desk's own operations. Only a card the owner picked can supply the target. */
+  async function decide(d: Delivered, act: 'approve' | 'change' | 'answer', words = '') {
+    if (saving || !decisionMode) return false;
+    saving = true;
+    problem = '';
+    try {
+      if (act === 'answer') {
+        if (!question(d)) throw new Error('This task is no longer waiting for a written answer.');
+        await call(`/api/tasks/${d.id}`, { op: 'finish', done: true, note: words });
+      } else {
+        const a = proposal(d);
+        if (!a) throw new Error('This proposal is no longer open.');
+        if (act === 'change' && words.length > 2000)
+          throw new Error('Keep the changes to 2,000 characters.');
+        const result = await call<{ hires?: AskRow[] }>(`/api/asks/${a.id}`, {
+          decision: act === 'change' ? 'iterate' : 'approve',
+          reason: words,
+          picks: picks(a)
+        });
+        if (result.hires?.length) onplan(result.hires);
+      }
+      return true;
+    } catch (err) {
+      problem = err instanceof Error ? err.message : String(err);
+      return false;
+    } finally {
+      saving = false;
+      load(profile.id);
+    }
+  }
+
   async function send(e: SubmitEvent) {
     e.preventDefault();
-    if ((!draft.trim() && !files.length) || cannotSend) return;
-    await say(draft, replyTo, files);
+    const message = draft.trim();
+    if ((!message && !files.length) || cannotSend) return;
+    if (!decisionMode) {
+      typed('');
+      intent = 'reply';
+      await say(draft, replyTo, files);
+      return;
+    }
+    const re = replyTo;
+    const explicit = approveWord(message);
+    const approved = approvalTarget(
+      message,
+      writtenDecision,
+      intent === 'proposal' ? re : undefined,
+      approveTo,
+      re ? undefined : onlyProposal
+    );
+    const action =
+      intent === 'change' || intent === 'answer' ? intent : approved ? 'approve' : undefined;
+    const target = re ?? approved;
+    if (target && action) {
+      if (!(await decide(target, action, action === 'approve' ? '' : message))) return;
+      draft = '';
+      writtenDecision = '';
+      approveTo = undefined;
+      replyTo = undefined;
+      intent = 'reply';
+      return;
+    }
+    if (explicit && (re?.kind === 'ask' || (!re && (approveTo || waitingAsks.length)))) {
+      problem = re
+        ? 'Open this ask to see the action it needs.'
+        : 'Choose Reply under the proposal you want to approve.';
+      return;
+    }
+    writtenDecision = '';
+    approveTo = undefined;
+    problem = '';
+    await say(draft, re, files);
   }
 
   function attach(selected: FileList | null) {
@@ -422,6 +566,8 @@
       problem = 'Use up to 8 files and 8 MiB of text and files per message.';
       return;
     }
+    typed('');
+    intent = 'reply';
     files = next;
     problem = '';
   }
@@ -449,7 +595,15 @@
    */
   const answers = $derived.by(() => {
     const last = lines.at(-1);
-    if (sending || remoteBusy || !last || last.from !== 'staff' || last.pending || last.failed)
+    if (
+      saving ||
+      sending ||
+      remoteBusy ||
+      !last ||
+      last.from !== 'staff' ||
+      last.pending ||
+      last.failed
+    )
       return [];
     return FIRST_QUESTIONS[firstQuestionIn(last.text)]?.answers ?? [];
   });
@@ -611,6 +765,7 @@
   $effect(() => {
     if (chatRequest.drafts[profile.id] === undefined || !visible) return;
     const d = takeDraft(profile.id) ?? '';
+    if (d) typed('');
     if (d) draft = draft.trim() ? `${draft.trimEnd()}\n\n${d}` : d;
     void tick().then(() => {
       fit();
@@ -922,6 +1077,53 @@
                 : 'text-muted'}">{STATUS[it.status] ?? it.status}</span
             >
           </button>
+          {#if it.note}
+            <p class="mt-1 px-3 text-xs whitespace-pre-wrap text-muted">{it.note}</p>
+          {/if}
+          {#if it.status === 'open'}
+            {@const a = proposal(it)}
+            {@const t = question(it)}
+            {#if a}
+              <dl class="mt-2 px-2">
+                {#if a.why}<div class="mb-2 text-xs text-muted">{a.why}</div>{/if}
+                <GoalProposal
+                  {a}
+                  {staff}
+                  skip={skipped[a.id] ?? {}}
+                  onskip={(i, value) => {
+                    skipped[a.id] = { ...skipped[a.id], [i]: value };
+                  }}
+                />
+              </dl>
+              <div class="mt-2 flex gap-2">
+                <button
+                  class="choice"
+                  disabled={saving || !decisionMode}
+                  onclick={() => reply(it, 'change')}>Change</button
+                >
+                <button
+                  class="choice"
+                  disabled={saving || !decisionMode || picks(a)?.length === 0}
+                  onclick={() => decide(it, 'approve')}
+                  >{a.goal
+                    ? 'Set the goal'
+                    : `Approve ${picks(a)?.length} of ${a.plan?.items.length}`}</button
+                >
+              </div>
+            {:else if t}
+              <div class="mt-2 px-2 text-xs text-muted">
+                <p>{t.why}</p>
+                <ol class="list-decimal ps-4">
+                  {#each t.steps as step, n (n)}<li>{step.text}</li>{/each}
+                </ol>
+                <button
+                  class="choice mt-2"
+                  disabled={saving || !decisionMode}
+                  onclick={() => reply(it, 'answer')}>Answer and finish</button
+                >
+              </div>
+            {/if}
+          {/if}
         </div>
         {@render meta(line, i)}
       {:else}
@@ -1064,15 +1266,28 @@
     onpointercancel={release}
     onkeydown={nudge}
   ></div>
+  {#if decisionMode && !replyTo && approveTo && approveTo.id === onlyProposal?.id && approveWord(draft)}
+    <p class="px-3 pb-1 text-xs text-muted">Approving “{approveTo.title}”</p>
+  {/if}
   {#if replyTo}
     <div class="flex items-center gap-2 px-3 pb-1.5 text-xs text-muted">
       <span class="min-w-0 flex-1 truncate"
-        >Replying about {KIND[replyTo.kind].toLowerCase()} “{replyTo.title}”</span
+        >{intent === 'answer'
+          ? 'Answering'
+          : intent === 'change'
+            ? 'Asking for changes to'
+            : 'Replying about'}
+        {KIND[replyTo.kind].toLowerCase()} “{replyTo.title}”</span
       >
       <button
         class="shrink-0 px-1 text-faint hover:text-coral"
         aria-label="Stop replying"
-        onclick={() => (replyTo = undefined)}>✕</button
+        disabled={saving}
+        onclick={() => {
+          replyTo = undefined;
+          intent = 'reply';
+          problem = '';
+        }}>✕</button
       >
     </div>
   {/if}
@@ -1107,6 +1322,9 @@
   {#if handoff && !handoff.saved}
     {#key handoff.ticket}<CodexHandoff {handoff} onkeep={keptHandoff} />{/key}
   {/if}
+  {#if profile.role === 'Office Manager' && !replyTo && decisionMode}
+    <ChatGoal managerId={profile.id} onset={() => load(profile.id)} />
+  {/if}
   <form class="flex items-end gap-2 px-3 pb-3" novalidate onsubmit={send}>
     <input
       type="file"
@@ -1132,12 +1350,29 @@
       class="min-h-[38px] flex-1 resize-none overflow-y-auto rounded-lg bg-raise px-3 py-2 text-sm leading-relaxed text-ink outline-none placeholder:text-faint"
       rows="1"
       placeholder={replyTo ? `Reply to ${profile.name}` : `Message ${profile.name}`}
+      oninput={(e) =>
+        typed(
+          decisionMode &&
+            e instanceof InputEvent &&
+            e.isTrusted &&
+            e.inputType !== 'insertFromPaste' &&
+            e.inputType !== 'insertFromDrop'
+            ? e.currentTarget.value
+            : ''
+        )}
       bind:value={draft}
-      {onkeydown}></textarea>
+      {onkeydown}
+      disabled={saving}></textarea>
     <button
       class="rounded-lg bg-sea px-3 py-2 text-sm font-medium text-night disabled:opacity-40"
       disabled={cannotSend || (!draft.trim() && !files.length)}
-      >{active ? 'Send correction' : 'Send'}</button
+      >{active
+        ? 'Send correction'
+        : decisionMode && replyTo && intent === 'answer'
+          ? 'Send answer'
+          : decisionMode && replyTo && intent === 'change'
+            ? 'Send changes'
+            : 'Send'}</button
     >
   </form>
 </div>

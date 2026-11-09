@@ -2,7 +2,7 @@
 // Office Manager heard in chat, and the manager plans it: one ask holding the
 // hires and the work staff already here take on. A staffer serves the goals it
 // is linked to, sees only those, and says how each is going.
-import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from './db.ts';
 import {
   addJob,
@@ -31,7 +31,14 @@ import {
 } from './schema.ts';
 import { MANAGER_ROLE, goalReview } from './managers.ts';
 import { HORIZONS } from './goal-words.ts';
-import { addFollowUp, goalThread, goalThreads, type Db, type GoalThread } from './threads.ts';
+import {
+  addFollowUp,
+  goalThread,
+  goalThreads,
+  type Db,
+  type Tx,
+  type GoalThread
+} from './threads.ts';
 
 export type GoalRow = typeof goals.$inferSelect;
 export type ProgressRow = typeof goalProgress.$inferSelect;
@@ -155,46 +162,71 @@ export async function manager(q: Db = db): Promise<StaffRow | undefined> {
  * Set a goal: the owner wrote it, or approved one the manager proposed. The
  * manager then plans it, and reviews every goal once a week from the first one.
  */
-export async function addGoal(d: GoalDraft, askId?: number): Promise<GoalRow> {
-  const [row] = await db.insert(goals).values(d).returning();
-  await record({
-    kind: 'decision',
-    actor: 'owner',
-    title: `Set a goal: ${d.title}`,
-    body: [d.why && `Why: ${d.why}`, d.doneWhen && `Done when: ${d.doneWhen}`]
-      .filter(Boolean)
-      .join('\n'),
-    askId
-  });
-  const m = await manager();
+export async function addGoal(d: GoalDraft, source?: number | ChatGoalRequest): Promise<GoalRow> {
+  return db.transaction((tx) => setGoal(tx, d, source));
+}
+
+type ChatGoalRequest = { managerId: string; requestId: string };
+
+export class GoalRequestConflict extends Error {}
+
+async function setGoal(tx: Tx, d: GoalDraft, source?: number | ChatGoalRequest): Promise<GoalRow> {
+  const chat = typeof source === 'object' ? source : undefined;
+  const askId = typeof source === 'number' ? source : undefined;
+  const m = await manager(tx);
+  if (chat && chat.managerId !== m?.id)
+    throw new GoalRequestConflict('Open the current Office Manager to set this goal.');
+  const [row] = await tx
+    .insert(goals)
+    .values({ ...d, requestId: chat?.requestId })
+    .onConflictDoNothing({ target: goals.requestId })
+    .returning();
+  if (!row && chat) {
+    const [saved] = await tx.select().from(goals).where(eq(goals.requestId, chat.requestId));
+    if (saved?.title === d.title) return saved;
+    throw new GoalRequestConflict('This submission already set a different goal.');
+  }
+  await record(
+    {
+      kind: 'decision',
+      actor: 'owner',
+      title: `Set a goal: ${d.title}`,
+      body: [d.why && `Why: ${d.why}`, d.doneWhen && `Done when: ${d.doneWhen}`]
+        .filter(Boolean)
+        .join('\n'),
+      askId
+    },
+    tx
+  );
   if (m) {
-    await ensureReview(m);
-    // Planned on a thread for the goal, so what the plan raises files under it.
-    await db.transaction(async (tx) =>
-      addFollowUp(tx, {
-        staffId: m.id,
-        kind: 'goal',
-        goalId: row.id,
-        threadId: await goalThread(tx, row.id, m.id)
-      })
-    );
+    await ensureReview(m, tx);
+    await addFollowUp(tx, {
+      staffId: m.id,
+      kind: 'goal',
+      goalId: row.id,
+      threadId: await goalThread(tx, row.id, m.id)
+    });
   }
   return row;
 }
 
-/** The manager's weekly review, made with the first goal so an office with none runs nothing. */
-async function ensureReview(m: StaffRow): Promise<void> {
-  const [has] = await db
+/** The manager's weekly review, made once even when two goals arrive together. */
+async function ensureReview(m: StaffRow, tx: Tx): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext('weekly-goal-review'))`);
+  const [has] = await tx
     .select({ id: jobs.id })
     .from(jobs)
     .where(and(eq(jobs.staffId, m.id), eq(jobs.name, REVIEW_JOB)));
   if (has) return;
-  await addJob({
-    staffId: m.id,
-    name: REVIEW_JOB,
-    instructions: goalReview(await ownerName()),
-    schedule: { every: 'week', day: 'Fri', at: '16:00' }
-  });
+  await addJob(
+    {
+      staffId: m.id,
+      name: REVIEW_JOB,
+      instructions: goalReview(await ownerName(tx)),
+      schedule: { every: 'week', day: 'Fri', at: '16:00' }
+    },
+    tx
+  );
 }
 
 /** The owner changes a goal: its words, when it is for, or where it stands. */
@@ -306,8 +338,8 @@ export async function approveGoal(askId: number, reason: string | null): Promise
   const draft = a.goal;
   let set: GoalRow | undefined;
   await approveAsk(askId, reason, {
-    carryOut: async () => {
-      set = await addGoal(draft, askId);
+    link: async (_, tx) => {
+      set = await setGoal(tx, draft, askId);
     }
   });
   if (!set) throw new Error('That goal is no longer open');
@@ -339,10 +371,13 @@ export async function approvePlan(
   const picked = plan.items.filter((_, i) => picks.includes(i));
   if (!picked.length) throw new Error('Tick at least one part of the plan, or deny it');
   const left = plan.items.filter((_, i) => !picks.includes(i));
-  const note =
-    [reason, left.length && `Left out: ${left.map(itemLabel).join('; ')}.`]
-      .filter(Boolean)
-      .join('\n') || null;
+  const note = [
+    reason,
+    `Approved: ${picked.map(itemLabel).join('; ')}`,
+    left.length && `Left out: ${left.map(itemLabel).join('; ')}.`
+  ]
+    .filter(Boolean)
+    .join('\n');
 
   const hires: AskRow[] = [];
   const approved = await approveAsk(askId, note, {

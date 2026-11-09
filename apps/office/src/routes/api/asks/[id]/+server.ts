@@ -40,6 +40,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
   if (!decision) error(400, 'Say approve, deny or iterate');
   const a = await ask(Number(params.id));
   if (!a) error(404, 'No such ask');
+  if (a.status !== 'open') error(409, 'This ask was already answered');
   if (a.kind === 'hire' && decision === 'approve') error(400, 'Approve a hire by hiring');
   if (a.kind === 'reply' && decision === 'approve')
     error(400, 'Send the reply, or save it to Gmail drafts');
@@ -61,11 +62,13 @@ export const POST: RequestHandler = async ({ params, request }) => {
     );
     return json({ ok: true, hires: done.hires });
   }
+  let decided;
   try {
-    await decideAsk(a.id, decision, reason || null, body.report === true);
+    decided = await decideAsk(a.id, decision, reason || null, body.report === true);
   } catch (e) {
     error(400, e instanceof Error ? e.message : String(e));
   }
+  if (!decided) error(409, 'This ask was already answered');
   if (decision === 'approve' && a.access) {
     const task = (await tasksFrom(a.staffId)).find((t) => t.askId === a.id && t.status === 'open');
     return json({ ok: true, task: task ?? null });

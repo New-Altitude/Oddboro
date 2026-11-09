@@ -99,6 +99,13 @@
       "when": 1794072899007,
       "tag": "0013_calls",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1794183223935,
+      "tag": "0014_chat_goals",
+      "breakpoints": true
     }
   ]
 }

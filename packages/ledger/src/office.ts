@@ -1092,8 +1092,8 @@ export async function decideAsk(
   decision: Decision,
   reason: string | null,
   reportWhenDone = false
-): Promise<void> {
-  await decide(id, decision, reason, { reportWhenDone });
+): Promise<boolean> {
+  return decide(id, decision, reason, { reportWhenDone });
 }
 
 /** What approving an ask means, done before the answer goes back. */
@@ -2582,49 +2582,57 @@ export async function tickKey(key: string): Promise<void> {
         .where(eq(tasks.id, t.id));
 }
 
-export async function finishTask(id: number, done: boolean, note: string | null): Promise<void> {
-  const [t] = await db
-    .update(tasks)
-    .set({ status: done ? 'done' : 'dropped', note: note || null, doneAt: new Date() })
-    .where(and(eq(tasks.id, id), eq(tasks.status, 'open')))
-    .returning();
-  if (!t) return;
-  const answers = t.steps
-    .filter((s) => s.answer && s.action?.kind === 'choice')
-    .map((s) => `${s.text} ${s.answer}`);
-  await record({
-    kind: 'work',
-    actor: 'owner',
-    title: `${done ? 'Done' : 'Dropped'} by ${await ownerName()}: ${t.title}`,
-    body: [t.why, ...answers].join('\n'),
-    reason: t.note,
-    taskId: t.id
+export async function finishTask(id: number, done: boolean, note: string | null): Promise<boolean> {
+  const owner = await ownerName();
+  const finished = await db.transaction(async (tx) => {
+    const [t] = await tx
+      .update(tasks)
+      .set({ status: done ? 'done' : 'dropped', note: note || null, doneAt: new Date() })
+      .where(and(eq(tasks.id, id), eq(tasks.status, 'open')))
+      .returning();
+    if (!t) return;
+    const answers = t.steps
+      .filter((s) => s.answer && s.action?.kind === 'choice')
+      .map((s) => `${s.text} ${s.answer}`);
+    await record(
+      {
+        kind: 'work',
+        actor: 'owner',
+        title: `${done ? 'Done' : 'Dropped'} by ${owner}: ${t.title}`,
+        body: [t.why, ...answers].join('\n'),
+        reason: t.note,
+        taskId: t.id
+      },
+      tx
+    );
+    const [from] = t.askId ? await tx.select().from(asks).where(eq(asks.id, t.askId)) : [];
+    // Closing an ordinary task and giving its Odd the answer are one write.
+    if (done && t.staffId && from?.kind !== 'access')
+      await addFollowUp(tx, {
+        staffId: t.staffId,
+        kind: 'task_done',
+        taskId: t.id,
+        threadId: t.threadId,
+        note: t.note
+      });
+    return { t, from };
   });
+  if (!finished) return false;
+  const { t, from } = finished;
   if (!done) {
-    // No run follows a dropped task: the answer itself goes back. A tool's connect
-    // task belongs to the access ask it came from.
-    const from = t.askId ? await ask(t.askId) : undefined;
     await answerLater(
       {
         handOffId: t.handOffId ?? from?.handOffId ?? null,
         threadId: t.threadId ?? from?.threadId ?? null
       },
       'failed',
-      `${await ownerName()} dropped "${t.title}"${t.note ? `: ${t.note}` : '.'}`
+      `${owner} dropped "${t.title}"${t.note ? `: ${t.note}` : '.'}`
     );
-    return;
+  } else if (from?.kind === 'access' && t.staffId) {
+    // Finishing a connect task starts the work its access asks held.
+    await carryOutTogether([from, ...(await answeredWith(from))]);
   }
-  if (!t.staffId) return;
-  // The owner finished connecting a tool a staffer asked for: it can start the
-  // work that was waiting on it.
-  const a = t.askId ? await ask(t.askId) : undefined;
-  if (a?.kind === 'access') {
-    await carryOutTogether([a, ...(await answeredWith(a))]);
-    return;
-  }
-  // Any other task a staffer gave them: the staffer picks up whatever waited on
-  // it, such as hiring from an intake the owner just filled in.
-  await followUp(t.staffId, 'task_done', { taskId: t.id, note: t.note });
+  return true;
 }
 
 export async function tasksFrom(staffId: string): Promise<TaskRow[]> {
@@ -2650,6 +2658,8 @@ export async function readReport(id: number): Promise<void> {
 // The desk: everything waiting on the owner
 
 export type Desk = {
+  /** The latest answers, kept apart from the items waiting on the owner. */
+  recent: Pick<LedgerRow, 'id' | 'title' | 'reason'>[];
   asks: AskRow[];
   tasks: TaskRow[];
   reports: ReportRow[];
@@ -2663,7 +2673,7 @@ export type Desk = {
 };
 
 export async function desk(): Promise<Desk> {
-  const [a, t, r, f] = await Promise.all([
+  const [a, t, r, f, recent] = await Promise.all([
     db.select().from(asks).where(eq(asks.status, 'open')).orderBy(asc(asks.createdAt)),
     db.select().from(tasks).where(eq(tasks.status, 'open')).orderBy(asc(tasks.createdAt)),
     db.select().from(reports).where(isNull(reports.readAt)).orderBy(asc(reports.createdAt)),
@@ -2673,12 +2683,24 @@ export async function desk(): Promise<Desk> {
       .leftJoin(asks, eq(attachments.askId, asks.id))
       .leftJoin(tasks, eq(attachments.taskId, tasks.id))
       .where(or(eq(asks.status, 'open'), eq(tasks.status, 'open')))
-      .orderBy(asc(attachments.id))
+      .orderBy(asc(attachments.id)),
+    db
+      .select({ id: ledger.id, title: ledger.title, reason: ledger.reason })
+      .from(ledger)
+      .where(
+        and(
+          eq(ledger.actor, 'owner'),
+          or(eq(ledger.kind, 'decision'), isNotNull(ledger.taskId), isNotNull(ledger.askId))
+        )
+      )
+      .orderBy(desc(ledger.createdAt), desc(ledger.id))
+      .limit(5)
   ]);
   // A twin waits behind the first ask it repeats, and the owner's answer to
   // that one answers it too (`asksNoMore`, `decide`).
   const shown = a.filter((x) => !a.some((first) => first.id < x.id && asksNoMore(first, x)));
   return {
+    recent,
     asks: shown,
     tasks: t,
     reports: r,
@@ -2735,6 +2757,8 @@ export type Delivery = {
   status: string;
   /** When the owner decided it, for an ask. */
   decidedAt?: Date | null;
+  /** The owner's words on a decided ask or finished task. */
+  note?: string | null;
 };
 
 /** What one staffer put on the owner's desk, newest last, with where each stands. */
@@ -2746,14 +2770,21 @@ export async function deliveries(staffId: string, limit = 200): Promise<Delivery
         title: asks.title,
         at: asks.createdAt,
         status: asks.status,
-        decidedAt: asks.decidedAt
+        decidedAt: asks.decidedAt,
+        note: asks.reason
       })
       .from(asks)
       .where(eq(asks.staffId, staffId))
       .orderBy(desc(asks.createdAt))
       .limit(limit),
     db
-      .select({ id: tasks.id, title: tasks.title, at: tasks.createdAt, status: tasks.status })
+      .select({
+        id: tasks.id,
+        title: tasks.title,
+        at: tasks.createdAt,
+        status: tasks.status,
+        note: tasks.note
+      })
       .from(tasks)
       .where(eq(tasks.staffId, staffId))
       .orderBy(desc(tasks.createdAt))
@@ -2809,14 +2840,17 @@ export async function jobsFor(staffId: string): Promise<(JobRow & { lastRun?: Ru
   );
 }
 
-export async function addJob(j: {
-  staffId: string;
-  name: string;
-  instructions: string;
-  schedule: Schedule;
-  report?: boolean;
-}): Promise<JobRow> {
-  const [row] = await db
+export async function addJob(
+  j: {
+    staffId: string;
+    name: string;
+    instructions: string;
+    schedule: Schedule;
+    report?: boolean;
+  },
+  q: Db = db
+): Promise<JobRow> {
+  const [row] = await q
     .insert(jobs)
     .values({ ...j, nextRunAt: nextRun(j.schedule, new Date()) })
     .returning();
@@ -3119,8 +3153,8 @@ export async function setPlanLimits(w: Partial<PlanWindows>): Promise<void> {
 }
 
 /** What the staff call the owner. "the owner" until the install sets a name. */
-export async function ownerName(): Promise<string> {
-  const [row] = await db.select().from(owner).where(eq(owner.id, 'owner'));
+export async function ownerName(q: Db = db): Promise<string> {
+  const [row] = await q.select().from(owner).where(eq(owner.id, 'owner'));
   return row?.name.trim() || 'the owner';
 }
 

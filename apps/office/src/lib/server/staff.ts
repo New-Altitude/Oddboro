@@ -210,7 +210,7 @@ export type ChatEntry = {
   poke?: true;
   told?: true;
   re?: ChatRef;
-  item?: ChatRef & { status: string };
+  item?: ChatRef & { status: string; note?: string | null };
   lesson?: LessonLine;
   /** `back` is which hand-back a reply or pick-up line shows. */
   handOff?: { line: HandOffLine; step: HandOffStep; back?: number };
