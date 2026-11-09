@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { newTurnId } from '../staff/chat-input.ts';
   import { call } from './api.ts';
 
   let { managerId, onset }: { managerId: string; onset: () => void } = $props();
@@ -17,11 +18,7 @@
     problem = '';
     try {
       if (pending?.title !== words) {
-        const bytes = crypto.getRandomValues(new Uint8Array(16));
-        pending = {
-          title: words,
-          requestId: Array.from(bytes, (n) => n.toString(16).padStart(2, '0')).join('')
-        };
+        pending = { title: words, requestId: newTurnId() };
       }
       const saved = await call<{ title: string }>('/api/goals', { ...pending, managerId });
       result = `Goal set: ${saved.title}`;

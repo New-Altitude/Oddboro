@@ -9,6 +9,7 @@ import { home } from '@oddboro/ledger';
 import {
   CHAT_BYTES,
   CHAT_FILES,
+  CHAT_ID,
   type ChatAttachment,
   type OwnerInput
 } from '../staff/chat-input.ts';
@@ -40,8 +41,7 @@ function media(name: string, data: Buffer): string {
 }
 
 export function checkInput({ turnId, message, source, files = [] }: OwnerInput): ChatAttachment[] {
-  if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(turnId))
-    throw new ChatInputError('This message has no valid ID.');
+  if (!CHAT_ID.test(turnId)) throw new ChatInputError('This message has no valid ID.');
   if (!message.trim() && !files.length)
     throw new ChatInputError('Write a message or attach a file.');
   if (

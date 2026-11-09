@@ -148,7 +148,7 @@ test('a failed follow-up leaves the question on the Desk to answer again', async
 test("one explicit manager chat submission sets the owner's goal and starts planning once", async () => {
   const request = {
     managerId: 'lead',
-    requestId: '12345678123442348123456712345678',
+    requestId: '12345678-1234-4234-8123-456712345678',
     title: 'Measure the north field'
   };
   const set = (body: unknown) => post(goalRoute.POST, 0, body).then((r) => r.json());

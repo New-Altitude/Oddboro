@@ -2,6 +2,7 @@
 export const CHAT_BYTES = 8 * 1024 * 1024;
 export const CHAT_REQUEST_BYTES = 12 * 1024 * 1024;
 export const CHAT_FILES = 8;
+export const CHAT_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 export const CHAT_ACCEPT = '.txt,.md,.markdown,.png,.jpg,.jpeg,.webp';
 export type ChatAttachment = { name: string; mediaType: string; size: number; hash: string };
 export type ChatSource = { kind: string; id?: string; revision?: string };

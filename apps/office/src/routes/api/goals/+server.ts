@@ -3,6 +3,7 @@
 // sets a new one, and the Office Manager starts planning it.
 import { error, json } from '@sveltejs/kit';
 import { addGoal, goalDraft, goalsWindow, GoalRequestConflict } from '@oddboro/ledger';
+import { CHAT_ID } from '../../../lib/staff/chat-input.ts';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async () => json(await goalsWindow());
@@ -14,7 +15,7 @@ export const POST: RequestHandler = async ({ request }) => {
     if (
       typeof body.managerId !== 'string' ||
       typeof body.requestId !== 'string' ||
-      !/^[0-9a-f]{32}$/i.test(body.requestId)
+      !CHAT_ID.test(body.requestId)
     )
       error(400, 'Open the goal box in the manager chat again');
     if (typeof body.title !== 'string' || body.title.trim().length > 140)
