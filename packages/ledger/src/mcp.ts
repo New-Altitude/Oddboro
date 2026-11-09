@@ -32,6 +32,7 @@ import {
   searchLedger,
   setDescription,
   staffer,
+  webReach,
   type GoAhead,
   record,
   roster,
@@ -527,7 +528,7 @@ async function placed(a: {
 tool(
   'raise_ask',
   {
-    description: `Ask ${OWNER} to approve something. It lands on their desk and they approve, deny, or send it back with what to change, maybe with a reason. Use it for anything that needs their yes. One decision per ask, worded as the exact action: if they approve, you carry it out at once in a new run, with only the ask to go on. The reply lists their closest past decisions: if one matches and gave no reason, tell ${OWNER} that a reason would let Odds handle these without asking next time. For an outside tool, use ask_for_access; for a folder on this computer, ask_for_folder; for ${SWITCH_NAMES.commands} or ${SWITCH_NAMES.web}, see my_access; and for a new Odd, use propose_hire.${raisedNote}`,
+    description: `Ask ${OWNER} to approve something. It lands on their desk and they approve, deny, or send it back with what to change, maybe with a reason. Use it for anything that needs their yes. One decision per ask, worded as the exact action: if they approve, you carry it out at once in a new run, with only the ask to go on. The reply lists their closest past decisions: if one matches and gave no reason, tell ${OWNER} that a reason would let Odds handle these without asking next time. For an outside tool, use ask_for_access; for a folder on this computer, ask_for_folder; for browsing, ask_to_browse; for ${SWITCH_NAMES.commands}, see my_access; and for a new Odd, use propose_hire.${raisedNote}`,
     inputSchema: {
       title: z
         .string()
@@ -997,6 +998,58 @@ if (has('ask_for_access'))
       );
     }
   );
+
+// Odds propose the named switches. Only an owner decision can move them.
+tool(
+  'ask_to_browse',
+  {
+    description: `Ask ${OWNER} to switch on Browse the web for one or more named Odds. Describe the work to pick up after their answer. This only asks for the switches.${raisedNote}`,
+    inputSchema: {
+      odds: z
+        .array(z.string().min(1).max(100))
+        .min(1)
+        .max(20)
+        .describe('The ids of the Odds whose work needs browsing.'),
+      why: z
+        .string()
+        .trim()
+        .min(1)
+        .max(1000)
+        .describe('The work that needs browsing and what to continue afterward.'),
+      revises: revisesArg,
+      ...raisedArgs
+    }
+  },
+  async ({ odds, why, revises, ...place }) => {
+    if (LESSON_RUN) return refused('A run learning from a note cannot ask for browsing.');
+    const on = await placed(place);
+    if ('problem' in on) return refused(on.problem);
+    const targets = [];
+    for (const id of [...new Set(odds)].sort()) {
+      const who = await staffer(id);
+      if (!who || who.leftAt) return refused(`No Odd here named ${id}.`);
+      targets.push({
+        id,
+        name: who.name,
+        alreadyOn: who.web,
+        reach: webReach(who, officeHeldIn(process.env))
+      });
+    }
+    const { ask } = await raiseAsk(ME, {
+      ...on,
+      kind: 'web',
+      web: targets,
+      why,
+      revises,
+      via: VIA,
+      title: `Let ${targets.map((t) => t.name).join(', ')} browse the web`,
+      ifApproved: targets
+        .map((t) => `${t.name}: ${t.alreadyOn ? 'Already on. ' : ''}${t.reach}`)
+        .join('\n')
+    });
+    return text(`Ask ${ask.id} is on ${OWNER}'s desk. Wait for their answer.`);
+  }
+);
 
 // A folder on this computer, outside the office: only the owner gives one,
 // from this ask's card or the Settings tab. Checked here with the Settings

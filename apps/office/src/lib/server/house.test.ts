@@ -49,7 +49,7 @@ test('every run speaks of the owner by name or as "they" unless the owner said o
 test('every run is told Run commands and Browse the web are its own tools, which my_access says how to get, never outside tools to find', () => {
   assert.ok(
     section.includes(
-      '- my_access lists your outside tools and your own. Run commands and Browse the web are your own tools, not outside tools: my_access says whether you have each, and if not, whether {owner} can switch it on in your Settings tab, under Office. When a job needs one they can switch on, say which and why in your reply. When an outside tool stops working'
+      '- my_access lists your outside tools and your own. Run commands and Browse the web are your own tools, not outside tools: my_access says whether you have each, and if not, whether {owner} can switch it on in your Settings tab, under Office. When a job needs browsing, use ask_to_browse. For commands, say why you need them in your reply. When an outside tool stops working'
     ),
     section
   );

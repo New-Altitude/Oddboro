@@ -109,6 +109,7 @@ export type AskKind =
   | 'reply'
   | 'filter'
   | 'folder'
+  | 'web'
   | 'call';
 /** `revise` means the owner sent it back to be reworked. */
 export type AskStatus = 'open' | 'approved' | 'denied' | 'revise';
@@ -127,6 +128,14 @@ export type FolderRequest = {
   path: string;
   level: FolderAccess;
   given?: { path: string; level: FolderAccess };
+};
+/** The Odd and reach shown when asking to switch on browsing, and what actually happened. */
+export type WebTarget = {
+  id: string;
+  name: string;
+  reach: string;
+  alreadyOn: boolean;
+  result?: string;
 };
 /**
  * One email reply an Odd proposes. The owner may change the recipients,
@@ -298,6 +307,7 @@ export const asks = pgTable('asks', {
   filter: jsonb().$type<GmailFilter>(),
   /** A folder ask's folder and level. */
   folder: jsonb().$type<FolderRequest>(),
+  web: jsonb().$type<WebTarget[]>(),
   /** A call ask's held call to an outside tool. */
   call: jsonb().$type<HeldCall>(),
   /** The ask this one reworks, after the owner sent that one back. */

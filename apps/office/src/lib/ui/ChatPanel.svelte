@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { tick } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { page } from '$app/state';
   import { replaceState } from '$app/navigation';
   import CodexHandoff from './CodexHandoff.svelte';
   import CodexSource from './CodexSource.svelte';
   import type { ChatSource } from '../staff/chat-input.ts';
-  import type { ChatEntry } from '#lib/server/staff.ts';
+  import type { ChatEntry, ChatEvent, ChatSignIn } from '#lib/server/staff.ts';
   import { SvelteSet } from 'svelte/reactivity';
   import type {
     Desk,
@@ -36,6 +36,8 @@
     saveResponse,
     type SavedResponse
   } from './task-response.svelte.ts';
+  import ChatAccessAsk from './ChatAccessAsk.svelte';
+  import ChatSignInCard from './ChatSignInCard.svelte';
   import Markdown from './Markdown.svelte';
   import ChatGoal from './ChatGoal.svelte';
   import GoalProposal from './GoalProposal.svelte';
@@ -104,7 +106,7 @@
     poke?: boolean;
     at?: string;
     /** Something the staffer put on the desk, shown where it landed. */
-    item?: Delivered & { status: string; note?: string | null; responseVersion?: number };
+    item?: ChatEntry['item'];
     /** What the owner's message replied about. */
     re?: Delivered;
     /** A lesson the staffer kept, shown where it kept it. */
@@ -309,6 +311,34 @@
   });
   let draft = $state('');
   let sending = $state(false);
+  // The office already holds the text, files and reply target under this turn id.
+  type Blocked = { turnId: string; signIn: ChatSignIn };
+  let blocked = $state<Blocked>();
+  const signInKey = () => `oddboro-chat-sign-in-${profile.id}`;
+  onMount(() => {
+    try {
+      const value = sessionStorage.getItem(signInKey());
+      if (value) blocked = JSON.parse(value);
+    } catch {
+      /* The open chat still holds the request when storage is unavailable. */
+    }
+  });
+  function hold(value?: Blocked) {
+    blocked = value;
+    try {
+      if (value) sessionStorage.setItem(signInKey(), JSON.stringify(value));
+      else sessionStorage.removeItem(signInKey());
+    } catch {
+      /* Storage is optional in the desktop window. */
+    }
+  }
+  function continueChat(turnId: string) {
+    const request = blocked?.signIn;
+    if (blocked?.turnId !== turnId || !request || sending || remoteBusy) return;
+    hold();
+    if (profile.agent === request.agent && (profile.account ?? 'office') === request.account)
+      void say('', undefined, undefined, turnId);
+  }
   let remoteBusy = $state(false);
   type Reply = { runId: string; turnId: string };
   let active = $state<Reply>();
@@ -767,23 +797,19 @@
       lines.push({ from: 'staff', text: '', pending: true, turnId });
       reply = lines[lines.length - 1];
       scrollDown();
-      const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
       let buffer = '';
       for (;;) {
         const { value, done } = await reader.read();
         if (done) break;
-        buffer += value;
+        buffer += decoder.decode(value, { stream: true });
         let cut: number;
         while ((cut = buffer.indexOf('\n\n')) >= 0) {
           const chunk = buffer.slice(0, cut);
           buffer = buffer.slice(cut + 2);
           if (!chunk.startsWith('data: ')) continue;
-          const ev = JSON.parse(chunk.slice(6)) as
-            | { type: 'reply'; runId: string; turnId: string }
-            | { type: 'delta'; text: string }
-            | { type: 'tool'; name: string }
-            | { type: 'done'; text: string }
-            | { type: 'error'; message: string };
+          const ev = JSON.parse(chunk.slice(6)) as ChatEvent;
           if (generation !== newest) {
             if (ev.type === 'done' || ev.type === 'error') {
               reply.pending = false;
@@ -803,7 +829,8 @@
             reply.pending = false;
             reply.at = new Date().toISOString();
           } else if (ev.type === 'error') {
-            problem = ev.message;
+            if (ev.signIn) hold({ turnId, signIn: ev.signIn });
+            else problem = ev.message;
             reply.text = ev.message;
             reply.pending = false;
             reply.failed = true;
@@ -811,6 +838,10 @@
           scrollDown();
         }
       }
+      if (reply.pending)
+        throw new Error(
+          'The connection closed before the reply arrived. Check the chat before sending again.'
+        );
     } catch (err) {
       if (generation === newest) problem = err instanceof Error ? err.message : String(err);
     } finally {
@@ -1022,7 +1053,7 @@
         Say hello to {profile.name}, who walks to your office while you talk.
       </p>
     {/if}
-    {#each lines as line, i (i)}
+    {#each lines as line, i (line.item ? keyOf(line.item) : i)}
       {#if breaks[i]}
         <!-- A new day in the office's time zone. -->
         <div class="flex items-center gap-2 py-1 text-[11px] text-faint">
@@ -1222,6 +1253,10 @@
                 <p class="text-xs text-muted">{responseProblem || 'Opening response'}</p>
               {/if}
             {/if}
+          {:else if it.web || it.folder?.given || (it.folder && it.status === 'open')}
+            {#key it.id}
+              <ChatAccessAsk item={it} name={profile.name} onchanged={() => load(profile.id)} />
+            {/key}
           {/if}
         </div>
         {@render meta(line, i)}
@@ -1280,13 +1315,22 @@
         {:else}
           {@render meta(line, i)}
           {#if line.from === 'owner' && line.turnId && !answered.has(line.turnId) && !sending}
-            <button
-              class="ms-auto text-xs text-sea"
-              disabled={remoteBusy}
-              onclick={() => say('', undefined, undefined, line.turnId)}
-            >
-              {remoteBusy ? 'Waiting for a reply' : 'Get a reply'}
-            </button>
+            {#if blocked?.turnId === line.turnId}
+              <ChatSignInCard
+                request={blocked.signIn}
+                name={profile.name}
+                onready={() => continueChat(line.turnId!)}
+                onedit={() => hold()}
+              />
+            {:else}
+              <button
+                class="ms-auto text-xs text-sea"
+                disabled={remoteBusy}
+                onclick={() => say('', undefined, undefined, line.turnId)}
+              >
+                {remoteBusy ? 'Waiting for a reply' : 'Get a reply'}
+              </button>
+            {/if}
           {/if}
         {/if}
       {/if}

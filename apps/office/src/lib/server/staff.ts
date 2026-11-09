@@ -108,6 +108,7 @@ import {
   type TaskRow,
   type PokeRow,
   type Agent,
+  type Delivery,
   type StaffRow,
   type UsageKind,
   clockTime,
@@ -156,6 +157,7 @@ import { awsReady } from './aws.ts';
 import { bearer } from './oauth.ts';
 import {
   apiKey,
+  claudeAccount,
   claudeAccountOf,
   claudeRunHome,
   claudeSettings,
@@ -176,7 +178,7 @@ import { endedEarly, LAUNCHES, streamTools, type Launch } from './cli.ts';
 import { NOT_SIGNED_IN, shellEnv, SIGN_IN_WHERE, stopGroups, type RunImage } from './launch.ts';
 import { tooOldLine } from './versions.ts';
 import { claudeSandbox, NETWORK_REFUSED, NETWORK_REFUSED_LINE } from './sandbox.ts';
-import { agentCommand } from './agent-sign-in.ts';
+import { agentCommand, claudeSignInState, signInState } from './agent-sign-in.ts';
 import { ACT_WRITE, house, managerWork, stillOnDeskSection } from './house.ts';
 
 /** The owner's data folder, which every staffer may read, whatever tool it runs on. */
@@ -210,7 +212,7 @@ export type ChatEntry = {
   poke?: true;
   told?: true;
   re?: ChatRef;
-  item?: ChatRef & { status: string; note?: string | null };
+  item?: Omit<Delivery, 'at' | 'decidedAt'>;
   lesson?: LessonLine;
   /** `back` is which hand-back a reply or pick-up line shows. */
   handOff?: { line: HandOffLine; step: HandOffStep; back?: number };
@@ -218,12 +220,13 @@ export type ChatEntry = {
   /** On a reply a chat run wrote: milliseconds from the owner's message to the reply. */
   took?: number;
 };
+export type ChatSignIn = { agent: Agent; account: string; how: 'key' | 'browser' };
 export type ChatEvent =
   | { type: 'reply'; runId: string; turnId: string }
   | { type: 'delta'; text: string }
   | { type: 'tool'; name: string }
   | { type: 'done'; text: string }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string; signIn?: ChatSignIn };
 
 /**
  * Background runs at once per staffer: jobs, follow-ups and drafts. Each
@@ -404,7 +407,9 @@ export async function chatLog(id: string): Promise<ChatEntry[]> {
       )
     ];
   });
-  return [...history(id), ...items, ...threads, ...handOffs, ...kept].sort((a, b) =>
+  // Only the database supplies actionable deliveries, never a line read from an Odd's folder.
+  const messages = history(id).map(({ item: _item, ...message }) => message);
+  return [...messages, ...items, ...threads, ...handOffs, ...kept].sort((a, b) =>
     a.at.localeCompare(b.at)
   );
 }
@@ -1357,7 +1362,10 @@ async function run(
             opts.onEvent?.({ type: 'delta', text: '\n\n' });
           }
         } else if (e.type === 'result') {
-          if (e.subtype === 'success') finish({ ok: true, text: String(e.result ?? reply).trim() });
+          if (e.subtype === 'success' && e.is_error === true)
+            finish({ ok: false, text: String(e.result ?? 'The run failed.') });
+          else if (e.subtype === 'success')
+            finish({ ok: true, text: String(e.result ?? reply).trim() });
           else finish({ ok: false, text: endedEarly(who.agent, e) });
         }
       }
@@ -1377,6 +1385,25 @@ async function run(
     child.stdin.on('error', () => {});
     child.stdin.end(launch.stdin);
   });
+}
+
+// Check the account the failed run actually used. Older Claude installs may use the owner's login.
+async function missingChatSignIn(who: StaffRow, failure: string): Promise<ChatSignIn | undefined> {
+  const agent = who.agent;
+  const account = await accountOf(who);
+  if (agent === 'claude') {
+    if (account === OFFICE_ACCOUNT && claudeSettings().auth === 'key')
+      return apiKey() ? undefined : { agent, account, how: 'key' };
+    const signed = await claudeSignInState(
+      account,
+      account === OFFICE_ACCOUNT ? claudeAccount : undefined
+    );
+    return signed.signedIn || signed.ownLogin ? undefined : { agent, account, how: signed.how };
+  }
+  const state = signInState(agent, account);
+  // Grok can reject an expired sign-in whose account file still exists.
+  if (!state.signedIn || (agent === 'grok' && failure === `Grok ${NOT_SIGNED_IN}`))
+    return { agent, account, how: state.how };
 }
 
 /** Keep an owner turn before any run. Imports can stop here until the owner asks for a reply. */
@@ -1569,6 +1596,7 @@ export async function replyToOwnerTurn(
         : [])
     ].join('\n\n');
     const { texts, images } = inputFiles(id, owner.attachments ?? []);
+    let usedTool = false;
     const r = await run(who, prompt, {
       kind: 'chat',
       ownerSaid: message,
@@ -1584,7 +1612,8 @@ export async function replyToOwnerTurn(
       sessionFile: chatSession(id),
       timeoutMs: CHAT_TIMEOUT_MS,
       onEvent: (e) => {
-        if (e.type !== 'done') onEvent(e);
+        if (e.type === 'tool') usedTool = true;
+        if (e.type !== 'done' && e.type !== 'error') onEvent(e);
       }
     });
     if (r.interrupted) {
@@ -1615,6 +1644,10 @@ export async function replyToOwnerTurn(
       });
       if (re?.ref.kind === 'report') await replyToReport(re.ref.id, message);
       onEvent({ type: 'done', text: r.text });
+    } else {
+      // Only offer a sign-in retry when this reply has not already used a tool.
+      const signIn = usedTool ? undefined : await missingChatSignIn(who, r.text);
+      onEvent({ type: 'error', message: r.text, ...(signIn && { signIn }) });
     }
   } finally {
     if (replies.get(id) === reply) replies.delete(id);
@@ -1736,7 +1769,7 @@ function followUpBrief(
       ...(g.doneWhen ? [`- Done when: ${g.doneWhen}`] : []),
       '',
       '1. Read the office: office_report for each Odd, what it does, its level and the tools it holds or is waiting on, and list_goals for the goals they already serve.',
-      `2. Work out who does what, how often, and with which tools (find_connectors). Give the work to Odds already here when one fits, with a new job or a change to one. Give a part to an Odd whose level and tools cover it. For a tool an Odd lacks, put any level raise in owner_steps, as a step on ${modelSection("that Odd's")}. Have the Odd ask for the tool itself with ask_for_access when its officeTools include it, or put connecting it in owner_steps when they do not. For ${SWITCH_NAMES.commands} or ${SWITCH_NAMES.web}, put switching it on in ${officeSection("that Odd's")}, in owner_steps only when office_report says {owner} can switch it on for that Odd. Keep every other step only {owner} can do in owner_steps too. Hire only for work nobody here fits.`,
+      `2. Work out who does what, how often, and with which tools (find_connectors). Give the work to Odds already here when one fits, with a new job or a change to one. Give a part to an Odd whose level and tools cover it. For a tool an Odd lacks, put any level raise in owner_steps, as a step on ${modelSection("that Odd's")}. Have the Odd ask for the tool itself with ask_for_access when its officeTools include it, or put connecting it in owner_steps when they do not. For ${SWITCH_NAMES.web}, call ask_to_browse with the Odds that need it. For ${SWITCH_NAMES.commands}, put switching it on in ${officeSection("that Odd's")}, in owner_steps only when office_report says {owner} can switch it on for that Odd. Keep every other step only {owner} can do in owner_steps too. Hire only for work nobody here fits.`,
       '3. Read the brief and any answers already given. If a missing answer changes the plan, put only those questions in the response of give_owner_a_task, then stop. You pick up when they finish it.',
       "4. Otherwise bring the whole plan in one ask with propose_goal_plan. Write each hire's job description to a file first, and pass any intake as its intake_file.",
       '5. Once {owner} approves the plan, you pick up here on the goal and lead the work: you hand each piece to the Odd who does it. So its owner steps hold only what truly needs {owner}, such as signing in to a tool, never passing work or a request to an Odd.',
@@ -1819,6 +1852,13 @@ function followUpBrief(
       '2. If work was waiting on it, do it now, within what they gave you. If they gave less than you asked and the work needs more, say so in your reply.',
       '3. If nothing was waiting, stop there.'
     ];
+  if (f.kind === 'carry_out' && a?.web)
+    return [
+      'The owner answered your browsing request.',
+      ...a.web.map((t) => `- ${t.name}: ${t.result}`),
+      `The work that waited: ${a.why}`,
+      'Continue that work once with the access each Odd has. If it still needs something, say who needs what.'
+    ];
   if (f.kind === 'carry_out' && a?.access)
     return [
       `{owner} approved your ask #${a.id}, and the access is ready now.`,
@@ -1873,7 +1913,7 @@ function followUpBrief(
       `- What they want changed: ${f.note}`,
       '',
       '1. Do any work the new version needs first, such as rewriting a file in your folder.',
-      `2. Raise the new version with the same tool as before (raise_ask, propose_reply, propose_filter, propose_hire, ask_for_access, ask_for_folder, propose_goal or propose_goal_plan), or the one their note calls for, passing revises: ${a?.id}.`,
+      `2. Raise the new version with the same tool as before (raise_ask, propose_reply, propose_filter, propose_hire, ask_for_access, ask_for_folder, ask_to_browse, propose_goal or propose_goal_plan), or the one their note calls for, passing revises: ${a?.id}.`,
       '3. Do not carry out the ask itself. They decide the new version.'
     ];
   return [
@@ -2055,7 +2095,7 @@ export async function followThrough(
         f.kind === 'task_done' && t?.responseVersion && t.response
           ? savedTaskWords(t.response)
           : undefined,
-      approvedAsk: f.kind === 'carry_out' ? a?.id : undefined,
+      approvedAsk: f.kind === 'carry_out' && !a?.web ? a?.id : undefined,
       ownerNote: ownerNoteOf(f),
       ownerEdit: edit && { path: edit.path, text: edit.shown.now },
       draftOnly: atDraft(f.kind),

@@ -420,13 +420,13 @@ test("find_connectors and ask_for_access each say they are not for the Odd's own
   }
 });
 
-test('raise_ask sends an outside tool to ask_for_access, a folder to ask_for_folder and the two switches to my_access', async () => {
+test('raise_ask sends an outside tool to ask_for_access, a folder to ask_for_folder, browsing to ask_to_browse and commands to my_access', async () => {
   const { tools } = await rae.listTools();
   const description = tools.find((t) => t.name === 'raise_ask')?.description ?? '';
-  const { commands, web } = W.SWITCH_NAMES;
+  const { commands } = W.SWITCH_NAMES;
   assert.ok(
     description.includes(
-      `For an outside tool, use ask_for_access; for a folder on this computer, ask_for_folder; for ${commands} or ${web}, see my_access;`
+      `For an outside tool, use ask_for_access; for a folder on this computer, ask_for_folder; for browsing, ask_to_browse; for ${commands}, see my_access;`
     ),
     description
   );

@@ -72,6 +72,7 @@ import {
   type AccessRequest,
   type AskKind,
   type FolderRequest,
+  type WebTarget,
   type FollowUpKind,
   type GoalDraft,
   type GoalPlan,
@@ -89,6 +90,7 @@ import {
 import {
   AGENT_NAMES,
   commandsOnline,
+  webLine,
   EFFORT_NAMES,
   EFFORT_ORDER,
   effortsOf,
@@ -319,18 +321,29 @@ export async function setModel(
   });
 }
 
+/** The effect of giving this Odd its web switch, in the Settings tab's words. */
+export function webReach(who: StaffRow, held: boolean): string {
+  return webLine(who.agent, process.platform, who.agent === 'claude' && held);
+}
+
 /** Only the owner switches Run commands or Browse the web. Takes effect on the staffer's next run. */
 export async function setOwnTool(
   id: string,
   which: 'commands' | 'web',
   on: boolean
 ): Promise<void> {
-  const before = await staffer(id);
-  if (!before || before[which] === on) return;
-  await db
+  await db.transaction(async (tx) => {
+    const [before] = await tx.select().from(staff).where(eq(staff.id, id)).for('update');
+    if (before) await changeOwnTool(tx, before, which, on);
+  });
+}
+
+async function changeOwnTool(tx: Tx, before: StaffRow, which: 'commands' | 'web', on: boolean) {
+  if (before[which] === on) return;
+  await tx
     .update(staff)
     .set({ [which]: on })
-    .where(eq(staff.id, id));
+    .where(eq(staff.id, before.id));
   const n = before.name;
   const title =
     which === 'commands'
@@ -340,12 +353,15 @@ export async function setOwnTool(
       : on
         ? `Let ${n} browse the web`
         : `Stopped ${n} browsing the web`;
-  await record({
-    kind: 'access',
-    actor: 'owner',
-    title,
-    ...networkNote(before, { ...before, [which]: on })
-  });
+  await record(
+    {
+      kind: 'access',
+      actor: 'owner',
+      title,
+      ...networkNote(before, { ...before, [which]: on })
+    },
+    tx
+  );
 }
 
 /**
@@ -898,10 +914,11 @@ export async function raiseAsk(
     filter?: GmailFilter;
     /** A folder ask's folder (`ask_for_folder`). */
     folder?: FolderRequest;
+    web?: WebTarget[];
     /** A call ask's held call, from the gateway (`holdCall` in the office's gateway.ts). */
     call?: HeldCall;
     /** `goal`, `plan`, `reply`, `filter`, `folder` and `call` say so; the rest follow from access or hire. */
-    kind?: 'goal' | 'plan' | 'reply' | 'filter' | 'folder' | 'call';
+    kind?: 'goal' | 'plan' | 'reply' | 'filter' | 'folder' | 'web' | 'call';
     revises?: number;
     /** The colleague whose handed-back work the lead raised this from (`VIA`). */
     via?: string;
@@ -926,7 +943,7 @@ export async function raiseAsk(
     // answer an email twice, and a filter may not file the same mail twice.
     // A folder ask may not repeat one from the same place. Office-raised
     // kinds and access twins are left alone.
-    if (ONCE_ONLY.includes(kind) || a.reply || a.filter || a.folder) {
+    if (kind === 'web' || ONCE_ONLY.includes(kind) || a.reply || a.filter || a.folder) {
       await lockDesk(tx, staffId);
       if (a.reply) await refuseSecondReply(tx, staffId, a.reply, a.revises);
       else if (a.filter) await refuseSecondFilter(tx, staffId, a.filter, a.revises);
@@ -1294,6 +1311,40 @@ async function decide(
       })
       .where(and(eq(asks.id, id), eq(asks.status, 'open')))
       .returning();
+    if (claimed?.web && decision === 'approve') {
+      // Lock the named rows in a fixed order: another ask or Settings may change the same Odd.
+      const rows = await tx
+        .select()
+        .from(staff)
+        .where(
+          inArray(
+            staff.id,
+            claimed.web.map((t) => t.id)
+          )
+        )
+        .orderBy(asc(staff.id))
+        .for('update');
+      for (const target of claimed.web) {
+        const who = rows.find((w) => w.id === target.id);
+        if (!who || who.leftAt) target.result = 'Left the office.';
+        else if (target.alreadyOn && !who.web)
+          target.result = 'Switched off since this ask. Still off.';
+        else if (who.name !== target.name || webReach(who, networkHeld()) !== target.reach)
+          target.result = 'Settings changed. Ask again with the new settings.';
+        else {
+          target.result = who.web ? 'Already on.' : 'Switched on.';
+          await changeOwnTool(tx, who, 'web', true);
+        }
+      }
+      await tx.update(asks).set({ web: claimed.web }).where(eq(asks.id, id));
+      await addFollowUp(tx, {
+        staffId: claimed.staffId,
+        kind: 'carry_out',
+        askId: id,
+        threadId: claimed.threadId,
+        note: reason
+      });
+    }
     if (claimed) await o.link?.(claimed, tx);
     if (claimed?.kind === 'hand_offs' && decision === 'approve') await startHeld(tx, claimed);
     // The folder goes to the Odd with the yes, or neither happens.
@@ -1354,6 +1405,7 @@ async function decide(
     reason: ask.reason,
     askId: ask.id
   });
+  if (ask.web && decision === 'approve') return true;
   await o.carryOut?.(ask);
   if (decision === 'approve' && ask.access) {
     const { task, connector: granted } = await grantAccess(ask.staffId, ask.access, ask.id);
@@ -2807,6 +2859,9 @@ export type Delivery = {
   status: string;
   /** A saved task response opens from its chat card, including after completion. */
   responseVersion?: number;
+  folder?: FolderRequest;
+  web?: WebTarget[];
+  why?: string;
   /** When the owner decided it, for an ask. */
   decidedAt?: Date | null;
   /** The owner's words on a decided ask or finished task. */
@@ -2823,7 +2878,10 @@ export async function deliveries(staffId: string, limit = 200): Promise<Delivery
         at: asks.createdAt,
         status: asks.status,
         decidedAt: asks.decidedAt,
-        note: asks.reason
+        note: asks.reason,
+        folder: asks.folder,
+        web: asks.web,
+        why: asks.why
       })
       .from(asks)
       .where(eq(asks.staffId, staffId))
@@ -2855,7 +2913,19 @@ export async function deliveries(staffId: string, limit = 200): Promise<Delivery
       .limit(limit)
   ]);
   return [
-    ...a.map((x) => ({ kind: 'ask' as const, ...x })),
+    ...a.map(({ folder, web, why, ...x }) => ({
+      kind: 'ask' as const,
+      ...x,
+      ...(folder && {
+        folder: {
+          ...folder,
+          path: shownFolder(folder.path),
+          ...(folder.given && { given: { ...folder.given, path: shownFolder(folder.given.path) } })
+        },
+        why
+      }),
+      ...(web && { web, why })
+    })),
     ...t.map((x) => ({ kind: 'task' as const, ...x })),
     ...r.map(({ readAt, ...x }) => ({
       kind: 'report' as const,

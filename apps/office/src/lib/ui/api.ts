@@ -50,12 +50,13 @@ export async function follow<T>(url: string, on: (line: T) => void): Promise<voi
 
 async function lines<T>(res: Response, on: (line: T) => void): Promise<void> {
   if (!res.ok || !res.body) throw await failure(res);
-  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
   let buf = '';
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    buf += value;
+    buf += decoder.decode(value, { stream: true });
     for (let i = buf.indexOf('\n'); i >= 0; i = buf.indexOf('\n')) {
       const line = buf.slice(0, i).trim();
       buf = buf.slice(i + 1);
