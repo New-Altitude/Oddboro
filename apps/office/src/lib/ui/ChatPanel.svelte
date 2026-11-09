@@ -1,5 +1,11 @@
 <script lang="ts">
   import { tick } from 'svelte';
+  import { page } from '$app/state';
+  import { replaceState } from '$app/navigation';
+  import CodexHandoff from './CodexHandoff.svelte';
+  import CodexSource from './CodexSource.svelte';
+  import type { ChatSource } from '../staff/chat-input.ts';
+  import type { ChatEntry } from '#lib/server/staff.ts';
   import { SvelteSet } from 'svelte/reactivity';
   import type { HandOffLine, HandOffStep, LessonLine, PokeRow, ThreadLine } from '@oddboro/ledger';
   import { FIRST_QUESTIONS, firstQuestionIn } from '@oddboro/ledger/first-questions';
@@ -50,6 +56,7 @@
     from: 'owner' | 'staff';
     text: string;
     turnId?: string;
+    source?: ChatSource;
     attachments?: Pick<ChatAttachment, 'name'>[];
     pending?: boolean;
     failed?: boolean;
@@ -193,6 +200,40 @@
   let status = $state('');
   let loaded = $state(false);
   let list: HTMLDivElement | undefined = $state();
+
+  const handoff = $derived(
+    page.data.handoff?.staff === profile.id &&
+      page.url.searchParams.get('handoff') === page.data.handoff.ticket
+      ? page.data.handoff
+      : undefined
+  );
+  let focused: string | undefined;
+  const requested = $derived(
+    handoff?.saved ??
+      (page.url.searchParams.get('chat') === profile.id
+        ? page.url.searchParams.get('turn')
+        : undefined)
+  );
+  $effect(() => {
+    if (
+      !loaded ||
+      !visible ||
+      !requested ||
+      requested === focused ||
+      !lines.some((l) => l.turnId === requested)
+    )
+      return;
+    focused = requested;
+    void tick().then(() =>
+      document.getElementById('turn-' + requested)?.scrollIntoView({ block: 'nearest' })
+    );
+  });
+
+  function keptHandoff(line: ChatEntry, added: boolean) {
+    if (!lines.some((l) => l.from === 'owner' && l.turnId === line.turnId)) lines.push(line);
+    replaceState('/?chat=' + encodeURIComponent(profile.id) + '&turn=' + line.turnId, page.state);
+    if (added) void say('', undefined, undefined, line.turnId);
+  }
 
   async function scrollDown() {
     await tick();
@@ -801,10 +842,21 @@
           {line.from === 'owner'
             ? 'ms-auto rounded-ee-md bg-sea/25 whitespace-pre-wrap text-ink'
             : 'me-auto rounded-es-md bg-raise text-ink'}"
+          id={line.from === 'owner' && line.turnId ? 'turn-' + line.turnId : undefined}
           class:text-coral={line.failed}
         >
           {#if line.pending && !line.text}
             <span class="dots" aria-label="Replying"><span></span><span></span><span></span></span>
+          {:else if line.from === 'owner' && line.source?.kind === 'Codex' && line.turnId}
+            {#key line.turnId}
+              <CodexSource
+                staff={profile.id}
+                turn={line.turnId}
+                text={line.text}
+                source={line.source}
+                files={line.attachments ?? []}
+              />
+            {/key}
           {:else if line.from === 'staff' && !line.failed}
             <Markdown text={line.text} staff={profile.id} />
           {:else}
@@ -923,6 +975,9 @@
       >
     </div>
   {/each}
+  {#if handoff && !handoff.saved}
+    {#key handoff.ticket}<CodexHandoff {handoff} onkeep={keptHandoff} />{/key}
+  {/if}
   <form class="flex items-end gap-2 px-3 pb-3" novalidate onsubmit={send}>
     <input
       type="file"

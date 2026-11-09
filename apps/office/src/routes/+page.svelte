@@ -582,6 +582,8 @@
 
   onMount(() => {
     let disposed = false;
+    const chat = data.handoff?.staff ?? new URL(location.href).searchParams.get('chat');
+    if (chat && data.staff.some((s) => s.id === chat)) chatAbout(chat, '');
     seen = keys(desk);
     // A new owner's first visit opens on its own song; later visits play if the owner left the music on.
     startMusic(firstRun);

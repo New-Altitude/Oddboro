@@ -19,6 +19,7 @@
     "./upgrade": "./src/upgrade.ts",
     "./update-window": "./src/update-window.ts",
     "./work-paths": "./src/work-paths.ts",
+    "./codex-handoff": "./src/codex-handoff/prepare.ts",
     "./filters": "./src/filter-words.ts"
   },
   "scripts": {
