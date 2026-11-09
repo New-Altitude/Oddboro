@@ -1,12 +1,12 @@
 // Terminal bytes go only to the owner's session view. A tab closing detaches
 // its listener; the native client stays up. Reopening replays a bounded screen history.
 import { EventEmitter, once } from 'node:events';
-import { spawn, type IPty } from 'node-pty';
+import { openProjectTerminal } from '@oddboro/ledger/project-terminal';
 import { nativeCommand, nativeEnv } from './native.ts';
 
 export class ProjectTerminal {
   readonly events = new EventEmitter();
-  private child: IPty;
+  private child: ReturnType<typeof openProjectTerminal>;
   private history = '';
   private ended = false;
   private writer?: string;
@@ -44,7 +44,7 @@ export class ProjectTerminal {
     extra: Record<string, string> = {}
   ) {
     const [exe, prefix] = nativeCommand(agent);
-    this.child = spawn(exe, [...prefix, ...args], {
+    this.child = openProjectTerminal(exe, [...prefix, ...args], {
       cwd,
       env: { ...nativeEnv(), ...extra, TERM: 'xterm-256color' },
       cols: 100,

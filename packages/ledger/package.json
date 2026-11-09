@@ -19,7 +19,8 @@
     "./upgrade": "./src/upgrade.ts",
     "./update-window": "./src/update-window.ts",
     "./work-paths": "./src/work-paths.ts",
-    "./filters": "./src/filter-words.ts"
+    "./filters": "./src/filter-words.ts",
+    "./project-terminal": "./src/project-terminal.ts"
   },
   "scripts": {
     "generate": "drizzle-kit generate",
@@ -40,6 +41,7 @@
     "@oddboro/sprites": "*",
     "@oddboro/world": "*",
     "drizzle-orm": "^0.45.4",
+    "node-pty": "1.1.0",
     "postgres": "^3.4.9",
     "zod": "^4.6.7"
   }

@@ -7,6 +7,7 @@ on:
       - 'apps/office/src/lib/ui/Project*.svelte'
       - 'apps/office/src/routes/api/project-sessions/**'
       - 'packages/ledger/src/project-session*.ts'
+      - 'packages/ledger/src/project-terminal.ts'
       - 'packages/ledger/project-plugin/**'
       - 'packages/ledger/test/project-sessions.test.ts'
       - 'packages/ledger/test/pglite.ts'

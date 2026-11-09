@@ -22,7 +22,6 @@
     "@oddboro/ledger": "*",
     "@oddboro/sprites": "*",
     "@oddboro/world": "*",
-    "node-pty": "^1.1.0",
     "ws": "^8.22.2"
   },
   "devDependencies": {
