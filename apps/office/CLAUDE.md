@@ -235,7 +235,9 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    out as `Bearer <key>` (`headerSecret`); a value with a scheme goes as it is. Steps without one tick by hand, as a checklist: only a step with an action, and
    the sign-in's step that ticks itself (its `oauth:` key), holds up Mark done (`stepsToGo` in
    `src/lib/ui/task-steps.ts`). Ticking keeps the task open: the drawer opens an item only
-   when its `focus` changes, never because the desk reloaded. Finishing a task records it in the ledger as the owner's work.
+   when its `focus` changes, never because the desk reloaded. Finishing a task records it in the ledger as the owner's work. A task's working response saves through
+   `/api/tasks/[id]` from its chat card or the editor beside it. Both carry the version
+   they opened. The follow-up gets the owner's exact saved words in its input.
 8. **The Ledger** (`src/lib/ui/LedgerPanel.svelte`) searches every decision and
    piece of work by meaning. **Goals** (`src/lib/ui/GoalsPanel.svelte`) are what
    the owner wants more of, grouped by area: each with why it matters, what

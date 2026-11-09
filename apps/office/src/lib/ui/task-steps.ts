@@ -1,17 +1,5 @@
 // Which of a task's steps hold up Mark done. Safe to import in the browser.
-import type { Step } from '@oddboro/ledger';
-
-/**
- * A step the office does something for: a sign-in, a secret, a tool list or
- * a choice, and the sign-in's step that ticks itself when it lands (it shares
- * the sign-in's `oauth:` key). The task cannot be done without these. Every
- * other step is a checklist the owner may tick or not.
- */
-export const mustDo = (s: Step): boolean => !!s.action || !!s.key?.startsWith('oauth:');
-
-/** How many steps still hold up Mark done. */
-export const stepsToGo = (steps: Step[]): number =>
-  steps.filter((s) => mustDo(s) && !s.done).length;
+export { mustDo, stepsToGo } from '@oddboro/ledger/tools';
 
 /**
  * A step's text as the desk renders it: a bare email address becomes inline

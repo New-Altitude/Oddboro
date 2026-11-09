@@ -2,6 +2,15 @@
   import type { AskRow, Desk, LedgerRow, ReportRow, Step, TaskRow } from '@oddboro/ledger';
   import Pixel from './Pixel.svelte';
   import Markdown from './Markdown.svelte';
+  import TaskResponse from './TaskResponse.svelte';
+  import {
+    current,
+    drafts,
+    corrections,
+    writing,
+    saveResponse,
+    staleDraft
+  } from './task-response.svelte.ts';
   import Attachments from './Attachments.svelte';
   import AwsSignIn from './AwsSignIn.svelte';
   import AwsSecretPick from './AwsSecretPick.svelte';
@@ -218,7 +227,22 @@
   }
   const finish = (t: TaskRow, done: boolean) =>
     act(async () => {
-      await call(`/api/tasks/${t.id}`, { op: 'finish', done, note });
+      const response = current(t);
+      const draft =
+        drafts[t.id] ??
+        (response.response !== null && !response.responseVersion
+          ? { text: response.response, version: 0 }
+          : undefined);
+      if (done && draft) {
+        drafts[t.id] = draft;
+        await saveResponse(t.id, draft, { note });
+      } else
+        await call(`/api/tasks/${t.id}`, {
+          op: 'finish',
+          done,
+          note,
+          version: response.responseVersion
+        });
       made = undefined;
     }, true);
 
@@ -598,6 +622,14 @@
         {@const t = open.row}
         <p class="mt-2 text-sm leading-relaxed text-muted">{t.why}</p>
         {@const toGo = stepsToGo(t.steps)}
+        {@const response = current(t)}
+        {@const draft = drafts[t.id]}
+        {@const needsSave = !!draft || (response.response !== null && !response.responseVersion)}
+        {@const blockedResponse =
+          writing[t.id] ||
+          (t.staffId && corrections[t.staffId]?.id === t.id) ||
+          staleDraft(draft, response) ||
+          (needsSave && !(draft?.text ?? response.response)?.trim())}
         <ol class="mt-3 flex flex-col gap-2">
           {#each t.steps as s, index (index)}
             <li
@@ -728,7 +760,13 @@
           {/each}
         </ol>
         {#key open.key}
-          <Attachments items={attached('task', t.id)} start="edit" ondirty={(d) => (unsaved = d)} />
+          {#if t.staffId && !t.askId}<TaskResponse task={t} files={attached('task', t.id)} />{/if}
+          <Attachments
+            items={attached('task', t.id)}
+            reference={response.response !== null}
+            start="edit"
+            ondirty={(d) => (unsaved = d)}
+          />
         {/key}
         <label class="mt-4 block text-xs text-muted" for="note">Note (optional)</label>
         <textarea
@@ -750,13 +788,15 @@
           >
           <button
             class="flex-1 rounded-lg bg-sea px-3 py-2 text-sm font-medium text-night disabled:opacity-40"
-            disabled={busy || unsaved || toGo > 0}
+            disabled={busy || unsaved || blockedResponse || toGo > 0}
             onclick={() => finish(t, true)}
             >{unsaved
               ? 'Save the attached file first'
               : toGo
                 ? `${toGo} ${toGo === 1 ? 'step' : 'steps'} to go`
-                : 'Mark done'}</button
+                : needsSave
+                  ? 'Save and finish'
+                  : 'Mark done'}</button
           >
         </div>
       {:else}

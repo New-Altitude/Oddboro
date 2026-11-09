@@ -104,7 +104,7 @@ import { MANAGER_ROLE } from './managers.ts';
 import { grantWorks, levelAtMost, type FolderAccess, type Level } from './access-words.ts';
 import { filterWords, sameCriteria, type GmailFilter } from './filter-words.ts';
 import { nextRun, zone } from './time.ts';
-import { isGrantable, OFFICE_TOOLS, STARTER_TOOLS, tickable, yesOrNo } from './tools.ts';
+import { isGrantable, OFFICE_TOOLS, STARTER_TOOLS, stepsToGo, tickable, yesOrNo } from './tools.ts';
 import { lookSignature, type DrawnPart, type LookSpec } from '@oddboro/sprites/look';
 
 export type StaffRow = typeof staff.$inferSelect;
@@ -2469,6 +2469,7 @@ export async function giveTask(
     title: string;
     why: string;
     steps: (string | Step)[];
+    response?: string;
     attach?: string[];
     /** Given while working on this hand-off: the owner's answer goes back to it. */
     handOffId?: number;
@@ -2496,6 +2497,7 @@ export async function giveTask(
         title: t.title,
         why: t.why,
         steps,
+        response: t.response,
         handOffId: t.handOffId,
         threadId: t.threadId,
         via: t.via
@@ -2582,7 +2584,42 @@ export async function tickKey(key: string): Promise<void> {
         .where(eq(tasks.id, t.id));
 }
 
-export async function finishTask(id: number, done: boolean, note: string | null): Promise<boolean> {
+export class TaskResponseConflict extends Error {}
+
+/** Start from a reference on an older task, or save the owner's edit to the version they opened. */
+export async function saveTaskResponse(id: number, version: number | 'start', text: string) {
+  const start = version === 'start';
+  const next = start ? 0 : version + 1;
+  const [saved] = await db
+    .update(tasks)
+    .set({ response: text, responseVersion: next })
+    .where(
+      and(
+        eq(tasks.id, id),
+        eq(tasks.status, 'open'),
+        start
+          ? isNull(tasks.response)
+          : and(isNotNull(tasks.response), eq(tasks.responseVersion, version))
+      )
+    )
+    .returning();
+  if (saved) return saved;
+  const t = await task(id);
+  if (!t || t.status !== 'open') throw new TaskResponseConflict('This task is closed.');
+  // A retry after a lost reply returns the same version. Opening a response never resets it.
+  if (t.response !== null && (start || (t.responseVersion === next && t.response === text)))
+    return t;
+  throw new TaskResponseConflict(
+    'The response changed. Review the saved words before saving again.'
+  );
+}
+
+export async function finishTask(
+  id: number,
+  done: boolean,
+  note: string | null,
+  responseVersion?: number
+): Promise<boolean> {
   const owner = await ownerName();
   const finished = await db.transaction(async (tx) => {
     const [t] = await tx
@@ -2591,6 +2628,14 @@ export async function finishTask(id: number, done: boolean, note: string | null)
       .where(and(eq(tasks.id, id), eq(tasks.status, 'open')))
       .returning();
     if (!t) return;
+    if (done && t.response !== null) {
+      if (!t.responseVersion || responseVersion !== t.responseVersion)
+        throw new TaskResponseConflict(
+          'Review and save your response before marking this task done.'
+        );
+      if (stepsToGo(t.steps))
+        throw new TaskResponseConflict('Finish the required steps before marking this task done.');
+    }
     const answers = t.steps
       .filter((s) => s.answer && s.action?.kind === 'choice')
       .map((s) => `${s.text} ${s.answer}`);
@@ -2617,7 +2662,12 @@ export async function finishTask(id: number, done: boolean, note: string | null)
       });
     return { t, from };
   });
-  if (!finished) return false;
+  if (!finished) {
+    // The owner may retry finishing the exact saved version after a lost reply.
+    if (!done || !responseVersion) return false;
+    const t = await task(id);
+    return t?.status === 'done' && t.responseVersion === responseVersion;
+  }
   const { t, from } = finished;
   if (!done) {
     await answerLater(
@@ -2755,6 +2805,8 @@ export type Delivery = {
   at: Date;
   /** open, approved, denied, revise, done, dropped, or for a report new or read. */
   status: string;
+  /** A saved task response opens from its chat card, including after completion. */
+  responseVersion?: number;
   /** When the owner decided it, for an ask. */
   decidedAt?: Date | null;
   /** The owner's words on a decided ask or finished task. */
@@ -2783,7 +2835,8 @@ export async function deliveries(staffId: string, limit = 200): Promise<Delivery
         title: tasks.title,
         at: tasks.createdAt,
         status: tasks.status,
-        note: tasks.note
+        note: tasks.note,
+        responseVersion: tasks.responseVersion
       })
       .from(tasks)
       .where(eq(tasks.staffId, staffId))

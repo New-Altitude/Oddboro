@@ -34,6 +34,7 @@ reaches the owner's real office (`test/home.test.ts`).
    does the same; with the office's own
    database, the office has to be running.
 3. After a schema change, `npm run db:generate` writes the next migration.
+   Migration `0015_task_response` adds the task response and its version.
    Never edit a migration that has run; add one. The chain starts at
    `0000_baseline`, which builds the whole schema at once and ends with the
    change triggers, written by hand. A trigger, function or row that

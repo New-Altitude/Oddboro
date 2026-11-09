@@ -413,7 +413,7 @@ export async function chatLog(id: string): Promise<ChatEntry[]> {
 async function replyBrief(
   id: string,
   re: Pick<ChatRef, 'kind' | 'id'>
-): Promise<{ ref: ChatRef; brief: string }> {
+): Promise<{ ref: ChatRef; brief: string; taskResponse?: string }> {
   if (re.kind === 'ask') {
     const a = await askById(re.id);
     if (a?.staffId !== id) throw new Error('No such ask from this Odd');
@@ -433,6 +433,7 @@ async function replyBrief(
     if (t?.staffId !== id) throw new Error('No such task from this Odd');
     return {
       ref: { kind: 'task', id: t.id, title: t.title },
+      taskResponse: t.responseVersion ? (t.response ?? undefined) : undefined,
       brief: [
         `({owner} is replying about the task you gave them, "${t.title}", which is ${t.status === 'open' ? 'still open' : t.status}.`,
         `- Why: ${t.why}`,
@@ -1424,6 +1425,10 @@ export async function keepOwnerTurn(
   return line;
 }
 
+function savedTaskWords(response: string): string {
+  return 'The owner saved this response to the task:\n' + response;
+}
+
 export async function chat(
   id: string,
   message: string,
@@ -1569,7 +1574,12 @@ export async function replyToOwnerTurn(
       ownerSaid: message,
       signal: reply.stop.signal,
       runId: reply.runId,
-      literal: [message, ...texts].filter(Boolean).join('\n\n') || 'See the attached picture.',
+      literal: [
+        [message, ...texts].filter(Boolean).join('\n\n') || 'See the attached picture.',
+        re?.taskResponse && savedTaskWords(re.taskResponse)
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
       images,
       sessionFile: chatSession(id),
       timeoutMs: CHAT_TIMEOUT_MS,
@@ -1711,7 +1721,7 @@ function followUpBrief(
       'You joined the office today, and you just said hello to {owner} in chat. Get started now, so they never have to ask.',
       '',
       '1. Read your job description, notes/intake.md if you have one, my_goals and my_jobs.',
-      '2. If you cannot do good work without answers from {owner}, write only the questions your intake did not answer to a file in your folder, put it on their desk with give_owner_a_task, attached, then stop.',
+      '2. If you cannot do good work without answers from {owner}, put only the questions your intake did not answer in the response of give_owner_a_task, then stop.',
       `3. If a tool you need is not in my_access, ask for it with ask_for_access. For ${SWITCH_NAMES.commands} or ${SWITCH_NAMES.web}, follow what my_access says instead.`,
       '4. Otherwise do the first piece of real work your job calls for, now: the first run of your job, or the first thing your job description says to do, so {owner} sees it today. Work for a goal you serve is not yours to start: the Odd who leads it hands you each piece.',
       '5. Your reply goes on their desk. Write it to {owner}: what you did, and what comes next.'
@@ -1727,7 +1737,7 @@ function followUpBrief(
       '',
       '1. Read the office: office_report for each Odd, what it does, its level and the tools it holds or is waiting on, and list_goals for the goals they already serve.',
       `2. Work out who does what, how often, and with which tools (find_connectors). Give the work to Odds already here when one fits, with a new job or a change to one. Give a part to an Odd whose level and tools cover it. For a tool an Odd lacks, put any level raise in owner_steps, as a step on ${modelSection("that Odd's")}. Have the Odd ask for the tool itself with ask_for_access when its officeTools include it, or put connecting it in owner_steps when they do not. For ${SWITCH_NAMES.commands} or ${SWITCH_NAMES.web}, put switching it on in ${officeSection("that Odd's")}, in owner_steps only when office_report says {owner} can switch it on for that Odd. Keep every other step only {owner} can do in owner_steps too. Hire only for work nobody here fits.`,
-      '3. Read the brief and any answers already given. If a missing answer changes the plan, write only those questions to a file in your folder, put it on their desk with give_owner_a_task, attached, then stop. You pick up when they finish it.',
+      '3. Read the brief and any answers already given. If a missing answer changes the plan, put only those questions in the response of give_owner_a_task, then stop. You pick up when they finish it.',
       "4. Otherwise bring the whole plan in one ask with propose_goal_plan. Write each hire's job description to a file first, and pass any intake as its intake_file.",
       '5. Once {owner} approves the plan, you pick up here on the goal and lead the work: you hand each piece to the Odd who does it. So its owner steps hold only what truly needs {owner}, such as signing in to a tool, never passing work or a request to an Odd.',
       '6. If the office already meets this goal as it is, say so and stop.'
@@ -1741,11 +1751,16 @@ function followUpBrief(
       '',
       `- Why you gave it: ${t.row.why}`,
       ...answers,
+      ...(t.row.responseVersion
+        ? [
+            `- Use the owner's saved response (version ${t.row.responseVersion}) in this run's message.`
+          ]
+        : []),
       ...(f.note ? [`- Their note: ${f.note}`] : []),
       ...(t.files.length
         ? [
             // A file from a thread's folder is named from the office's folder, so the run gets where it is.
-            `- Attached, with anything they filled in: ${t.files.map((f) => (workPath(f) ? home(f) : f)).join(', ')}. Read each one first.`
+            `- ${t.row.responseVersion ? 'Reference files' : 'Attached, with anything they filled in'}: ${t.files.map((f) => (workPath(f) ? home(f) : f)).join(', ')}. Read each one first.`
           ]
         : []),
       '',
@@ -2036,6 +2051,10 @@ export async function followThrough(
     run(who, label, {
       kind: 'follow-up',
       onEvent,
+      literal:
+        f.kind === 'task_done' && t?.responseVersion && t.response
+          ? savedTaskWords(t.response)
+          : undefined,
       approvedAsk: f.kind === 'carry_out' ? a?.id : undefined,
       ownerNote: ownerNoteOf(f),
       ownerEdit: edit && { path: edit.path, text: edit.shown.now },

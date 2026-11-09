@@ -25,11 +25,23 @@
     CHAT_FILES,
     type ChatAttachment
   } from '../staff/chat-input.ts';
+  import TaskResponse from './TaskResponse.svelte';
+  import {
+    saved,
+    current,
+    alreadySaved,
+    drafts,
+    corrections,
+    writing,
+    saveResponse,
+    type SavedResponse
+  } from './task-response.svelte.ts';
   import Markdown from './Markdown.svelte';
   import ChatGoal from './ChatGoal.svelte';
   import GoalProposal from './GoalProposal.svelte';
   import { approvalTarget, approveWord, yesWord } from './chat-approval.ts';
-  import { mustDo } from './task-steps.ts';
+  import { wins } from './windows.svelte.ts';
+  import { mustDo, stepsToGo } from './task-steps.ts';
   import Lesson from './Lesson.svelte';
   import { call, failure } from './api.ts';
   import { when, workLine } from './format.ts';
@@ -92,7 +104,7 @@
     poke?: boolean;
     at?: string;
     /** Something the staffer put on the desk, shown where it landed. */
-    item?: Delivered & { status: string; note?: string | null };
+    item?: Delivered & { status: string; note?: string | null; responseVersion?: number };
     /** What the owner's message replied about. */
     re?: Delivered;
     /** A lesson the staffer kept, shown where it kept it. */
@@ -204,6 +216,7 @@
         t.staffId === profile.id &&
         t.id === d.id &&
         !t.askId &&
+        current(t).response === null &&
         !t.steps.some(mustDo) &&
         !desk.attachments.some((f) => f.taskId === t.id)
     );
@@ -230,8 +243,44 @@
     chatRequest.focus = { staff: profile.id, item: d };
     onitem(d);
   }
+  let responseId = $state<number>();
+  let responseProblem = $state('');
+  let change = $state<{ id: number; text: string }>();
+  const correction = $derived(corrections[profile.id]);
+  const taskHere = (id: number) => desk.tasks.find((t) => t.id === id && t.staffId === profile.id);
+
+  function workingTask(it: Delivered) {
+    const t = taskHere(it.id);
+    return (
+      t &&
+      !t.askId &&
+      (current(t).response !== null || desk.attachments.some((f) => f.taskId === t.id))
+    );
+  }
+
+  async function toggleResponse(d: Delivered) {
+    responseProblem = '';
+    responseId = responseId === d.id ? undefined : d.id;
+    // The Desk already holds open tasks. A finished task is still readable here.
+    if (responseId && !taskHere(d.id)) {
+      try {
+        saved[d.id] = await call<SavedResponse>(`/api/tasks/${d.id}`);
+      } catch (e) {
+        responseProblem = e instanceof Error ? e.message : String(e);
+      }
+    }
+  }
+
+  function reviewCorrection() {
+    if (!correction) return;
+    const { id, title, version, before, words, after } = correction;
+    drafts[id] = { version, text: before + words + after };
+    delete corrections[profile.id];
+    pick({ kind: 'task', id, title });
+  }
+
   async function reply(d: Delivered, how: typeof intent = 'reply') {
-    if (saving) return;
+    if (saving || correction) return;
     problem = '';
     intent = how === 'reply' && proposal(d) ? 'proposal' : how;
     chatRequest.focus = { staff: profile.id, item: d };
@@ -244,7 +293,7 @@
   // Reply on the desk or a report window arrives here once the chat shows.
   $effect(() => {
     const r = chatRequest.reply;
-    if (r?.staff !== profile.id || !visible) return;
+    if (r?.staff !== profile.id || !visible || correction) return;
     chatRequest.reply = undefined;
     void reply(r.item);
   });
@@ -311,7 +360,14 @@
 
   let files = $state<File[]>([]);
   const decisionMode = $derived(
-    !files.length && !about && !active && !sending && !remoteBusy && !posting && !stopping
+    !correction &&
+      !files.length &&
+      !about &&
+      !active &&
+      !sending &&
+      !remoteBusy &&
+      !posting &&
+      !stopping
   );
   let picker: HTMLInputElement;
   let problem = $state('');
@@ -515,6 +571,21 @@
 
   async function send(e: SubmitEvent) {
     e.preventDefault();
+    if (correction) {
+      const { id, version, before, words, after } = correction;
+      if (!words.trim() || writing[id]) return;
+      responseProblem = '';
+      try {
+        const finish = e.submitter instanceof HTMLButtonElement && e.submitter.value === 'finish';
+        await saveResponse(id, { text: before + words + after, version }, finish ? {} : undefined);
+        change = { id, text: words };
+        responseId = id;
+        delete corrections[profile.id];
+      } catch (err) {
+        responseProblem = err instanceof Error ? err.message : String(err);
+      }
+      return;
+    }
     const message = draft.trim();
     if ((!message && !files.length) || cannotSend) return;
     if (!decisionMode) {
@@ -797,6 +868,7 @@
   }
   $effect(() => {
     void draft;
+    void correction?.words;
     void floor;
     void visible;
     fit();
@@ -1124,6 +1196,33 @@
               </div>
             {/if}
           {/if}
+          {#if it.kind === 'task' && (workingTask(it) || it.responseVersion)}
+            <button class="mt-1 text-xs text-sea" onclick={() => toggleResponse(it)}
+              >{responseId === it.id ? 'Hide response' : 'Task response'}</button
+            >
+            {#if change?.id === it.id}
+              <p class="mt-1 text-xs whitespace-pre-wrap" role="status">
+                Saved your change: {change.text}
+              </p>
+            {/if}
+            {#if responseId === it.id}
+              {@const t = taskHere(it.id)}
+              {#if t}
+                <TaskResponse
+                  task={t}
+                  files={desk.attachments.filter((f) => f.taskId === it.id)}
+                  inChat
+                />
+                <button class="mt-2 text-xs text-sea" onclick={() => pick(it)}
+                  >Open editor beside chat</button
+                >
+              {:else if saved[it.id]}
+                <p class="mt-2 text-sm whitespace-pre-wrap">{saved[it.id]?.response}</p>
+              {:else}
+                <p class="text-xs text-muted">{responseProblem || 'Opening response'}</p>
+              {/if}
+            {/if}
+          {/if}
         </div>
         {@render meta(line, i)}
       {:else}
@@ -1269,7 +1368,30 @@
   {#if decisionMode && !replyTo && approveTo && approveTo.id === onlyProposal?.id && approveWord(draft)}
     <p class="px-3 pb-1 text-xs text-muted">Approving “{approveTo.title}”</p>
   {/if}
-  {#if replyTo}
+  {#if correction}
+    <div class="px-3 pb-1.5 text-xs text-muted">
+      <span
+        >{correction.passage ? 'Replace the selected words' : 'Add to the response'} in “{correction.title}”</span
+      >
+      <button
+        class="ms-2"
+        disabled={writing[correction.id]}
+        onclick={() => {
+          delete corrections[profile.id];
+          responseProblem = '';
+        }}>Cancel</button
+      >
+      {#if correction.passage}
+        <blockquote class="max-h-20 overflow-auto border-s-2 border-sea ps-2 whitespace-pre-wrap">
+          {correction.passage}
+        </blockquote>
+      {/if}
+      {#if responseProblem}
+        <p role="alert" class="text-coral">{responseProblem}</p>
+        <button class="text-sea" onclick={reviewCorrection}>Review my change in the editor</button>
+      {/if}
+    </div>
+  {:else if replyTo}
     <div class="flex items-center gap-2 px-3 pb-1.5 text-xs text-muted">
       <span class="min-w-0 flex-1 truncate"
         >{intent === 'answer'
@@ -1299,7 +1421,7 @@
       >
     </div>
   {/if}
-  {#if active}
+  {#if active && !correction}
     <div class="flex items-center justify-between gap-2 px-3 pb-1.5 text-xs text-muted">
       <span>Send a correction to stop this reply.</span><button
         type="button"
@@ -1322,7 +1444,7 @@
   {#if handoff && !handoff.saved}
     {#key handoff.ticket}<CodexHandoff {handoff} onkeep={keptHandoff} />{/key}
   {/if}
-  {#if profile.role === 'Office Manager' && !replyTo && decisionMode}
+  {#if profile.role === 'Office Manager' && !replyTo && !correction && decisionMode}
     <ChatGoal managerId={profile.id} onset={() => load(profile.id)} />
   {/if}
   <form class="flex items-end gap-2 px-3 pb-3" novalidate onsubmit={send}>
@@ -1337,20 +1459,28 @@
         picker.value = '';
       }}
     />
-    <button type="button" class="py-2 text-sm text-sea" onclick={() => picker.click()}
-      >Attach</button
+    <button
+      type="button"
+      class="py-2 text-sm text-sea"
+      disabled={!!correction}
+      onclick={() => picker.click()}>Attach</button
     >
     <textarea
-      onpaste={paste}
+      onpaste={(e) => !correction && paste(e)}
       ondragover={(e) => {
         if (e.dataTransfer?.types.includes('Files')) e.preventDefault();
       }}
-      ondrop={drop}
+      ondrop={(e) => !correction && drop(e)}
       bind:this={box}
-      class="min-h-[38px] flex-1 resize-none overflow-y-auto rounded-lg bg-raise px-3 py-2 text-sm leading-relaxed text-ink outline-none placeholder:text-faint"
+      class="min-h-[38px] min-w-0 flex-1 resize-none overflow-y-auto rounded-lg bg-raise px-3 py-2 text-sm leading-relaxed text-ink outline-none placeholder:text-faint"
       rows="1"
-      placeholder={replyTo ? `Reply to ${profile.name}` : `Message ${profile.name}`}
+      placeholder={correction
+        ? 'Type the words to save'
+        : replyTo
+          ? `Reply to ${profile.name}`
+          : `Message ${profile.name}`}
       oninput={(e) =>
+        !correction &&
         typed(
           decisionMode &&
             e instanceof InputEvent &&
@@ -1360,20 +1490,42 @@
             ? e.currentTarget.value
             : ''
         )}
-      bind:value={draft}
+      bind:value={
+        () => correction?.words ?? draft,
+        (value) => {
+          if (correction) correction.words = value;
+          else draft = value;
+        }
+      }
       {onkeydown}
-      disabled={saving}></textarea>
+      disabled={correction ? writing[correction.id] : saving}></textarea>
     <button
       class="rounded-lg bg-sea px-3 py-2 text-sm font-medium text-night disabled:opacity-40"
-      disabled={cannotSend || (!draft.trim() && !files.length)}
-      >{active
-        ? 'Send correction'
-        : decisionMode && replyTo && intent === 'answer'
-          ? 'Send answer'
-          : decisionMode && replyTo && intent === 'change'
-            ? 'Send changes'
-            : 'Send'}</button
+      disabled={correction
+        ? writing[correction.id] || !correction.words.trim()
+        : cannotSend || (!draft.trim() && !files.length)}
+      >{correction
+        ? 'Save change'
+        : active
+          ? 'Send correction'
+          : decisionMode && replyTo && intent === 'answer'
+            ? 'Send answer'
+            : decisionMode && replyTo && intent === 'change'
+              ? 'Send changes'
+              : 'Send'}</button
     >
+    {#if correction}
+      {@const task = taskHere(correction.id)}
+      {#if task ? !stepsToGo(task.steps) : alreadySaved({ version: correction.version, text: correction.before + correction.words + correction.after }, saved[correction.id])}
+        <button
+          type="submit"
+          value="finish"
+          class="rounded-lg bg-sea px-3 py-2 text-sm font-medium text-night disabled:opacity-40"
+          disabled={writing[correction.id] || !correction.words.trim() || wins.dirty.desk}
+          >Save and finish</button
+        >
+      {/if}
+    {/if}
   </form>
 </div>
 

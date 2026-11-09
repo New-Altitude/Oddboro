@@ -17,7 +17,7 @@ export type Offers = {
 
 export const offers = (f: FileRef): Offers => ({
   shown: shownPath(f.path),
-  edit: !workPath(f.path),
+  edit: !f.readOnly && !workPath(f.path),
   browser: PAGE.test(f.path)
 });
 
