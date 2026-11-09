@@ -6,6 +6,7 @@ import {
   boolean,
   check,
   doublePrecision,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -13,6 +14,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  unique,
   vector
 } from 'drizzle-orm/pg-core';
 import type { ArtKind, Place } from '@oddboro/sprites/art';
@@ -20,7 +22,7 @@ import type { LookSpec, PartKind } from '@oddboro/sprites/look';
 import type { FloorPlan, OfficeSpec, RoomKind, RoomTemplate } from '@oddboro/world';
 import { STARTER_TOOLS } from './tools.ts';
 import type { Agent, Effort, GrantedFolder } from './agents.ts';
-import type { FolderAccess, Level } from './access-words.ts';
+import type { FolderAccess, Level, OwnSwitch } from './access-words.ts';
 import type { GmailFilter } from './filter-words.ts';
 
 const at = (name: string) => timestamp(name, { withTimezone: true });
@@ -95,7 +97,9 @@ export type AccountRow = typeof accounts.$inferSelect;
  * computer an Odd asks for (`asks.folder`): the owner may narrow it, then the
  * office gives it (`setFolder`). `call` is one call to an outside tool that
  * changes something, held by the gateway for an Odd at Draft (`asks.call`):
- * on the owner's yes the office makes that exact call.
+ * on the owner's yes the office makes that exact call. `switch` asks for the
+ * owner's Run commands or Browse the web switch, or both (`asks.switches`):
+ * the owner's yes turns them on.
  */
 export type AskKind =
   | 'approval'
@@ -108,6 +112,7 @@ export type AskKind =
   | 'reply'
   | 'filter'
   | 'folder'
+  | 'switch'
   | 'call';
 /** `revise` means the owner sent it back to be reworked. */
 export type AskStatus = 'open' | 'approved' | 'denied' | 'revise';
@@ -297,6 +302,8 @@ export const asks = pgTable('asks', {
   folder: jsonb().$type<FolderRequest>(),
   /** A call ask's held call to an outside tool. */
   call: jsonb().$type<HeldCall>(),
+  /** A switch ask's switches, Run commands or Browse the web, to turn on (`ask_for_switch`). */
+  switches: jsonb().$type<OwnSwitch[]>(),
   /** The ask this one reworks, after the owner sent that one back. */
   revises: integer(),
   /** The hand-off (its `hand_off` follow-up) the staffer raised this while working on. */
@@ -943,15 +950,27 @@ export const appUpdate = pgTable('app_update', {
 
 // A connection belongs to one native conversation in the owner's chosen project.
 // The provider keeps its full transcript. The office keeps requests it sent there.
-export const projectSessions = pgTable('project_sessions', {
-  id: text().primaryKey(),
-  agent: text().$type<'claude' | 'codex'>().notNull(),
-  nativeId: text().notNull(),
-  folder: text().notNull(),
-  title: text().notNull(),
-  staffId: text().references(() => staff.id),
-  createdAt: created()
-});
+export const projectSessions = pgTable(
+  'project_sessions',
+  {
+    id: text().primaryKey(),
+    agent: text().$type<'claude' | 'codex'>().notNull(),
+    nativeId: text().notNull(),
+    folder: text().notNull(),
+    title: text().notNull(),
+    staffId: text(),
+    createdAt: created()
+  },
+  (t) => [
+    foreignKey({
+      name: 'project_sessions_staff_id_fkey',
+      columns: [t.staffId],
+      foreignColumns: [staff.id]
+    }),
+    unique('project_sessions_agent_native_id_key').on(t.agent, t.nativeId),
+    check('project_sessions_agent_check', sql`${t.agent} IN ('claude', 'codex')`)
+  ]
+);
 
 export type ProjectRequestState =
   | 'proposed'
@@ -964,17 +983,36 @@ export type ProjectRequestState =
   | 'uncertain'
   | 'failed';
 
-export const projectRequests = pgTable('project_requests', {
-  id: text().primaryKey(),
-  sessionId: text()
-    .notNull()
-    .references(() => projectSessions.id),
-  staffId: text().references(() => staff.id),
-  threadId: integer().references(() => threads.id),
-  prompt: text().notNull(),
-  file: text(),
-  state: text().$type<ProjectRequestState>().notNull(),
-  turn: text(),
-  answer: text(),
-  createdAt: created()
-});
+export const projectRequests = pgTable(
+  'project_requests',
+  {
+    id: text().primaryKey(),
+    sessionId: text().notNull(),
+    staffId: text(),
+    threadId: integer(),
+    prompt: text().notNull(),
+    file: text(),
+    state: text().$type<ProjectRequestState>().notNull(),
+    turn: text(),
+    answer: text(),
+    createdAt: created()
+  },
+  (t) => [
+    foreignKey({
+      name: 'project_requests_session_id_fkey',
+      columns: [t.sessionId],
+      foreignColumns: [projectSessions.id]
+    }),
+    foreignKey({
+      name: 'project_requests_staff_id_fkey',
+      columns: [t.staffId],
+      foreignColumns: [staff.id]
+    }),
+    foreignKey({
+      name: 'project_requests_thread_id_fkey',
+      columns: [t.threadId],
+      foreignColumns: [threads.id]
+    }),
+    index('project_requests_session').on(t.sessionId, t.createdAt)
+  ]
+);

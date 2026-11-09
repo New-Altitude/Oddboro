@@ -29,7 +29,7 @@ import {
 } from '@oddboro/ledger';
 import { notePlan, pluginsOff, staffEnv } from './staff.ts';
 import { claudeRunHome, modelArgs, spawnClaude } from './claude.ts';
-import { endedEarly, LAUNCHES } from './cli.ts';
+import { endedEarly, LAUNCHES, stoppedWhy } from './cli.ts';
 import { SIGN_IN_WHERE, stopGroups, type RunImage } from './launch.ts';
 import { agentCommand } from './agent-sign-in.ts';
 import { tooOldLine } from './versions.ts';
@@ -209,7 +209,7 @@ async function runOn(
       if (launch.ownGroup) stop();
       finish({
         ok: false,
-        text: `${tool} stopped (exit ${code}). ${stderr.trim().split('\n').slice(-2).join(' ')}`
+        text: stoppedWhy(agent, code, stderr, true)
       });
     });
     // A run stopped before it read its message closes its input: the stop says so, not this.

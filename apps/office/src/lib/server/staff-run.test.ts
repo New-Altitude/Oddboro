@@ -11,12 +11,15 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   renameSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync
 } from 'node:fs';
 import { homedir } from 'node:os';
@@ -446,6 +449,67 @@ test("a Grok run's environment switches off every other tool's setup, and carrie
     GROK_TELEMETRY_ENABLED: 'false',
     GROK_TELEMETRY_TRACE_UPLOAD: 'false'
   });
+});
+
+test("a Grok run's tool servers keep the owner's home, whatever home grok gets", async () => {
+  const run = await chatOf('gus');
+  for (const server of ['office', 'files'])
+    assert.equal((run.servers?.[server].env as Record<string, string>).HOME, homedir(), server);
+});
+
+test('a Docker socket that is a link gives a Grok run a home whose .docker/run leads to its folder, so Grok starts sandboxed (issue #52)', async () => {
+  const { grokHome, runHome } = await import('./grok.ts');
+  const h = grokHome();
+  const at = mkdtempSync(join(folder, 'socket-'));
+  const socket = join(at, 'docker.sock');
+  const run = join(h.home, '.docker', 'run');
+  // No socket, or one that is no link: the owner's home.
+  assert.equal(runHome(h, socket), undefined);
+  writeFileSync(socket, '');
+  assert.equal(runHome(h, socket), undefined);
+  rmSync(socket);
+  // As OrbStack links it.
+  symlinkSync(join(at, 'orbstack', 'run', 'docker.sock'), socket);
+  assert.equal(runHome(h, socket), h.home);
+  assert.equal(readlinkSync(run), join(at, 'orbstack', 'run'));
+  // Moved to Colima, linked by a relative path: the run's link follows.
+  rmSync(socket);
+  symlinkSync(join('colima', 'default', 'docker.sock'), socket);
+  assert.equal(runHome(h, socket), h.home);
+  assert.equal(readlinkSync(run), join(at, 'colima', 'default'));
+  // A target with another name cannot go on Grok's list.
+  rmSync(socket);
+  symlinkSync(join(at, 'docker.sock.real'), socket);
+  assert.equal(runHome(h, socket), undefined);
+});
+
+test("a Grok run its sandbox refuses for a socket link says so in plain words, with the way to another tool; any other stop gives the tool's last lines", async () => {
+  const { stoppedWhy } = await import('./cli.ts');
+  // Grok 1.0.77's refusal (issue #52), for a podman socket `runHome` cannot clear.
+  const refused =
+    "warning: sandbox could not be applied: socket deny resolution failed: could not resolve runtime-socket deny path /var/run/podman/podman.sock: endpoint is a symlink to a path outside the deny list\nerror: could not apply the 'odd-jamal' sandbox profile; see the warning above for the cause. Refusing to start with its protections missing.\n";
+  const said =
+    "Grok can't start on this computer. Its sandbox won't run while /var/run/podman/podman.sock is a link to a place Grok doesn't know, which some container apps set up. The office never runs Grok without its sandbox.";
+  const later = 'Or wait for a Grok update that fixes this.';
+  assert.equal(
+    stoppedWhy('grok', 1, refused),
+    [
+      said,
+      "To keep this Odd working:\n1. Open this Odd's Settings tab.\n2. Under Model, pick another tool.",
+      later
+    ].join('\n\n')
+  );
+  assert.equal(
+    stoppedWhy('grok', 1, refused, true),
+    [
+      said,
+      'To keep the office working:\n1. Open Setup.\n2. Under Your AI, pick another tool.',
+      later
+    ].join('\n\n')
+  );
+  // Another tool's words are never read as Grok's.
+  assert.match(stoppedWhy('codex', 1, refused), /^Codex stopped \(exit 1\)\. warning: /);
+  assert.equal(stoppedWhy('grok', 2, 'one\ntwo\nthree\n'), 'Grok stopped (exit 2). two three');
 });
 
 test("every Odd is told of the owner's data folder, on Grok as on Claude Code", async () => {
@@ -1372,7 +1436,7 @@ test("a new hire's first day and the manager's planning say how an Odd gets Run 
   const firstText = `${first.system}\n${first.message}`;
   assert.ok(
     firstText.includes(
-      '3. If a tool you need is not in my_access, ask for it with ask_for_access. For Run commands or Browse the web, follow what my_access says instead.'
+      `3. If a tool you need is not in my_access, ask for it with ask_for_access. For Run commands or Browse the web, ask with ask_for_switch when my_access says ${await L.ownerName()} can switch it on.`
     ),
     firstText
   );
@@ -1400,10 +1464,10 @@ test("a new hire's first day and the manager's planning say how an Odd gets Run 
     ),
     planText
   );
-  // Only office_report knows whether that Odd's tool follows the switch, so the step waits on it.
+  // The Odd asks for a switch itself, so the plan never hands the owner steps for one.
   assert.ok(
     planText.includes(
-      `For Run commands or Browse the web, put switching it on in that Odd's Settings tab, under Office, in owner_steps only when office_report says ${owner} can switch it on for that Odd.`
+      `For Run commands or Browse the web, never put switching it on in owner_steps: the Odd asks for it itself with ask_for_switch when its part needs it, and office_report says whether ${owner} can switch it on for that Odd.`
     ),
     planText
   );

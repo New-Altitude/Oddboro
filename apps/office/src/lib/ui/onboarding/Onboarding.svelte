@@ -37,6 +37,7 @@
   import ManagerCard, { type Custom, type Preset } from './ManagerCard.svelte';
   import type { Built } from '../OddParts.svelte';
   import SpaceCard from './SpaceCard.svelte';
+  import { STEPS, TITLE, type Step } from './steps.ts';
   import { selectOnFocus } from '../select-on-focus.ts';
 
   // A new owner's first visit, over the live floor: six cards, the same on a
@@ -48,16 +49,6 @@
   type Props = { stage: Stage; sample?: World };
   let { stage, sample }: Props = $props();
 
-  const STEPS = ['mac', 'you', 'ai', 'manager', 'space', 'go'] as const;
-  type Step = (typeof STEPS)[number];
-  const TITLE: Record<Step, string> = {
-    mac: 'Your computer',
-    you: 'You',
-    ai: 'Your AI',
-    manager: 'Your office manager',
-    space: 'Your space',
-    go: 'Open the office'
-  };
   let step = $state<Step>('mac');
   let backward = $state(false);
 

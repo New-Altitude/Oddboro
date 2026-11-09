@@ -434,9 +434,9 @@ test('raise_ask sends an outside tool to ask_for_access, a folder to ask_for_fol
 
 test('the hire drawer names Run commands only where the owner can switch it, and always the Office section', () => {
   const both =
-    "Optional. You can give tools and switch on Run commands or Browse the web on their Settings tab, under Office, later. They'll tell you when a job needs one.";
+    "Optional. You can give tools and switch on Run commands or Browse the web on their Settings tab, under Office, later. They'll ask you when a job needs one.";
   const web =
-    "Optional. You can give tools and switch on Browse the web on their Settings tab, under Office, later. They'll tell you when a job needs one.";
+    "Optional. You can give tools and switch on Browse the web on their Settings tab, under Office, later. They'll ask you when a job needs one.";
   const rows: [(typeof A.AGENTS)[number], NodeJS.Platform, string][] = [
     ['claude', 'darwin', both],
     ['codex', 'darwin', both],

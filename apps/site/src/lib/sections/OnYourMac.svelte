@@ -1,7 +1,7 @@
 <script lang="ts">
   // Where the data lives: your computer in the middle with the office on its screen,
   // Anthropic and the tools you connect at the edges on dashed lines you open,
-  // and New Altitude off the map with nothing flowing to it.
+  // and New Altitude off the map, reached only by the error reports and the sign-in the owner chooses.
   //
   // Each fact lights the part of the map it is about and dims the rest. While
   // the section is on screen the highlight steps through the four facts. The
@@ -20,19 +20,19 @@
       shows: 'Highlights your computer in the diagram.'
     },
     {
-      title: 'Nothing comes to us.',
-      text: 'New Altitude, the company behind Oddboro, runs no server for it and receives nothing from your office.',
+      title: 'Nothing comes to us unless you say so.',
+      text: 'New Altitude runs no server for your office. If you sign in to a New Altitude account, your sign-in comes to us. If you also turn on error reports, they go to our relay so we can fix what broke. Nothing else does.',
       shows:
-        'Highlights New Altitude, off the map, and the two dashed lines, the only paths data takes.'
+        "Highlights New Altitude, off the map, and the two dashed lines, the only paths your office's data takes. Error reports and a New Altitude sign-in reach us only if you choose them."
     },
     {
-      title: 'Claude works under your own account.',
-      text: 'Odds think with Claude, through your Claude plan or your Anthropic API key. We are not in that loop.',
-      shows: 'Highlights Anthropic, your Claude account and the line to it.'
+      title: 'Your AI works under your own account.',
+      text: 'Odds think with Claude Code, Codex or Grok, signed in to your own account. We are not in that loop.',
+      shows: 'Highlights your AI, your own account and the line to it.'
     },
     {
-      title: 'No account with us.',
-      text: 'Nothing to sign up for, no email to give, no key to request.',
+      title: 'No account needed.',
+      text: 'Nothing to sign up for and no key to request. If you have a New Altitude account, you can sign in and choose to send error reports; nothing else changes.',
       shows: 'Highlights the two accounts in the diagram, both of them yours.'
     }
   ];
@@ -133,8 +133,8 @@
         )}"
         class:pop={active === 2 || active === 3}
       >
-        <p class="who text-ink text-sm font-semibold">Anthropic</p>
-        <p class="text-muted mt-0.5 text-xs">Your Claude account.</p>
+        <p class="who text-ink text-sm font-semibold">Your AI</p>
+        <p class="text-muted mt-0.5 text-xs">Claude, Codex or Grok, on your account.</p>
       </div>
       <div class="part link link-a {level('la')}" aria-hidden="true"></div>
 
@@ -185,8 +185,8 @@
         aria-hidden="true">×</span
       >
       <p class="text-muted text-xs">
-        <span class="text-ink font-semibold">New Altitude</span> is off the map. No server, no line, nothing
-        flows here.
+        <span class="text-ink font-semibold">New Altitude</span> is off the map. Your office's data never
+        flows here. Error reports and a sign-in do, only if you choose them.
       </p>
     </div>
   </figure>
@@ -328,7 +328,7 @@
   .cross.pop {
     transform: scale(1.5);
   }
-  /* No account with us: the account lines lead, the names step back. */
+  /* No account needed: the account lines lead, the names step back. */
   [data-active='3'] .who {
     opacity: 0.55;
   }
