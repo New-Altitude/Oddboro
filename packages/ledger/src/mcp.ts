@@ -113,6 +113,7 @@ import {
 import { hasTool, isGrantable } from './tools.ts';
 import { home } from './home.ts';
 
+import { projectConnections, projectWork, requestProject } from './project-sessions.ts';
 const ME = process.env.STAFF_ID ?? '';
 const me = await staffer(ME);
 if (!me) throw new Error(`STAFF_ID "${ME}" names no Odd in this office`);
@@ -443,6 +444,59 @@ const shortDay = (d: Date) =>
 const line = (r: LedgerRow) =>
   `- ${day(r.createdAt)} [${r.kind}] ${r.actor}: ${r.title}${r.reason ? ` (reason: ${r.reason})` : r.kind === 'decision' ? ' (no reason given)' : ''}`;
 
+// Connections are granted one at a time by the owner. An Odd can never
+// start a native process or type terminal keys through these tools.
+const connectedProjects = ME && !LESSON_RUN ? await projectConnections(ME) : [];
+if (connectedProjects.length) {
+  tool(
+    'my_project_sessions',
+    {
+      description:
+        'See the project conversations the owner shared with you and the status and answers of your assignments.',
+      inputSchema: {}
+    },
+    async () => {
+      const sessions = await projectConnections(ME);
+      return json(
+        await Promise.all(
+          sessions.map(async (s) => ({
+            id: s.id,
+            title: s.title,
+            provider: s.agent,
+            work: (await projectWork(s.id))
+              .filter((r) => r.staffId === ME)
+              .map((r) => ({ id: r.id, state: r.state, answer: r.answer }))
+          }))
+        )
+      );
+    }
+  );
+  tool(
+    'send_project_work',
+    {
+      description:
+        'Give a shared native project session an assignment. Use a fresh UUID per assignment and reuse it on a retry. At Draft it waits for the owner to send it. Its result comes back as a report.',
+      inputSchema: {
+        session: z.string().uuid(),
+        key: z.string().uuid(),
+        prompt: z.string().trim().min(1).max(64000)
+      }
+    },
+    async (a) => {
+      if (process.env.PROJECT_WORK_LEVEL === 'read')
+        return refused('This run can only read project work.');
+      const row = await requestProject({
+        id: a.key,
+        sessionId: a.session,
+        prompt: a.prompt,
+        staffId: ME,
+        threadId: THREAD_ID,
+        draft: process.env.PROJECT_WORK_LEVEL !== 'act'
+      });
+      return json({ id: row.id, state: row.state });
+    }
+  );
+}
 if (has('search_ledger'))
   tool(
     'search_ledger',

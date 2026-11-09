@@ -1,6 +1,7 @@
 // What the office does with its tables. The office app and the staff tool
 // server both call these, so a rule lives in one place: an ask is decided only
 // here, a task is finished only here, and each writes its ledger row.
+import { proposedProjectWork } from './project-sessions.ts';
 import {
   and,
   arrayOverlaps,
@@ -2650,6 +2651,7 @@ export async function readReport(id: number): Promise<void> {
 // The desk: everything waiting on the owner
 
 export type Desk = {
+  projectWork: Awaited<ReturnType<typeof proposedProjectWork>>;
   asks: AskRow[];
   tasks: TaskRow[];
   reports: ReportRow[];
@@ -2663,7 +2665,7 @@ export type Desk = {
 };
 
 export async function desk(): Promise<Desk> {
-  const [a, t, r, f] = await Promise.all([
+  const [a, t, r, f, projectWork] = await Promise.all([
     db.select().from(asks).where(eq(asks.status, 'open')).orderBy(asc(asks.createdAt)),
     db.select().from(tasks).where(eq(tasks.status, 'open')).orderBy(asc(tasks.createdAt)),
     db.select().from(reports).where(isNull(reports.readAt)).orderBy(asc(reports.createdAt)),
@@ -2673,12 +2675,14 @@ export async function desk(): Promise<Desk> {
       .leftJoin(asks, eq(attachments.askId, asks.id))
       .leftJoin(tasks, eq(attachments.taskId, tasks.id))
       .where(or(eq(asks.status, 'open'), eq(tasks.status, 'open')))
-      .orderBy(asc(attachments.id))
+      .orderBy(asc(attachments.id)),
+    proposedProjectWork()
   ]);
   // A twin waits behind the first ask it repeats, and the owner's answer to
   // that one answers it too (`asksNoMore`, `decide`).
   const shown = a.filter((x) => !a.some((first) => first.id < x.id && asksNoMore(first, x)));
   return {
+    projectWork,
     asks: shown,
     tasks: t,
     reports: r,

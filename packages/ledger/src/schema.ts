@@ -940,3 +940,41 @@ export const appUpdate = pgTable('app_update', {
   upAt: at('up_at'),
   updatedAt: at('updated_at').notNull().defaultNow()
 });
+
+// A connection belongs to one native conversation in the owner's chosen project.
+// The provider keeps its full transcript. The office keeps requests it sent there.
+export const projectSessions = pgTable('project_sessions', {
+  id: text().primaryKey(),
+  agent: text().$type<'claude' | 'codex'>().notNull(),
+  nativeId: text().notNull(),
+  folder: text().notNull(),
+  title: text().notNull(),
+  staffId: text().references(() => staff.id),
+  createdAt: created()
+});
+
+export type ProjectRequestState =
+  | 'proposed'
+  | 'queued'
+  | 'authorized'
+  | 'sending'
+  | 'working'
+  | 'done'
+  | 'stopped'
+  | 'uncertain'
+  | 'failed';
+
+export const projectRequests = pgTable('project_requests', {
+  id: text().primaryKey(),
+  sessionId: text()
+    .notNull()
+    .references(() => projectSessions.id),
+  staffId: text().references(() => staff.id),
+  threadId: integer().references(() => threads.id),
+  prompt: text().notNull(),
+  file: text(),
+  state: text().$type<ProjectRequestState>().notNull(),
+  turn: text(),
+  answer: text(),
+  createdAt: created()
+});

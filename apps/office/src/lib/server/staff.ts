@@ -484,6 +484,7 @@ async function access(who: StaffRow, ceiling: Level, ms: number, place?: CallPla
       args: [STAFF_SERVER],
       env: {
         STAFF_ID: who.id,
+        PROJECT_WORK_LEVEL: ceiling,
         DATABASE_URL,
         ...officeSettings(),
         // In the app on a Mac only the office reaches the Keychain, through
