@@ -21,9 +21,12 @@
   "dependencies": {
     "@oddboro/ledger": "*",
     "@oddboro/sprites": "*",
-    "@oddboro/world": "*"
+    "@oddboro/world": "*",
+    "node-pty": "^1.1.0",
+    "ws": "^8.22.2"
   },
   "devDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.319",
     "@aws-sdk/client-secrets-manager": "~3.1156.0",
     "@aws-sdk/client-sso": "~3.1156.0",
     "@aws-sdk/client-sso-oidc": "~3.1156.0",
@@ -35,6 +38,9 @@
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@tailwindcss/vite": "^4.3.3",
     "@types/markdown-it": "^14.2.0",
+    "@types/ws": "^8.18.2",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "layerchart": "~2.8.0",
     "markdown-it": "^14.3.3",
     "pixi.js": "^8.22.0",
