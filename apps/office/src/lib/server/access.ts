@@ -9,6 +9,9 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   AWS_SECRETS_ID,
+  POSTAL_ID,
+  POSTAL_URL,
+  bindPostalMailbox,
   connector,
   connectorReady,
   readsOnly,
@@ -22,6 +25,8 @@ import { secretNamesClient, toolKeys } from './aws.ts';
 import { cleanEnv } from './claude.ts';
 import { driveServer } from './google/drive.ts';
 import { gmailServer } from './google/gmail.ts';
+import { postalInboxes, postalTools } from './postal.ts';
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { bearer, startSignIn } from './oauth.ts';
 
 export type ToolInfo = { name: string; description: string; readOnly: boolean };
@@ -31,17 +36,24 @@ export type ToolInfo = { name: string; description: string; readOnly: boolean };
  * office. `open` leaves the sign-in out, to see whether it needs one.
  */
 export async function upstream(c: ConnectorRow, open = false): Promise<Client> {
+  if (
+    c.id === POSTAL_ID &&
+    (c.kind !== 'http' || c.config.url !== POSTAL_URL || c.config.oauth !== true || open)
+  )
+    throw new Error('Physical mail requires sign-in at the LegalZoom read-only endpoint.');
   if (c.kind === 'builtin') return builtin(c);
   // AWS Secrets Manager's names come from the office itself, never a server.
   if (c.id === AWS_SECRETS_ID) return secretNamesClient();
   const { env, headers } = await toolKeys(c);
+  const token = c.config.oauth && !open ? await bearer(c.id) : undefined;
+  if (c.id === POSTAL_ID && !token) throw new Error('Reconnect LegalZoom to read physical mail.');
   const transport =
     c.kind === 'http'
       ? new StreamableHTTPClientTransport(new URL(c.config.url!), {
           requestInit: {
             headers: {
               ...headers,
-              ...(c.config.oauth && !open ? { Authorization: `Bearer ${await bearer(c.id)}` } : {})
+              ...(token ? { Authorization: `Bearer ${token}` } : {})
             }
           }
         })
@@ -108,6 +120,7 @@ export async function listTools(id: string, open = false): Promise<ToolInfo[]> {
  * the page sends can add a tool that changes something.
  */
 export async function confirmTools(id: string): Promise<void> {
+  if (id === POSTAL_ID) throw new Error('Choose the physical mailbox first.');
   const tools = await listTools(id);
   await connectorReady(
     id,
@@ -126,7 +139,7 @@ export async function hostedSignIn(id: string): Promise<{ url?: string }> {
   } catch (signInError) {
     // A Google tool always needs its sign-in: listing its tools takes none, so
     // the check below would wrongly mark it open.
-    if ((await connector(id))?.config.oauth === 'google') throw signInError;
+    if (id === POSTAL_ID || (await connector(id))?.config.oauth === 'google') throw signInError;
     try {
       await listTools(id, true);
     } catch {
@@ -140,5 +153,41 @@ export async function hostedSignIn(id: string): Promise<{ url?: string }> {
     if (c) await setConnectorConfig(id, { ...c.config, oauth: false });
     await tickKey(`oauth:${id}`);
     return {};
+  }
+}
+
+/** Only the owner's setup step may enumerate mailboxes. Never give that tool to a run. */
+export async function postalSetup(taskId: number, selected?: string) {
+  const c = await connector(POSTAL_ID);
+  if (!c) throw new Error('Request physical mail access first.');
+  const client = await upstream(c);
+  try {
+    const { tools } = await client.listTools();
+    const checked = (name: string) => tools.some((t) => t.name === name && readsOnly(t));
+    if (!checked('list_inboxes'))
+      throw new Error('LegalZoom did not offer read-only mailbox discovery.');
+    const inboxes = postalInboxes(
+      (await client.callTool({ name: 'list_inboxes', arguments: {} })) as CallToolResult
+    );
+    if (selected !== undefined) {
+      if (!selected.trim() || selected.length > 80) throw new Error('Choose a mailbox number.');
+      if (inboxes.length && !inboxes.some((i) => i.pmb === selected))
+        throw new Error('Choose a mailbox from your LegalZoom account.');
+      // Even when discovery returned prose, check the exact owner-supplied number with
+      // the provider before binding it. Never use the first mailbox as a default.
+      if (
+        !checked('get_inbox_overview') ||
+        (await client.callTool({ name: 'get_inbox_overview', arguments: { pmb: selected } }))
+          .isError
+      )
+        throw new Error('LegalZoom could not verify that mailbox.');
+      const names = postalTools(tools).map((t) => t.name);
+      if (names.length !== 3)
+        throw new Error('LegalZoom did not offer all three required mail reads.');
+      await bindPostalMailbox(taskId, selected, names);
+    }
+    return { inboxes: c.config.pmb ? inboxes.filter((i) => i.pmb === c.config.pmb) : inboxes };
+  } finally {
+    await client.close();
   }
 }

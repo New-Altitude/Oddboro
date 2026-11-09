@@ -22,6 +22,8 @@ import {
   type Tool
 } from '@modelcontextprotocol/sdk/types.js';
 import {
+  POSTAL_ID,
+  grantsFor,
   connector,
   narrowReadTools,
   OFFICE_URL,
@@ -33,6 +35,7 @@ import {
   type HeldCall,
   type Level
 } from '@oddboro/ledger';
+import { postalTools, postalArguments } from './postal.ts';
 import { upstream } from './access.ts';
 
 export const GATEWAY_PATH = '/api/gateway';
@@ -41,9 +44,15 @@ export const GATEWAY_PATH = '/api/gateway';
  * One outside tool a run holds, its connection made on first use and kept for
  * the run. `waits`: a write grant at Draft, whose changes wait for the owner.
  */
-type Held = { level: Level; waits: boolean; client?: Promise<Client>; tools?: Promise<Tool[]> };
+type Held = {
+  pmb?: string;
+  level: Level;
+  waits: boolean;
+  client?: Promise<Client>;
+  tools?: Promise<Tool[]>;
+};
 /** `place` is where a held call lands; a run with none (a lesson run) changes nothing. */
-type GatewayRun = { held: Map<string, Held>; until: number; place?: CallPlace };
+type GatewayRun = { staffId?: string; held: Map<string, Held>; until: number; place?: CallPlace };
 
 /**
  * Runs going, by token. Each goes when its run ends, or at the latest when its
@@ -66,15 +75,22 @@ export type GatewayServer = { type: 'http'; url: string; headers: Record<string,
 export function openGateway(
   grants: { connector: ConnectorRow; level: Level; waits?: boolean }[],
   ms: number,
-  place?: CallPlace
+  place?: CallPlace,
+  staffId = place?.staffId
 ): { token: string; servers: Record<string, GatewayServer> } {
   const now = Date.now();
   for (const [t, r] of runs) if (r.until < now) void closeGateway(t);
   const token = randomBytes(32).toString('base64url');
   runs.set(token, {
-    held: new Map(grants.map((g) => [g.connector.id, { level: g.level, waits: !!g.waits }])),
+    held: new Map(
+      grants.map((g) => [
+        g.connector.id,
+        { pmb: g.connector.config.pmb, level: g.level, waits: !!g.waits }
+      ])
+    ),
     until: now + ms + 60_000,
-    place
+    place,
+    staffId
   });
   const servers = Object.fromEntries(
     grants.map((g) => [
@@ -136,6 +152,7 @@ function listed(c: ConnectorRow, h: Held): Promise<Tool[]> {
  */
 export async function reachable(c: ConnectorRow, h: Held): Promise<Tool[]> {
   const tools = await listed(c, h);
+  if (c.id === POSTAL_ID) return postalTools(tools).filter((t) => c.readTools.includes(t.name));
   // A tool whose own permissions only read (AWS read only's role) holds itself.
   if (h.level === 'act' || c.config.readsByRole) return tools;
   const named = tools.filter((t) => c.readTools.includes(t.name));
@@ -191,6 +208,7 @@ async function hold(
 export async function makeCall(call: HeldCall): Promise<NonNullable<HeldCall['result']>> {
   const c = await connector(call.connector);
   if (!c) throw new Error('That service is no longer in the office');
+  if (c.id === POSTAL_ID) throw new Error('Physical mail has no approval actions.');
   const client = await upstream(c);
   try {
     const r = (await client.callTool({ name: call.tool, arguments: call.arguments }, undefined, {
@@ -214,6 +232,16 @@ export async function gateway(request: Request, id: string): Promise<Response> {
   const c = h && (await connector(id));
   if (!h || !c) return new Response('This run does not hold that tool', { status: 403 });
 
+  if (
+    id === POSTAL_ID &&
+    (!run.staffId ||
+      !c.readyAt ||
+      !c.config.pmb ||
+      c.config.pmb !== h.pmb ||
+      !(await grantsFor(run.staffId)).some((g) => g.connectorId === id && g.level === 'read'))
+  )
+    return new Response('This run no longer has access to this mailbox', { status: 403 });
+
   const server = new Server(
     { name: `oddboro-gateway-${id}`, version: '1.0.0' },
     { capabilities: { tools: {} } }
@@ -232,9 +260,19 @@ export async function gateway(request: Request, id: string): Promise<Response> {
     if (h.waits && !onlyReads(c, tool)) return hold(c, name, req.params.arguments ?? {}, run.place);
     const client = await clientOf(c, h);
     // As long as the run itself may take: the run's own time limit ends it first.
-    return (await client.callTool({ name, arguments: req.params.arguments }, undefined, {
-      timeout: Math.max(60_000, run.until - Date.now())
-    })) as CallToolResult;
+    return (await client.callTool(
+      {
+        name,
+        arguments:
+          id === POSTAL_ID
+            ? postalArguments(c.config.pmb!, req.params.arguments)
+            : req.params.arguments
+      },
+      undefined,
+      {
+        timeout: Math.max(60_000, run.until - Date.now())
+      }
+    )) as CallToolResult;
   });
   // A new server and transport per request, with no session: the run's state
   // (its token, connections and tool list) lives here, not in the transport.

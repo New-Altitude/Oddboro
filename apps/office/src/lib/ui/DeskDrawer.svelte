@@ -3,6 +3,7 @@
   import Pixel from './Pixel.svelte';
   import Markdown from './Markdown.svelte';
   import Attachments from './Attachments.svelte';
+  import PostalMailbox from './PostalMailbox.svelte';
   import AwsSignIn from './AwsSignIn.svelte';
   import AwsSecretPick from './AwsSecretPick.svelte';
   import SelectToChat from './SelectToChat.svelte';
@@ -734,6 +735,15 @@
                     disabled={busy}
                     onclick={() => hostedSignIn(t, index)}>Sign in</button
                   >
+                {:else if s.action?.kind === 'postal'}
+                  {#if s.done}<p class="text-xs text-muted">{s.answer}</p>
+                  {:else}
+                    {#key t.id}<PostalMailbox
+                        taskId={t.id}
+                        {index}
+                        odd={nameOf(t.staffId ?? '')}
+                      />{/key}
+                  {/if}
                 {:else if s.action?.kind === 'aws'}
                   {#if s.done}
                     {#if s.answer}<p class="mt-1.5 text-xs text-muted">{s.answer}</p>{/if}
