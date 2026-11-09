@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { open as openOfficeWindow } from './windows.svelte.ts';
   import { tick } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import type { HandOffLine, HandOffStep, LessonLine, PokeRow, ThreadLine } from '@oddboro/ledger';
@@ -808,6 +809,10 @@
       >
     </div>
   {/if}
+  <button
+    class="self-start ms-3 text-xs text-muted"
+    onclick={() => openOfficeWindow({ id: 'projects', kind: 'projects' })}>Project sessions</button
+  >
   <form class="flex items-end gap-2 px-3 pb-3" novalidate onsubmit={send}>
     <textarea
       bind:this={box}

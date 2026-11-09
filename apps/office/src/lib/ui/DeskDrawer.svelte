@@ -12,7 +12,7 @@
   import { call } from './api.ts';
   import { AWS_GUIDES, siteLink } from '../site.ts';
   import { ago, when } from './format.ts';
-  import { openFile, wins } from './windows.svelte.ts';
+  import { openFile, openProject, wins } from './windows.svelte.ts';
   import { chatAbout, replyAbout, showInChat } from './chat-about.svelte.ts';
   import { OFFICE_TOOLS } from '@oddboro/ledger/tools';
   import { describe } from '@oddboro/ledger/time';
@@ -285,7 +285,17 @@
 
   <div class="flex-1 overflow-y-auto p-3">
     {#if !open}
-      {#if !items.length}
+      {#each desk.projectWork as proposal (proposal.id)}
+        <button
+          class="mb-2 block w-full rounded-lg bg-raise p-3 text-start"
+          onclick={() => openProject(proposal.sessionId)}
+        >
+          <strong>Review work for {proposal.title}</strong><span class="block truncate text-sm"
+            >{proposal.prompt}</span
+          >
+        </button>
+      {/each}
+      {#if !items.length && !desk.projectWork.length}
         <p class="py-10 text-center text-sm text-muted">
           Desk clear. Your Odds will bring you anything that needs you.
         </p>
