@@ -1298,8 +1298,8 @@ account.
    and span again and sends them through the office's own transport, so the
    gate applies to them too.
 6. Traces: about one in ten (`TRACE_SAMPLE_RATE`). `QUIET_ROUTES` are never
-   traced: `/api/events` stays open as long as the page, `/api/update` is the
-   shell's poll, and the relay would trace itself.
+   traced: the office and project event streams stay open, project commands carry
+   terminal input, `/api/update` is the shell's poll, and the relay would trace itself.
 7. `instrumentation.server.ts` loads before the server, so
    `src/lib/server/diagnostics.ts` and `src/lib/server/hosts.ts` import
    nothing that brings in Postgres.
