@@ -22,7 +22,7 @@ import { secretNamesClient, toolKeys } from './aws.ts';
 import { cleanEnv } from './claude.ts';
 import { driveServer } from './google/drive.ts';
 import { gmailServer } from './google/gmail.ts';
-import { bearer, startSignIn } from './oauth.ts';
+import { bearer, BuiltWithout, startSignIn } from './oauth.ts';
 
 export type ToolInfo = { name: string; description: string; readOnly: boolean };
 
@@ -125,8 +125,10 @@ export async function hostedSignIn(id: string): Promise<{ url?: string }> {
     return await startSignIn(id);
   } catch (signInError) {
     // A Google tool always needs its sign-in: listing its tools takes none, so
-    // the check below would wrongly mark it open.
-    if ((await connector(id))?.config.oauth === 'google') throw signInError;
+    // the check below would wrongly mark it open. A build without a sign-in's
+    // secret says so, never that the server offers none.
+    if ((await connector(id))?.config.oauth === 'google' || signInError instanceof BuiltWithout)
+      throw signInError;
     try {
       await listTools(id, true);
     } catch {

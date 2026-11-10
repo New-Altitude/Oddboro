@@ -27,12 +27,18 @@
 // ODDBORO_RELEASE_NOTES. Signing and notarizing are Mac only: the Windows
 // installer is not code-signed yet, so Windows warns before it runs.
 //
+// With SENTRY_AUTH_TOKEN set (and SENTRY_ORG and SENTRY_PROJECT), the shell
+// keeps its line tables and they go to Sentry, as the office's page source
+// maps do from its build. Without it the shell's release profile is as it
+// was, and nothing goes to Sentry.
+//
 //   node apps/desktop/scripts/release.ts [--version 0.0.2] [--out <dir>] [--test]
 //
 // `--version` sets the version in tauri.conf.json and Cargo.toml for this
 // build only, and puts the files back after. `--test` is for trying updates
 // on this machine: no notarizing, and the app accepts an http latest.json
-// from ODDBORO_UPDATE_URL. Never ship a --test build.
+// from ODDBORO_UPDATE_URL, and nothing goes to Sentry. Never ship a --test
+// build.
 import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
@@ -62,16 +68,57 @@ const TEST = args.includes('--test');
 const OUT = resolve(flag('--out') ?? join(DESKTOP, 'release'));
 // Rust writes source paths into the binary for its panic messages, and those
 // paths name the builder's home folder. Map them to neutral ones, so a release
-// never carries whose Mac built it.
+// never carries whose Mac built it. With debug files built, the C code's paths
+// take the same map, through CFLAGS. rustc, and gcc and clang for debug info,
+// apply the last map that matches, so the list runs from the most general
+// folder to the most specific: the checkout and Cargo's folder usually sit
+// inside the home folder.
 const CARGO_HOME = process.env.CARGO_HOME ?? join(homedir(), '.cargo');
+const PATH_MAPS = [
+  [homedir(), '/home'],
+  [CARGO_HOME, '/cargo'],
+  // The shell's reports cut its own frames to this (`ROOT` in src-tauri/src/diagnostics.rs).
+  [resolve(DESKTOP, '..', '..'), '/oddboro']
+];
 const RUSTFLAGS = [
   process.env.RUSTFLAGS ?? '',
-  `--remap-path-prefix=${CARGO_HOME}=/cargo`,
-  `--remap-path-prefix=${resolve(DESKTOP, '..', '..')}=/oddboro`,
-  `--remap-path-prefix=${homedir()}=/home`
+  ...PATH_MAPS.map(([from, to]) => `--remap-path-prefix=${from}=${to}`)
 ]
   .join(' ')
   .trim();
+// The C code the shell links (ring) names its paths too once it keeps line
+// tables. clang and gcc take these flags; MSVC builds it on Windows, where
+// checkNoHome still catches a path left in. gcc 11 (Ubuntu 22.04) hands the
+// assembler only -fdebug-prefix-map, so ring's .S files need it too.
+const CFLAGS = [
+  process.env.CFLAGS ?? '',
+  ...PATH_MAPS.flatMap(([from, to]) => [
+    `-ffile-prefix-map=${from}=${to}`,
+    `-fdebug-prefix-map=${from}=${to}`
+  ])
+]
+  .join(' ')
+  .trim();
+// release.yml passes "" when the secret is missing, so empty means unset.
+const SENTRY_TOKEN = process.env.SENTRY_AUTH_TOKEN || '';
+/**
+ * With a Sentry token, line tables for the shell, so a crash names its line:
+ * inside the binary on Linux, beside it as a .dSYM or .pdb on the Mac and
+ * Windows. The env overrides Cargo.toml's release profile for this build
+ * only; without a token it is empty and the profile is as it was. The Mac
+ * keeps the profile's strip: rustc writes the .dSYM first, then strips the
+ * binary of the linker's map of object files, whose paths name the home
+ * folder. On Linux the line tables live in the binary, and on Windows a
+ * strip means no .pdb, so there nothing is stripped.
+ */
+const SYMBOLS: Record<string, string> = SENTRY_TOKEN
+  ? {
+      CARGO_PROFILE_RELEASE_DEBUG: 'line-tables-only',
+      ...(process.platform === 'darwin' ? {} : { CARGO_PROFILE_RELEASE_STRIP: 'none' }),
+      ...(process.platform === 'linux' ? {} : { CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: 'packed' }),
+      ...(process.platform === 'win32' ? {} : { CFLAGS })
+    }
+  : {};
 /** This machine: Rust's target, and the name its files and latest.json use. */
 const MACHINES: Record<string, { target: string; arch: string; platform: string }> = {
   'darwin-arm64': { target: 'aarch64-apple-darwin', arch: 'aarch64', platform: 'darwin-aarch64' },
@@ -117,10 +164,31 @@ const CLI = join(
 );
 const tauri = (argv: string[], env: Record<string, string | undefined> = {}) =>
   run(process.execPath, [CLI, ...argv], env);
+// A test build hands the office's build no token, so its source maps never go
+// to Sentry.
 const stage = () => {
-  run(process.execPath, [join(DESKTOP, 'scripts', 'stage.ts')]);
+  run(
+    process.execPath,
+    [join(DESKTOP, 'scripts', 'stage.ts')],
+    TEST ? { SENTRY_AUTH_TOKEN: undefined } : {}
+  );
   run(process.execPath, [join(DESKTOP, 'scripts', 'smoke.ts'), '--stage']);
 };
+
+/**
+ * Sends the shell's debug files to Sentry, when there is a token; a test build
+ * only scans them. The CLI is found here, not at the top, so a build without
+ * a token never needs it.
+ */
+function uploadDebugFiles(files: string[]): void {
+  if (!SENTRY_TOKEN) return;
+  const cli = join(dirname(createRequire(import.meta.url).resolve('sentry')), 'bin.cjs');
+  run(
+    process.execPath,
+    [cli, 'debug-files', 'upload', ...(TEST ? ['--no-upload'] : []), ...files],
+    { SENTRY_CLI_NO_TELEMETRY: '1' }
+  );
+}
 
 const KEY = process.env.TAURI_SIGNING_PRIVATE_KEY;
 if (!KEY) throw new Error('Set TAURI_SIGNING_PRIVATE_KEY to sign the updater archive');
@@ -231,9 +299,10 @@ function buildLinux(version: string): void {
       'appimage',
       ...configs.flatMap((c) => ['--config', c])
     ],
-    { RUSTFLAGS, ...gstreamerDirs() }
+    { RUSTFLAGS, ...SYMBOLS, ...gstreamerDirs() }
   );
   checkNoHome(join(RELEASE, 'oddboro'));
+  uploadDebugFiles([join(RELEASE, 'oddboro')]);
   const built = join(RELEASE, 'bundle', 'appimage');
   const appimage = builtFile(built, version, '.AppImage');
 
@@ -263,10 +332,11 @@ function buildWindows(version: string): void {
   if (TEST) configs.push('{"plugins":{"updater":{"dangerousInsecureTransportProtocol":true}}}');
   tauri(
     ['build', '--target', TARGET, '--bundles', 'nsis', ...configs.flatMap((c) => ['--config', c])],
-    { RUSTFLAGS }
+    { RUSTFLAGS, ...SYMBOLS }
   );
   checkNoHome(join(RELEASE, 'oddboro.exe'));
   checkFileVersion(join(RELEASE, 'oddboro.exe'), version);
+  uploadDebugFiles([join(RELEASE, 'oddboro.exe'), join(RELEASE, 'oddboro.pdb')]);
   const built = join(RELEASE, 'bundle', 'nsis');
   const setup = builtFile(built, version, '-setup.exe');
   checkFileVersion(join(built, setup), version);
@@ -296,11 +366,18 @@ function buildMac(version: string): void {
   tauri(
     ['build', '--target', TARGET, '--bundles', 'app', ...configs.flatMap((c) => ['--config', c])],
     // Tauri would notarize by itself with these. release.ts does it after the checks.
-    { APPLE_SIGNING_IDENTITY: IDENTITY, RUSTFLAGS, APPLE_API_KEY: undefined, APPLE_ID: undefined }
+    {
+      APPLE_SIGNING_IDENTITY: IDENTITY,
+      RUSTFLAGS,
+      ...SYMBOLS,
+      APPLE_API_KEY: undefined,
+      APPLE_ID: undefined
+    }
   );
   run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', APP]);
   checkNoHome(join(APP, 'Contents/MacOS/oddboro'));
   checkBundleVersion(APP, version);
+  uploadDebugFiles([join(APP, 'Contents/MacOS/oddboro'), join(RELEASE, 'oddboro.dSYM')]);
   const node = read('codesign', [
     '-d',
     '--entitlements',

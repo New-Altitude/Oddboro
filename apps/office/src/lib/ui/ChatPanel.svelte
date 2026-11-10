@@ -182,6 +182,12 @@
   let lines = $state<Line[]>([]);
   let draft = $state('');
   let sending = $state(false);
+  /**
+   * What the owner sent while a reply was still coming: it goes once that
+   * reply ends. A second Send while one waits joins it, so the Odd answers
+   * both in one turn.
+   */
+  let waiting = $state<{ text: string; re?: Delivered } | undefined>();
   let status = $state('');
   let loaded = $state(false);
   let list: HTMLDivElement | undefined = $state();
@@ -256,6 +262,8 @@
     fetch(`/api/staff/${id}/chat`)
       .then((r) => r.json())
       .then((d: { history: Entry[]; busy: boolean }) => {
+        // A message that started meanwhile is streaming into the list: keep it.
+        if (sending) return;
         lines = d.history.map((h) => ({ ...h }));
         loaded = true;
         scrollDown();
@@ -299,11 +307,30 @@
   async function send(e: SubmitEvent) {
     e.preventDefault();
     const message = draft.trim();
-    if (!message || sending) return;
+    if (!message) return;
     const re = replyTo;
     draft = '';
     replyTo = undefined;
+    if (sending) {
+      waiting = waiting
+        ? { text: `${waiting.text}\n\n${message}`, re: waiting.re ?? re }
+        : { text: message, re };
+      scrollDown();
+      return;
+    }
     await say(message, re);
+  }
+
+  /** Take back the message waiting to go: it returns to the box. */
+  function unwait() {
+    if (!waiting) return;
+    draft = draft.trim() ? `${waiting.text}\n\n${draft}` : waiting.text;
+    replyTo ??= waiting.re;
+    waiting = undefined;
+    void tick().then(() => {
+      fit();
+      box?.focus();
+    });
   }
 
   /**
@@ -373,8 +400,12 @@
       status = '';
       onend();
       scrollDown();
+      const next = waiting;
+      waiting = undefined;
+      // What the owner sent meanwhile goes now; its reply reloads the chat after.
+      if (next) void say(next.text, next.re);
       // Show what the reply changed: a report it read, a lesson it kept.
-      if (!reply.failed) load(profile.id);
+      else if (!reply.failed) load(profile.id);
     }
   }
 
@@ -733,6 +764,20 @@
         {/if}
       {/if}
     {/each}
+    {#if waiting}
+      <!-- Sent while the reply above was still coming: it goes when that reply ends. -->
+      <div class="ms-auto flex max-w-[85%] flex-col items-end gap-0.5">
+        <div
+          class="rounded-2xl rounded-ee-md border border-dashed border-sea/40 px-3 py-2 text-sm leading-relaxed break-words whitespace-pre-wrap text-ink"
+        >
+          {waiting.text}
+        </div>
+        <div class="flex gap-3 pe-1 text-[10px] text-faint">
+          <span>Sends when {profile.name} finishes</span>
+          <button class="hover:text-coral" onclick={unwait}>Cancel</button>
+        </div>
+      </div>
+    {/if}
     {#if answers.length}
       <!-- Each answer a full-width choice on the owner's side, the default first and marked. -->
       <div class="ms-auto flex w-[85%] flex-col gap-1.5" role="group" aria-label="Answers">
@@ -815,11 +860,10 @@
       rows="1"
       placeholder={replyTo ? `Reply to ${profile.name}` : `Message ${profile.name}`}
       bind:value={draft}
-      {onkeydown}
-      disabled={sending}></textarea>
+      {onkeydown}></textarea>
     <button
       class="rounded-lg bg-sea px-3 py-2 text-sm font-medium text-night disabled:opacity-40"
-      disabled={sending || !draft.trim()}>Send</button
+      disabled={!draft.trim()}>Send</button
     >
   </form>
 </div>

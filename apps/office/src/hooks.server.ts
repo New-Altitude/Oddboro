@@ -11,8 +11,10 @@
 // Every route and API request passes `guardOffice` first: the office's own
 // names, and actions only from the owner's page (`#lib/server/owner-page.ts`).
 // Files built into the page (scripts, styles, images) are served before it.
+// Then Sentry's handle, which traces the request when the owner said yes to diagnostics.
 import { release } from 'node:os';
-import type { ServerInit } from '@sveltejs/kit/hooks';
+import { sequence, type ServerInit } from '@sveltejs/kit/hooks';
+import { handleErrorWithSentry, sentryHandle } from '@sentry/sveltekit';
 import { LOCAL } from '@oddboro/ledger';
 import { startLocalDatabase } from '@oddboro/ledger/local-db';
 import { useShellSecrets } from '@oddboro/ledger/secrets';
@@ -21,9 +23,14 @@ import { keepAddress } from '#lib/server/address.ts';
 import { startFollowUps } from '#lib/server/follow-ups.ts';
 import { markReady, timed } from '#lib/server/health.ts';
 import { startClock } from '#lib/server/jobs.ts';
+import { guardOffice } from '#lib/server/owner-page.ts';
 import { loadUpdate, VERSION } from '#lib/server/update.ts';
 
-export { guardOffice as handle } from '#lib/server/owner-page.ts';
+// The guard first, so a refused request reaches neither Sentry nor a route.
+// Kit 3 needs no fetch proxy script; saying so keeps the handle from
+// importing `@sveltejs/kit` to find out.
+export const handle = sequence(guardOffice, sentryHandle({ injectFetchProxyScript: false }));
+export const handleError = handleErrorWithSentry();
 
 if (process.env.ODDBORO_APP) {
   process.on('sveltekit:shutdown', () => process.exit(0));

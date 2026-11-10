@@ -20,7 +20,7 @@ import type { LookSpec, PartKind } from '@oddboro/sprites/look';
 import type { FloorPlan, OfficeSpec, RoomKind, RoomTemplate } from '@oddboro/world';
 import { STARTER_TOOLS } from './tools.ts';
 import type { Agent, Effort, GrantedFolder } from './agents.ts';
-import type { FolderAccess, Level } from './access-words.ts';
+import type { FolderAccess, Level, OwnSwitch } from './access-words.ts';
 import type { GmailFilter } from './filter-words.ts';
 
 const at = (name: string) => timestamp(name, { withTimezone: true });
@@ -95,7 +95,9 @@ export type AccountRow = typeof accounts.$inferSelect;
  * computer an Odd asks for (`asks.folder`): the owner may narrow it, then the
  * office gives it (`setFolder`). `call` is one call to an outside tool that
  * changes something, held by the gateway for an Odd at Draft (`asks.call`):
- * on the owner's yes the office makes that exact call.
+ * on the owner's yes the office makes that exact call. `switch` asks for the
+ * owner's Run commands or Browse the web switch, or both (`asks.switches`):
+ * the owner's yes turns them on.
  */
 export type AskKind =
   | 'approval'
@@ -108,6 +110,7 @@ export type AskKind =
   | 'reply'
   | 'filter'
   | 'folder'
+  | 'switch'
   | 'call';
 /** `revise` means the owner sent it back to be reworked. */
 export type AskStatus = 'open' | 'approved' | 'denied' | 'revise';
@@ -297,6 +300,8 @@ export const asks = pgTable('asks', {
   folder: jsonb().$type<FolderRequest>(),
   /** A call ask's held call to an outside tool. */
   call: jsonb().$type<HeldCall>(),
+  /** A switch ask's switches, Run commands or Browse the web, to turn on (`ask_for_switch`). */
+  switches: jsonb().$type<OwnSwitch[]>(),
   /** The ask this one reworks, after the owner sent that one back. */
   revises: integer(),
   /** The hand-off (its `hand_off` follow-up) the staffer raised this while working on. */

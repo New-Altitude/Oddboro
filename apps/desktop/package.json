@@ -15,6 +15,7 @@
     "lint": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings && cargo fmt --manifest-path src-tauri/Cargo.toml --check && prettier --check . --ignore-path ../../.prettierignore --ignore-path .gitignore"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "2.12.4"
+    "@tauri-apps/cli": "2.12.4",
+    "sentry": "0.45.0"
   }
 }

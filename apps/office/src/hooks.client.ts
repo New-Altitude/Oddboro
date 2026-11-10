@@ -1,7 +1,16 @@
-// The page tells the office it booted, and reports every error it hits, to
-// /api/client-log, which writes them to the app's log. Sent as JSON like every
-// action: a text/plain beacon would meet the release-only origin check (#25).
+// The page's error and trace reports. It always starts the SDK: it cannot
+// know before its data arrives whether the office has an address, and the
+// relay drops what it gets when it has none.
+// The page also tells the office it booted, and logs every error it hits, to
+// /api/client-log, which writes them to the app's log on this computer. Sent
+// as JSON like every action: a text/plain beacon would meet the release-only
+// origin check (#25).
+import * as Sentry from '@sentry/sveltekit';
 import type { ClientInit, HandleClientError } from '@sveltejs/kit/hooks';
+import { pageOptions } from '#lib/diagnostics.ts';
+import { pageAnswer } from '#lib/ui/diagnostics.svelte.ts';
+
+Sentry.init(pageOptions(pageAnswer));
 
 /** At most this many reports a page load, so a loop cannot flood the office. */
 const MOST = 20;
@@ -36,7 +45,9 @@ export const init: ClientInit = () => {
   });
 };
 
-export const handleError: HandleClientError = ({ kind, error }) => {
+const logError: HandleClientError = ({ kind, error }) => {
   const { message, stack } = describe(error);
   report('error', `${kind}: ${message}`, stack);
 };
+
+export const handleError = Sentry.handleErrorWithSentry(logError);

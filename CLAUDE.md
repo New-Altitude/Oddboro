@@ -83,6 +83,7 @@ npm run db:migrate          # apply migrations (the office also does it as it st
 npm run dev                 # build the sprites, then start the office on :4500
 npm run service:install -w apps/office   # run the office at login instead
 npm run sprites             # recompile the art after editing a .px file
+npm run mark -w @oddboro/sprites  # redraw the mark into every icon and logo file, on a Mac
 npm run render -- main-street  # render the Main Street floor to packages/world/out/
 npm run lint                # guards, prettier, then each workspace
 npm run check-types         # tsc and svelte-check everywhere

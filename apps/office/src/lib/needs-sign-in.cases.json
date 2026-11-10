@@ -1,0 +1,10 @@
+[
+  { "dsn": "https://k@relay.newaltitude.ai/oddboro/0", "site": null, "needs": true },
+  { "dsn": "https://k@newaltitude.ai/1", "site": null, "needs": true },
+  { "dsn": "http://k@relay.newaltitude.ai/1", "site": null, "needs": false },
+  { "dsn": "https://k@evilnewaltitude.ai/1", "site": null, "needs": false },
+  { "dsn": "https://k@o1.ingest.sentry.io/2", "site": null, "needs": false },
+  { "dsn": "http://k@127.0.0.1:4599/oddboro/0", "site": "http://127.0.0.1:4598", "needs": true },
+  { "dsn": "http://k@127.0.0.1:4599/oddboro/0", "site": null, "needs": false },
+  { "dsn": "not a url", "site": null, "needs": false }
+]

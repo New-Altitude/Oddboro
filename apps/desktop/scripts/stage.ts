@@ -6,20 +6,23 @@
 //   stage/node_modules/             what the workspace packages load, at the versions installed here
 //   stage/node_modules/@oddboro/*   ledger, sprites and world, as JavaScript, with their files
 //
-// Packages' test folders stay out, and no path may run long enough to stop
-// the Windows installer's builder (see LONGEST).
+// Packages' test folders and every source map stay out, and no path may run
+// long enough to stop the Windows installer's builder (see LONGEST).
 //
 // It also fetches the Node binary the app carries, checked against nodejs.org's
 // published sums. `node apps/desktop/scripts/smoke.ts --stage` then checks the
 // stage as the app would run it.
-import { execFileSync, execSync } from 'node:child_process';
+import { execFileSync, execSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
+  closeSync,
   cpSync,
   existsSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
   readdirSync,
   rmSync,
   statSync,
@@ -78,11 +81,17 @@ function build(): void {
   npm(['run', 'build', '-w', '@oddboro/office']);
 }
 
-/** The office's build bundles what it runs, so a package listed here ships twice (#13). */
+/**
+ * The office's third-party dependencies its build leaves out, so the stage
+ * carries them: Sentry's tracing hooks modules as they load. Any other
+ * package listed there would ship twice, bundled and in node_modules (#13).
+ */
+const UNBUNDLED = ['@sentry/core', '@sentry/sveltekit'];
+
 function checkOfficeDependencies(): void {
   const listed = Object.keys(
     readJson(join(ROOT, 'apps', 'office', 'package.json')).dependencies ?? {}
-  ).filter((name) => !name.startsWith('@oddboro/'));
+  ).filter((name) => !name.startsWith('@oddboro/') && !UNBUNDLED.includes(name));
   if (listed.length)
     throw new Error(
       `apps/office lists ${listed.join(', ')} under dependencies. The office's build ` +
@@ -90,10 +99,10 @@ function checkOfficeDependencies(): void {
     );
 }
 
-/** Pinned to the versions installed here. The office is left out: its build bundles its own. */
+/** Every third-party runtime dependency, pinned to the version installed here. */
 function dependencies(): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const dir of PACKAGES.map((p) => `packages/${p}`)) {
+  for (const dir of ['apps/office', ...PACKAGES.map((p) => `packages/${p}`)]) {
     for (const name of Object.keys(readJson(join(ROOT, dir, 'package.json')).dependencies ?? {})) {
       if (name.startsWith('@oddboro/')) continue;
       out[name] = readJson(join(ROOT, 'node_modules', name, 'package.json')).version;
@@ -144,6 +153,51 @@ function stagePackage(name: string): void {
   );
 }
 
+/**
+ * Sentry's build plugins, the source parser and the `sentry` CLI they bring.
+ * `@sentry/sveltekit` and `@sentry/node` depend on them for `vite build`; the
+ * running office never loads them. The parser is native code nobody signed,
+ * which Apple's notary refuses. Vite and its native tools stay out by
+ * `--omit=peer`.
+ */
+const BUILD_ONLY = [
+  '@sentry/bundler-plugins',
+  'oxc-parser',
+  '@oxc-parser',
+  '@oxc-project',
+  'sentry'
+];
+/**
+ * The only native code the app may carry beside the shell and Node, which the
+ * release signs. Each arrives signed by its publisher's Developer ID.
+ */
+const NATIVE = ['node_modules/@napi-rs/keyring-'];
+
+/** Mach-O, ELF or Windows (MZ) code, by the file's first bytes. */
+function isNative(path: string): boolean {
+  const head = Buffer.alloc(4);
+  const fd = openSync(path, 'r');
+  readSync(fd, head, 0, 4, 0);
+  closeSync(fd);
+  const magic = head.readUInt32BE(0);
+  return (
+    [0xcffaedfe, 0xcefaedfe, 0xcafebabe, 0x7f454c46].includes(magic) || magic >>> 16 === 0x4d5a
+  );
+}
+
+/**
+ * Fails on native code outside NATIVE, and on a Mac on any without a
+ * Developer ID signature and a secure timestamp: Apple's notary refuses both.
+ */
+function checkNative(path: string, rel: string): void {
+  if (!NATIVE.some((p) => rel.startsWith(p)))
+    throw new Error(`stage/${rel} is native code the app does not sign. Leave it out of the stage`);
+  if (process.platform !== 'darwin') return;
+  const sig = spawnSync('codesign', ['-dv', '--verbose=2', path], { encoding: 'utf8' }).stderr;
+  if (!sig.includes('Authority=Developer ID Application') || !sig.includes('Timestamp='))
+    throw new Error(`stage/${rel} has no Developer ID signature with a timestamp`);
+}
+
 /** Folders a package keeps for its own tests, which the app never loads. */
 const TEST_DIRS = new Set(['__screenshots__', '__tests__']);
 /**
@@ -155,8 +209,11 @@ const LONGEST = 180;
 
 /**
  * Takes out every test folder, where the longest names live (layerchart's
- * screenshots run past 200 characters), then fails on any path still too
- * long, here rather than in the installer.
+ * screenshots run past 200 characters), and every source map: nothing in the
+ * app loads one, and the office's own would ship its source (Sentry's build
+ * plugin keeps them when it has no token to upload them). Then fails on any
+ * path still too long, here rather than in the installer, and on native code
+ * the release cannot ship (checkNative).
  */
 function prune(dir: string, rel = ''): void {
   for (const name of readdirSync(dir)) {
@@ -165,8 +222,10 @@ function prune(dir: string, rel = ''): void {
     if (statSync(path).isDirectory()) {
       if (TEST_DIRS.has(name)) rmSync(path, { recursive: true, force: true });
       else prune(path, r);
-    } else if (r.length > LONGEST)
+    } else if (name.endsWith('.map')) rmSync(path);
+    else if (r.length > LONGEST)
       throw new Error(`stage/${r} is ${r.length} characters, too long for the Windows installer`);
+    else if (isNative(path)) checkNative(path, r);
   }
 }
 
@@ -247,7 +306,11 @@ writeFileSync(
     2
   ) + '\n'
 );
-npm(['install', '--omit=dev', '--no-audit', '--no-fund', '--loglevel=error'], STAGE);
+// --omit=peer leaves out Vite and SvelteKit, which Sentry's SvelteKit SDK
+// names as peers for the build. The office bundles its own.
+npm(['install', '--omit=dev', '--omit=peer', '--no-audit', '--no-fund', '--loglevel=error'], STAGE);
+for (const p of [...BUILD_ONLY, '.bin/sentry'])
+  rmSync(join(STAGE, 'node_modules', p), { recursive: true, force: true });
 for (const p of PACKAGES) stagePackage(p);
 stageOffice();
 prune(STAGE);

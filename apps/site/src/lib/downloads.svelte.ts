@@ -36,7 +36,7 @@ export const BUILDS: Build[] = [
     requirements: [
       'A Mac with Apple silicon',
       'macOS 13 or later',
-      'A Claude plan, or an Anthropic API key'
+      'A Claude plan or API key, or a ChatGPT or Grok account'
     ],
     install: [
       'Open Oddboro.dmg.',
@@ -52,7 +52,10 @@ export const BUILDS: Build[] = [
     label: 'Windows, x64',
     file: 'Oddboro-x64-setup.exe',
     versioned: (v) => `Oddboro_${v}_x64-setup.exe`,
-    requirements: ['Windows 10 or 11 on x64', 'A Claude plan, or an Anthropic API key'],
+    requirements: [
+      'Windows 10 or 11 on x64',
+      'A Claude plan or API key, or a ChatGPT or Grok account'
+    ],
     install: [
       'Open Oddboro-x64-setup.exe.',
       'If Windows says it protected your PC, select More info, then Run anyway.',
@@ -67,7 +70,7 @@ export const BUILDS: Build[] = [
     label: 'Windows, arm64',
     file: 'Oddboro-arm64-setup.exe',
     versioned: (v) => `Oddboro_${v}_arm64-setup.exe`,
-    requirements: ['Windows 11 on arm64', 'A Claude plan, or an Anthropic API key'],
+    requirements: ['Windows 11 on arm64', 'A Claude plan or API key, or a ChatGPT or Grok account'],
     install: [
       'Open Oddboro-arm64-setup.exe.',
       'If Windows says it protected your PC, select More info, then Run anyway.',
@@ -85,7 +88,7 @@ export const BUILDS: Build[] = [
     requirements: [
       'Linux on x86_64, with systemd and a desktop',
       'A keyring and notifications (GNOME, KDE and most others)',
-      'A Claude plan, or an Anthropic API key'
+      'A Claude plan or API key, or a ChatGPT or Grok account'
     ],
     install: [
       'Move Oddboro-x86_64.AppImage to ~/Applications.',
@@ -104,7 +107,7 @@ export const BUILDS: Build[] = [
     requirements: [
       'Linux on arm64, with systemd and a desktop',
       'A keyring and notifications (GNOME, KDE and most others)',
-      'A Claude plan, or an Anthropic API key'
+      'A Claude plan or API key, or a ChatGPT or Grok account'
     ],
     install: [
       'Move Oddboro-aarch64.AppImage to ~/Applications.',

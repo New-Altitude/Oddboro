@@ -223,6 +223,7 @@ const gave = {
   ),
   env: servers.office?.env,
   servers,
+  home: process.env.HOME,
   agentMode: fs.statSync(after('--agent')).mode & 0o777,
   profile,
   system: joined('--rules'),
@@ -591,6 +592,8 @@ export type Gave = {
   /** The Claude Code run's ANTHROPIC_API_KEY, which only a key sign-in sets. */
   apiKey?: string | null;
   grokEnv?: Record<string, string>;
+  /** The Grok run's HOME: the owner's, or the run home `runHome` made. */
+  home?: string;
   agentMode?: number;
   profile?: string;
   codexEnv?: Record<string, string>;
