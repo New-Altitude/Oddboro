@@ -313,6 +313,13 @@ const hireFields = {
     .describe(
       'Office tools beyond the ones every Odd has: search_ledger, give_owner_a_task, find_connectors, ask_for_access, edit_my_job, edit_my_description, hand_off, poke_owner, propose_hire, office_report. Leave out for the usual starters.'
     ),
+  persona_slug: z
+    .string()
+    .regex(/^[a-z0-9-]{1,64}$/)
+    .optional()
+    .describe(
+      'For a real person with a New Altitude persona, its slug if known. Uses their look for this hire. Leave out for an ordinary Odd.'
+    ),
   appearance: z
     .string()
     .max(600)
@@ -357,6 +364,7 @@ function hireFrom(a: HireArgs): HireProposal | string {
     permission: a.permission,
     jobDescriptionFile: jd,
     tools: a.office_tools?.filter(isGrantable),
+    personaSlug: a.persona_slug,
     appearance: a.appearance,
     job: a.first_job,
     intakeFile: intake

@@ -23,6 +23,7 @@
   import PersonaOffer from './PersonaOffer.svelte';
   import { connect, PersonaOffers, personas as asked } from './persona-offers.svelte.ts';
   import { call } from './api.ts';
+  import { hasPersonaHint } from '#lib/proposal-persona.ts';
   import { wins } from './windows.svelte.ts';
   import type { StaffProfile } from '../staff/roster.ts';
 
@@ -45,7 +46,7 @@
   let path = $state<'choose' | 'odd' | 'persona'>(untrack(() => from) ? 'odd' : 'choose');
   // The offers, read once the account is signed in, so the list is ready when
   // the sign-in finishes.
-  const personas = new PersonaOffers();
+  const personas = new PersonaOffers(!untrack(() => from));
   const signedIn = $derived(account.status.state === 'in');
   /** The persona Hire was pressed for. The window closes once it joins. */
   let hiring = $state<string>();
@@ -69,7 +70,12 @@
   let name = $state('');
   let role = $state('');
   /** The look the owner kept for them. Nobody is hired without one. */
-  let look = $state<Drawn | undefined>();
+  let customLook = $state<Drawn>();
+  let loadingLook = $state(untrack(() => !!from && hasPersonaHint(from.proposal)));
+  let preset = $state<Drawn>();
+  let usePreset = $state(false);
+  const look = $derived(usePreset ? preset : customLook);
+  let lookNote = $state('');
   let appearance = $state('');
   let room = $state('');
   let brief = $state('');
@@ -121,6 +127,19 @@
   onMount(() => {
     if (!from) return;
     const p = from.proposal;
+    if (loadingLook) {
+      void call<{ look?: Drawn; problem?: string } | null>(`/api/asks/${from.askId}/look`)
+        .then((r) => {
+          if (r?.look) {
+            preset = r.look;
+            usePreset = true;
+          } else {
+            lookNote = r?.problem ?? 'There is no saved look for this persona.';
+          }
+        })
+        .catch(() => (lookNote = "The persona's look could not be loaded."))
+        .finally(() => (loadingLook = false));
+    }
     name = p.name;
     role = p.role;
     remit = p.remit;
@@ -367,19 +386,54 @@
             <input class={field} placeholder="e.g. Mail Clerk" bind:value={role} />
           </label>
         </div>
-        <LookStudio
-          {name}
-          {role}
-          bind:description={appearance}
-          kept={look}
-          keepLabel="Keep this look"
-          autoKeep
-          onkeep={(d) => {
-            look = d;
-          }}
-          onclear={() => (look = undefined)}
-          onbusy={(b) => (wins.busy[id] = b)}
-        />
+        {#if loadingLook}
+          <p role="status" class="py-4 text-muted">Loading the persona’s look…</p>
+        {:else if usePreset && preset}
+          <div
+            class="flex items-end justify-center gap-4 rounded-xl bg-raise p-3"
+            aria-label="Persona look"
+          >
+            <Pixel
+              src={preset.portrait}
+              scale={2}
+              label={`${name}, portrait`}
+              class="overflow-hidden rounded-lg"
+            />
+            {#each ['down', 'side', 'up'] as facing (facing)}
+              <Pixel
+                src={preset.sheet}
+                crop={{ x: preset.frames[`idle-${facing}-0`], y: 0, w: 16, h: 32 }}
+                scale={3}
+                label={`${name}, ${facing}`}
+              />
+            {/each}
+          </div>
+          <button class="self-start text-xs text-sea underline" onclick={() => (usePreset = false)}
+            >Choose a different look</button
+          >
+        {:else}
+          {#if lookNote}<p class="text-xs text-muted">{lookNote}</p>{/if}
+          {#if preset}
+            <button
+              class="self-start text-xs text-sea underline"
+              disabled={wins.busy[id]}
+              onclick={() => (usePreset = true)}>Use the persona’s look</button
+            >
+          {/if}
+          <LookStudio
+            {name}
+            {role}
+            bind:description={appearance}
+            kept={customLook}
+            keepLabel="Keep this look"
+            autoKeep
+            onkeep={(d) => {
+              customLook = d;
+            }}
+            onclear={() => (customLook = undefined)}
+            onbusy={(b) => (wins.busy[id] = b)}
+          />
+        {/if}
       {:else if step === 1}
         <div class="text-xs text-muted">The room {name || 'they'} works in.</div>
         <div class="grid grid-cols-2 gap-2">

@@ -80,6 +80,8 @@ const { accountStatus, accountToken } = await import('./account.ts');
 const { installGrantedPersonas, syncPersonas } = await import('./persona.ts');
 const { history } = await import('./staff.ts');
 const { bus } = await import('./events.ts');
+const { proposalLook } = await import('./proposal-look.ts');
+const { matchPersona, hasPersonaHint } = await import('../proposal-persona.ts');
 const accountRoute = await import('../../routes/api/account/+server.ts');
 const personasRoute = await import('../../routes/api/personas/+server.ts');
 const personaRoute = await import('../../routes/api/personas/[slug]/+server.ts');
@@ -227,6 +229,34 @@ const BROKEN = (() => {
 })();
 const NOT_OFFERED = 'New Altitude does not offer this persona to your account.';
 
+test('a signed-out proposal gets its bundled art without a grant, drawing or hire', async () => {
+  const before = fake.seen.length;
+  const result = await proposalLook({ role: ' Nate B. Jones Persona ' });
+  assert.ok(result?.look);
+  const { look, frames, portraitPx } = result.look;
+  assert.equal(look.top, 'blazer');
+  assert.equal(look.colours.second, 'navy');
+  assert.equal(look.glasses, 'black');
+  assert.equal(look.beard, true);
+  assert.match(portraitPx, /^sprite portrait-nate\n/);
+  for (const facing of ['down', 'side', 'up'])
+    assert.ok(Number.isInteger(frames['idle-' + facing + '-0']));
+  const michele = await proposalLook({ role: 'Editor', personaSlug: 'michele' });
+  assert.ok(michele?.look?.newParts.length);
+  assert.equal(await proposalLook({ role: 'Unknown Person Persona' }), null);
+  assert.equal(await proposalLook({ role: 'Nate B. Jones Persona', personaSlug: 'unknown' }), null);
+  assert.equal(hasPersonaHint({ role: 'Mail Clerk' }), false);
+  assert.equal(
+    matchPersona({ role: 'Pat Persona' }, [
+      { slug: 'p', names: ['Pat'] },
+      { slug: 'q', names: ['Pat'] }
+    ]),
+    undefined
+  );
+  assert.equal(fake.seen.length, before);
+  assert.equal((await L.roster()).length, 0);
+});
+
 test('signing in asks for profile and personas, and a profile-only grant still refreshes', async () => {
   const { body } = await account('POST');
   assert.equal(new URL(String(body.url)).searchParams.get('scope'), 'profile personas');
@@ -273,6 +303,17 @@ test('an account signed in without personas is asked to sign in again, and signi
   } finally {
     fake.refused.delete('/api/personas/odds');
   }
+});
+
+test('a proposal retrieves the offered portrait and body without granting the persona', async () => {
+  const result = await proposalLook({ role: 'Analyst', personaSlug: 'pat' });
+  assert.ok(result?.look);
+  assert.equal(result.look.portraitPx, (PAT.odd as { portraitPx: string }).portraitPx);
+  assert.equal(result.look.newParts[0]?.name, result.look.look.hair);
+  assert.match(result.look.newParts[0]!.name, /^proposal-/);
+  assert.ok(result.look.frames['walk-side-1'] > 0);
+  assert.equal(await odd('pat'), undefined);
+  assert.equal(store.has('new-altitude-persona-pat:oauth'), false);
 });
 
 test('Add on a persona New Altitude does not offer, as a stale card asks, gets 404 and no sign-in', async () => {

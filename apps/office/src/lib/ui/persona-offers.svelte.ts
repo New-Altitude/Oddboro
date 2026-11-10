@@ -96,7 +96,8 @@ export class PersonaOffers {
   #signedIn = $derived(account.status.state === 'in');
 
   /** Made while a component starts, since it reads the offers in an effect of that component. */
-  constructor() {
+  constructor(enabled = true) {
+    if (!enabled) return;
     $effect(() => {
       void changes;
       if (!this.#signedIn) {

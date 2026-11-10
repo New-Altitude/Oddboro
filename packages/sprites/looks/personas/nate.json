@@ -1,0 +1,17 @@
+{
+  "hair": "side-part",
+  "top": "blazer",
+  "bottom": "trousers",
+  "colours": {
+    "hair": "dark brown",
+    "beard": "silver",
+    "skin": "light tan",
+    "top": "blue",
+    "second": "navy",
+    "accent": "cream",
+    "bottom": "charcoal",
+    "shoes": "black"
+  },
+  "glasses": "black",
+  "beard": true
+}

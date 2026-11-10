@@ -359,11 +359,11 @@ const ENTRANCE_VIEW: Rect = { x: TILE, y: TILE + 2, w: 8 * TILE, h: 6 * TILE };
 /**
  * Nate, Michele and Sam Frank, the New Altitude personas 0.0.9 brings in, in
  * the looks their packages carry, with the parts drawn for them. Copied from
- * a test office's ledger into scripts/persona-looks.json, since the site
+ * a test office's ledger into the shared sprite library, since the site
  * build never reads one.
  */
 const personaLooks = JSON.parse(
-  readFileSync(join(ROOT, 'scripts', 'persona-looks.json'), 'utf8')
+  readFileSync(join(LOOKS_ROOT, 'personas', 'release-looks.json'), 'utf8')
 ) as Record<Persona, { look: LookSpec; parts: DrawnPart[] }>;
 const personaLib = loadLibrary(Object.values(personaLooks).flatMap((p) => p.parts));
 

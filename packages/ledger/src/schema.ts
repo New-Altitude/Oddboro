@@ -203,6 +203,8 @@ export type HireProposal = {
   /** Office tools beyond the ones every staffer has. */
   tools?: string[];
   job?: { name: string; instructions: string; schedule: Schedule; report?: boolean };
+  /** The New Altitude persona whose look this proposed Odd starts with. */
+  personaSlug?: string;
   /** What the person looks like, in words, for drawing their look. */
   appearance?: string;
   /** The owner's intake answers, a file in the proposer's folder. The hire gets a copy as `notes/intake.md`. */

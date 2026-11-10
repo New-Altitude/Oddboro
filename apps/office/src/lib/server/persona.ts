@@ -229,7 +229,7 @@ export async function endPersonaGrants(): Promise<void> {
 type Listing = Exclude<Offers, { state: 'ok' }> | { state: 'ok'; listed: Listed[] };
 
 /** The personas New Altitude lists with an Odd for this account, each checked; a bad one is left out. */
-async function readListing(): Promise<Listing> {
+export async function readListing(): Promise<Listing> {
   if (accountStatus().state !== 'in') return { state: 'out' };
   // Signed in with `profile` alone: only a fresh sign-in can add personas.
   if (!accountHasPersonas()) return { state: 'rescope' };

@@ -92,6 +92,25 @@ export function readListed(raw: unknown): Listed | string {
 }
 
 /**
+ * A local hire keeps its own copy of the package parts it wears. A future
+ * package update must not repaint that hire, or find its part names taken.
+ */
+export function localArtwork(art: Pick<OddPackage, 'look' | 'parts'>) {
+  const look = { ...art.look };
+  const parts: DrawnPart[] = [];
+  for (const p of art.parts) {
+    if (art.look[p.kind] !== p.name) continue;
+    const name = 'proposal-' + p.name;
+    const px = p.px.replace(/^sprite ([^\r\n]+)$/m, (line, id: string) =>
+      id === p.kind + '-' + p.name ? 'sprite ' + p.kind + '-' + name : line
+    );
+    look[p.kind] = name;
+    parts.push({ kind: p.kind, name, px });
+  }
+  return { look, parts };
+}
+
+/**
  * Everything wrong with a listed package's look, in words; empty when it is
  * good. The checks of `problemsWith` in looks.ts, with one rule different: a
  * part already in the library is allowed when it was drawn for an Odd of this
@@ -128,7 +147,9 @@ export async function packageProblems(
     problems.push(`the portrait: ${e instanceof Error ? e.message : e}`);
   }
   if (!problems.length) {
-    const twin = await lookTaken(pkg.look, staffId);
+    const twin =
+      (await lookTaken(pkg.look, staffId)) ??
+      (pkg.parts.length ? await lookTaken(localArtwork(pkg).look, staffId) : undefined);
     if (twin) problems.push(`${twin.name} already looks exactly like that`);
   }
   return problems;
