@@ -47,7 +47,7 @@ import {
 import { drawArt } from './office-art.ts';
 import { runAsOffice } from './office-run.ts';
 import { housePalette, officeLibrary, SAMPLE, sheetJson, type ArtSheetJson } from './space.ts';
-import { canDraw, SONNET_CANNOT_DRAW } from './claude.ts';
+import { canDraw, cannotDesignOffice } from './claude.ts';
 
 export type DrawnOffice = {
   spec: OfficeSpec;
@@ -631,7 +631,7 @@ export async function drawOffice(
   },
   on: (p: Progress) => void = () => {}
 ): Promise<DrawnOffice> {
-  if (!canDraw()) throw new Error(SONNET_CANNOT_DRAW);
+  if (!canDraw()) throw new Error(cannotDesignOffice());
   const staff = (await roster()).length;
   const lib = await officeLibrary();
   const palette = housePalette();

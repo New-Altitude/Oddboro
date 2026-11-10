@@ -4,26 +4,29 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   agentsOn,
+  drawsLooks,
   AGENTS,
   EFFORTS,
   effortFor,
   filesViaOffice,
   MODELS,
   modelFor,
+  isMagpieModel,
   offeredAgent
 } from '../src/agents.ts';
 
-test('a Mac, Linux and Windows office each offer Claude Code, Grok and Codex, and not Gemini yet', () => {
+test('a Mac, Linux and Windows office each offer Pi, Claude Code, Grok and Codex, and not Gemini yet', () => {
   for (const platform of ['darwin', 'linux', 'win32'] as const) {
-    assert.deepEqual(agentsOn(platform), ['claude', 'grok', 'codex'], platform);
-    for (const tool of ['claude', 'grok', 'codex'])
+    assert.deepEqual(agentsOn(platform), ['pi', 'claude', 'grok', 'codex'], platform);
+    for (const tool of ['pi', 'claude', 'grok', 'codex'])
       assert.equal(offeredAgent(tool, platform), tool, `${tool} on ${platform}`);
     assert.equal(offeredAgent('gemini', platform), undefined, platform);
   }
 });
 
-test('the office carries the files of Claude Code, Codex and Grok on every system, and never of Gemini', () => {
+test('the office carries the files of Pi, Claude Code, Codex and Grok on every system, and never of Gemini', () => {
   const want = {
+    pi: { darwin: true, linux: true, win32: true },
     claude: { darwin: true, linux: true, win32: true },
     codex: { darwin: true, linux: true, win32: true },
     grok: { darwin: true, linux: true, win32: true },
@@ -57,10 +60,48 @@ test("an Odd's model is one its tool lists, or the office's, and its levels foll
   assert.equal(modelFor('codex', 'gpt-6-astra'), 'gpt-6-astra');
   assert.equal(modelFor('claude', 'gpt-6-astra'), undefined);
   assert.equal(modelFor('grok', null), undefined);
+  assert.equal(modelFor('claude', 'magpie:group/opus'), 'magpie:group/opus');
+  assert.equal(modelFor('pi', 'magpie:group/opus'), 'magpie:group/opus');
+  assert.equal(modelFor('pi', 'gpt-6-astra'), undefined);
+  assert.equal(modelFor('claude', 'magpie:bare-model-id'), 'magpie:bare-model-id');
+  assert.equal(modelFor('pi', 'magpie:bare-model-id'), 'magpie:bare-model-id');
+  assert.equal(drawsLooks('claude', 'magpie:group/opus'), false);
+  assert.equal(drawsLooks('codex', 'magpie:provider/astra'), false);
   // Luna stops at Max, so an Ultra kept from Sol becomes Max.
   assert.equal(effortFor('codex', 'ultra', false, 'gpt-6-luna'), 'max');
   assert.equal(effortFor('codex', 'ultra', false, 'gpt-6.1-sol'), 'ultra');
   for (const [tool, list] of Object.entries(MODELS))
     for (const m of list)
       assert.ok((m.efforts ?? EFFORTS[tool as keyof typeof EFFORTS]).includes('medium'), m.id);
+});
+
+test('Magpie model references accept bounded catalog IDs and reject malformed input', () => {
+  for (const id of [
+    'bare-model-id',
+    'provider/model',
+    'group/team',
+    'org/provider/model:latest',
+    'provider//model',
+    'provider/model/',
+    '/model',
+    'x'.repeat(256)
+  ]) {
+    assert.equal(isMagpieModel(`magpie:${id}`), true, id);
+    assert.equal(modelFor('pi', `magpie:${id}`), `magpie:${id}`);
+  }
+  for (const invalid of [
+    'magpie:',
+    'magpie:a b',
+    'magpie:a\nb',
+    'magpie:a\u0000b',
+    'magpie:a?b',
+    `magpie:${'x'.repeat(257)}`
+  ]) {
+    assert.equal(isMagpieModel(invalid), false, JSON.stringify(invalid));
+    assert.equal(modelFor('pi', invalid), undefined);
+  }
+  assert.equal(isMagpieModel(null), false);
+  assert.equal(isMagpieModel(undefined), false);
+  assert.equal(modelFor('pi', 'gpt-6-astra'), undefined);
+  assert.equal(drawsLooks('claude', 'magpie:opus'), false);
 });

@@ -48,6 +48,7 @@ import {
   onPlatform,
   onWindows,
   ownerData,
+  ownerHome,
   plain,
   hide,
   rgBin,
@@ -795,6 +796,17 @@ const patch = (id: string, body: unknown) =>
   } as unknown as Parameters<typeof PATCH>[0]);
 const refused = (status: number) => (e: unknown) => (e as { status?: number }).status === status;
 
+/** The bundled worker is available without a separate install or login. */
+const piListed = (platform: NodeJS.Platform) => ({
+  id: 'pi',
+  name: 'Pi (built-in)',
+  installed: true,
+  version: '1.5.0',
+  magpieReady: false,
+  signIn: { how: 'key', installing: false, signedIn: false },
+  commandsHow: L.commandsHow('pi', platform)
+});
+
 test('the "Runs on" picker hears only of the tools on this Mac', async () => {
   const only = join(folder, 'only-claude');
   mkdirSync(only, { recursive: true });
@@ -810,16 +822,20 @@ test('the "Runs on" picker hears only of the tools on this Mac', async () => {
     assert.deepEqual(await res.json(), {
       computer: 'Mac',
       office: 'claude',
+      officeConfigured: false,
+      officeModel: null,
       drawsLooks: true,
       // No account added beyond each tool's Office account.
       accounts: [],
       later: [{ id: 'gemini', name: 'Gemini', why: 'Coming soon. We are still testing it.' }],
       tools: [
+        piListed('darwin'),
         // The office's own Claude Code folder is not signed in, and neither is this stand-in.
         {
           id: 'claude',
           name: 'Claude Code',
           installed: true,
+          magpieReady: false,
           signIn: { how: 'browser', installing: false, signedIn: false },
           commandsHow: L.commandsHow('claude', 'darwin'),
           officeModel: officeModel('claude')
@@ -828,6 +844,7 @@ test('the "Runs on" picker hears only of the tools on this Mac', async () => {
           id: 'grok',
           name: 'Grok',
           installed: false,
+          magpieReady: false,
           signIn: { how: 'browser', installing: false, signedIn: false },
           commandsHow: L.commandsHow('grok', 'darwin'),
           officeModel: officeModel('grok')
@@ -837,6 +854,7 @@ test('the "Runs on" picker hears only of the tools on this Mac', async () => {
           id: 'codex',
           name: 'Codex',
           installed: false,
+          magpieReady: false,
           signIn: { how: 'browser', installing: false, signedIn: true },
           commandsHow: L.commandsHow('codex', 'darwin'),
           officeModel: officeModel('codex')
@@ -892,6 +910,7 @@ require(${JSON.stringify(join(bin, 'claude'))});
       id: 'grok',
       name: 'Grok',
       installed: false,
+      magpieReady: false,
       signIn: out,
       commandsHow: L.commandsHow('grok', 'win32'),
       officeModel: officeModel('grok')
@@ -900,6 +919,7 @@ require(${JSON.stringify(join(bin, 'claude'))});
       id: 'codex',
       name: 'Codex',
       installed: false,
+      magpieReady: false,
       // The office's Codex home is signed in under test.
       signIn: { ...out, signedIn: true },
       commandsHow: L.commandsHow('codex', 'win32'),
@@ -907,10 +927,12 @@ require(${JSON.stringify(join(bin, 'claude'))});
     }
   ];
   const installed = [
+    piListed('win32'),
     {
       id: 'claude',
       name: 'Claude Code',
       installed: true,
+      magpieReady: false,
       signIn: out,
       commandsHow,
       officeModel: officeModel('claude'),
@@ -926,13 +948,17 @@ require(${JSON.stringify(join(bin, 'claude'))});
         assert.deepEqual(await picker(), {
           computer: 'computer',
           office: 'claude',
+          officeConfigured: false,
+          officeModel: null,
           drawsLooks: true,
           accounts: [],
           tools: [
+            piListed('win32'),
             {
               id: 'claude',
               name: 'Claude Code',
               installed: false,
+              magpieReady: false,
               signIn: { how: 'browser', installing: false, signedIn: false },
               commandsHow,
               officeModel: officeModel('claude')
@@ -955,10 +981,12 @@ require(${JSON.stringify(join(bin, 'claude'))});
         assert.deepEqual(agentCommand('claude'), [join(native, 'claude.exe'), []]);
         // Installed. This Mac cannot run a stand-in claude.exe, so it has no version to say.
         assert.deepEqual((await picker()).tools, [
+          piListed('win32'),
           {
             id: 'claude',
             name: 'Claude Code',
             installed: true,
+            magpieReady: false,
             signIn: out,
             commandsHow,
             officeModel: officeModel('claude')
@@ -987,12 +1015,12 @@ test('moving an Odd to another tool clears its chat session; picking the tool it
   await assert.rejects(async () => patch('sam', { agent: 'cursor' }), refused(400));
 });
 
-test('on Linux the "Runs on" picker and a move offer Claude Code, Grok and Codex, and never Gemini', async () => {
+test('on Linux the picker offers Pi, Claude Code, Grok and Codex, and never Gemini', async () => {
   await onPlatform('linux', async () => {
     const res = await agents.GET({} as Parameters<typeof agents.GET>[0]);
     assert.deepEqual(
       ((await res.json()) as { tools: { id: string }[] }).tools.map((t) => t.id),
-      ['claude', 'grok', 'codex']
+      ['pi', 'claude', 'grok', 'codex']
     );
     try {
       for (const agent of ['grok', 'codex']) {
@@ -1055,7 +1083,7 @@ test('the hire flow offers no Gemini today: the picker does not list it, and a h
     await assert.rejects(
       async () => hireOn('Gemma', 'gemini'),
       (e: { status?: number; body?: { message?: string } }) =>
-        e.status === 400 && e.body?.message === 'Pick claude or grok or codex'
+        e.status === 400 && e.body?.message === 'Pick pi or claude or grok or codex'
     );
   });
   assert.equal(
@@ -1487,4 +1515,123 @@ test("a new hire's first day and the manager's planning say how an Odd gets Run 
     ),
     planText
   );
+});
+
+test('Codex on Magpie keeps the office gateway and disables its shell when commands are off', async () => {
+  const { LAUNCHES } = await import('./cli.ts');
+  await onPlatform('win32', async () => {
+    const launch = await LAUNCHES.codex({
+      key: 'test-gateway-codex',
+      staffId: 'sam',
+      account: 'office',
+      dir: folder,
+      reads: [],
+      writes: [folder],
+      granted: [],
+      web: false,
+      commands: false,
+      network: false,
+      system: 'Test.',
+      input: 'Hello.',
+      servers: {
+        connector: {
+          type: 'http',
+          url: 'http://127.0.0.1:1234/api/gateway/test',
+          headers: { Authorization: 'Bearer fixture-tool-key' }
+        }
+      },
+      allowed: ['mcp__connector'],
+      timeoutMs: 1000,
+      model: 'group/test',
+      connection: {
+        baseUrl: 'http://127.0.0.1:1234',
+        apiKey: 'fixture-inference-key',
+        model: 'group/test'
+      }
+    });
+    assert.ok(!('refused' in launch));
+    if ('refused' in launch) return;
+    try {
+      assert.equal(launch.env.MAGPIE_API_KEY, 'fixture-inference-key');
+      assert.equal(launch.env.ODDBORO_GATEWAY_TOKEN, 'fixture-tool-key');
+      assert.ok(launch.args.includes('features.shell_tool=false'));
+      assert.ok(launch.args.includes('features.unified_exec=false'));
+      assert.ok(!JSON.stringify(launch.args).includes('fixture-tool-key'));
+      assert.ok(!JSON.stringify(launch.args).includes('fixture-inference-key'));
+      assert.equal(launch.ownGroup, undefined);
+    } finally {
+      launch.done();
+    }
+  });
+});
+
+test('Pi rechecks saved folder grants before building its file server', async () => {
+  const { piDenyRoots } = await import('./staff.ts');
+  await ownerHome(async (owner) => {
+    const safe = join(owner, 'pi-allowed');
+    const secret = join(owner, '.ssh');
+    mkdirSync(safe, { recursive: true });
+    mkdirSync(secret, { recursive: true });
+    const denied = piDenyRoots('sam', [], [safe]);
+    assert.ok(denied.includes(L.home('pi-sessions')));
+    assert.ok(denied.includes(L.home('magpie')));
+    assert.ok(denied.includes(L.home('accounts')));
+    assert.ok(denied.includes(L.chatSession('sam')));
+    assert.throws(() => piDenyRoots('sam', [], [secret]), /saved folder grant/);
+    assert.throws(() => piDenyRoots('sam', [], [folder]), /saved folder grant/);
+  });
+});
+
+test('an office run already stopped does not start a tool or resolve a gateway', async () => {
+  const { runAsOffice } = await import('./office-run.ts');
+  const controller = new AbortController();
+  controller.abort();
+  assert.deepEqual(
+    await runAsOffice('Draft.', {
+      system: 'Test.',
+      kind: 'look',
+      timeoutMs: 1000,
+      signal: controller.signal
+    }),
+    { ok: false, text: 'Stopped.' }
+  );
+});
+
+test('Pi file-server policy refuses new nested skills and Git paths', async () => {
+  const { fileNoWrite } = await import('./staff.ts');
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+  const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
+  const root = join(folder, 'pi-file-policy');
+  mkdirSync(root, { recursive: true });
+  const inherited = [join(root, '**', 'AGENTS.md')];
+  const noWrite = fileNoWrite('pi', [root], inherited);
+  assert.deepEqual(noWrite, [...inherited, join(root, '**', 'SKILL.md'), join(root, '**', '.git')]);
+  assert.deepEqual(fileNoWrite('claude', [root], inherited), inherited);
+  const payload = { cwd: root, reads: [], writes: [root], noWrite, noAccess: [] };
+  const client = new Client({ name: 'pi-policy-test', version: '1.0' });
+  try {
+    await client.connect(
+      new StdioClientTransport({
+        command: process.execPath,
+        args: [L.FILES_SERVER],
+        env: { ...(process.env as Record<string, string>), ODDBORO_FILES: JSON.stringify(payload) },
+        stderr: 'ignore'
+      })
+    );
+    for (const path of ['SKILL.md', 'new/deep/SKILL.md', '.git/config', 'new/deep/.git/config']) {
+      const result = await client.callTool({
+        name: 'write_file',
+        arguments: { path, content: 'fixture' }
+      });
+      assert.equal(result.isError, true, path);
+    }
+    const allowed = await client.callTool({
+      name: 'write_file',
+      arguments: { path: 'allowed.txt', content: 'fixture' }
+    });
+    assert.notEqual(allowed.isError, true);
+  } finally {
+    await client.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });

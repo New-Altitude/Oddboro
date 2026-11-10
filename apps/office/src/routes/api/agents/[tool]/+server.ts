@@ -40,9 +40,9 @@ import type { RequestHandler } from './$types';
  * The tool the address names, when this system offers it and it signs in
  * here, and nothing is installing it.
  */
-function toolOf(name: string): Agent {
+function toolOf(name: string): Exclude<Agent, 'pi'> {
   const tool = offeredAgent(name, process.platform);
-  if (!tool) error(404, 'No such tool to sign in to here.');
+  if (!tool || tool === 'pi') error(404, 'No such tool to sign in to here.');
   const running = SLOTS[tool].running?.action;
   if (running === 'install' || running === 'update')
     error(
@@ -53,7 +53,7 @@ function toolOf(name: string): Agent {
 }
 
 /** The account a request names: the Office account, or one the owner added for this tool. */
-async function accountFor(tool: Agent, named: unknown): Promise<string> {
+async function accountFor(tool: Exclude<Agent, 'pi'>, named: unknown): Promise<string> {
   if (named === undefined || named === OFFICE_ACCOUNT) return OFFICE_ACCOUNT;
   const row = typeof named === 'string' ? await accountRow(named) : undefined;
   if (row?.agent !== tool) error(404, `No such ${AGENT_NAMES[tool]} account.`);
@@ -61,7 +61,7 @@ async function accountFor(tool: Agent, named: unknown): Promise<string> {
 }
 
 /** One account's sign-in, as the page reads it. */
-const state = async (tool: Agent, account: string) =>
+const state = async (tool: Exclude<Agent, 'pi'>, account: string) =>
   tool === 'claude' ? claudeSignInState(account) : signInState(tool, account);
 
 export const POST: RequestHandler = async ({ params, request }) => {

@@ -1,15 +1,14 @@
 <script lang="ts">
   import { drawsLooks } from '@oddboro/ledger/agents';
   import type { AgentTools } from '../agent-tools.svelte.ts';
+  import { officeAiReady } from '../magpie-ui.ts';
   import OfficeTools from '../OfficeTools.svelte';
 
-  // Your AI: what the office runs on. A tile for every coding tool, and the
-  // owner picks one for the office: its own runs, the Office Manager and every
-  // new hire. The picked tool's panel below installs it and signs it in (on
-  // Claude Code, its plan or key and its model). Next waits until the picked
-  // tool is installed and signed in. A system that offers only Claude Code
-  // shows the rest greyed, with why, so this card works the same on a Mac,
-  // Linux and Windows (hard rule 14).
+  // Your AI chooses the office default for its own runs and new Odds. Magpie
+  // uses included Pi for new setup and keeps an explicit compatible runner.
+  // Next needs the real runner plus a ready gateway route, or the selected
+  // direct tool's sign-in. The server supplies current platform offers; file
+  // access and outside-write approvals stay with the shared run layer.
   type Props = {
     tools: AgentTools;
     onnext: () => void;
@@ -24,23 +23,29 @@
 
   let claudeReady = $state(false);
   let model = $state<'opus' | 'sonnet'>('opus');
-  const picked = $derived(tools.tools.find((t) => t.id === tools.office));
+  const picked = $derived(tools.tools.find((t) => t.id === tools.selectedOffice));
   const ready = $derived(
-    !!picked?.installed &&
-      !picked.tooOld &&
-      (tools.office === 'claude' ? claudeReady : !!picked.signIn?.signedIn)
+    officeAiReady({
+      throughMagpie: tools.magpieSelected,
+      installed: !!picked?.installed,
+      tooOld: !!picked?.tooOld,
+      gatewayReady: !!picked?.magpieReady,
+      directReady: tools.office === 'claude' ? claudeReady : !!picked?.signIn?.signedIn
+    })
   );
   $effect(() =>
     ondraw(
-      tools.office !== 'claude' || model !== 'sonnet',
-      tools.office === 'claude' ? drawsLooks('claude', model) : tools.drawsLooks
+      !tools.magpieSelected && (tools.office !== 'claude' || model !== 'sonnet'),
+      !tools.magpieSelected &&
+        (tools.office === 'claude' ? drawsLooks('claude', model) : tools.drawsLooks)
     )
   );
 </script>
 
 <p class="text-lg font-semibold">What your office runs on.</p>
 <p class="text-sm text-muted">
-  Your Office Manager and every new Odd run on it. You can move any Odd to another tool later.
+  Choose a direct tool or Magpie for your models. Your Office Manager and new Odds use this choice;
+  each Odd can change later.
 </p>
 
 <div class="mt-3">
@@ -52,10 +57,16 @@
   <span class="flex-1 text-end text-xs text-muted">
     {#if tools.loaded && !ready && picked}
       {!picked.installed
-        ? `Install ${picked.name} to go on.`
+        ? picked.id === 'pi'
+          ? 'The included Pi runner is missing. Rebuild or reinstall Oddboro.'
+          : `Install ${picked.name} to go on.`
         : picked.tooOld
-          ? `Update ${picked.name} to go on.`
-          : `Sign in to ${picked.name} to go on.`}
+          ? picked.id === 'pi'
+            ? 'Rebuild or reinstall Oddboro to use the included Pi version.'
+            : `Update ${picked.name} to go on.`
+          : tools.magpieSelected
+            ? 'Finish Magpie setup and choose a ready model or group to go on.'
+            : `Sign in to ${picked.name} to go on.`}
     {/if}
   </span>
   <button class="btn primary" disabled={!ready} onclick={onnext}>Next</button>

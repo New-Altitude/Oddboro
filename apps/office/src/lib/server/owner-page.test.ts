@@ -292,6 +292,16 @@ test("only the owner's page reaches the route that opens a page", async () => {
   assert.deepEqual([page.status, page.ran], [404, true]);
 });
 
+async function onMac<T>(fn: () => Promise<T>): Promise<T> {
+  const original = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', { value: 'darwin' });
+  try {
+    return await fn();
+  } finally {
+    if (original) Object.defineProperty(process, 'platform', original);
+  }
+}
+
 test('the "Runs on" picker lists the tools and moves an Odd to another from the owner\'s page, and from no other', async () => {
   const listed = await send(agentsRoute.GET as Route, {
     method: 'GET',
@@ -317,7 +327,7 @@ test('the "Runs on" picker lists the tools and moves an Odd to another from the 
   });
   assert.deepEqual([away.status, away.ran], [403, false]);
   assert.equal((await L.staffer('paige'))?.agent, 'claude');
-  const page = await move('grok', PAGE);
+  const page = await onMac(() => move('grok', PAGE));
   assert.deepEqual([page.status, page.ran], [200, true]);
   assert.equal((await L.staffer('paige'))?.agent, 'grok');
   assert.equal((await move('claude', PAGE)).status, 200);
@@ -344,7 +354,7 @@ test('signing a tool in is refused from another site, and never starts its comma
     assert.deepEqual([away.status, away.ran], [403, false]);
     assert.ok(!existsSync(mark), 'a sign-in from another site started grok');
     // The same request from the owner's page starts it, so the mark can show.
-    const page = await signIn(PAGE);
+    const page = await onMac(() => signIn(PAGE));
     assert.deepEqual([page.status, page.ran], [200, true]);
     assert.ok(existsSync(mark), "the owner's page did not start grok");
   } finally {

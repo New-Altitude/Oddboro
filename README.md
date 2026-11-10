@@ -11,7 +11,8 @@ computer, a Mac, Linux or Windows, and its first Odd is the Office Manager you p
 The quickest way is the app, for a Mac, Windows or Linux, from
 [oddboro.com/releases](https://oddboro.com/releases/). To run it from source
 instead, you need a Mac, Linux or Windows 10 or later, [Node](https://nodejs.org) 24 or
-later, and a Claude plan or an Anthropic API key. On Windows, Git for Windows brings
+later, and model access through a supported tool or the Magpie integration below.
+On Windows, Git for Windows brings
 `git`, and the steps below work the same in PowerShell.
 
 1. Clone the repo:
@@ -34,7 +35,7 @@ later, and a Claude plan or an Anthropic API key. On Windows, Git for Windows br
 
 Setup asks nothing. It installs what the office needs, starts the office now
 and at every login, and opens it in your browser. The browser walks you through
-the rest: Claude Code (it installs it or signs you in), your name, your Office
+the rest: your AI tool or Magpie connection, your name, your Office
 Manager, the office you want, and its time zone. Then the office goes up in
 front of you.
 
@@ -54,6 +55,21 @@ none. Without it, the office is at `http://oddboro.localhost:4500`.
 - [Ollama](https://ollama.com) with `nomic-embed-text` lets your Odds search the
   ledger by meaning, and `uv` runs the tools that come from PyPI. The office
   says when either is missing.
+
+## Magpie integration
+
+This integration branch adds a Magpie choice with the Pi runner included.
+An existing local Magpie can supply its published models and routing groups
+without management access. The included private runtime supports a separate
+setup; editing an existing installation requires its management authorization.
+There is no separate Pi install or login. The upstream release linked above
+does not include this branch until it is merged and released.
+
+See [setup and supported limits](docs/magpie.md) to try it. A source checkout
+needs `npm run magpie:build` before using the private runtime; that command
+needs the pinned Go toolchain described in the guide. Maintainers and agents
+can start with [the architecture and reading map](docs/magpie-architecture.md)
+for the decisions, boundaries and relevant tests.
 
 ## Work on it
 

@@ -9,8 +9,10 @@ import {
   checkFolder,
   commandsHow,
   offeredAgent,
+  officeAgent,
   parseLevel,
   setAgent,
+  setAgentModel,
   setEffort,
   setModel,
   setAccount,
@@ -23,6 +25,7 @@ import {
   type Agent,
   type Effort
 } from '@oddboro/ledger';
+import { magpieRunConnection } from '#lib/server/magpie.ts';
 import { isBusy } from '#lib/server/staff.ts';
 import type { RequestHandler } from './$types';
 
@@ -73,6 +76,35 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
     if (isBusy(params.id)) error(409, 'Wait for the reply to finish, then switch.');
     // Refused before anything changes, so the Odd never moves without the commands it was moved for.
     if (typeof b.commands === 'boolean') followsCommands(agent);
+    if (agent === 'pi' || b.model !== undefined) {
+      const model =
+        b.model === undefined
+          ? who.model?.startsWith('magpie:')
+            ? who.model
+            : process.env.OFFICE_MAGPIE_MODEL
+              ? `magpie:${process.env.OFFICE_MAGPIE_MODEL}`
+              : null
+          : b.model;
+      if (model !== null && typeof model !== 'string') error(400, 'Pick a model');
+      if (
+        agent === 'pi' &&
+        (typeof model !== 'string' || !model.startsWith('magpie:') || model.length <= 7)
+      )
+        error(400, 'Pick a ready Magpie model for Pi.');
+      if (typeof model === 'string' && model.startsWith('magpie:')) {
+        if (agent !== 'pi' && agent !== 'claude' && agent !== 'codex')
+          error(400, 'This tool cannot use Magpie yet.');
+        try {
+          await magpieRunConnection(model.slice(7));
+        } catch (e) {
+          error(400, e instanceof Error ? e.message : 'Magpie is unavailable.');
+        }
+      }
+      const set = await setAgentModel(params.id, agent, model);
+      if (set) error(400, set.refused);
+      if (typeof b.commands === 'boolean') await setOwnTool(params.id, 'commands', b.commands);
+      return json({ ok: true });
+    }
     await setAgent(params.id, agent);
     if (typeof b.commands === 'boolean') await setOwnTool(params.id, 'commands', b.commands);
     return json({ ok: true });
@@ -88,6 +120,22 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
   }
   if (b.model !== undefined) {
     if (b.model !== null && typeof b.model !== 'string') error(400, 'Pick a model');
+    if (isBusy(params.id)) error(409, 'Wait for the reply to finish, then switch.');
+    if (
+      who.agent === 'pi' &&
+      b.model === null &&
+      !(officeAgent() === 'pi' && process.env.OFFICE_MAGPIE_MODEL)
+    )
+      error(400, 'Pick a ready Magpie model for Pi.');
+    if (typeof b.model === 'string' && b.model.startsWith('magpie:')) {
+      if (who.agent !== 'pi' && who.agent !== 'claude' && who.agent !== 'codex')
+        error(400, 'This tool cannot use Magpie yet.');
+      try {
+        await magpieRunConnection(b.model.slice(7));
+      } catch (e) {
+        error(400, e instanceof Error ? e.message : 'Magpie is unavailable.');
+      }
+    }
     const set = await setModel(params.id, b.model);
     if (set) error(400, set.refused);
     return json({ ok: true });

@@ -20,7 +20,8 @@ export type ToolAction =
 /** The action for one tool from `/api/agents`, or for none when the list does not name it. */
 export function toolAction(tool: AgentTool | undefined): ToolAction {
   const s = tool?.signIn;
-  if (!tool) return 'none';
+  // Pi ships with the office; only the office bundle can install or update it.
+  if (!tool || tool.id === 'pi') return 'none';
   // Before installed: xAI's installer links grok in well before it ends.
   if (s?.installing) return 'installing';
   // Older than the office runs comes first, Claude Code's too: its runs are refused until then.
@@ -35,7 +36,11 @@ export function toolAction(tool: AgentTool | undefined): ToolAction {
 
 /** Whether a newer version is out that the owner can update to in one click, though this one still runs. */
 export const offersUpdate = (tool: AgentTool | undefined): boolean =>
-  !!tool?.installed && !!tool.newer && !tool.tooOld && !tool.signIn?.installing;
+  tool?.id !== 'pi' &&
+  !!tool?.installed &&
+  !!tool.newer &&
+  !tool.tooOld &&
+  !tool.signIn?.installing;
 
 /**
  * Whether the row shows Sign out beside its action: only for a tool signed in
@@ -44,12 +49,15 @@ export const offersUpdate = (tool: AgentTool | undefined): boolean =>
  */
 export function offersSignOut(tool: AgentTool | undefined): boolean {
   return (
-    !!tool?.signIn?.signedIn && !['install', 'installing', 'update'].includes(toolAction(tool))
+    tool?.id !== 'pi' &&
+    !!tool?.signIn?.signedIn &&
+    !['install', 'installing', 'update'].includes(toolAction(tool))
   );
 }
 
 /** Who makes each tool: a row names them, and a browser tool signs in on their page. */
 export const MAKERS: Record<Agent, string> = {
+  pi: 'Pi',
   claude: 'Anthropic',
   grok: 'xAI',
   codex: 'OpenAI',

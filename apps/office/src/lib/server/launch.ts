@@ -6,9 +6,9 @@
 // shell, Claude Code's too. What run() in staff.ts takes from a tool's own
 // stream, how a run with a shell stops, and where a run refused for its
 // sign-in points the owner. Server only.
-import { execFileSync } from 'node:child_process';
+import { execFileSync, type ChildProcess } from 'node:child_process';
 import { readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, win32 } from 'node:path';
 import { modelSection, runsGoing, type ModelUsage } from '@oddboro/ledger';
 import { cleanEnv } from './claude.ts';
 
@@ -54,6 +54,7 @@ export type RunImage = { path: string; mediaType: string };
 export type RunEvent =
   | { type: 'session'; id: string }
   | { type: 'tool'; name: string }
+  | { type: 'delta'; text: string }
   /** One whole message of the reply. */
   | { type: 'message'; text: string }
   | { type: 'usage'; usage: ModelUsage }
@@ -185,4 +186,41 @@ export function stopGroups(pid: number): void {
     } catch {
       // That group is gone already: nothing is left to stop.
     }
+}
+
+/** Stop a live Pi worker and its children, using only its own recorded PID. */
+export function stopPiChild(
+  child: Pick<ChildProcess, 'pid' | 'exitCode' | 'signalCode' | 'kill'>,
+  platform: NodeJS.Platform = process.platform,
+  run: typeof execFileSync = execFileSync
+): boolean {
+  const pid = child.pid;
+  if (
+    !pid ||
+    !Number.isSafeInteger(pid) ||
+    pid <= 0 ||
+    child.exitCode !== null ||
+    child.signalCode !== null
+  )
+    return true;
+  if (platform !== 'win32') {
+    stopGroups(pid);
+    return true;
+  }
+  try {
+    const taskkill = win32.join(
+      process.env.SystemRoot || 'C:\\Windows',
+      'System32',
+      'taskkill.exe'
+    );
+    run(taskkill, ['/PID', String(pid), '/T', '/F'], {
+      stdio: 'ignore',
+      timeout: 3000,
+      windowsHide: true
+    });
+    return true;
+  } catch {
+    child.kill();
+    return false;
+  }
 }

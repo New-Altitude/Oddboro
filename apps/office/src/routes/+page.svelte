@@ -1161,8 +1161,8 @@
             >{clock} <span class="text-xs font-medium text-muted">{zoneShort()}</span></span
           >
         </div>
-        <div class="text-xs text-muted max-sm:hidden" class:hidden={firstRun}>
-          {data.computer} ·
+        <div class="text-xs text-muted" class:hidden={firstRun}>
+          <span class="max-sm:hidden">{data.computer} · </span>
           <button class="underline underline-offset-2 hover:text-ink" onclick={openSetup}
             >Setup</button
           >

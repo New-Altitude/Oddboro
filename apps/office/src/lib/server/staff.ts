@@ -1,3 +1,6 @@
+import { ENV_FILE } from '@oddboro/ledger/env';
+import { magpieConnectionIdentity, magpieRunConnection } from './magpie.ts';
+import { runTemp } from './run-temp.ts';
 // Running a staffer: each chat message or job run is Claude Code, or Grok, Codex
 // or Gemini for an Odd the owner moved to one (cli.ts), run headless, with the staffer's job
 // description from Postgres added to the system prompt. Server only.
@@ -26,18 +29,21 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, dirname, join, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
+  CODE,
   DATABASE_URL,
   goal as findGoal,
   goalsFor,
   goalWhen,
   atDraft,
   capabilities,
+  checkFolder,
   capped,
   handOffBrief,
   handOffContext,
@@ -140,6 +146,7 @@ import {
   effortFor,
   MANAGER_ROLE,
   modelFor,
+  officeAgent,
   accountOf,
   accountsHome,
   OFFICE_ACCOUNT,
@@ -172,7 +179,7 @@ import { chatPreface } from './chat-preface.ts';
 import { officeEnv } from './run-env.ts';
 import { firstDayOf } from './first-day.ts';
 import { endedEarly, LAUNCHES, stoppedWhy, streamTools, type Launch } from './cli.ts';
-import { NOT_SIGNED_IN, shellEnv, SIGN_IN_WHERE, stopGroups } from './launch.ts';
+import { NOT_SIGNED_IN, shellEnv, SIGN_IN_WHERE, stopGroups, stopPiChild } from './launch.ts';
 import { tooOldLine } from './versions.ts';
 import { claudeSandbox, NETWORK_REFUSED, NETWORK_REFUSED_LINE } from './sandbox.ts';
 import { agentCommand } from './agent-sign-in.ts';
@@ -487,6 +494,7 @@ async function access(who: StaffRow, ceiling: Level, ms: number, place?: CallPla
       args: [STAFF_SERVER],
       env: {
         STAFF_ID: who.id,
+        CODE,
         DATABASE_URL,
         ...officeSettings(),
         // In the app on a Mac only the office reaches the Keychain, through
@@ -805,6 +813,53 @@ function unreadable(
     .flatMap((p) => denyRules(['Read'], rulePath(p)));
 }
 
+/** Pi keeps its instruction and repository write walls at every depth. */
+export function fileNoWrite(agent: Agent, writes: string[], denied: string[]): string[] {
+  return agent === 'pi'
+    ? [
+        ...denied,
+        ...writes.flatMap((root) => [join(root, '**', 'SKILL.md'), join(root, '**', '.git')])
+      ]
+    : denied;
+}
+
+/** Paths the office file server must never disclose to a Pi run. */
+export function piDenyRoots(id: string, threads: number[], granted: string[]): string[] {
+  const office = realpathSync(home());
+  for (const folder of granted) {
+    const checked = checkFolder(folder);
+    if ('refused' in checked)
+      throw new Error(`Pi cannot use a saved folder grant: ${checked.refused}`);
+    const root = realpathSync(folder);
+    const part = relative(root, office);
+    if (!part || (!part.startsWith(`..${sep}`) && part !== '..' && !isAbsolute(part)))
+      throw new Error('Pi cannot use a granted folder that contains the office.');
+  }
+  const siblings = (parent: string, keep: string[]) => {
+    try {
+      return readdirSync(parent)
+        .filter((n) => !keep.includes(n))
+        .map((n) => join(parent, n));
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw e;
+    }
+  };
+  return [
+    resolve(ENV_FILE),
+    CODE,
+    chatSession(id),
+    chatFile(id),
+    home('pi-sessions'),
+    home('magpie'),
+    home('accounts'),
+    ...SECRET_STORES.map((p) => join(homedir(), p)),
+    ...siblings(home(), ['staff', 'data', 'threads']),
+    ...siblings(HOMES, [id]),
+    ...siblings(dirname(threadFolder(0)), threads.map(String))
+  ];
+}
+
 /** The time as a run is told it: "Tuesday, November 3, 9:41 PM", in the office's time zone. */
 const officeNow = () =>
   new Date().toLocaleString('en-US', {
@@ -870,7 +925,23 @@ async function run(who: StaffRow, message: string, opts: RunOpts): Promise<Run> 
  * file, or starts fresh. A tool that will not start fails the run, naming the
  * tool: no run falls back to another.
  */
+export function modelChoice(who: Pick<StaffRow, 'agent' | 'model'>): string | undefined {
+  return (
+    (who.model?.startsWith('magpie:') ? who.model : modelFor(who.agent, who.model)) ??
+    (!who.model && who.agent === officeAgent() && process.env.OFFICE_MAGPIE_MODEL
+      ? `magpie:${process.env.OFFICE_MAGPIE_MODEL}`
+      : undefined)
+  );
+}
+
+function modelSource(choice: string | undefined): string {
+  const id = choice?.startsWith('magpie:') ? magpieConnectionIdentity() : '';
+  return id ? `${id}:${choice}` : '';
+}
+
 async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<Run> {
+  const choice = modelChoice(who);
+  const source = modelSource(choice);
   const dir = homeOf(who.id);
   // The account its tool signs in with, and that account's folder. A session
   // saved in another folder (the Odd moved accounts) cannot resume here.
@@ -880,7 +951,8 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
     opts.sessionFile && existsSync(opts.sessionFile)
       ? parseSession(readFileSync(opts.sessionFile, 'utf8'))
       : undefined;
-  const saved = read && (read.home ?? '') === toolDir ? read : undefined;
+  const saved =
+    read && (read.home ?? '') === toolDir && (read.source ?? '') === source ? read : undefined;
   /** Claude Code's folder for this run: the account's, or ~/.claude for the owner's own login. */
   const claudeDir = toolDir || join(homedir(), '.claude');
   const ceiling = opts.draftOnly && levelAtMost('draft', who.permission) ? 'draft' : who.permission;
@@ -987,6 +1059,23 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
   // files, holding the same folders on every system: it reads what the run
   // reads, writes what it writes, and never writes what `deniedEdits` names.
   const officeFiles = filesViaOffice(who.agent, process.platform);
+  if (who.agent === 'pi' && !officeFiles) {
+    await closeGateway(gate);
+    const text = 'Pi file access is unavailable on this system.';
+    opts.onEvent?.({ type: 'error', message: text });
+    return { ok: false, text };
+  }
+  let noAccess: string[] | undefined;
+  if (who.agent === 'pi') {
+    try {
+      noAccess = piDenyRoots(who.id, reads, [...extraReads, ...extraWrites]);
+    } catch (e) {
+      await closeGateway(gate);
+      const text = e instanceof Error ? e.message : 'Pi file access could not be checked.';
+      opts.onEvent?.({ type: 'error', message: text });
+      return { ok: false, text };
+    }
+  }
   if (officeFiles) {
     servers.files = {
       command: process.execPath,
@@ -996,7 +1085,8 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
           cwd: dir,
           reads: readsBeyond(dir, reads, extraReads, claudeDir),
           writes,
-          noWrite: denied
+          noWrite: fileNoWrite(who.agent, writes, denied),
+          ...(noAccess ? { noAccess } : {})
         })
       }
     };
@@ -1014,14 +1104,33 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
   // Commands get a temp folder of their own: short, since a long one falls
   // back to the folder every run shares, and spelt /private/tmp, since /tmp
   // broke every command (both measured). Commands are on only on a Mac.
-  const tmp = own.commands ? `/private/tmp/ob-${key.slice(0, 8)}` : undefined;
+  const tmp = own.commands ? runTemp(key) : undefined;
   // The temp folder comes last: npm keeps its cache there (`shellEnv`), and
   // without it in --add-dir the sandbox refuses npm's writes (measured).
   const workIn = tmp
     ? [...data, ...(part ? [part] : []), ...extraWrites, tmp]
     : readsBeyond(dir, reads, extraReads, claudeDir);
   // The owner's pick for this Odd, or Medium; never below Medium for the Office Manager.
-  const model = modelFor(who.agent, who.model);
+  let connection: Awaited<ReturnType<typeof magpieRunConnection>> | undefined;
+  if (choice?.startsWith('magpie:')) {
+    if (who.agent !== 'pi' && who.agent !== 'claude' && who.agent !== 'codex') {
+      await closeGateway(gate);
+      const text = `${AGENT_NAMES[who.agent]} cannot use Magpie in this office yet.`;
+      opts.onEvent?.({ type: 'error', message: text });
+      return { ok: false, text };
+    }
+    try {
+      connection = await magpieRunConnection(choice.slice(7));
+      if (modelSource(choice) !== source)
+        throw new Error('The Magpie connection changed. Try the run again.');
+    } catch (e) {
+      await closeGateway(gate);
+      const text = e instanceof Error ? e.message : 'Magpie is unavailable.';
+      opts.onEvent?.({ type: 'error', message: text });
+      return { ok: false, text };
+    }
+  }
+  const model = connection?.model ?? choice;
   const effort = effortFor(who.agent, who.effort, who.role === MANAGER_ROLE, model);
   function claudeArgs(env: NodeJS.ProcessEnv): string[] {
     return [
@@ -1098,6 +1207,11 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
   /** A Claude Code run; with commands, their temp folder and the git template in it, made now and removed when the run ends. */
   function claudeLaunch(): Launch {
     const env = staffEnv(toolDir || undefined);
+    if (connection)
+      Object.assign(env, {
+        ANTHROPIC_BASE_URL: connection.baseUrl,
+        ANTHROPIC_API_KEY: connection.apiKey
+      });
     const dropMcp = writeMcpFile();
     if (!tmp) return { args: claudeArgs(env), env, stdin: input, done: dropMcp };
     mkdirSync(tmp, { recursive: true, mode: 0o700 });
@@ -1118,7 +1232,13 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
     };
   }
   // An added Claude account nobody signed in to: say where to sign in, rather than Claude Code's own advice.
-  if (who.agent === 'claude' && account !== OFFICE_ACCOUNT && !(await claudeAccountOf(account))) {
+  if (
+    !connection &&
+    who.agent === 'claude' &&
+    account !== OFFICE_ACCOUNT &&
+    !(await claudeAccountOf(account))
+  ) {
+    await closeGateway(gate);
     const line = `Claude Code ${NOT_SIGNED_IN}`;
     opts.onEvent?.({ type: 'error', message: line });
     return { ok: false, text: line };
@@ -1126,6 +1246,7 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
   // A tool older than the office runs fails on a switch it does not know, so it never starts.
   const tooOld = await tooOldLine(who.agent, SIGN_IN_WHERE);
   if (tooOld) {
+    await closeGateway(gate);
     opts.onEvent?.({ type: 'error', message: tooOld });
     return { ok: false, text: tooOld };
   }
@@ -1152,9 +1273,12 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
           network: own.network,
           effort,
           model,
+          connection,
+          sourceIdentity: source,
           account
         });
   if ('refused' in launch) {
+    await closeGateway(gate);
     opts.onEvent?.({ type: 'error', message: launch.refused });
     return { ok: false, text: launch.refused };
   }
@@ -1165,7 +1289,7 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
     // The command the page counts as installed, such as a Grok only in xAI's
     // install folder or an npm Claude Code on Windows; by name when there is
     // none, so the run fails naming it.
-    const [cmd, before] = agentCommand(who.agent) ?? [who.agent, []];
+    const [cmd, before] = launch.command ?? agentCommand(who.agent) ?? [who.agent, []];
     const child = spawn(cmd, [...before, ...launch.args], {
       cwd: dir,
       env: launch.env,
@@ -1174,6 +1298,7 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
     });
     /** Stop the tool, and with a group of its own, whatever its commands left running. */
     const stop = () => {
+      if (who.agent === 'pi') return stopPiChild(child);
       if (!launch.ownGroup) return child.kill();
       if (child.pid) stopGroups(child.pid);
     };
@@ -1182,6 +1307,7 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
     let reply = '';
     /** The last whole message a Codex or Gemini run sent, which is its reply. */
     let last = '';
+    let streaming = false;
     let session: string | undefined;
     let finished = false;
     const finish = (end: Run) => {
@@ -1209,13 +1335,20 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
       void closeGateway(gate);
       bus.emit(RUN_ENDED);
       if (session && opts.sessionFile)
-        saveSession(opts.sessionFile, { sessionId: session, seen: sections, home: toolDir });
+        saveSession(opts.sessionFile, {
+          sessionId: session,
+          seen: sections,
+          home: toolDir,
+          source
+        });
       opts.onEvent?.(r.ok ? { type: 'done', text: r.text } : { type: 'error', message: r.text });
       done(r);
     };
     const timer = setTimeout(() => {
-      stop();
-      finish({ ok: false, text: `No reply after ${opts.timeoutMs / 60_000} minutes.` });
+      const stopped = stop();
+      const cleanup =
+        who.agent === 'pi' && stopped === false ? ' Pi could not stop all its child tools.' : '';
+      finish({ ok: false, text: `No reply after ${opts.timeoutMs / 60_000} minutes.${cleanup}` });
     }, opts.timeoutMs);
 
     child.stdout.setEncoding('utf8');
@@ -1236,11 +1369,19 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
           for (const ev of launch.read(e)) {
             if (ev.type === 'session') session = ev.id;
             else if (ev.type === 'tool') opts.onEvent?.({ type: 'tool', name: floorTool(ev.name) });
-            else if (ev.type === 'message') {
-              const text = (reply ? '\n\n' : '') + ev.text;
+            else if (ev.type === 'delta') {
+              const text = (!streaming && reply ? '\n\n' : '') + ev.text;
+              streaming = true;
               reply += text;
-              last = ev.text;
               opts.onEvent?.({ type: 'delta', text });
+            } else if (ev.type === 'message') {
+              if (!streaming) {
+                const text = (reply ? '\n\n' : '') + ev.text;
+                reply += text;
+                opts.onEvent?.({ type: 'delta', text });
+              }
+              last = ev.text;
+              streaming = false;
             } else if (ev.type === 'usage')
               void recordUsage(who.id, opts.kind, ev.usage).catch(() => {});
             else if (ev.type === 'done') finish({ ok: true, text: last.trim() });
@@ -1331,7 +1472,9 @@ export async function chat(
     // never saw the chat: it gets the latest of it word for word. The preface
     // leaves out the told and poke lines the replay holds, and keeps those the
     // budget cut, so each line since the owner last wrote is said once.
-    const kept = sessionIdIn(chatSession(id), await runHomeOf(who)) ? [] : replayed(past);
+    const kept = sessionIdIn(chatSession(id), await runHomeOf(who), modelSource(modelChoice(who)))
+      ? []
+      : replayed(past);
     const inReplay = new Set(replayedAt(past, kept));
     const since = replaySince(past, kept);
     // The Odd writes only its own folder and the given folders it may change, so only those are walked.

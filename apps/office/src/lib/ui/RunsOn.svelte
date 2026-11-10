@@ -13,6 +13,8 @@
   type Props = {
     /** The tool picked now. */
     value: Agent;
+    /** The actual model source, or undefined to inherit the office selection. */
+    model?: string | null;
     /** The owner picked another. The caller reads `select.value`, and may set it back. */
     onpick?: (select: HTMLSelectElement) => void;
     /** Only the picked tool's actions, with no picker: the Model tab's tiles pick. */
@@ -24,6 +26,7 @@
   };
   let {
     value,
+    model,
     onpick,
     actionsOnly = false,
     installOnly = false,
@@ -35,6 +38,10 @@
   const offered = $derived(tools.tools.filter((t) => t.installed || t.id === value));
   const picked = $derived(tools.tools.find((t) => t.id === value));
   const action = $derived(toolAction(picked));
+  const throughMagpie = $derived(
+    (model === undefined ? tools.officeModel : model)?.startsWith('magpie:') &&
+      ['pi', 'claude', 'codex'].includes(value)
+  );
   /** The key field, opened by the key button. */
   let keyOpen = $state(false);
   let key = $state('');
@@ -62,18 +69,32 @@
             onchange={(e) => onpick?.(e.currentTarget)}
           >
             {#each offered as t (t.id)}
-              <option value={t.id}
-                >{t.installed
-                  ? t.signIn && !t.signIn.signedIn
-                    ? `${t.name} (not signed in)`
-                    : t.name
-                  : `${t.name} (not on this ${tools.computer})`}</option
+              <option
+                value={t.id}
+                disabled={t.id === 'pi' &&
+                  !(model === undefined ? tools.officeModel : model)?.startsWith('magpie:')}
+                >{t.id === 'pi' &&
+                !(model === undefined ? tools.officeModel : model)?.startsWith('magpie:')
+                  ? 'Pi (built-in; choose a Magpie model in Setup)'
+                  : t.installed
+                    ? t.signIn && !t.signIn.signedIn && !throughMagpie
+                      ? `${t.name} (not signed in)`
+                      : t.name
+                    : `${t.name} (not on this ${tools.computer})`}</option
               >
             {/each}
           </select>
         </label>
       {/if}
-      {#if picked && (picked.signIn || action === 'update') && (!installOnly || ['install', 'installing', 'update'].includes(action))}
+      {#if picked?.id === 'pi'}
+        <span class="text-xs text-muted"
+          >{picked.installed && !picked.tooOld
+            ? 'Pi is included. Choose a Magpie model; no separate login is needed.'
+            : 'The included Pi runner is unavailable. Rebuild or reinstall Oddboro.'}</span
+        >
+      {:else if picked && throughMagpie && !installOnly}
+        <span class="text-xs text-muted">Uses the selected Magpie model connection.</span>
+      {:else if picked && (picked.signIn || action === 'update') && (!installOnly || ['install', 'installing', 'update'].includes(action))}
         {@const t = picked}
         {#if action === 'update'}
           <button class="small" onclick={() => tools.install(t.id, 'update')}>Update</button>
@@ -111,7 +132,7 @@
     {#if picked && (action === 'install' || action === 'installing') && INSTALL_NOTES[picked.id]}
       <p class="mt-1 text-muted">{INSTALL_NOTES[picked.id]}</p>
     {/if}
-    {#if picked?.signIn && action === 'key' && keyOpen}
+    {#if picked?.signIn && !throughMagpie && action === 'key' && keyOpen}
       {@const t = picked}
       <form
         class="mt-1 flex gap-2"

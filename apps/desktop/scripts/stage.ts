@@ -32,6 +32,8 @@ import { stripTypeScriptTypes } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildMagpie } from './magpie-runtime.ts';
+import { assertPiBundle } from './pi-stage.ts';
 
 const ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 const DESKTOP = join(ROOT, 'apps', 'desktop');
@@ -216,6 +218,7 @@ function prune(dir: string, rel = ''): void {
 }
 
 function stageOffice(): void {
+  assertPiBundle(join(ROOT, 'apps', 'office', 'build'));
   const office = join(STAGE, 'apps', 'office');
   cpSync(join(ROOT, 'apps', 'office', 'build'), join(office, 'build'), { recursive: true });
   writeFileSync(
@@ -334,6 +337,7 @@ for (const p of [...BUILD_ONLY, '.bin/sentry'])
   rmSync(join(STAGE, 'node_modules', p), { recursive: true, force: true });
 for (const p of PACKAGES) stagePackage(p);
 stageOffice();
+await buildMagpie(join(STAGE, 'magpie'));
 prune(STAGE);
 await fetchNode();
 console.log(`Staged the server in ${STAGE}.`);

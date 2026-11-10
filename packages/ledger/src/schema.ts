@@ -809,8 +809,8 @@ export const usage = pgTable(
     tokens: integer().generatedAlwaysAs(
       sql`input_tokens + output_tokens + cache_read_tokens + cache_write_tokens`
     ),
-    /** What the run would cost at API list prices. The owner's plan does not bill it. */
-    costUsd: doublePrecision().notNull().default(0),
+    /** Reported API cost, often a list-price estimate rather than a bill. Null means unknown. */
+    costUsd: doublePrecision().default(0),
     createdAt: created()
   },
   (t) => [index('usage_by_staff').on(t.staffId, t.createdAt)]

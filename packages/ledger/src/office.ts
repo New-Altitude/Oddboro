@@ -96,6 +96,7 @@ import {
   effortsOf,
   MANAGER_EFFORT_FLOOR,
   MODELS,
+  isMagpieModel,
   officeAgentOf,
   type Agent,
   type Effort,
@@ -251,6 +252,31 @@ export async function setAgent(id: string, agent: Agent): Promise<void> {
   });
 }
 
+/** Change a tool and model together, with one database update. */
+export async function setAgentModel(
+  id: string,
+  agent: Agent,
+  model: string | null
+): Promise<{ refused: string } | undefined> {
+  if (agent === 'pi' && !isMagpieModel(model)) return { refused: 'Pi needs a Magpie model.' };
+  if (model !== null && !isMagpieModel(model) && !MODELS[agent].some((m) => m.id === model))
+    return { refused: `Pick a model offered by ${AGENT_NAMES[agent]}.` };
+  const before = await staffer(id);
+  if (!before) return { refused: 'No such Odd' };
+  if (before.agent === agent && before.model === model) return;
+  await db
+    .update(staff)
+    .set({ agent, model, ...(before.agent === agent ? {} : { account: null }) })
+    .where(eq(staff.id, id));
+  rmSync(chatSession(id), { force: true });
+  await record({
+    kind: 'access',
+    actor: 'owner',
+    title: `Set ${before.name} to run on ${AGENT_NAMES[agent]}${model ? ` with ${model}` : " with the office's model"}`,
+    ...networkNote(before, { ...before, agent, model })
+  });
+}
+
 /** Only the owner grants or removes an office tool. Takes effect on the staffer's next run. */
 export async function setTool(id: string, tool: string, on: boolean): Promise<void> {
   const found = OFFICE_TOOLS.find((t) => t.id === tool);
@@ -313,7 +339,7 @@ export async function setModel(
   if (!before) return { refused: 'No such Odd' };
   const menu = MODELS[before.agent];
   const picked = model === null ? undefined : menu.find((m) => m.id === model);
-  if (model !== null && !picked)
+  if (model !== null && !picked && !isMagpieModel(model))
     return {
       refused: menu.length
         ? `${AGENT_NAMES[before.agent]} runs ${menu.map((m) => m.name).join(', ')}`
@@ -321,12 +347,14 @@ export async function setModel(
     };
   if (before.model === model) return;
   await db.update(staff).set({ model }).where(eq(staff.id, id));
+  rmSync(chatSession(id), { force: true });
   await record({
     kind: 'access',
     actor: 'owner',
-    title: picked
-      ? `Set ${before.name} to run on ${picked.name}`
-      : `Set ${before.name} to run on the office's model`
+    title:
+      picked || isMagpieModel(model)
+        ? `Set ${before.name} to run on ${picked?.name ?? model}`
+        : `Set ${before.name} to run on the office's model`
   });
 }
 
@@ -3278,7 +3306,7 @@ export async function officeActivity(since: Date) {
 
 // Usage and the plan
 
-/** One run's token counts, per model, as Claude Code's result reports them. */
+/** One run's reported token counts and API cost, per model. Explicit null cost means unknown. */
 export type ModelUsage = Record<
   string,
   {
@@ -3286,11 +3314,14 @@ export type ModelUsage = Record<
     outputTokens?: number;
     cacheReadInputTokens?: number;
     cacheCreationInputTokens?: number;
-    costUSD?: number;
+    costUSD?: number | null;
   }
 >;
 
-/** `staffId` is null for a run as the office itself. */
+/**
+ * `staffId` is null for a run as the office itself. Missing cost keeps the
+ * legacy zero default; a runner that cannot report cost must pass null.
+ */
 export async function recordUsage(staffId: string | null, kind: UsageKind, byModel: ModelUsage) {
   const rows = Object.entries(byModel).map(([model, u]) => ({
     staffId,
@@ -3300,7 +3331,7 @@ export async function recordUsage(staffId: string | null, kind: UsageKind, byMod
     outputTokens: u.outputTokens ?? 0,
     cacheReadTokens: u.cacheReadInputTokens ?? 0,
     cacheWriteTokens: u.cacheCreationInputTokens ?? 0,
-    costUsd: u.costUSD ?? 0
+    costUsd: u.costUSD === undefined ? 0 : u.costUSD
   }));
   if (rows.length) await db.insert(usage).values(rows);
 }
@@ -3363,7 +3394,18 @@ export async function plan() {
   };
 }
 
-export type UsageTotals = { tokens: number; output: number; costUsd: number; runs: number };
+export type UsageTotals = {
+  tokens: number;
+  output: number;
+  /** Complete reported total, or null when any included model record has unknown cost. */
+  costUsd: number | null;
+  /** Subtotal of known records only. It is not a complete total while unknownCostRows is positive. */
+  knownCostUsd: number;
+  /** Counts model usage records, not distinct runs. */
+  knownCostRows: number;
+  unknownCostRows: number;
+  runs: number;
+};
 /** `at` is the bucket's start, in epoch milliseconds. */
 export type UsageBucket = { at: number; tokens: number; output: number };
 
@@ -3373,7 +3415,11 @@ export async function usageFor(staffId: string) {
     const [r] = await pg`
       select coalesce(sum(tokens), 0)::float8 as tokens,
              coalesce(sum(output_tokens), 0)::float8 as output,
-             coalesce(sum(cost_usd), 0)::float8 as "costUsd",
+             case when count(*) filter (where cost_usd is null) > 0
+                  then null else coalesce(sum(cost_usd), 0) end::float8 as "costUsd",
+             coalesce(sum(cost_usd), 0)::float8 as "knownCostUsd",
+             count(cost_usd)::int as "knownCostRows",
+             count(*) filter (where cost_usd is null)::int as "unknownCostRows",
              count(distinct created_at)::int as runs
       from usage
       where staff_id = ${staffId} and created_at > now() - ${interval}::interval`;

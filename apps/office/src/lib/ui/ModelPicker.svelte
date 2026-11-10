@@ -17,6 +17,7 @@
     type Effort
   } from '@oddboro/ledger/agents';
   import type { AgentTools } from './agent-tools.svelte.ts';
+  import MagpieModelPicker from './MagpieModelPicker.svelte';
   import RunsOn from './RunsOn.svelte';
   import ToolTiles from './ToolTiles.svelte';
   import { toolAction } from './tool-action.ts';
@@ -70,7 +71,7 @@
    * has none to pick.
    */
   const accountList = $derived(
-    agent === 'gemini'
+    agent === 'gemini' || agent === 'pi'
       ? []
       : [
           {
@@ -116,6 +117,7 @@
   function stateOf(id: Agent): string {
     const t = tools.tools.find((x) => x.id === id);
     if (!t) return '';
+    if (id === 'pi') return t.installed && !t.tooOld ? 'Included' : 'Unavailable';
     if (id === 'claude') return !t.installed ? 'Install' : t.tooOld ? 'Update' : 'Ready';
     const a = toolAction(t);
     if (a === 'install') return 'Install';
@@ -129,7 +131,7 @@
     manager && EFFORT_ORDER.indexOf(e) < EFFORT_ORDER.indexOf(MANAGER_EFFORT_FLOOR);
 
   /** The levels its runs take, on its own model when it has one. */
-  const efforts = $derived(effortsOf(agent, model));
+  const efforts = $derived(agent === 'pi' ? [] : effortsOf(agent, model));
 
   /** A model's thinking levels, lowest to highest, for its card. */
   function levelsOf(id: string): string {
@@ -152,10 +154,20 @@
 {/snippet}
 
 <ToolTiles {tools} picked={agent} onpick={onagent} {stateOf} label="What {name} runs on" />
-<RunsOn value={agent} actionsOnly installOnly={agent !== 'gemini'} class="text-[11px]" />
+<RunsOn
+  value={agent}
+  model={model ?? officeModel ?? null}
+  actionsOnly
+  installOnly={agent !== 'gemini'}
+  class="text-[11px]"
+/>
+<MagpieModelPicker {agent} value={model} {officeModel} onpick={onmodel} />
 {#if accountList.length}
   <div>
-    <h3 class="text-xs font-semibold text-ink">Signed in with</h3>
+    <h3 class="text-xs font-semibold text-ink">Direct execution account</h3>
+    <p class="mt-1 text-[10px] text-muted">
+      This account folder belongs to the agent tool. Magpie provider accounts are managed in Setup.
+    </p>
     <div class="mt-1 grid grid-cols-2 gap-1.5" role="radiogroup" aria-label="Account">
       {#each accountList as a (a.id)}
         {@const on = onAccount === a.id}
@@ -285,7 +297,7 @@
   <div>
     <h3 class="text-xs font-semibold text-ink">Model</h3>
     <div class="mt-1 grid grid-cols-2 gap-1.5" role="radiogroup" aria-label="Model">
-      {#each [{ id: '', name: 'Office default', about: office ? `Now ${office.name}` : "The office's" }, ...MODELS[agent].map( (m) => ({ id: m.id, name: m.name, about: levelsOf(m.id) }) )] as m (m.id)}
+      {#each [{ id: '', name: 'Office default', about: officeModel?.startsWith('magpie:') ? `Magpie: ${officeModel.slice(7)}` : office ? `Now ${office.name}` : "The office's" }, ...MODELS[agent].map( (m) => ({ id: m.id, name: m.name, about: levelsOf(m.id) }) )] as m (m.id)}
         {@const on = (model ?? '') === m.id}
         <button
           class="flex items-center gap-2 rounded-lg px-2.5 py-2 text-start {on

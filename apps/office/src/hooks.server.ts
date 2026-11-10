@@ -23,6 +23,7 @@ import { startClock } from '#lib/server/jobs.ts';
 import { guardOffice } from '#lib/server/owner-page.ts';
 import { syncPersonas } from '#lib/server/persona.ts';
 import { loadUpdate } from '#lib/server/update.ts';
+import { initializeMagpie, shutdownMagpie } from '#lib/server/magpie.ts';
 
 // The guard first, so a refused request reaches neither Sentry nor a route.
 // Kit 3 needs no fetch proxy script; saying so keeps the handle from
@@ -30,10 +31,15 @@ import { loadUpdate } from '#lib/server/update.ts';
 export const handle = sequence(guardOffice, sentryHandle({ injectFetchProxyScript: false }));
 export const handleError = handleErrorWithSentry();
 
-if (process.env.ODDBORO_APP) {
-  process.on('sveltekit:shutdown', () => process.exit(0));
-  process.stdin.on('close', () => process.exit(0)).resume();
-}
+let closing: Promise<void> | undefined;
+const closeOwnedRuntime = () => (closing ??= shutdownMagpie());
+process.on('sveltekit:shutdown', () => {
+  void closeOwnedRuntime().finally(() => {
+    if (process.env.ODDBORO_APP) process.exit(0);
+  });
+});
+if (process.env.ODDBORO_APP)
+  process.stdin.on('close', () => void closeOwnedRuntime().finally(() => process.exit(0))).resume();
 
 export const init: ServerInit = async () => {
   // In the Mac app the shell keeps the secrets; this process alone asks it.
@@ -42,6 +48,8 @@ export const init: ServerInit = async () => {
   await bringUpToDate();
   // Before the clock: a poke that came due while the app updated still lands.
   await loadUpdate();
+  // Resume only the private runtime the owner selected, before any jobs start.
+  await initializeMagpie();
   startClock();
   startFollowUps();
   // Never awaited: an office offline or signed out starts as fast as any.

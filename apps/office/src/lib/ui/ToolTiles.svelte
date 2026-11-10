@@ -11,14 +11,18 @@
   type Props = {
     tools: AgentTools;
     /** The tool picked now. */
-    picked: Agent;
+    picked: Agent | 'magpie';
     onpick: (id: Agent) => void;
     /** A tile's one-word state, such as Ready, Sign in or Install. */
     stateOf: (id: Agent) => string;
     /** What the tiles pick, for screen readers. */
     label: string;
+    /** Your AI keeps Pi behind Magpie; advanced Odd controls still list real runners. */
+    hideBuiltInPi?: boolean;
+    /** Magpie is a connection choice, not an Agent value passed to runner APIs. */
+    magpie?: { state: string; disabled: boolean; onpick: () => void };
   };
-  let { tools, picked, onpick, stateOf, label }: Props = $props();
+  let { tools, picked, onpick, stateOf, label, magpie, hideBuiltInPi = false }: Props = $props();
 </script>
 
 <div
@@ -26,7 +30,7 @@
   role="radiogroup"
   aria-label={label}
 >
-  {#each tools.tools as t (t.id)}
+  {#each tools.tools.filter((tool) => !hideBuiltInPi || tool.id !== 'pi') as t (t.id)}
     {@const on = picked === t.id}
     {@const state = stateOf(t.id)}
     <button
@@ -45,7 +49,37 @@
       >
     </button>
   {/each}
-  {#each tools.later as l (l.id)}
+  {#if magpie}
+    <button
+      class="tile"
+      class:on={picked === 'magpie'}
+      role="radio"
+      aria-checked={picked === 'magpie'}
+      disabled={magpie.disabled}
+      onclick={() => magpie?.onpick()}
+    >
+      <svg
+        class="h-8 w-8"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        aria-hidden="true"
+        ><path
+          d="M4 17h5l3-5 3 5h5M7 7l5 5 5-5M4 7h3V4M20 7h-3V4M9 20v-3M15 20v-3"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        /></svg
+      >
+      <span class="text-sm font-medium">Magpie</span>
+      <span
+        class="text-xs"
+        class:text-sea={magpie.state === 'Ready'}
+        class:text-muted={magpie.state !== 'Ready'}>{magpie.state}</span
+      >
+    </button>
+  {/if}
+  {#each tools.later.filter((tool) => !hideBuiltInPi || tool.id !== 'pi') as l (l.id)}
     <div class="tile off" role="radio" aria-checked="false" aria-disabled="true" title={l.why}>
       <svg class="h-8 w-8" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
         ><path fill-rule="evenodd" d={LOGOS[l.id]} /></svg
@@ -77,6 +111,14 @@
   .tile.on,
   button.tile.on:hover {
     box-shadow: inset 0 0 0 2px var(--color-sea);
+  }
+  button.tile:disabled {
+    opacity: 0.5;
+    cursor: wait;
+  }
+  button.tile:focus-visible {
+    outline: 2px solid var(--color-sea);
+    outline-offset: 2px;
   }
   .tile.off {
     opacity: 0.5;

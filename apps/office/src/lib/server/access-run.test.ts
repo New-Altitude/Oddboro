@@ -30,6 +30,7 @@ import {
   ownerHome,
   runOf,
   setOwn,
+  testRunTemp,
   withEnv,
   type Gave
 } from './office-under-test.ts';
@@ -77,7 +78,7 @@ type Sandbox = {
 const sandboxOf = (run: Gave) =>
   (JSON.parse(after(run.args, '--settings')) as { sandbox?: Sandbox }).sandbox;
 /** The run's temp folder, where Run commands puts its commands' own files. */
-const tmpOf = (run: Gave) => `/private/tmp/ob-${run.env.RUN_KEY.slice(0, 8)}`;
+const tmpOf = (run: Gave) => testRunTemp(run.env.RUN_KEY);
 /** The paths of a Claude Code run's Read allows, in order. */
 const readAllows = (run: Gave) =>
   listAfter(run.args, '--allowedTools')

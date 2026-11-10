@@ -5,10 +5,11 @@
 import { officeSection, SWITCH_NAMES } from './access-words.ts';
 
 /** The coding tools an Odd can run on. Each is also the command the office starts. */
-export const AGENTS = ['claude', 'grok', 'codex', 'gemini'] as const;
+export const AGENTS = ['pi', 'claude', 'grok', 'codex', 'gemini'] as const;
 export type Agent = (typeof AGENTS)[number];
 /** What the owner reads for each. */
 export const AGENT_NAMES: Record<Agent, string> = {
+  pi: 'Pi (built-in)',
   claude: 'Claude Code',
   grok: 'Grok',
   codex: 'Codex',
@@ -31,6 +32,7 @@ export const AGENT_PLATFORMS: Record<
   Agent,
   { runs: readonly NodeJS.Platform[]; commands: readonly NodeJS.Platform[] }
 > = {
+  pi: { runs: ['darwin', 'linux', 'win32'], commands: [] },
   claude: { runs: ['darwin', 'linux', 'win32'], commands: ['darwin'] },
   grok: { runs: ['darwin', 'linux', 'win32'], commands: [] },
   codex: { runs: ['darwin', 'linux', 'win32'], commands: ['darwin', 'linux'] },
@@ -46,6 +48,7 @@ export const AGENT_PLATFORMS: Record<
  * use_tool; the owner chose the same walls everywhere over that speed.
  */
 export const FILES_VIA_OFFICE: Record<Agent, readonly NodeJS.Platform[]> = {
+  pi: ['darwin', 'linux', 'win32'],
   claude: ['darwin', 'linux', 'win32'],
   codex: ['darwin', 'linux', 'win32'],
   grok: ['darwin', 'linux', 'win32'],
@@ -70,6 +73,7 @@ export const offeredAgent = (v: unknown, platform: NodeJS.Platform): Agent | und
  * when the office starts to rely on something newer.
  */
 export const MIN_VERSIONS: Record<Agent, string> = {
+  pi: '1.5.0',
   claude: '2.1.318',
   codex: '0.166.0',
   // Grok's office runs send pictures as --prompt-json blocks, measured on 1.0.62.
@@ -121,6 +125,7 @@ export const EFFORT_NAMES: Record<Effort, string> = {
  * nowhere yet.
  */
 export const EFFORTS: Record<Agent, readonly Effort[]> = {
+  pi: [],
   claude: ['low', 'medium', 'high', 'xhigh', 'max'],
   codex: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
   grok: ['low', 'medium', 'high'],
@@ -137,6 +142,7 @@ const UP_TO_MAX: readonly Effort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
  * list shows (Luna stops at Max); Grok's are the models it lists.
  */
 export const MODELS: Record<Agent, readonly ModelChoice[]> = {
+  pi: [],
   claude: [
     { id: 'claude-opus-5-5', name: 'Opus 5.5' },
     { id: 'claude-fable-5-2', name: 'Fable 5.2' },
@@ -164,7 +170,14 @@ export const MODELS: Record<Agent, readonly ModelChoice[]> = {
 };
 /** The Odd's own model on `agent`, or nothing for the office's: a model kept from another tool does not carry over. */
 export const modelFor = (agent: Agent, picked: string | null | undefined): string | undefined =>
-  MODELS[agent].find((m) => m.id === picked)?.id;
+  picked && isMagpieModel(picked) ? picked : MODELS[agent].find((m) => m.id === picked)?.id;
+
+/** A gateway model reference. Availability is checked by the office before use. */
+export const isMagpieModel = (model: string | null | undefined): boolean => {
+  if (typeof model !== 'string' || !model.startsWith('magpie:')) return false;
+  const id = model.slice('magpie:'.length);
+  return /^[a-zA-Z0-9._~:@/+-]{1,256}$/.test(id);
+};
 /** The levels a run on `agent` takes, on the Odd's model when it has one. */
 export const effortsOf = (agent: Agent, model?: string | null): readonly Effort[] =>
   MODELS[agent].find((m) => m.id === model)?.efforts ?? EFFORTS[agent];
@@ -203,6 +216,7 @@ export function effortFor(
  * model builds a look from parts, which needs no drawing at all.
  */
 export function drawsLooks(agent: Agent, model: string | undefined): boolean {
+  if (isMagpieModel(model)) return false;
   if (agent === 'claude') return /opus|fable/i.test(model ?? 'opus');
   if (agent === 'codex') return /sol|astra/i.test(model ?? 'sol');
   return false;
@@ -229,6 +243,7 @@ export type CommandsHow = { state: 'switch' } | { state: 'never'; why: string; o
 
 /** Why each tool's Run commands is fixed, as the owner reads it. */
 export const COMMANDS_WHY: Record<Agent, string> = {
+  pi: 'Pi does not run commands.',
   // Claude Code's sandbox was measured on a Mac only.
   claude: 'Not tested on this system yet.',
   // Codex's Windows sandbox gave every Odd's folder to reads (2026-11-06).
@@ -281,6 +296,7 @@ export function runsCommands(agent: Agent, platform: NodeJS.Platform, stored: bo
  * was measured to shut them, so they stay off. Grok and Gemini run no commands.
  */
 export const NETWORK_WITH_WEB: Record<Agent, boolean> = {
+  pi: false,
   claude: true,
   codex: false,
   grok: false,
@@ -301,6 +317,7 @@ export function commandsOnline(
  * on or off, with no page fetch beside it, so its Odds are told web search only.
  */
 export const FETCHES_PAGES: Record<Agent, boolean> = {
+  pi: false,
   claude: true,
   grok: true,
   codex: false,
@@ -313,6 +330,7 @@ export const FETCHES_PAGES: Record<Agent, boolean> = {
  * stay off the internet until the office restarts.
  */
 export function webLine(agent: Agent, platform: NodeJS.Platform, held: boolean): string {
+  if (agent === 'pi') return 'Pi uses only the tools you grant.';
   const how = commandsHow(agent, platform).state;
   const web = FETCHES_PAGES[agent] ? 'Search and read web pages.' : 'Search the web.';
   if (how === 'never') return web;

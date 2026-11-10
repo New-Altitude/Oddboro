@@ -137,6 +137,7 @@ export const ROUTE_IDS = {
   '/api/lessons/[id]': true,
   '/api/looks': true,
   '/api/looks/parts': true,
+  '/api/magpie': true,
   '/api/me/parts': true,
   '/api/office': true,
   '/api/office/design': true,

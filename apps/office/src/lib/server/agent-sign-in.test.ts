@@ -216,11 +216,11 @@ test('the "Runs on" list says which tools the office is signed in to, with the a
   } finally {
     rmSync(join(GROK_HOME, 'auth.json'), { force: true });
   }
-  // Linux offers Claude Code, Grok and Codex, so their sign-ins show there.
+  // Linux offers Pi, Claude Code, Grok and Codex.
   const linux = await listed('linux');
   assert.deepEqual(
     linux.filter((t) => t.signIn).map((t) => t.id),
-    ['claude', 'grok', 'codex']
+    ['pi', 'claude', 'grok', 'codex']
   );
 });
 
@@ -288,11 +288,15 @@ test('a second sign-in starts the first over, and Cancel stops a waiting one and
   await second.url();
   const secondPid = loginPid(GROK_HOME);
   assert.notEqual(secondPid, firstPid);
-  assert.deepEqual(await (await send('DELETE', 'grok')).json(), { stopped: true });
+  assert.deepEqual(await (await onPlatform('darwin', () => send('DELETE', 'grok'))).json(), {
+    stopped: true
+  });
   assert.deepEqual(await second.end(), [{ line: 'Cancelled.' }, { done: true, ok: false }]);
   for (const pid of [firstPid, secondPid])
     await waitFor(() => gone(pid) || undefined, `sign-in ${pid} to stop`);
-  assert.deepEqual(await (await send('DELETE', 'grok')).json(), { stopped: false });
+  assert.deepEqual(await (await onPlatform('darwin', () => send('DELETE', 'grok'))).json(), {
+    stopped: false
+  });
   assert.equal((await stateOf('grok'))?.waiting, undefined);
 });
 
@@ -454,7 +458,7 @@ test("every grok the office starts outside a run names the office's own leader s
   const s = await signIn('grok');
   await s.url();
   assert.deepEqual(lastLogin(GROK_HOME).args.slice(-2), leader);
-  await send('DELETE', 'grok');
+  await onPlatform('darwin', () => send('DELETE', 'grok'));
   await s.ended;
   // A sign-in that could run out within a chat's time is renewed first, outside the sandbox.
   const signedIn = (inMs: number) =>
@@ -486,7 +490,7 @@ test('Your AI lists every tool once on a Mac, Linux and Windows: the ones this s
   const mac = await listing('darwin');
   assert.deepEqual(
     mac.tools.map((t) => t.id),
-    ['claude', 'grok', 'codex']
+    ['pi', 'claude', 'grok', 'codex']
   );
   assert.deepEqual(mac.later, [
     { id: 'gemini', name: 'Gemini', why: 'Coming soon. We are still testing it.' }
@@ -495,7 +499,7 @@ test('Your AI lists every tool once on a Mac, Linux and Windows: the ones this s
     const l = await listing(platform);
     assert.deepEqual(
       l.tools.map((t) => t.id),
-      ['claude', 'grok', 'codex'],
+      ['pi', 'claude', 'grok', 'codex'],
       platform
     );
     assert.deepEqual(
@@ -511,7 +515,7 @@ test('Your AI lists every tool once on a Mac, Linux and Windows: the ones this s
     const l = await listing('linux');
     assert.deepEqual(
       l.tools.map((t) => t.id),
-      ['claude', 'codex']
+      ['pi', 'claude', 'codex']
     );
     assert.deepEqual(
       l.later.map((t) => [t.id, t.why]),
@@ -530,11 +534,35 @@ test('Your AI lists every tool once on a Mac, Linux and Windows: the ones this s
     const l = await listing('darwin');
     assert.deepEqual(
       l.tools.map((t) => t.id),
-      ['claude', 'grok', 'codex', 'gemini']
+      ['pi', 'claude', 'grok', 'codex', 'gemini']
     );
     assert.deepEqual(l.later, []);
   } finally {
     L.AGENT_PLATFORMS.gemini.runs = before;
+  }
+});
+
+test('Pi is built in on every desktop and has no install or sign-in action', async () => {
+  for (const platform of ['darwin', 'linux', 'win32'] as const) {
+    const tool = (await listing(platform)).tools.find((t) => t.id === 'pi');
+    assert.ok(tool, platform);
+    assert.equal(tool.name, 'Pi (built-in)');
+    assert.equal(tool.installed, true);
+    assert.equal(tool.version, '1.5.0');
+    assert.equal(tool.magpieReady, false);
+    assert.equal(toolAction(tool), 'none');
+    for (const [method, body] of [
+      ['POST', { action: 'install' }],
+      ['POST', { action: 'update' }],
+      ['POST', { action: 'sign-in' }],
+      ['PUT', { key: 'fixture' }],
+      ['DELETE', undefined]
+    ] as const) {
+      await assert.rejects(
+        onPlatform(platform, () => send(method, 'pi', body)),
+        (e: { status?: number }) => e.status === 404
+      );
+    }
   }
 });
 
@@ -563,17 +591,19 @@ test('the office runs on the tool picked at setup, only one this system offers, 
     assert.deepEqual(await picked.json(), { office: 'grok' });
     assert.equal((await listing('darwin')).office, 'grok');
     assert.match(readFileSync(envFile, 'utf8'), /^OFFICE_AGENT=grok$/m);
-    const hired = await L.hire({
-      name: 'Ida',
-      role: 'Tester',
-      remit: 'Test work.',
-      desk: 'You are Ida.',
-      room: 'workspace',
-      permission: 'draft',
-      sprite: 'staff',
-      variant: 'a',
-      portrait: 'a'
-    } as Parameters<typeof L.hire>[0]);
+    const hired = await onPlatform('darwin', () =>
+      L.hire({
+        name: 'Ida',
+        role: 'Tester',
+        remit: 'Test work.',
+        desk: 'You are Ida.',
+        room: 'workspace',
+        permission: 'draft',
+        sprite: 'staff',
+        variant: 'a',
+        portrait: 'a'
+      } as Parameters<typeof L.hire>[0])
+    );
     assert.equal(hired.agent, 'grok');
     // Gemini is offered nowhere yet.
     for (const [office, platform] of [
@@ -762,7 +792,7 @@ test("a Grok installed from the page only into xAI's install folder is offered, 
     const s = await signIn('grok');
     await s.url();
     assert.equal(lastLogin(GROK_HOME).home, GROK_HOME);
-    await send('DELETE', 'grok');
+    await onPlatform('darwin', () => send('DELETE', 'grok'));
     await s.ended;
     // So do the renewal before a run and the run itself.
     const signedIn = (inMs: number) =>
@@ -825,13 +855,15 @@ test("an office run on Codex or Grok goes through the tool's own sandboxed launc
   const { runAsOffice } = await import('./office-run.ts');
   const picture = { mediaType: 'image/png', data: Buffer.from('a picture').toString('base64') };
   const ask = () =>
-    runAsOffice('Draw a desk for {owner}.', {
-      system: 'You draw for {owner}.',
-      kind: 'look',
-      timeoutMs: 60_000,
-      effort: 'low',
-      images: [picture]
-    });
+    onPlatform('darwin', () =>
+      runAsOffice('Draw a desk for {owner}.', {
+        system: 'You draw for {owner}.',
+        kind: 'look',
+        timeoutMs: 60_000,
+        effort: 'low',
+        images: [picture]
+      })
+    );
   const gaveOf = (text: string) =>
     JSON.parse(text.slice(0, text.lastIndexOf('\nOutcome:'))) as Record<string, unknown>;
   const runs = join(folder, 'office', 'runs');
@@ -858,6 +890,7 @@ test("an office run on Codex or Grok goes through the tool's own sandboxed launc
   assert.deepEqual(readdirSync(runs), []);
 
   const signedIn = { expires_at: new Date(Date.now() + 86_400_000).toISOString() };
+  mkdirSync(GROK_HOME, { recursive: true });
   writeFileSync(
     join(GROK_HOME, 'auth.json'),
     JSON.stringify({ 'https://auth.x.ai::test': signedIn })
@@ -922,8 +955,10 @@ test('a tool older than the office runs shows Update, its runs are refused sayin
     assert.equal(toolAction(codex), 'update');
 
     const { runAsOffice } = await import('./office-run.ts');
-    const run = await withEnv({ OFFICE_AGENT: 'codex' }, () =>
-      runAsOffice('Hello.', { system: 'Say hello.', kind: 'look', timeoutMs: 60_000 })
+    const run = await onPlatform('darwin', () =>
+      withEnv({ OFFICE_AGENT: 'codex' }, () =>
+        runAsOffice('Hello.', { system: 'Say hello.', kind: 'look', timeoutMs: 60_000 })
+      )
     );
     assert.deepEqual(run, {
       ok: false,
@@ -1029,62 +1064,70 @@ test('only Claude Code on Opus or Codex on Sol or Astra draws a look; on any oth
       request: new Request('http://office/api', { method: 'POST', body: JSON.stringify(body) })
     } as never) as Promise<Response>;
 
-  await withEnv({ OFFICE_AGENT: 'grok' }, async () => {
-    assert.equal(((await listing()) as Listing & { drawsLooks: boolean }).drawsLooks, false);
-    await assert.rejects(post(looks, { description: 'Red hair', name: 'Ida' }), (e: object) => {
-      assert.match(String((e as { body?: { message?: string } }).body?.message), /from parts/);
-      return true;
-    });
-    const p = (await (await list.GET({} as never)).json()) as {
-      hair: string[];
-      top: string[];
-      bottom: string[];
-      colours: Record<string, { name: string }[]>;
-    };
-    const look = {
-      hair: p.hair[0],
-      top: p.top[0],
-      bottom: p.bottom[0],
-      colours: {
-        hair: p.colours.hair[0].name,
-        skin: p.colours.skin[0].name,
-        top: p.colours.cloth[0].name,
-        bottom: p.colours.cloth[1].name,
-        shoes: p.colours.shoes[0].name
-      }
-    };
-    const built = (await (await post(parts, { look })).json()) as {
-      look: object;
-      portraitPx: string;
-      newParts: unknown[];
-      portrait: string;
-      sheet: string;
-      problems: string[];
-    };
-    assert.deepEqual(built.problems, []);
-    assert.deepEqual(built.newParts, []);
-    // A face shape is a part like the rest, and a look may leave it out.
-    assert.deepEqual((p as unknown as { face: string[] }).face.sort(), ['soft', 'strong']);
-    for (const face of ['soft', 'strong']) {
-      const f = (await (await post(parts, { look: { ...look, face } })).json()) as {
+  await onPlatform('darwin', () =>
+    withEnv({ OFFICE_AGENT: 'grok' }, async () => {
+      assert.equal(((await listing()) as Listing & { drawsLooks: boolean }).drawsLooks, false);
+      await assert.rejects(post(looks, { description: 'Red hair', name: 'Ida' }), (e: object) => {
+        assert.match(String((e as { body?: { message?: string } }).body?.message), /from parts/);
+        return true;
+      });
+      const p = (await (await list.GET({} as never)).json()) as {
+        hair: string[];
+        top: string[];
+        bottom: string[];
+        colours: Record<string, { name: string }[]>;
+      };
+      const look = {
+        hair: p.hair[0],
+        top: p.top[0],
+        bottom: p.bottom[0],
+        colours: {
+          hair: p.colours.hair[0].name,
+          skin: p.colours.skin[0].name,
+          top: p.colours.cloth[0].name,
+          bottom: p.colours.cloth[1].name,
+          shoes: p.colours.shoes[0].name
+        }
+      };
+      const built = (await (await post(parts, { look })).json()) as {
+        look: object;
+        portraitPx: string;
+        newParts: unknown[];
+        portrait: string;
+        sheet: string;
         problems: string[];
       };
-      assert.deepEqual(f.problems, [], face);
-    }
-    await assert.rejects(post(parts, { look: { ...look, face: 'no-such-face' } }), (e: object) => {
-      assert.equal((e as { status?: number }).status, 400);
-      return true;
-    });
-    assert.match(built.portrait, /^data:image\/png;base64,/);
-    assert.match(built.sheet, /^data:image\/png;base64,/);
-    // The hire's own check takes it as it takes a drawn look.
-    const { drawnFrom, problemsWith } = await import('./looks.ts');
-    assert.deepEqual(await problemsWith(drawnFrom(built)!), []);
-    await assert.rejects(post(parts, { look: { ...look, hair: 'no-such-hair' } }), (e: object) => {
-      assert.equal((e as { status?: number }).status, 400);
-      return true;
-    });
-  });
+      assert.deepEqual(built.problems, []);
+      assert.deepEqual(built.newParts, []);
+      // A face shape is a part like the rest, and a look may leave it out.
+      assert.deepEqual((p as unknown as { face: string[] }).face.sort(), ['soft', 'strong']);
+      for (const face of ['soft', 'strong']) {
+        const f = (await (await post(parts, { look: { ...look, face } })).json()) as {
+          problems: string[];
+        };
+        assert.deepEqual(f.problems, [], face);
+      }
+      await assert.rejects(
+        post(parts, { look: { ...look, face: 'no-such-face' } }),
+        (e: object) => {
+          assert.equal((e as { status?: number }).status, 400);
+          return true;
+        }
+      );
+      assert.match(built.portrait, /^data:image\/png;base64,/);
+      assert.match(built.sheet, /^data:image\/png;base64,/);
+      // The hire's own check takes it as it takes a drawn look.
+      const { drawnFrom, problemsWith } = await import('./looks.ts');
+      assert.deepEqual(await problemsWith(drawnFrom(built)!), []);
+      await assert.rejects(
+        post(parts, { look: { ...look, hair: 'no-such-hair' } }),
+        (e: object) => {
+          assert.equal((e as { status?: number }).status, 400);
+          return true;
+        }
+      );
+    })
+  );
   await withEnv({ OFFICE_AGENT: 'codex' }, async () =>
     assert.equal(((await listing()) as Listing & { drawsLooks: boolean }).drawsLooks, true)
   );

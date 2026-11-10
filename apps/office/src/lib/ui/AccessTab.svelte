@@ -226,7 +226,18 @@
   async function pickAgent(agent: Agent) {
     problem = refused = '';
     try {
-      await call(`/api/staff/${profile.id}`, { agent }, 'PATCH');
+      const model = [profile.model, profile.officeModel, agentTools.officeModel].find((value) =>
+        value?.startsWith('magpie:')
+      );
+      if (agent === 'pi' && !model) {
+        problem = 'Choose an office Magpie model in Setup before using Pi.';
+        return;
+      }
+      await call(
+        `/api/staff/${profile.id}`,
+        { agent, ...(agent === 'pi' ? { model } : {}) },
+        'PATCH'
+      );
     } catch (e) {
       problem = e instanceof Error ? e.message : String(e);
     }

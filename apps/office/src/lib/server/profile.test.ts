@@ -117,3 +117,20 @@ test("the page's profile carries what runs reach, each folder's ~ form, the offe
     }
   });
 });
+
+test('a profile shows the office gateway only on the office tool', () => {
+  const beforeAgent = process.env.OFFICE_AGENT;
+  const beforeModel = process.env.OFFICE_MAGPIE_MODEL;
+  try {
+    process.env.OFFICE_AGENT = 'claude';
+    process.env.OFFICE_MAGPIE_MODEL = 'group/route';
+    assert.equal(toProfile(row()).officeModel, 'magpie:group/route');
+    assert.notEqual(toProfile(row({ agent: 'codex' })).officeModel, 'magpie:group/route');
+    assert.equal(toProfile(row({ model: 'magpie:provider/model' })).model, 'magpie:provider/model');
+  } finally {
+    if (beforeAgent === undefined) delete process.env.OFFICE_AGENT;
+    else process.env.OFFICE_AGENT = beforeAgent;
+    if (beforeModel === undefined) delete process.env.OFFICE_MAGPIE_MODEL;
+    else process.env.OFFICE_MAGPIE_MODEL = beforeModel;
+  }
+});

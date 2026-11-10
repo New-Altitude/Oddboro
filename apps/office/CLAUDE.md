@@ -407,7 +407,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    (`claudeRunHome`), and Setup's Claude card and the account card say so.
    A session counts only in the folder it was made in (`home` in
    session.json), so a move starts a new one, which hears the chat and is
-   told where the rest is (`chat.jsonl`, replay.ts). Then its model from that tool's list
+   told where the rest is (`chat.jsonl`, replay.ts). Then its direct model from that tool's list
    (`MODELS` in the ledger's agents.ts, `setModel`; "The office's default"
    keeps the office's: Opus or Sonnet from setup, Codex's and Grok's own),
    passed as `--model` or `-m`, then the permission level, then
@@ -1218,6 +1218,34 @@ its own dialog and adds it to the owner's list, with no admin), because a
 browser shows notifications only on a secure page. Firefox keeps its own trusted
 list, and the card says so to Firefox users. `npm run setup` opens the secure
 address when it answers and is trusted.
+
+## Magpie model connections
+
+Setup's Your AI section and onboarding offer a Magpie tile beside Claude
+Code. Selecting it checks existing Magpie once. A verified public local
+catalog permits model use without management authorization. Protected
+gateways can use the supported descriptor or explicit access form; the bundle
+starts when no existing instance is found. Saved targets stay selected until
+the owner changes them. The direct Claude sign-in
+panel stays hidden until a direct tool tile is selected. Both share native `MagpieSetup.svelte`
+controls for a built-in or existing Magpie, providers, supported accounts,
+API keys, groups and route inspection. `MagpieModelPicker.svelte` adds an
+explicit model/group choice on each Odd's Model tab; direct execution
+accounts remain separate. New Magpie setups use the included Pi runner on
+Mac, Linux and Windows without a separate CLI install or login. Existing
+explicit Claude Code and Codex choices retain their runner and platform
+restrictions. A ready gateway route can satisfy model sign-in
+without a direct vendor login. An unavailable route never falls back to one.
+
+The adapter is `src/lib/server/magpie.ts`, its bounded transport and safe
+public shapes are in `magpie-http.ts` and `src/lib/magpie.ts`, and the owned
+process contract is in `magpie-runtime.ts`. The office route is
+`OFFICE_MAGPIE_MODEL`; per-Odd values use `magpie:<ref>`. The selected office
+route disables generated looks and office design, so setup uses parts and
+Main Street. See [the integration guide](../../docs/magpie.md) for actual
+account support, shared-edit notices, private state and release evidence.
+Read [the maintainer map](../../docs/magpie-architecture.md) before changing
+connection authority, runner sessions, file grants or the embedding patch.
 
 ## Who the office answers
 
