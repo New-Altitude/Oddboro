@@ -36,9 +36,7 @@ test('a shell counts by the program it runs, never by its arguments', () => {
 });
 
 test('a shell counts by its program name too, as `ps -o comm` gives it', () => {
-  const out = [' 201 oddboro', ' 202 node', ' 203 WebKitWebProce', ' 204 tauri-driver'].join(
-    '\n'
-  );
+  const out = [' 201 oddboro', ' 202 node', ' 203 WebKitWebProce', ' 204 tauri-driver'].join('\n');
   assert.deepEqual(shellsIn(out, 0), [201]);
 });
 

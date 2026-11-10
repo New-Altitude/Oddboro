@@ -153,8 +153,7 @@ export function shellsIn(out: string, self: number): number[] {
     .split('\n')
     .map((l) => l.trim().split(/\s+/))
     .filter(
-      ([pid, program]) =>
-        Number(pid) !== self && /((^|\/)oddboro|\.AppImage)$/.test(program ?? '')
+      ([pid, program]) => Number(pid) !== self && /((^|\/)oddboro|\.AppImage)$/.test(program ?? '')
     )
     .map(([pid]) => Number(pid));
 }
