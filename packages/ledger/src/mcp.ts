@@ -17,7 +17,10 @@ import {
   catalog,
   checkFolder,
   folderAskRefused,
+  FOLDER_REFUSED,
   shownFolder,
+  switchAskRefused,
+  switchesOff,
   editOwnJob,
   giveTask,
   GOOGLE,
@@ -58,15 +61,17 @@ import {
   outsideLines,
   ownToolsSaid
 } from './capabilities.ts';
-import { AGENT_NAMES } from './agents.ts';
+import { AGENT_NAMES, commandsOnline } from './agents.ts';
 import {
   FOLDER_SAID,
   grantWorks,
   levelAtMost,
   LEVELS,
   NOT_OWN_TOOLS,
+  OWN_SWITCHES,
   SETTINGS_TAB,
-  SWITCH_NAMES
+  SWITCH_NAMES,
+  switchesSaid
 } from './access-words.ts';
 import { handOff } from './hand-offs.ts';
 import {
@@ -99,8 +104,15 @@ import {
 } from './filter-words.ts';
 import { goalWork, goalWorkRefused } from './goal-work.ts';
 import { FOLDER, heldTools, lacking, toolNames, WEB, type Tool } from './sharing.ts';
-import { BUILT_IN, ensureConnector, searchRegistry } from './registry.ts';
+import {
+  BUILT_IN,
+  ensureConnector,
+  GITHUB_ADDRESS,
+  GITHUB_ID,
+  searchRegistry
+} from './registry.ts';
 import type { GoalPlanItem, HireProposal } from './schema.ts';
+import type { OwnSwitch as OwnSwitchName } from './access-words.ts';
 import {
   clockTime,
   describe as describeSchedule,
@@ -920,7 +932,7 @@ if (has('ask_for_access'))
           .max(64)
           .optional()
           .describe(
-            `Only for an https address that takes a key instead of a sign-in: the name of the header the key goes in, as the server's docs or ${OWNER} give it, e.g. x-api-key or Authorization. ${OWNER} pastes the key on their desk. Never ask for the key itself.`
+            `Only for an https address that takes a key instead of a sign-in: the name of the header the key goes in, as the server's docs or ${OWNER} give it, e.g. x-api-key or Authorization. ${OWNER} pastes the key on their desk. Never ask for the key itself. Never for GitHub, which signs in (catalog id ${GITHUB_ID}).`
           ),
         another_account: z
           .boolean()
@@ -937,9 +949,12 @@ if (has('ask_for_access'))
       const level = asked === 'write' ? 'act' : 'read';
       if (!grantWorks(level, me.permission))
         return text(askAboveLevel(me.permission, asked, OWNER));
+      // Any address on GitHub's server is the catalog's GitHub, which signs in:
+      // an Odd's key header there would have the owner make a token.
+      const github = GITHUB_ADDRESS.test(wanted.trim());
       const found = await ensureConnector(
-        wanted,
-        key_header ? { keyHeader: key_header.trim() } : undefined
+        github ? GITHUB_ID : wanted,
+        key_header && !github ? { keyHeader: key_header.trim() } : undefined
       );
       if (!found.connector) return text(`${found.problem} Use find_connectors.`);
       const conn = found.connector;
@@ -1009,7 +1024,9 @@ tool(
         .trim()
         .min(1)
         .max(1000)
-        .describe('The folder\'s full path, starting with / or ~, e.g. "~/Documents/Taxes".'),
+        .describe(
+          'The folder\'s full path, starting with /, ~ or a drive letter, e.g. "~/Documents/Taxes".'
+        ),
       level: z.enum(['read', 'write']).describe('read to look, write to change files there.'),
       why: z.string().max(1000).describe('What work needs it, in one or two plain sentences.'),
       revises: revisesArg
@@ -1018,10 +1035,11 @@ tool(
   async ({ path, level, why, revises }) => {
     const on = await placed({});
     if ('problem' in on) return refused(on.problem);
-    if (!isAbsolute(path) && !/^~(?=$|\/)/.test(path))
-      return refused("Give the folder's full path, starting with / or ~.");
+    if (!isAbsolute(path) && !/^~(?=$|[\\/])/.test(path))
+      return refused("Give the folder's full path, starting with /, ~ or a drive letter.");
     const checked = checkFolder(path);
     if ('refused' in checked) return refused(checked.refused);
+    if ('warning' in checked) return refused(FOLDER_REFUSED.broad);
     const held = folderAskRefused((await staffer(ME)) ?? me, checked.real, level);
     if (held) return refused(held);
     const shown = shownFolder(checked.real);
@@ -1037,6 +1055,50 @@ tool(
     });
     return text(
       `Ask ${ask.id} is on ${OWNER}'s desk. When they give the folder, a new run of yours picks up the work with it. Check my_asks later for their decision.`
+    );
+  }
+);
+
+// Run commands or Browse the web: only the owner turns one on, from this ask's
+// card or the Settings tab. Checked here as the Settings tab checks it, so a
+// switch they could not turn on never reaches the desk.
+tool(
+  'ask_for_switch',
+  {
+    description: `Ask ${OWNER} to turn on ${SWITCH_NAMES.commands} (a shell, to run commands like git, npm or a script) or ${SWITCH_NAMES.web} (search and read web pages) for you, or both. Ask with this instead of giving ${OWNER} steps for your ${SETTINGS_TAB} tab: they turn it on with one click. Ask only for what the work needs; work that downloads, such as git clone or npm install, needs both. You have it from your next run, which starts when they say yes. my_access says which you have.${raisedNote}`,
+    inputSchema: {
+      switches: z
+        .array(z.enum(OWN_SWITCHES as [OwnSwitchName, ...OwnSwitchName[]]))
+        .min(1)
+        .max(2)
+        .describe(`commands for ${SWITCH_NAMES.commands}, web for ${SWITCH_NAMES.web}.`),
+      why: z.string().max(1000).describe('What work needs it, in one or two plain sentences.'),
+      revises: revisesArg
+    }
+  },
+  async ({ switches, why, revises }) => {
+    const on = await placed({});
+    if ('problem' in on) return refused(on.problem);
+    const now = (await staffer(ME)) ?? me;
+    const held = switchAskRefused(now, switches);
+    if (held) return refused(held);
+    const off = switchesOff(now, switches);
+    const online = commandsOnline(now.agent, process.platform, {
+      commands: now.commands || off.includes('commands'),
+      web: now.web || off.includes('web')
+    });
+    const { ask } = await raiseAsk(ME, {
+      ...on,
+      kind: 'switch',
+      title: `Turn on ${switchesSaid(off)}`,
+      why,
+      ifApproved: `The office turns on ${switchesSaid(off)} for ${me.name}, as the ${SETTINGS_TAB} tab does, and ${me.name} picks up the work with it.${online ? ` With both on, ${me.name}'s commands can reach the internet.` : ''}`,
+      switches: off,
+      revises,
+      via: VIA
+    });
+    return text(
+      `Ask ${ask.id} is on ${OWNER}'s desk. When they turn it on, a new run of yours picks up the work with it. Check my_asks later for their decision.`
     );
   }
 );

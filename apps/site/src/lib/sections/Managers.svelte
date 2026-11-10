@@ -116,10 +116,12 @@
       </svg>
       <h3 class="font-pixel text-ink mt-4 text-2xl">Describe your own.</h3>
       <p class="text-muted mt-4 text-[15px] leading-relaxed">
-        Tell the office how they work and how they look. It writes their job description and draws
-        them.
+        Tell the office how they work, and it writes their job description. Build their look from
+        parts, or have the office draw them.
       </p>
-      <p class="text-faint mt-auto pt-4 text-xs">Drawing a new manager needs Claude Opus.</p>
+      <p class="text-faint mt-auto pt-4 text-xs">
+        Drawing needs Claude Opus or Fable, or Codex on Sol or Astra.
+      </p>
     </li>
   </ul>
 </div>

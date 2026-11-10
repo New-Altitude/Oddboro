@@ -141,6 +141,13 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           ODDBORO_GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+          ODDBORO_GITHUB_CLIENT_SECRET: ${{ secrets.OAUTH_GITHUB_CLIENT_SECRET }}
+          # Where the shell and office send reports, and what uploads their
+          # debug files and source maps. Each build job carries the same four.
+          ODDBORO_DIAGNOSTICS_DSN: ${{ vars.ODDBORO_DIAGNOSTICS_DSN }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
         run: |
           export APPLE_API_KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
           printf '%s' "$APPLE_API_KEY_CONTENTS" > "$APPLE_API_KEY_PATH"
@@ -220,6 +227,13 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           ODDBORO_GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+          ODDBORO_GITHUB_CLIENT_SECRET: ${{ secrets.OAUTH_GITHUB_CLIENT_SECRET }}
+          # Where the shell and office send reports, and what uploads their
+          # debug files and source maps. Each build job carries the same four.
+          ODDBORO_DIAGNOSTICS_DSN: ${{ vars.ODDBORO_DIAGNOSTICS_DSN }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
         run: |
           ODDBORO_RELEASE_NOTES="$NOTES" \
           ODDBORO_RELEASE_URL="https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION" \
@@ -307,6 +321,13 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           ODDBORO_GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+          ODDBORO_GITHUB_CLIENT_SECRET: ${{ secrets.OAUTH_GITHUB_CLIENT_SECRET }}
+          # Where the shell and office send reports, and what uploads their
+          # debug files and source maps. Each build job carries the same four.
+          ODDBORO_DIAGNOSTICS_DSN: ${{ vars.ODDBORO_DIAGNOSTICS_DSN }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
         run: |
           ODDBORO_RELEASE_NOTES="$NOTES" \
           ODDBORO_RELEASE_URL="https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION" \

@@ -5,6 +5,7 @@ import { readMigrationFiles } from 'drizzle-orm/migrator';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { moveToolHomes } from './accounts.ts';
 import { db, sql } from './db.ts';
+import { fixedError } from './errors.ts';
 
 const MIGRATIONS = fileURLToPath(new URL('../migrations', import.meta.url));
 
@@ -42,7 +43,7 @@ export async function markBaseline(): Promise<boolean> {
   const [baseline] = readMigrationFiles({ migrationsFolder: MIGRATIONS });
   return sql.begin(async (tx) => {
     const [table] = await tx`select to_regclass('drizzle.__drizzle_migrations') as name`;
-    if (!table.name) throw new Error('markBaseline: this database has no migrations recorded');
+    if (!table.name) throw fixedError('markBaseline: this database has no migrations recorded');
     const marked =
       await tx`select 1 from drizzle.__drizzle_migrations where hash = ${baseline.hash}`;
     if (marked.length) return false;
@@ -53,7 +54,7 @@ export async function markBaseline(): Promise<boolean> {
       last?.hash !== LAST_BEFORE_BASELINE.hash ||
       Number(last.created_at) !== LAST_BEFORE_BASELINE.when
     ) {
-      throw new Error('markBaseline: this database is not at 0034, the last migration before it');
+      throw fixedError('markBaseline: this database is not at 0034, the last migration before it');
     }
     await tx`delete from grants
       where connector_id in (select id from connectors where kind = 'google')`;

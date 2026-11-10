@@ -1,11 +1,14 @@
 <script lang="ts">
   import { modelSection } from '@oddboro/ledger/access';
   import type { Check } from '@oddboro/ledger/checks';
+  import AccountSection from './AccountSection.svelte';
   import { AgentTools } from './agent-tools.svelte.ts';
   import { call } from './api.ts';
+  import DiagnosticsSection from './DiagnosticsSection.svelte';
   import OfficeTools from './OfficeTools.svelte';
   import { selectOnFocus } from './select-on-focus.ts';
   import UpdatesSection from './UpdatesSection.svelte';
+  import { shown } from './diagnostics.svelte.ts';
 
   // The office's first screen for a new owner, and its Setup window after:
   // the name staff call them, the office they work in, their first staffer,
@@ -184,6 +187,10 @@
 
     {#if welcomed}
       <UpdatesSection />
+      {#if shown()}
+        <DiagnosticsSection />
+      {/if}
+      <AccountSection />
     {/if}
 
     <section class="flex flex-col gap-2">

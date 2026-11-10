@@ -48,6 +48,8 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
     web?: unknown;
     folder?: unknown;
     access?: unknown;
+    /** The owner's Accept on a folder the office warned about. */
+    accept?: unknown;
     effort?: unknown;
     model?: unknown;
     account?: unknown;
@@ -113,8 +115,11 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
       return json({ ok: true });
     }
     if (b.access !== 'read' && b.access !== 'write') error(400, 'Pick read or write');
-    const checked = checkFolder(b.folder);
+    // A whole drive or system files comes back as a warning, given nothing,
+    // until the owner presses Accept, which sends `accept`.
+    const checked = checkFolder(b.folder, b.accept === true);
     if ('refused' in checked) error(400, checked.refused);
+    if ('warning' in checked) return json({ warning: checked.warning });
     const set = await setFolder(params.id, checked.real, b.access);
     if (set) error(400, set.refused);
     return json({ ok: true });

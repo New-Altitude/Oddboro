@@ -5,13 +5,15 @@
   // another folder once there is one), which opens the system's own picker
   // (`/api/folders/pick`) and says what it added. A path can be typed instead,
   // behind a link, or at once where no picker can open. A new folder starts at
-  // Can read. Each folder has
-  // Can read and Can write side by side. Each shows with the home folder
+  // Can read. A whole drive or system files comes back from the server as a
+  // warning instead (`FolderWarning`), and goes in only on Accept. Each folder
+  // has Can read and Can write side by side. Each shows with the home folder
   // written `~`, which only the server can work out, so the profile carries
   // it. A level change or Remove sends the path as stored, so a folder gone
   // from the disk can still go.
   import { FOLDER_LABEL, type FolderAccess } from '@oddboro/ledger/access';
   import { call } from './api.ts';
+  import FolderWarning from './FolderWarning.svelte';
   import type { StaffProfile } from '../staff/roster.ts';
 
   type Props = {
@@ -38,6 +40,9 @@
   let added = $state('');
   /** The server's own line for a folder it refused, or a change that failed. */
   let problem = $state('');
+  /** A folder the server warned about, waiting on Accept or Cancel. */
+  let warned = $state<{ path: string; to: FolderAccess; warning: string }>();
+  let accepting = $state(false);
 
   /** A folder's own name, the last part of its path. */
   const nameOf = (shown: string) =>
@@ -49,12 +54,19 @@
   const whereOf = (shown: string) =>
     shown.replace(/[\\/]+$/, '').replace(/[\\/][^\\/]*$/, '') || shown;
 
-  async function change(folder: string, to: FolderAccess | null): Promise<boolean> {
+  /** Whether the change went in; a warning holds it for Accept or Cancel. */
+  async function change(folder: string, to: FolderAccess | null, accept = false): Promise<boolean> {
     problem = '';
     added = '';
+    warned = undefined;
     try {
-      await call(`/api/staff/${profile.id}`, { folder, access: to }, 'PATCH');
-      return true;
+      const r = await call<{ warning?: string }>(
+        `/api/staff/${profile.id}`,
+        { folder, access: to, accept },
+        'PATCH'
+      );
+      if (r.warning && to) warned = { path: folder, to, warning: r.warning };
+      return !r.warning;
     } catch (e) {
       problem = e instanceof Error ? e.message : String(e);
       return false;
@@ -65,6 +77,22 @@
     const ok = await change(path, 'read');
     if (ok) added = nameOf(path);
     return ok;
+  }
+
+  async function accept() {
+    if (!warned) return;
+    accepting = true;
+    try {
+      const { path, to } = warned;
+      const fresh = !profile.folders.some((f) => f.path === path);
+      if ((await change(path, to, true)) && fresh) {
+        added = nameOf(path);
+        typed = '';
+        typing = false;
+      }
+    } finally {
+      accepting = false;
+    }
   }
 
   async function choose() {
@@ -166,6 +194,16 @@
     >
   {:else}
     <p class="text-[11px] text-muted">{noPicker} Type its path instead.</p>
+  {/if}
+
+  {#if warned}
+    <FolderWarning
+      folder={warned.path}
+      warning={warned.warning}
+      busy={accepting}
+      onaccept={accept}
+      oncancel={() => (warned = undefined)}
+    />
   {/if}
 
   {#if added}

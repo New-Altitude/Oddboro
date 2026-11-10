@@ -22,6 +22,9 @@ colour from `src/palette.json`. `scripts/compile.ts` turns the `.px` files into
   `looks/managers/` holds the portraits of the ready-made Office Managers
   whose looks are generated (their specs live in the ledger's `managers.ts`).
 
+- `scripts/mark.ts` draws Oddboro's mark, the glowing pixel O, into every
+  icon and logo file (`npm run mark`, on a Mac). ART.md says where each goes.
+
 - `src/props/street/street-bus.px` is the bus that brings a new owner's Office
   Manager on their first visit.
 
