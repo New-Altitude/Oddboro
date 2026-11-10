@@ -75,6 +75,15 @@ export const SWITCH_NAMES: Record<'commands' | 'web', string> = {
   commands: 'Run commands',
   web: 'Browse the web'
 };
+/** One of the owner's two switches for an Odd's own tools. */
+export type OwnSwitch = keyof typeof SWITCH_NAMES;
+/** Both switches, in the order the Settings tab lists them. */
+export const OWN_SWITCHES: readonly OwnSwitch[] = ['commands', 'web'];
+/** Switches by name, joined: "Run commands and Browse the web". */
+export const switchesSaid = (s: readonly OwnSwitch[]): string =>
+  OWN_SWITCHES.filter((x) => s.includes(x))
+    .map((x) => SWITCH_NAMES[x])
+    .join(' and ');
 /**
  * Said by both tools that get an outside tool (find_connectors and
  * ask_for_access): an Odd without the web went looking for a web search

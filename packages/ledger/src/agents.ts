@@ -262,7 +262,7 @@ export function commandsHow(agent: Agent, platform: NodeJS.Platform): CommandsHo
 export function hireToolsLine(state?: CommandsHow['state']): string {
   const switches =
     state === 'switch' ? `${SWITCH_NAMES.commands} or ${SWITCH_NAMES.web}` : SWITCH_NAMES.web;
-  return `Optional. You can give tools and switch on ${switches} on ${officeSection('their')}, later. They'll tell you when a job needs one.`;
+  return `Optional. You can give tools and switch on ${switches} on ${officeSection('their')}, later. They'll ask you when a job needs one.`;
 }
 
 /** Whether a run gets a shell: the owner's stored switch, as its tool takes it. */

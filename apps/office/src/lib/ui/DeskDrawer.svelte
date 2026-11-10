@@ -9,6 +9,7 @@
   import ReplyReview from './ReplyReview.svelte';
   import FilterReview from './FilterReview.svelte';
   import FolderAsk from './FolderAsk.svelte';
+  import FolderWarning from './FolderWarning.svelte';
   import { call } from './api.ts';
   import { AWS_GUIDES, siteLink } from '../site.ts';
   import { ago, when } from './format.ts';
@@ -139,6 +140,13 @@
   let folderPath = $state('');
   let folderLevel = $state<FolderAccess>('read');
   let changing = $state(false);
+  /** The server's warning on a whole drive or system files: Give access waits on Accept or Cancel. */
+  let folderWarning = $state('');
+  // A warning is about the folder and level it was given for: a change to either drops it.
+  $effect(() => {
+    void [folderPath, folderLevel];
+    folderWarning = '';
+  });
 
   // Each newly opened item starts clean, and an ask brings its closest past
   // decisions. Keyed on the item, not its row: the desk reloading (a step
@@ -155,6 +163,7 @@
     skip = {};
     secret = {};
     changing = false;
+    folderWarning = '';
     const asked = i?.kind === 'ask' ? i.row : undefined;
     folderPath = asked?.folder ? (untrack(() => desk.folders[asked.id]) ?? asked.folder.path) : '';
     folderLevel = asked?.folder?.level ?? 'read';
@@ -202,11 +211,21 @@
     });
   /** A held call's inputs, as the tool takes them, for the owner to read. */
   const inputs = (args: Record<string, unknown>) => JSON.stringify(args, null, 2);
-  /** Give the folder as it stands on the card: the server gives it, then approves the ask. */
-  const giveFolder = (a: AskRow) =>
+  /**
+   * Give the folder as it stands on the card: the server gives it, then
+   * approves the ask. A whole drive or system files comes back as a warning
+   * first, and goes only on Accept (`accept`).
+   */
+  const giveFolder = (a: AskRow, accept = false) =>
     act(async () => {
-      await call(`/api/asks/${a.id}/folder`, { path: folderPath, level: folderLevel, reason });
-      show(undefined);
+      const r = await call<{ warning?: string }>(`/api/asks/${a.id}/folder`, {
+        path: folderPath,
+        level: folderLevel,
+        reason,
+        accept
+      });
+      folderWarning = r.warning ?? '';
+      if (!r.warning) show(undefined);
     });
   const picked = (a: AskRow) => a.plan?.items.filter((_, i) => !skip[i]).length ?? 0;
   const nameOf = (id: string) => staff.find((p) => p.id === id)?.name ?? id;
@@ -558,6 +577,15 @@
               bind:level={folderLevel}
               bind:changing
             />
+            {#if folderWarning}
+              <FolderWarning
+                folder={folderPath}
+                warning={folderWarning}
+                {busy}
+                onaccept={() => giveFolder(a, true)}
+                oncancel={() => (folderWarning = '')}
+              />
+            {/if}
           {:else}
             <div>
               <dt class="text-xs text-muted">If you approve</dt>
@@ -629,7 +657,7 @@
             {/if}
             <button
               class="flex-[1.4] rounded-lg bg-sea px-3 py-2 text-sm font-medium text-night disabled:opacity-40"
-              disabled={busy || unsaved || !folderPath.trim()}
+              disabled={busy || unsaved || !folderPath.trim() || !!folderWarning}
               onclick={() => giveFolder(a)}>Give access</button
             >
           {:else if a.kind === 'hire'}
@@ -651,11 +679,13 @@
                     : 'Make this call'
                   : a.access
                     ? 'Connect'
-                    : a.kind === 'window'
-                      ? 'Let it carry on'
-                      : a.plan && picked(a) < a.plan.items.length
-                        ? `Approve ${picked(a)} of ${a.plan.items.length}`
-                        : 'Approve'}</button
+                    : a.kind === 'switch'
+                      ? 'Turn on'
+                      : a.kind === 'window'
+                        ? 'Let it carry on'
+                        : a.plan && picked(a) < a.plan.items.length
+                          ? `Approve ${picked(a)} of ${a.plan.items.length}`
+                          : 'Approve'}</button
             >
           {/if}
         </div>

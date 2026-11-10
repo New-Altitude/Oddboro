@@ -22,7 +22,9 @@
   "dependencies": {
     "@oddboro/ledger": "*",
     "@oddboro/sprites": "*",
-    "@oddboro/world": "*"
+    "@oddboro/world": "*",
+    "@sentry/core": "^11.10.0",
+    "@sentry/sveltekit": "^11.10.0"
   },
   "devDependencies": {
     "@aws-sdk/client-secrets-manager": "~3.1156.0",

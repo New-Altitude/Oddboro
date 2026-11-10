@@ -28,6 +28,12 @@ export const OFFICE_TOOLS: readonly OfficeTool[] = [
     does: 'Asks you for a folder on this computer, to read or to change. You give it with one click, or a narrower one.',
     always: true
   },
+  {
+    id: 'ask_for_switch',
+    name: 'Ask for switches',
+    does: 'Asks you to turn on Run commands or Browse the web for it. You turn it on with one click.',
+    always: true
+  },
   { id: 'my_jobs', name: 'Its jobs', does: 'Sees its own jobs and schedules.', always: true },
   {
     id: 'keep_lesson',

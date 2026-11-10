@@ -8,15 +8,15 @@
   const faqs = [
     {
       q: 'What is an Odd?',
-      a: 'An AI worker in your office. Each Odd runs on Claude Code, with one job description, a place on the floor, and the tools you connected for it.'
+      a: 'An AI worker in your office. Each Odd runs on Claude Code, Codex or Grok, with one job description, a place on the floor, and the tools you connected for it.'
     },
     {
       q: 'What does it cost?',
-      a: 'Oddboro itself is free under Apache 2.0. Claude costs what it already costs you, on your Claude plan or your API key.'
+      a: 'Oddboro itself is free under Apache 2.0. The AI your Odds run on costs what it already costs you, on your own plan or API key.'
     },
     {
-      q: 'Which Claude plan do I need?',
-      a: 'Any plan that signs in to Claude Code. Or skip the plan and use an Anthropic API key.'
+      q: 'Which AI account do I need?',
+      a: 'One of these: a Claude plan that signs in to Claude Code, or an Anthropic API key; the ChatGPT account you use with Codex; or your Grok account. You pick one for the office, and can run any Odd on another.'
     },
     {
       q: 'Does it run on Windows or Linux?',
@@ -24,7 +24,7 @@
     },
     {
       q: 'What leaves my computer?',
-      a: 'Only what the work needs. Odds send their work to Claude under your own account, and an Odd talks to the tools you connected for it. The app checks GitHub for new versions of itself. Nothing goes to New Altitude.'
+      a: 'Only what the work needs. Odds send their work to the AI they run on, under your own account, and an Odd talks to the tools you connected for it. The app checks GitHub for new versions of itself. Your sign-in goes to New Altitude only if you sign in to a New Altitude account, and error reports only if you are signed in and turn them on.'
     },
     {
       q: 'Can an Odd act without asking me?',
@@ -32,7 +32,7 @@
     },
     {
       q: 'Can I pick the model?',
-      a: 'Yes, between Claude Opus and Claude Sonnet. Opus is the default. Claude is the only provider today.'
+      a: 'Yes, for each Odd. Pick Claude Code, Codex or Grok, then a model from its list and how hard it thinks.'
     },
     {
       q: 'What is the Office Manager?',

@@ -217,3 +217,37 @@ test('Deny and Iterate work as for any ask', async () => {
     ]
   );
 });
+
+/** A folder outside the test's home, under the system's temp folder: system files on a Mac and Linux. */
+function outside(): string {
+  const p = realpathSync(mkdtempSync(join(tmpdir(), 'folder-asks-out-')));
+  after(() => rmSync(p, { recursive: true, force: true }));
+  return p;
+}
+
+test(
+  'the tool refuses a whole drive or system files: only the owner may give one',
+  { skip: process.platform === 'win32' && "Windows' temp folder sits in the home's AppData" },
+  async () => {
+    const r = await call(await theo('k-broad'), { path: outside(), level: 'read', why: 'w' });
+    assert.ok(r.error && r.text.endsWith(O.FOLDER_REFUSED.broad), r.text);
+    assert.deepEqual(await folderAsks(), []);
+  }
+);
+
+test(
+  'giving a whole drive or system files warns and changes nothing, and the Accept gives it',
+  { skip: process.platform === 'win32' && "Windows' temp folder sits in the home's AppData" },
+  async () => {
+    const a = await raise('read');
+    const out = outside();
+    assert.deepEqual(await O.giveFolder(a.id, out, 'read'), { warning: O.FOLDER_WARNING });
+    assert.equal((await row(a.id)).status, 'open');
+    assert.deepEqual(await folders(), []);
+    assert.deepEqual(await db.select().from(ledger), []);
+    assert.deepEqual(await O.giveFolder(a.id, out, 'read', null, true), {
+      given: { path: out, level: 'read' }
+    });
+    assert.deepEqual(await folders(), [{ path: out, write: false }]);
+  }
+);

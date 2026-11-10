@@ -464,3 +464,26 @@ test("the hand_off tool names what each colleague lacks of the lead's tools once
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+test("an Odd that names GitHub's address with a key header gets the catalog's GitHub, which signs in", async () => {
+  const c = await toolServer('jo', { RUN_KEY: 'k-jo-github' });
+  const r = await c.callTool({
+    name: 'ask_for_access',
+    arguments: {
+      connector: 'https://api.githubcopilot.com/mcp/x/repos/readonly',
+      level: 'read',
+      why: 'Read the repositories.',
+      key_header: 'Authorization'
+    }
+  });
+  assert.equal(r.isError, undefined, said(r));
+  const [github] = await db.select().from(connectors).where(eq(connectors.id, 'github'));
+  assert.deepEqual(github?.config, { url: 'https://api.githubcopilot.com/mcp/', oauth: true });
+  const asked = (await raisedBy('jo')).asks.filter((a) => a.kind === 'access');
+  assert.deepEqual(
+    asked.map((a) => a.access?.connector),
+    ['github']
+  );
+  const byAddress = (await db.select().from(connectors)).filter((x) => x.id !== 'github');
+  assert.ok(!byAddress.some((x) => x.config.url?.includes('githubcopilot')));
+});

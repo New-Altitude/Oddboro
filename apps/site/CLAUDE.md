@@ -27,6 +27,15 @@ and `preview`, fixed.
   the `oddboro` secret store service, `local.oddboro.com`). Keep them in step
   with the app.
 
+## Info pages
+
+`/info/<name>/` explains a safety limit the office links to, rendered from
+`src/content/info/<name>.md` through `LegalDoc.svelte` with "Safety" over the
+title (`info` in `src/lib/server/legal.ts`). `/info/folder-sharing/` is the
+office's folder warning's More info (`FolderWarning.svelte`): which folders
+the office refuses, which warn, and why. Its words follow `checkFolder` in
+the ledger, and change with it.
+
 ## Connector guides
 
 `/connectors/<name>/` walks the owner through giving an Odd one outside
@@ -65,8 +74,7 @@ access its job needs, and every claim rests on the office's real rules:
 
 An Odd has web search only when the owner turns on Browse the web for it,
 through its tool's own search and fetch; otherwise it has file tools only.
-Copy that searches the web says it uses a search tool the owner connects from
-the MCP Registry. When any of these rules changes in the office, change the
+Copy that searches the web says the owner turns on Browse the web for that Odd. When any of these rules changes in the office, change the
 site in the same change.
 
 ## The promise
@@ -119,6 +127,7 @@ are: daylight, and night.
 ```sh
 npm run dev -w @oddboro/site        # http://localhost:4501
 npm run build -w @oddboro/site      # prerender to apps/site/build/
+npm run deploy -w @oddboro/site     # build, then put it live at oddboro.com (Cloudflare)
 npm run preview -w @oddboro/site    # serve the build on 4501
 npm run art -w @oddboro/site        # regenerate static/art/, src/lib/hero/scene.json and src/lib/vignettes.json
 npm run office-gif -w @oddboro/site # the README's office, docs/office.gif; add -- --night for docs/office-night.gif
@@ -314,5 +323,15 @@ src/lib/hero/                Hero.svelte, HeadlineOdd.svelte, choreo.ts, scene.j
 src/lib/server/legal.ts      Renders src/content/legal/*.md with markdown-it at prerender.
 src/content/legal/           privacy.md and terms.md. The legal writer owns these.
 src/routes/                  /, /releases/, /connectors/open-brain/, /connectors/aws-*/, /privacy/, /terms/, /sitemap.xml. +layout.ts prerenders everything.
-static/                      logo.png (the mark: favicon, header, footer; Google's sign-in screen shows the same), robots.txt, art/ (night) and art/day/.
+static/                      logo.png (the mark, drawn by `npm run mark -w @oddboro/sprites`: favicon, header, footer), robots.txt, art/ (night) and art/day/.
 ```
+
+## Hosting
+
+Cloudflare serves the site at oddboro.com: a Worker with static assets, named
+`oddboro-site`, set up in `wrangler.jsonc`. `npm run deploy -w @oddboro/site`
+builds and uploads it; it needs `CLOUDFLARE_API_TOKEN` and
+`CLOUDFLARE_ACCOUNT_ID` in the environment. The other domains (oddboro.ai,
+oddborough.com, oddborro.com, oddsboro.com, and every `www`) redirect to
+https://oddboro.com with a 301 that keeps the path, from a redirect rule on each
+zone. Every zone sends HTTP to HTTPS and needs TLS 1.2 or later.

@@ -1,7 +1,52 @@
+import { sentrySvelteKit } from '@sentry/sveltekit/vite';
 import adapter from '@sveltejs/adapter-node';
 import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
+
+/** The repository's root folder, where every uploaded map's sources start. */
+const REPO = fileURLToPath(new URL('../..', import.meta.url));
+
+/**
+ * One source of a map as Sentry gets it: relative to the repository, with
+ * forward slashes, such as `apps/office/src/routes/+page.svelte`. Every
+ * release job builds the same code, so the same file gets the same debug id
+ * on every system, and whichever job's upload Sentry keeps must name its
+ * sources the same way. Sentry's own default resolves each source against
+ * the build's working folder, not the map's, and keeps the system's
+ * separator, so a Windows job uploaded `..\..\src\...`. `paths` is
+ * `node:path`, or `path.win32` in a test.
+ */
+export function mapSource(source: string, mapDir: string, root = REPO, paths = path): string {
+  return paths.relative(root, paths.resolve(mapDir, source)).split(paths.sep).join('/');
+}
+
+/**
+ * Sentry's build plugin. It uploads the office's source maps only when the
+ * release build holds SENTRY_AUTH_TOKEN (SENTRY_ORG and SENTRY_PROJECT come
+ * from the environment too); without one it makes no request at all. It never
+ * reports the build itself, and wraps nothing at build time: the office sets
+ * Sentry up by hand (src/instrumentation.server.ts, src/hooks.*.ts).
+ */
+export function buildOptions(env: NodeJS.ProcessEnv) {
+  return {
+    autoInstrument: false,
+    buildTimeInstrumentation: false,
+    telemetry: false,
+    autoUploadSourceMaps: !!env.SENTRY_AUTH_TOKEN,
+    // Maps match by debug id. Injecting a release would stamp the page with
+    // the git hash, which matches no server release (oddboro@<version>). With
+    // no release made, nothing may finalize it or set its commits either:
+    // each would ask Sentry for a release that is not there (404).
+    release: { create: false, finalize: false, setCommits: false as const, inject: false },
+    sourcemaps: {
+      rewriteSources: (source: string, _map: unknown, context?: { mapDir: string }) =>
+        context ? mapSource(source, context.mapDir) : source
+    }
+  };
+}
 
 /**
  * Vite's dev server has a route, `/__open-in-editor`, that opens a file in an
@@ -43,7 +88,13 @@ export function siteUrl(env: Record<string, string | undefined> = process.env): 
 // they reload on save.
 const port = Number(process.env.ODDBORO_PORT) || 4500;
 export default defineConfig(({ command }) => ({
-  plugins: [noEditorLaunch(), tailwindcss(), sveltekit({ adapter: adapter() })],
+  // Sentry's plugin goes before SvelteKit's, as Sentry's setup asks.
+  plugins: [
+    noEditorLaunch(),
+    tailwindcss(),
+    sentrySvelteKit(buildOptions(process.env)),
+    sveltekit({ adapter: adapter() })
+  ],
   define: { __SITE_URL__: JSON.stringify(siteUrl()) },
   // The office's addresses through Caddy (lib/server/address.ts).
   server: {
@@ -56,7 +107,8 @@ export default defineConfig(({ command }) => ({
   // out of the server build. The adapter also leaves out whatever package.json
   // lists under dependencies, so the office lists only the workspace packages
   // there, and every third-party package under devDependencies, which bundles
-  // it: the app then ships none of them (issue #13).
+  // it: the app then ships none of them (issue #13). Sentry is the exception:
+  // it stays under dependencies, since its tracing hooks modules as they load.
   environments:
     command === 'build'
       ? { ssr: { build: { rolldownOptions: { external: [/^@oddboro\//] } } } }

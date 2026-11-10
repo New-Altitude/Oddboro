@@ -215,7 +215,7 @@ test('setOwnTool and setFolder record one line each', async () => {
   assert.deepEqual([row?.commands, row?.web, row?.folders], [false, false, []]);
 });
 
-test('checkFolder refuses what holds keys, the home, the office and its code', () => {
+test('checkFolder refuses what holds keys, the home, the office and its code, and what holds the home', () => {
   const R = O.FOLDER_REFUSED;
   // The glob line names its character: the next test reads it.
   const { glob: _glob, ...fixed } = R;
@@ -224,7 +224,8 @@ test('checkFolder refuses what holds keys, the home, the office and its code', (
     home: 'Pick a folder inside your home, not the whole home.',
     secrets: 'That folder holds your keys or sign-ins.',
     code: "That folder holds Oddboro's own code.",
-    nested: 'That folder is inside one this Odd already has, or holds one.'
+    nested: 'That folder is inside one this Odd already has, or holds one.',
+    broad: 'That folder is a whole drive or holds system files. Ask for a narrower one.'
   });
   const refused = (path: string) => O.checkFolder(path);
   for (const s of O.SECRET_STORES) folder(s);
@@ -238,7 +239,8 @@ test('checkFolder refuses what holds keys, the home, the office and its code', (
   assert.deepEqual(refused('relative/path'), { refused: R.missing });
   assert.deepEqual(refused('~'), { refused: R.home });
   assert.deepEqual(refused(HOME), { refused: R.home });
-  assert.deepEqual(refused(tmpdir()), { refused: R.home });
+  // A folder holding the home holds its secret stores, whether they exist or not.
+  assert.deepEqual(refused(tmpdir()), { refused: R.secrets });
   for (const s of O.SECRET_STORES) assert.deepEqual(refused(`~/${s}`), { refused: R.secrets }, s);
   assert.deepEqual(refused('~/.ssh/keys'), { refused: R.secrets });
   assert.deepEqual(refused('~/.oddboro/staff'), { refused: R.secrets });
@@ -317,3 +319,84 @@ test('checkFolder refuses a link into a secret store, and a folder holding where
   folder('project', '.ssh');
   assert.deepEqual(O.checkFolder('~/project'), { real: project });
 });
+
+/** A folder outside the test's home, made now, by its real path. */
+function outside(...parts: string[]): string {
+  const top = realpathSync(mkdtempSync(join(tmpdir(), 'outside-')));
+  after(() => rmSync(top, { recursive: true, force: true }));
+  const p = join(top, ...parts);
+  mkdirSync(p, { recursive: true });
+  return p;
+}
+
+test(
+  'checkFolder gives a folder outside the home, warning first when it sits in system files',
+  { skip: process.platform === 'win32' && "Windows' temp folder sits in the home's AppData" },
+  () => {
+    assert.equal(
+      O.FOLDER_WARNING,
+      "This folder is a whole drive or holds system files, so an Odd could reach everything inside it. We don't recommend giving it."
+    );
+    // The system's temp folder is in /private (a Mac) or /tmp (Linux): system files.
+    const out = outside('projects', 'game');
+    assert.deepEqual(O.checkFolder(out), { warning: O.FOLDER_WARNING });
+    assert.deepEqual(O.checkFolder(out, true), { real: out });
+    // A folder in the home never warns, wherever the home sits.
+    const inHome = folder('Projects', 'game');
+    assert.deepEqual(O.checkFolder(inHome), { real: inHome });
+  }
+);
+
+test(
+  'outside the home, checkFolder refuses a secret store by what it holds, in the folder, above it and one level down',
+  { skip: process.platform === 'win32' && "Windows' temp folder sits in the home's AppData" },
+  () => {
+    const R = O.FOLDER_REFUSED;
+    const keys = outside('keys');
+    mkdirSync(join(keys, '.ssh'));
+    assert.deepEqual(O.checkFolder(keys, true), { refused: R.secrets });
+    assert.deepEqual(O.checkFolder(join(keys, '.ssh'), true), { refused: R.secrets });
+
+    // A coding tool's home by its sign-in or history, at the top or above.
+    const drive = outside('drive');
+    mkdirSync(join(drive, '.codex', 'sessions'), { recursive: true });
+    writeFileSync(join(drive, '.codex', 'auth.json'), '{}');
+    assert.deepEqual(O.checkFolder(drive, true), { refused: R.secrets });
+    assert.deepEqual(O.checkFolder(join(drive, '.codex', 'sessions'), true), {
+      refused: R.secrets
+    });
+    const claude = outside('claude-home');
+    mkdirSync(join(claude, '.claude'));
+    writeFileSync(join(claude, '.claude', 'history.jsonl'), '');
+    assert.deepEqual(O.checkFolder(claude, true), { refused: R.secrets });
+
+    // A project's own .claude or .codex of settings is no store.
+    const project = outside('project');
+    mkdirSync(join(project, '.claude'));
+    writeFileSync(join(project, '.claude', 'settings.json'), '{}');
+    mkdirSync(join(project, '.codex'));
+    writeFileSync(join(project, '.codex', 'config.toml'), '');
+    assert.deepEqual(O.checkFolder(project, true), { real: project });
+
+    // Deeper than one level is not looked at: the site's page says so.
+    const deep = outside('deep');
+    mkdirSync(join(deep, 'backup', '.ssh'), { recursive: true });
+    assert.deepEqual(O.checkFolder(deep, true), { real: deep });
+  }
+);
+
+test(
+  'broadFolder is a whole drive or volume, or system files, and never a folder in the home',
+  { skip: process.platform === 'win32' && 'the paths here are a Mac and Linux' },
+  () => {
+    for (const p of ['/', '/usr', '/usr/local/share', '/bin'])
+      assert.equal(O.broadFolder(p), true, p);
+    assert.equal(O.broadFolder('/Volumes/Data'), true);
+    assert.equal(O.broadFolder('/mnt/d'), true);
+    assert.equal(O.broadFolder('/media/ada/disk'), true);
+    assert.equal(O.broadFolder('/run/media/ada/disk'), true);
+    for (const p of ['/Volumes/Data/Projects', '/mnt/d/projects', '/opt/projects', '/srv/site'])
+      assert.equal(O.broadFolder(p), false, p);
+    assert.equal(O.broadFolder(folder('Projects')), false);
+  }
+);

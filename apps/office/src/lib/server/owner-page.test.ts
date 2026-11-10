@@ -1,5 +1,5 @@
-// Which requests the office answers: `guardOffice`, the server's `handle`, in
-// front of the real routes, over the office's own database (local-db.ts) in a
+// Which requests the office answers: `guardOffice`, the first step of the
+// server's `handle`, in front of the real routes, over the office's own database (local-db.ts) in a
 // throwaway folder on a free port. Run with `npm test -w @oddboro/office`.
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -123,8 +123,17 @@ async function openAsk(): Promise<{ id: string; status: () => Promise<string | u
   return { id: String(id), status: async () => (await L.ask(id))?.status };
 }
 
-test("the server's handle is the guard, so every route request passes it", () => {
-  assert.equal(hooks.handle, guardOffice);
+test('every route request passes the guard before anything else', async () => {
+  // The server's handle is a sequence, which needs the request store Kit gives each request.
+  const { sender } = await import('./diagnostics-harness.ts');
+  const send = sender(hooks.handle);
+  const refused = await send({
+    route: '/api/ledger',
+    headers: { host: 'rebind.evil.example:4500' }
+  });
+  assert.deepEqual(refused, { status: 403, ran: false });
+  // The same request from the office's own name reaches the route.
+  assert.deepEqual(await send({ route: '/api/ledger' }), { status: 200, ran: true });
 });
 
 test('an approval sent from another site is refused, and the ask stays open', async () => {
