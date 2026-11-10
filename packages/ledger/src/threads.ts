@@ -68,7 +68,7 @@ export type Db = typeof db | Tx;
 /**
  * The thread keeps the key of a run that put work on it from outside it: a
  * hand-off, taken or held (`takeHandOff`), or a plan (`raiseAsk`). While that
- * run goes, the hub's pick-ups there wait (`waitsOnOwnRun` in office.ts). Only
+ * run goes, the hub's pick-ups there wait (`waitsOnOwnRun` in office-follow-ups.ts). Only
  * the office's memory says which keys still go (`runsGoing`), so a key from
  * before a restart holds nothing, and none needs clearing.
  */
@@ -369,7 +369,7 @@ async function askToKeepGoing(tx: Tx, t: ThreadRow, held: HeldHandOff): Promise<
  * A yes to a `hand_offs` ask starts the hand-off it held, as the hub wrote it,
  * as the first of a new round, and its result brings the hub back as any
  * hand-off's does. It runs in the transaction that claims the ask (`decide`
- * in office.ts), so a stop between the two cannot leave the yes with nothing
+ * in office-decide.ts), so a stop between the two cannot leave the yes with nothing
  * started. What it carries is worked out now (`sharing`), from access as it
  * is at the yes.
  */
@@ -487,7 +487,7 @@ export async function wakeThread(id: number): Promise<void> {
  * the answer, and with `askId`, the ask it answers, so its brief can say what
  * comes next, such as starting the work of a plan the owner approved. While a
  * pick-up of the hub's there has yet to start, as when a run of the hub's on
- * the thread holds it (`waitsOnOwnRun` in office.ts), each answer joins it, a
+ * the thread holds it (`waitsOnOwnRun` in office-follow-ups.ts), each answer joins it, a
  * line each, so several hires landing together wake it once. The claim
  * returns the row as joined (`startFollowUp`), so the run reads every line.
  */

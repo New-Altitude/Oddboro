@@ -3,7 +3,7 @@
 // staffer that handed it, which picks up in a fresh run of its own. Both are
 // follow-ups, so the office starts them the moment they are written and nothing
 // polls. Every hand-off is a step in a thread (threads.ts): the colleague's run
-// cannot hand off (mcp.ts), the hub's pick-up may hand on in the same thread,
+// cannot hand off (mcp-run.ts), the hub's pick-up may hand on in the same thread,
 // and both work at Draft at most (staff.ts in the office app).
 import {
   closeSync,
@@ -185,7 +185,7 @@ export function handBack(
 /**
  * A `denied` run only reads the owner's reason for a lesson. The denial itself
  * already went back to the hand-off or thread the ask came from (`answerLater`
- * in office.ts, or `answerHandOffs` for a no to more hand-offs), so the run
+ * in office-decide.ts, or `answerHandOffs` for a no to more hand-offs), so the run
  * serves neither: it joins no thread and hands
  * nothing back. An `edited` run only reads the owner's edit to a file, for a
  * lesson, and answers nothing raised anywhere. Neither run hands work on: the
@@ -278,7 +278,7 @@ export async function answeredAll(q: Db, handOffId: number): Promise<boolean> {
 /**
  * The other results waiting for a hub on the thread a `handed_back` picks up,
  * oldest first. They landed while a run of the hub's there had yet to end
- * (`waitsOnOwnRun` in office.ts), so this one run picks them all up, and they
+ * (`waitsOnOwnRun` in office-follow-ups.ts), so this one run picks them all up, and they
  * end with it (`finishFollowUp`).
  */
 export async function resultsToJoin(f: FollowUpRow): Promise<FollowUpRow[]> {

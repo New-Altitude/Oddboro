@@ -59,7 +59,7 @@ Each line says what to do when its trigger comes.
 - Building Stop for a run (NEW-1701), or any new kind of run: first make the
   run registers one registry with a stop handle. Today they are `slots`,
   `chatting` and `inProgress` in `staff.ts` and `runsGoing` in the ledger's
-  `office.ts`, and `runsActive` in `staff.ts` reads two of them. The job
+  `office-follow-ups.ts`, and `runsActive` in `staff.ts` reads two of them. The job
   clock's `running` in `jobs.ts` stays its own.
 - Building NEW-1651 or NEW-1654, whichever comes first: give each run one
   row of its own, with `runs.jobId` optional, usage pointing at the run, and

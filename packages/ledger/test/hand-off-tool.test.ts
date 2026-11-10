@@ -426,7 +426,7 @@ test('a lead naming a thread it leads is never refused, even when it also serves
 });
 
 // A chat resumed after a parameter was renamed still uses the old name. Every
-// tool refuses a key it does not take (mcp.ts `tool`), and names the ones it does.
+// tool refuses a key it does not take (mcp-run.ts `tool`), and names the ones it does.
 /** A finished piece of work Lena leads, to continue. */
 const finished = async (title: string) =>
   (

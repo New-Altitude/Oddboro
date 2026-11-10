@@ -524,7 +524,8 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    connected, with each Odd and its grant; a click on an Odd opens its card.
    The line saying what an Odd is doing names an outside tool's service by
    its name (`serviceNames`, sent with the office state), not its id. Each switch and folder goes through
-   the staff PATCH, `setOwnTool` or `setFolder` in the ledger's `office.ts`,
+   the staff PATCH, `setOwnTool` in the ledger's `office-staff.ts` or `setFolder` in its
+   `office-folders.ts`,
    which records a Ledger line, gets no 409 and takes effect on the next run;
    a change that opens or closes the internet to the Odd's commands says so
    in the line's body (`NETWORK_NOTE`). The page gets one profile per Odd,
@@ -709,7 +710,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    and `dontAsk` turns down every other path). Deny rules beat any allow,
    the owner's own Claude Code settings included, so `unreadable` names what
    stays shut whatever else allows it: the secret stores in `SECRET_STORES`
-   (the ledger's `office.ts`, which `checkFolder` also reads): `~/.ssh`,
+   (the ledger's `office-folders.ts`, which `checkFolder` also reads): `~/.ssh`,
    `~/.aws`, `~/.gnupg`, `~/.config`, `~/Library`, `~/AppData`,
    `~/.claude.json`, `~/.google_workspace_mcp` (where
    that MCP server keeps its sign-ins for other apps on the Mac), `~/.grok`,

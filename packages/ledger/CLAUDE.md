@@ -220,7 +220,7 @@ hand-off or number, which ledger tests and the office's format test share.
   closes that says so in its ledger line (`NETWORK_NOTE`). `ownTools()` in
   `capabilities.ts` is that one reading of the switches and folders for a
   run, `my_access`, `office_report` and the page. Once a Claude Code refuses
-  the open network, the office holds it (`holdNetwork` in `office.ts`, in the
+  the open network, the office holds it (`holdNetwork` in `office-staff.ts`, in the
   office's memory until it restarts), and `heldReach()` is the one rule every
   reader applies: a Claude Code Odd's commands go with no network. The office
   tells every run's tool server so (`OFFICE_NETWORK_HELD`), whatever the run's
@@ -282,7 +282,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   `goal` asks) and `giveTask` refuse a title the Odd already has open, case
   and spacing ignored, unless the ask `revises` that one; the office's own
   tasks pass `byOffice`. The refusal is an `AlreadyOnDesk` error, which
-  `tool()` in `mcp.ts` returns as a tool error naming the item. Each check
+  `tool()` in `mcp-run.ts` returns as a tool error naming the item. Each check
   runs in the insert's transaction under `pg_advisory_xact_lock` on the Odd
   (`lockDesk`), so two tool servers at once cannot both pass. `stillOnDesk`
   lists what an Odd has open, for its prompt. `test/once-on-desk.test.ts`
@@ -566,7 +566,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   approved hire), `handBackLater` sends the owner's answer itself.
 - A `reply` ask carries one email in `asks.reply` (`ReplyDraft`), raised by
   `propose_reply`, which every Odd has (`always` in `tools.ts`, so no hire's
-  tool list can leave it out) and `mcp.ts` offers only while it holds a Gmail
+  tool list can leave it out) and `mcp-mail.ts` offers only while it holds a Gmail
   grant at any level, and which places it as `raise_ask` does.
   Only the office approves one, with `approveReply`, once Gmail sent it or
   saved it as a draft: the owner's final version with `reply.sent`, one
@@ -643,7 +643,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
 - `asks.via` and `tasks.via` name the colleague whose handed-back work a
   lead raised the item from: the office sets `VIA` on a lead's pick-up, and
   `raise_ask`, `give_owner_a_task`, `propose_reply` and `propose_filter` store it.
-- `hand_off` takes `files` the giver can read (`readableFile` in `mcp.ts`),
+- `hand_off` takes `files` the giver can read (`readableFile` in `mcp-run.ts`),
   in its own folder, the owner's chat attachments in `attachments/` among
   them, or the folder of work it is on. `carryFiles` copies each from
   outside the work into the giver's part of the thread's folder as the
@@ -712,11 +712,11 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   does not serve. `list_goals` is the Office Manager's.
 - A schedule is every n minutes, daily, weekdays, or once a week on a day
   (`{ every: 'week', day: 'Fri', at: '16:00' }`).
-- `src/mcp.ts` registers every tool through `tool()`, never
+- Every `src/mcp-*.ts` file registers its tools through `tool()`, never
   `server.registerTool` directly: its input refuses a key it does not name and
   lists the ones it does, so an old parameter name in a resumed chat is an
   error, not a call that runs as if it were left out.
-- `src/mcp.ts` registers a tool only when `has()` says the Odd holds it, and
+- A `src/mcp-*.ts` file registers a tool only when `has()` says the Odd holds it, and
   a tool that rides with one (`RIDES_WITH` in `src/tools.ts`) only beside it.
   Gate on the grant, never on an Odd's id.
 - Where to touch. Each kind of thing starts at its one declaration; the type
@@ -735,7 +735,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
     it is offered (`withGmail`, `inChat`, `notToManager`, and `prompt` for
     one that only shapes the prompt and is never offered) is a field on its
     row, which `isOffered` in `src/tools.ts` reads for the tool server
-    (`offered()` in `mcp.ts`), the Settings tab's Always on group
+    (`offered()` in `mcp-run.ts`), the Settings tab's Always on group
     (`toolGroups` in the office), `test/hand-off-tool.test.ts` and the
     office's `named-tools.test.ts`.
   - To add an owner control on an Odd's card (a key the staff PATCH route
@@ -823,10 +823,6 @@ Each line says what to do when its trigger comes.
   reads could make it do, and which wall stops each.
 - When a test fixture is copied a third time: move it into one shared test
   helper that every copy's tests import.
-- When a feature changes `office.ts` or `mcp.ts` substantially (it adds to or
-  rewrites a group of functions, not a line or two): first move the piece it
-  touches into a module of its own, then make the change there. Do not split
-  either file in one go while pull requests are open.
 - When adding an AI tool makes a branch on a tool's name repeat, such as one
   more `agent === 'grok'`: first fold that branch into a per-tool table, a
   `Record<Agent, ...>` as `AGENT_FILES` is, so the next tool fails check-types

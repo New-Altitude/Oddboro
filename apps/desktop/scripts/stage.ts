@@ -55,12 +55,14 @@ const NODE_BIN = join(
 );
 const PACKAGES = ['ledger', 'sprites', 'world'];
 /**
- * What a package does not need at runtime. Its own CLAUDE.md stays behind;
- * every other document in it ships, since the office reads the sprites'
- * FORMAT.md and ART.md when it draws.
+ * What a package does not need at runtime. Its own CLAUDE.md and the
+ * ledger's FILES.md, a list of its files for people working on it, stay
+ * behind; every other document in it ships, since the office reads the
+ * sprites' FORMAT.md and ART.md when it draws.
  */
 const LEAVE_OUT = new Set([
   'CLAUDE.md',
+  'FILES.md',
   'node_modules',
   'out',
   'scripts',
