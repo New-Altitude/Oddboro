@@ -356,29 +356,14 @@ const PADLOCK = sprite([
 // meeting in the middle. Each is 13 columns wide.
 const LEAF = { top: 13, bottom: 30, left: 11, right: 36, w: 13 };
 
-// The sprite's doorway has a transom, two panes and a bar over shorter
-// leaves (rows 13 to 17). Here the leaves run its full height instead: each
-// row listed copies another row of the sprite's own, already lit, between its
-// frame's columns 8 and 39. Shut, the leaf's top rail moves up under the frame
-// and the glass grows, with the pulls where they were. Open, the dark
-// doorway does the same. Rows not listed stay as they are.
-const FULL_HEIGHT = {
-  shut: { 13: 18, 14: 19, 15: 20, 16: 21, 17: 21, 18: 21, 19: 21, 20: 21 },
-  open: { 13: 18, 14: 19, 15: 20, 16: 20, 17: 20, 18: 20, 19: 20 }
-} satisfies Record<string, Record<number, number>>;
-
-/** The door's pixels from `src` at (x, y), with its rows moved as `rows` says. */
-function fullHeight(src: Image, x: number, y: number, rows: Record<number, number>): Image {
+/** The door's pixels from `src` at (x, y). */
+function doorAt(src: Image, x: number, y: number): Image {
   const w = 48;
   const h = 32;
   const img = createImage(w, h);
-  const at = (r: number, c: number) => ((y + r) * src.width + x + c) * 4;
   for (let r = 0; r < h; r++) {
-    const from = rows[r as keyof typeof rows] ?? r;
-    for (let c = 0; c < w; c++) {
-      const s = at(c >= 8 && c <= 39 ? from : r, c);
-      img.data.set(src.data.subarray(s, s + 4), (r * w + c) * 4);
-    }
+    const s = ((y + r) * src.width + x) * 4;
+    img.data.set(src.data.subarray(s, s + w * 4), r * w * 4);
   }
   return img;
 }
@@ -395,9 +380,9 @@ function lockedDoor({ room, door, open, odd }: DoorLayers): GifFrame[] {
   // The pulls sit in the door's columns 21 and 26, rows 22 to 24.
   const lock = { x: door.x + 21, y: door.y + 19 };
   const frames: GifFrame[] = [];
-  // The door shut and open, its leaves the doorway's full height.
-  const shut = fullHeight(room, door.x, door.y, FULL_HEIGHT.shut);
-  const opened = fullHeight(open, 0, 0, FULL_HEIGHT.open);
+  // The door shut and open.
+  const shut = doorAt(room, door.x, door.y);
+  const opened = doorAt(open, 0, 0);
   // How far the leaves have slid shut, 0 open to 1 shut.
   let slid = 0;
   let locked = false;

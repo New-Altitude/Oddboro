@@ -58,6 +58,8 @@ const AMBIENT_FPS = 12;
 const BLOCK = 16 * TILE;
 /** How long after the last wheel event the zoom settles on a crisp level. */
 const SETTLE_MS = 140;
+/** Milliseconds a sliding door shows each frame on its way open or shut. */
+const DOOR_STEP_MS = 70;
 
 /** A sprite the ambient clock animates, with its box in world pixels. */
 type Anim = { s: Sprite; frames: Texture[]; fps: number; start: number; box: Box };
@@ -271,7 +273,20 @@ export class Floor {
   /** Called when the user takes the camera by dragging or zooming. */
   onRelease: (() => void) | undefined;
   private resizeObserver: ResizeObserver;
-  private doors: { s: Sprite; open: Texture; closed: Texture; tiles: Set<number> }[] = [];
+  /**
+   * Each door that opens: its sprite and the glow drawn over it, its frames
+   * from closed to open (a sliding door's `slide-N` frames between), each lit,
+   * glowing and unlit, the one it shows, and milliseconds until its next step.
+   */
+  private doors: {
+    s: Sprite;
+    e?: Sprite;
+    obj?: string;
+    frames: { lit: Texture; e?: Texture; off?: Texture }[];
+    at: number;
+    wait: number;
+    tiles: Set<number>;
+  }[] = [];
   private switches = new Map<string, Switch>();
   /** Called when the owner taps a prop that can be switched, with its id. */
   onTap: ((obj: string) => void) | undefined;
@@ -503,7 +518,7 @@ export class Floor {
         });
       if (meta.tags.includes('shelf') && meta.tags.includes('library'))
         this.shelves.push({ box, rank: i });
-      // A door with open and closed frames swings open when staff come near.
+      // A door with open and closed frames opens when staff come near.
       if (
         meta.tags.includes('door') &&
         meta.frames.includes('open') &&
@@ -516,10 +531,21 @@ export class Floor {
         const tiles = new Set<number>();
         for (let x = tx; x < tx + meta.footprint[0]; x++)
           for (let y = ty - 2; y <= ty; y++) tiles.add(y * world.width + x);
+        const slides = meta.frames
+          .filter((f) => /^slide-\d+$/.test(f))
+          .sort((a, b) => Number(a.slice(6)) - Number(b.slice(6)));
+        const tex = atlas.sheet.textures;
         this.doors.push({
           s,
-          open: atlas.sheet.textures[`${prefix}/open`],
-          closed: atlas.sheet.textures[`${prefix}/closed`],
+          e,
+          obj: d.obj,
+          frames: ['closed', ...slides, 'open'].map((f) => ({
+            lit: tex[`${prefix}/${f}`],
+            e: tex[`${prefix}/${f}~e`],
+            off: tex[`${prefix}/${f}~off`]
+          })),
+          at: 0,
+          wait: 0,
           tiles
         });
       }
@@ -1221,18 +1247,36 @@ export class Floor {
 
   /**
    * Open each door a staffer is about to walk through or is standing in, and
-   * close the rest. Sitting on the bench beside a door does not open it.
+   * close the rest. Sitting on the bench beside a door does not open it. A
+   * sliding door steps through its frames, one each `DOOR_STEP_MS`; under
+   * reduced motion, and for a door with no frames between, it is a cut.
    */
   updateDoors(steps: [number, number][]) {
     const w = this.world.width;
     const keys = steps.map(([x, y]) => y * w + x);
+    const dt = this.app.ticker.deltaMS;
     for (const d of this.doors) {
-      const through = keys.some((k) => d.tiles.has(k));
-      const tex = through ? d.open : d.closed;
-      if (d.s.texture !== tex) {
-        d.s.texture = tex;
-        this.dirty = true;
+      const want = keys.some((k) => d.tiles.has(k)) ? d.frames.length - 1 : 0;
+      if (d.at === want) {
+        d.wait = 0;
+        continue;
       }
+      d.wait -= dt;
+      if (d.wait > 0) continue;
+      d.wait = DOOR_STEP_MS;
+      d.at = this.reduceMotion.matches ? want : d.at + Math.sign(want - d.at);
+      // The glow over the glass and the unlit frame move with the door, and
+      // a switch turned later shows this frame, not the shut one.
+      const f = d.frames[d.at];
+      const sw = d.obj ? this.switches.get(d.obj) : undefined;
+      const part = sw?.parts.find((p) => p.s === d.s);
+      if (part) {
+        part.lit = f.lit;
+        part.off = f.off;
+      }
+      d.s.texture = sw && !sw.on && f.off ? f.off : f.lit;
+      if (d.e && f.e) d.e.texture = f.e;
+      this.dirty = true;
     }
   }
 

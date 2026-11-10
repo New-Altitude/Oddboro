@@ -10,9 +10,9 @@
     onpick
   }: {
     agent: Agent;
-    value?: string;
+    value?: string | null;
     officeModel?: string;
-    onpick: (model: string | null) => Promise<void>;
+    onpick: (model: string | null) => void | Promise<void>;
   } = $props();
   const connection = new MagpieConnection();
   const choices = $derived(magpieChoices(connection.state));

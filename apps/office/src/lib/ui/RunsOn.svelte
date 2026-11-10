@@ -116,7 +116,7 @@
           {/if}
           <button class="small" onclick={() => tools.cancel(t.id)}>Cancel</button>
         {:else if action === 'sign-in-again'}
-          <button class="small" onclick={() => tools.signIn(t.id)}>Sign in again</button>
+          <button class="small" onclick={() => tools.signIn(t.id)}>Switch account</button>
         {:else if action === 'key'}
           <button class="small" onclick={() => (keyOpen = !keyOpen)}
             >{t.signIn?.signedIn ? 'Use another key' : 'Add a key'}</button

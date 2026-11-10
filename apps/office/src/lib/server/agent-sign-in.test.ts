@@ -1044,6 +1044,7 @@ test('only Claude Code on Opus or Codex on Sol or Astra draws a look; on any oth
   for (const [agent, model, draws] of [
     ['claude', undefined, true],
     ['claude', 'opus', true],
+    ['claude', 'claude-fable-5-2', true],
     ['claude', 'claude-fable-5-1', true],
     ['claude', 'sonnet', false],
     ['codex', undefined, true],

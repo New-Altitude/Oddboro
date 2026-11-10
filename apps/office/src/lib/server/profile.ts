@@ -24,7 +24,7 @@ import { claudeSettings } from './claude.ts';
  * setup, else `OFFICE_CODEX_MODEL` or `OFFICE_GROK_MODEL`, else the tool's own
  * default, first in its list.
  */
-function officeModel(agent: Agent): string | undefined {
+export function officeModel(agent: Agent): string | undefined {
   if (agent === officeAgent() && process.env.OFFICE_MAGPIE_MODEL)
     return `magpie:${process.env.OFFICE_MAGPIE_MODEL}`;
   if (agent === 'claude')
@@ -72,6 +72,7 @@ export function toProfile(r: StaffRow, guesses = 0): StaffProfile {
             sheet: `/api/staff/${r.id}/look?v=${lookVersion(r.look, r.portraitPx)}`,
             portrait: `/api/staff/${r.id}/portrait?v=${lookVersion(r.look, r.portraitPx)}`
           }
-        : undefined
+        : undefined,
+    ...(r.package ? { persona: r.package } : {})
   };
 }

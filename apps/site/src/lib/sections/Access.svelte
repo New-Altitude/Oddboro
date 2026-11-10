@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Least access, as a working mock of an Odd's Access tab: the Odd's level,
+  // Least access, as a working mock of an Odd's Settings: the Odd's level,
   // the two tools connected for it, and what it can do with that mix right
   // now. It follows the office's own rules: a grant never sits above the
   // Odd's level, and a grant above a lowered level waits. Nothing here leaves
@@ -295,7 +295,7 @@
       </div>
     </div>
     <p class="text-faint mt-3 text-center text-xs">
-      This Access tab is a mock. Nothing you press here leaves the page.
+      This is a mock of an Odd's Settings. Nothing you press here leaves the page.
     </p>
   </div>
 </div>

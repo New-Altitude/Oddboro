@@ -53,9 +53,9 @@ import {
   type System
 } from '@oddboro/ledger';
 import { writeEnv } from '@oddboro/ledger/env';
+import { fixedError } from '@oddboro/ledger/errors';
+import { HOSTS } from './hosts.ts';
 
-/** The names Caddy answers to, best first. The first one is served over HTTPS too. */
-export const HOSTS = ['local.oddboro.com', 'oddboro.localhost'];
 const SECURE = HOSTS[0];
 const UPSTREAM = `127.0.0.1:${OFFICE_PORT}`;
 // Caddy's admin API listens on 127.0.0.1 by default; Node would try IPv6's ::1 first for localhost.
@@ -287,7 +287,7 @@ async function download(): Promise<string> {
     .find((l) => l.trim().endsWith(archive))
     ?.split(/\s+/)[0];
   const got = createHash('sha512').update(tar).digest('hex');
-  if (!want || want !== got) throw new Error('The Caddy download did not match its checksum.');
+  if (!want || want !== got) throw fixedError('The Caddy download did not match its checksum.');
   mkdirSync(join(HOME, 'bin'), { recursive: true });
   const file = join(HOME, 'bin', archive);
   writeFileSync(file, tar);
@@ -295,7 +295,7 @@ async function download(): Promise<string> {
   const unpack = WINDOWS
     ? ['-xf', file, '-C', join(HOME, 'bin'), 'caddy.exe']
     : ['-xzf', file, '-C', join(HOME, 'bin'), 'caddy'];
-  if (!(await run('tar', unpack)).ok) throw new Error('The Caddy download would not unpack.');
+  if (!(await run('tar', unpack)).ok) throw fixedError('The Caddy download would not unpack.');
   if (!WINDOWS) chmodSync(OWN_CADDY, 0o755);
   return OWN_CADDY;
 }
@@ -346,7 +346,7 @@ async function startOwn(): Promise<void> {
     args: [caddy, 'run', '--config', CADDYFILE, '--adapter', 'caddyfile'],
     log: join(LOGS, MAC ? 'oddboro-caddy.log' : 'caddy.log')
   });
-  if (!started) throw new Error('Caddy would not start as a login service.');
+  if (!started) throw fixedError('Caddy would not start as a login service.');
 }
 
 type Servers = Record<string, { listen?: string[] }>;
@@ -437,7 +437,7 @@ export async function setUpAddress(): Promise<Address> {
  */
 export async function secureAddress(): Promise<Address> {
   const root = await rootCert();
-  if (!root) throw new Error('Caddy has not made its certificate yet. Try again in a moment.');
+  if (!root) throw fixedError('Caddy has not made its certificate yet. Try again in a moment.');
   const q = (p: string) => `'${p.replaceAll("'", "'\\''")}'`;
   // Windows adds it to the owner's own list after its own dialog asks them, with no admin.
   const r = WINDOWS
@@ -460,7 +460,7 @@ export async function secureAddress(): Promise<Address> {
           `if command -v trust >/dev/null; then trust anchor --store ${q(root)}; else cp ${q(root)} /usr/local/share/ca-certificates/oddboro-caddy.crt && update-ca-certificates; fi`
         ]);
   if (!r.ok)
-    throw new Error('The certificate was not trusted. Try again, and enter your password.');
+    throw fixedError('The certificate was not trusted. Try again, and enter your password.');
   return address();
 }
 

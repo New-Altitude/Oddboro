@@ -19,6 +19,7 @@
     "preview": "node scripts/compile.ts --only",
     "check-types": "tsc -p tsconfig.json",
     "lint": "prettier --check . --ignore-path ../../.prettierignore",
-    "looks:derive": "node scripts/derive-looks.ts"
+    "looks:derive": "node scripts/derive-looks.ts",
+    "mark": "node scripts/mark.ts"
   }
 }

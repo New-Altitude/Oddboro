@@ -1,9 +1,10 @@
-// Renders a legal document from src/content/legal/<name>.md at prerender:
-// the body as HTML, a table of contents from its ## headings, and its title
-// from the first # heading. The legal writer owns the markdown files.
+// Renders a document from src/content/<folder>/<name>.md at prerender: the
+// body as HTML, a table of contents from its ## headings, and its title from
+// the first # heading. The legal writer owns the files in legal/; info/
+// holds the pages the office links to, such as why some folders warn.
 import MarkdownIt from 'markdown-it';
 
-const files = import.meta.glob('/src/content/legal/*.md', {
+const files = import.meta.glob('/src/content/*/*.md', {
   query: '?raw',
   import: 'default',
   eager: true
@@ -23,10 +24,17 @@ const slugify = (text: string) =>
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '');
 
-export function legal(name: 'privacy' | 'terms', fallbackTitle: string): LegalDoc {
-  const text = files[`/src/content/legal/${name}.md`];
+export const legal = (name: 'privacy' | 'terms', fallbackTitle: string): LegalDoc =>
+  markdownDoc(`legal/${name}`, fallbackTitle);
+
+/** A page the office links to, from src/content/info/<name>.md. */
+export const info = (name: 'folder-sharing', fallbackTitle: string): LegalDoc =>
+  markdownDoc(`info/${name}`, fallbackTitle);
+
+function markdownDoc(name: string, fallbackTitle: string): LegalDoc {
+  const text = files[`/src/content/${name}.md`];
   if (!text) {
-    console.warn(`site: src/content/legal/${name}.md is not here yet, so /${name}/ is a stub`);
+    console.warn(`site: src/content/${name}.md is not here yet, so its page is a stub`);
     return { title: fallbackTitle, html: '', toc: [], missing: true };
   }
   // Raw HTML stays escaped, so the document can format but never inject.

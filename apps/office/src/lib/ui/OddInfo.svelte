@@ -145,11 +145,14 @@
       {/if}
     </div>
     <div class="mt-2 flex gap-1.5">
-      <button
-        class="flex-1 rounded-lg bg-raise px-3 py-2 text-xs text-ink hover:bg-sea/20"
-        aria-expanded={redrawing}
-        onclick={() => (redrawing = !redrawing)}>Redraw look</button
-      >
+      <!-- A persona Odd's look is its package's, the same in every office. -->
+      {#if !profile.persona}
+        <button
+          class="flex-1 rounded-lg bg-raise px-3 py-2 text-xs text-ink hover:bg-sea/20"
+          aria-expanded={redrawing}
+          onclick={() => (redrawing = !redrawing)}>Redraw look</button
+        >
+      {/if}
       <button
         class="flex-1 rounded-lg bg-raise px-3 py-2 text-xs text-ink hover:bg-sea/20"
         onclick={onsend}>Send to a place</button

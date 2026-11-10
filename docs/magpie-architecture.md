@@ -21,7 +21,7 @@ not another instruction source or a second copy of the implementation.
 | File or outside-tool access | [file walls](../packages/ledger/src/file-walls.ts), [file MCP server](../packages/ledger/src/files-server.ts)                  | [outside-tool gateway](../apps/office/src/lib/server/gateway.ts), staff runs                                                 |
 | Runtime ownership           | [managed process](../apps/office/src/lib/server/magpie-runtime.ts)                                                             | [embedding patch](../apps/desktop/magpie/embedded-runtime.patch), [source pin](../apps/desktop/magpie/source.json)           |
 | Packaging                   | [Magpie build](../apps/desktop/scripts/magpie-runtime.ts), [Pi build](../apps/office/scripts/build-pi.ts)                      | [desktop staging](../apps/desktop/scripts/stage.ts), [Pi artifact checks](../apps/desktop/scripts/pi-stage.ts)               |
-| Usage costs                 | [usage recording and totals](../packages/ledger/src/office.ts)                                                                 | [nullable-cost migration](../packages/ledger/migrations/0014_unknown-cost.sql), worker usage events                          |
+| Usage costs                 | [usage recording and totals](../packages/ledger/src/office.ts)                                                                 | [nullable-cost migration](../packages/ledger/migrations/0016_unknown-cost.sql), worker usage events                          |
 
 ## Keep runner, connection and route separate
 

@@ -2,7 +2,7 @@
 // doing. The staff themselves live in Postgres; hiring adds a row there.
 // The page loads this file for ACTIVITY_LABEL, so it takes only types from
 // the ledger; the server builds the profile (`toProfile` in `lib/server/profile.ts`).
-import type { OwnTools } from '@oddboro/ledger';
+import type { OwnTools, PersonaLink } from '@oddboro/ledger';
 import type { Level } from '@oddboro/ledger/access';
 import type { Agent, Effort, GrantedFolder } from '@oddboro/ledger/agents';
 import type { LookSpec } from '@oddboro/sprites/look';
@@ -10,6 +10,8 @@ import type { LookSpec } from '@oddboro/sprites/look';
 export type Activity =
   'work' | 'intake' | 'read' | 'wait' | 'play' | 'rest' | 'eat' | 'exercise' | 'talk' | 'home';
 
+/** The most characters an Odd's name, role and remit take, however it joins: hired or added from New Altitude. */
+export const LIMITS = { name: 40, role: 60, remit: 200 } as const;
 export type StaffProfile = {
   id: string;
   name: string;
@@ -57,6 +59,8 @@ export type StaffProfile = {
   guesses: number;
   /** A generated look: where its frames and portrait load from. Absent for hand-drawn art. */
   look?: { spec: LookSpec; sheet: string; portrait: string; version: string };
+  /** Set for an Odd added from a New Altitude persona's package. */
+  persona?: PersonaLink;
 };
 
 /** A short stamp that changes whenever the look or portrait does. */

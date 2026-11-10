@@ -1,5 +1,5 @@
 {
-  "id": "2ae9f674-ecf5-4a41-85e9-1960227caccb",
+  "id": "d716beff-a5d5-4326-aeb7-b985fda547a2",
   "prevId": "f9bd2252-a4ef-4b5b-9b38-c5153737cfa6",
   "version": "7",
   "dialect": "postgresql",
@@ -293,6 +293,12 @@
         },
         "call": {
           "name": "call",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "switches": {
+          "name": "switches",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
@@ -2615,7 +2621,7 @@
           "name": "cost_usd",
           "type": "double precision",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "default": 0
         },
         "created_at": {

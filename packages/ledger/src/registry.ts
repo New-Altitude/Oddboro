@@ -118,10 +118,16 @@ export async function fromRegistry(name: string): Promise<Candidate | undefined>
   return undefined;
 }
 
+/** GitHub's own hosted MCP server, which signs in with New Altitude's GitHub app (the office's `oauth.ts`). */
+export const GITHUB_ID = 'github';
+/** Any address on GitHub's MCP server, which an Odd's ask turns into the catalog's GitHub. */
+export const GITHUB_ADDRESS = /^https:\/\/api\.githubcopilot\.com\//i;
+
 /**
  * Tools the office connects in its own way, offered by `find_connectors`
  * before the registry and added to the catalog the first time one is asked for.
  * AWS starts once the owner signs in, which fills in its proxy's arguments.
+ * GitHub signs in with New Altitude's own app, so an owner pastes no token.
  */
 const AWS_PICK =
   'If it is not clear what the owner wants in AWS, ask them before asking for any: use their secrets (AWS Secrets Manager), read their data (AWS, read only), or build in their account (AWS, builder).';
@@ -148,6 +154,14 @@ export const BUILT_IN: (typeof connectors.$inferInsert)[] = [
     description: `Build in the owner's Amazon Web Services (AWS) account through AWS's MCP Server: create and change S3, Lambda, EC2 and the rest, as a role that cannot change IAM or read a secret value. Ask for write when the owner wants you to build in AWS. ${AWS_PICK}`,
     kind: 'stdio',
     config: { command: 'uvx', args: [] }
+  },
+  {
+    id: GITHUB_ID,
+    name: 'GitHub',
+    description:
+      "The owner's GitHub through GitHub's own MCP server: repositories, code, issues and pull requests. The owner signs in with GitHub on their desk, so never ask for a key or a token, and never tell them to make one. Ask for read to look, write to open issues, comment or change code.",
+    kind: 'http',
+    config: { url: 'https://api.githubcopilot.com/mcp/', oauth: true }
   }
 ];
 

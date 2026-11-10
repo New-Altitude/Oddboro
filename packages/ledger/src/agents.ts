@@ -145,6 +145,7 @@ export const MODELS: Record<Agent, readonly ModelChoice[]> = {
   pi: [],
   claude: [
     { id: 'claude-opus-5-5', name: 'Opus 5.5' },
+    { id: 'claude-fable-5-2', name: 'Fable 5.2' },
     { id: 'claude-fable-5-1', name: 'Fable 5.1' },
     { id: 'claude-sonnet-5-5', name: 'Sonnet 5.5' },
     { id: 'claude-haiku-5-5', name: 'Haiku 5.5' }
@@ -277,7 +278,7 @@ export function commandsHow(agent: Agent, platform: NodeJS.Platform): CommandsHo
 export function hireToolsLine(state?: CommandsHow['state']): string {
   const switches =
     state === 'switch' ? `${SWITCH_NAMES.commands} or ${SWITCH_NAMES.web}` : SWITCH_NAMES.web;
-  return `Optional. You can give tools and switch on ${switches} on ${officeSection('their')}, later. They'll tell you when a job needs one.`;
+  return `Optional. You can give tools and switch on ${switches} on ${officeSection('their')}, later. They'll ask you when a job needs one.`;
 }
 
 /** Whether a run gets a shell: the owner's stored switch, as its tool takes it. */

@@ -28,6 +28,7 @@ import {
   threadPart,
   workFile
 } from '@oddboro/ledger';
+import { fixedError, isFixedError } from '@oddboro/ledger/errors';
 import { workPath } from '@oddboro/ledger/work-paths';
 import { PAGE } from '#lib/pages.ts';
 
@@ -83,11 +84,11 @@ export class FileError extends Error {}
 
 /**
  * What the owner reads when the file they asked for by `name` did not open or
- * save. A refusal reads as written. Anything else (a file the office may not
+ * save. A refusal, or a message the code fixed (`fixedError`), reads as written. Anything else (a file the office may not
  * read, say) names a path, so the owner gets `fallback` and the log gets the rest.
  */
 export function ownerMessage(e: unknown, name: string, fallback: string): string {
-  if (e instanceof FileError) return e.message;
+  if (e instanceof FileError || isFixedError(e)) return e.message;
   console.error(`${fallback} (${name}):`, e);
   return fallback;
 }
@@ -180,7 +181,7 @@ const isFolder = (path: string): boolean =>
  * file while the Odd is on that thread, in whoever's part of it.
  */
 async function locate(staff: string, path: string): Promise<{ file: string; path: string }> {
-  if (!/^[a-z0-9-]+$/.test(staff) || !(await staffer(staff))) throw new FileError('No such Odd');
+  if (!/^[a-z0-9-]+$/.test(staff) || !(await staffer(staff))) throw fixedError('No such Odd');
   // The page names a file inside the Odd's folders, never by where it sits on the Mac.
   if (isAbsolute(path)) throw new FileError(`No file at ${basename(path)}`);
   // The Odd's tools read such a name the same way (`attachable`), so both find one file.
@@ -281,7 +282,7 @@ export async function writeStaffFile(
   if (workPath(path)) throw new FileError(`${basename(path)} opens here to read only`);
   const { file } = await locate(staff, path);
   if (Math.abs(statSync(file).mtimeMs - mtime) > 1)
-    throw new FileError('The Odd changed this file since you opened it. Reopen it to see.');
+    throw fixedError('The Odd changed this file since you opened it. Reopen it to see.');
   // The mtime check makes this the Odd's version, unless the owner saved it before.
   const before = await readStaffFile(staff, path);
   writeFileSync(file, content);

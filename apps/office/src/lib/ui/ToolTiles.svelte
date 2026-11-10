@@ -1,5 +1,5 @@
 <script lang="ts">
-  // A square tile for every coding tool, with its maker's mark: setup's Your
+  // A tile for every coding tool, all one height, with its maker's mark: setup's Your
   // AI (OfficeTools.svelte), where the pick is the office's tool, and an Odd's
   // Model tab, where it is that Odd's. A tile this system offers picks; one it
   // does not offer yet is greyed, with why. The caller says each tile's
@@ -25,7 +25,11 @@
   let { tools, picked, onpick, stateOf, label, magpie, hideBuiltInPi = false }: Props = $props();
 </script>
 
-<div class="grid grid-cols-2 gap-2 sm:grid-cols-4" role="radiogroup" aria-label={label}>
+<div
+  class="grid auto-rows-fr grid-cols-2 gap-2 sm:grid-cols-4"
+  role="radiogroup"
+  aria-label={label}
+>
   {#each tools.tools.filter((tool) => !hideBuiltInPi || tool.id !== 'pi') as t (t.id)}
     {@const on = picked === t.id}
     {@const state = stateOf(t.id)}
@@ -87,9 +91,10 @@
 </div>
 
 <style>
+  /* One height for every tile, the tallest's: a long name or why never makes one stand taller. */
   .tile {
     display: flex;
-    aspect-ratio: 1;
+    min-block-size: 6.5rem;
     flex-direction: column;
     align-items: center;
     justify-content: center;
