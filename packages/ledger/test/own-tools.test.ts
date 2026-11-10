@@ -389,7 +389,7 @@ test(
   'broadFolder is a whole drive or volume, or system files, and never a folder in the home',
   { skip: process.platform === 'win32' && 'the paths here are a Mac and Linux' },
   () => {
-    for (const p of ['/', '/usr', '/usr/local/share', '/bin'])
+    for (const p of ['/', '/usr', '/usr/local/share', realpathSync('/bin')])
       assert.equal(O.broadFolder(p), true, p);
     assert.equal(O.broadFolder('/Volumes/Data'), true);
     assert.equal(O.broadFolder('/mnt/d'), true);
