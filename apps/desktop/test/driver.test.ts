@@ -35,6 +35,13 @@ test('a shell counts by the program it runs, never by its arguments', () => {
   assert.deepEqual(shellsIn(out, 101), [102, 103]);
 });
 
+test('a shell counts by its program name too, as `ps -o comm` gives it', () => {
+  const out = [' 201 oddboro', ' 202 node', ' 203 WebKitWebProce', ' 204 tauri-driver'].join(
+    '\n'
+  );
+  assert.deepEqual(shellsIn(out, 0), [201]);
+});
+
 test('a page-shaped write carries the Origin, and Sec-Fetch-Site when asked', () => {
   assert.deepEqual(pageHeaders(false), { origin: BASE, 'content-type': 'application/json' });
   assert.equal(pageHeaders(true)['sec-fetch-site'], 'same-origin');

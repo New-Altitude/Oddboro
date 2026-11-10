@@ -486,7 +486,7 @@ async function smokeApp(): Promise<void> {
   // starts the app itself, Windows and the Mac by reading the window as is.
   let app: ChildProcess | undefined;
   let page: Page | undefined;
-  let stopDriven: (() => Promise<void>) | undefined;
+  let stopDriven: (() => Promise<string>) | undefined;
   let script: ((body: string) => Promise<unknown>) | undefined;
   const started = await step('the first start answers', true, async () => {
     if (LINUX) {
@@ -542,10 +542,7 @@ async function smokeApp(): Promise<void> {
   });
   await step('a screenshot', false, () => screenshot(join(OUT, 'screen.png')));
   await step('quits with Node and both ports gone', true, async () => {
-    if (stopDriven) {
-      await stopDriven();
-      return 'stopped through tauri-driver; the relaunches quit with SIGTERM';
-    }
+    if (stopDriven) return `${await stopDriven()}; the relaunches quit with SIGTERM`;
     return `${await quit(app!, r)} ms`;
   });
 

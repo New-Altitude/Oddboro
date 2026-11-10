@@ -144,8 +144,9 @@ export function parseTasklist(out: string): number[] {
 }
 
 /**
- * The shells in `ps -eo pid=,args=` output. Only the program a process runs
- * counts, never its arguments: smoke.ts's own `--artifact` names the AppImage.
+ * The shells in `ps -eo pid=,args=` or `pid=,comm=` output. Only the program
+ * a process runs counts, never its arguments: smoke.ts's own `--artifact`
+ * names the AppImage.
  */
 export function shellsIn(out: string, self: number): number[] {
   return out
@@ -153,18 +154,25 @@ export function shellsIn(out: string, self: number): number[] {
     .map((l) => l.trim().split(/\s+/))
     .filter(
       ([pid, program]) =>
-        Number(pid) !== self &&
-        /(\/MacOS\/oddboro|\/usr\/bin\/oddboro|\.AppImage)$/.test(program ?? '')
+        Number(pid) !== self && /((^|\/)oddboro|\.AppImage)$/.test(program ?? '')
     )
     .map(([pid]) => Number(pid));
 }
 
+/**
+ * By command line and by program name: started through WebDriver, the
+ * AppImage's shell can carry a command line that names neither, and a shell
+ * left running keeps the next launch from starting (one Oddboro at a time).
+ */
 export function shellPids(): number[] {
   if (WIN)
     return parseTasklist(
       sh('tasklist', ['/FI', 'IMAGENAME eq oddboro.exe', '/FO', 'CSV', '/NH']).out
     );
-  return shellsIn(sh('ps', ['-eo', 'pid=,args=']).out, process.pid);
+  const found = ['pid=,args=', 'pid=,comm='].flatMap((columns) =>
+    shellsIn(sh('ps', ['-eo', columns]).out, process.pid)
+  );
+  return [...new Set(found)];
 }
 
 function officeNodes(): number[] {
@@ -354,14 +362,26 @@ export async function ready(app: ChildProcess, r: Run, secs = 120): Promise<numb
     await sleep(500);
   }
   throw new Error(
-    `no answer within ${secs} s. Dialog: ${dialogText(app.pid ?? 0) || 'none'}. Log: ${logTail(r)}`
+    `no answer within ${secs} s. Dialog: ${dialogText(app.pid ?? 0) || 'none'}. Shells: ${shellPids().join(', ') || 'none'}. Log: ${logTail(r)}`
   );
 }
 
 async function allGone(r: Run): Promise<boolean> {
   const node = lastNodePid(logText(r));
-  return !(await tcp(PORT)) && !(await tcp(DB_PORT)) && !(node && alive(node));
+  return (
+    !(await tcp(PORT)) && !(await tcp(DB_PORT)) && !(node && alive(node)) && !shellPids().length
+  );
 }
+
+/** The shell, Node and both ports gone within `secs`. */
+export const goneWithin = (r: Run, secs: number): Promise<boolean> =>
+  until('a quit', async () => ((await allGone(r)) ? true : undefined), secs).then(
+    () => true,
+    () => false
+  );
+
+export const leftRunning = async (): Promise<string> =>
+  `port ${PORT} open: ${await tcp(PORT)}, port ${DB_PORT} open: ${await tcp(DB_PORT)}, shells: ${shellPids().join(', ') || 'none'}`;
 
 /**
  * Mac and Linux: SIGTERM, the shell's normal quit. Windows has no signal a
@@ -371,13 +391,8 @@ export async function quit(app: ChildProcess, r: Run): Promise<number> {
   const started = Date.now();
   if (WIN) app.kill();
   else app.kill('SIGTERM');
-  const gone = () =>
-    until('a quit', async () => ((await allGone(r)) ? true : undefined), 15).then(
-      () => true,
-      () => false
-    );
-  if (await gone()) return Date.now() - started;
-  const left = `port ${PORT} open: ${await tcp(PORT)}, port ${DB_PORT} open: ${await tcp(DB_PORT)}`;
+  if (await goneWithin(r, 15)) return Date.now() - started;
+  const left = await leftRunning();
   killAll();
   throw new Error(`still running 15 s after the quit (${left}); killed`);
 }
@@ -482,7 +497,8 @@ export type Driven = {
   page: Page;
   /** Runs a script in the page and gives back what it returns. */
   script(body: string): Promise<unknown>;
-  stop(): Promise<void>;
+  /** Ends the session and the app, and says how; throws if anything is left running. */
+  stop(): Promise<string>;
 };
 
 /**
@@ -507,12 +523,18 @@ export async function webdriverStart(exe: string, r: Run): Promise<Driven> {
     return ((await res.json()) as { value: unknown }).value;
   };
   let session = '';
-  const stop = async () => {
+  const stop = async (): Promise<string> => {
     if (session) await wd('DELETE', `/session/${session}`).catch(() => undefined);
     driver.kill();
-    await sleep(2000);
-    killAll();
-    writeFileSync(join(r.out, 'tauri-driver.log'), driverLog);
+    try {
+      if (await goneWithin(r, 10)) return 'closed with the WebDriver session';
+      const left = await leftRunning();
+      killAll();
+      if (await goneWithin(r, 10)) return `killed: the session left it running (${left})`;
+      throw new Error(`still running after the session and a kill: ${await leftRunning()}`);
+    } finally {
+      writeFileSync(join(r.out, 'tauri-driver.log'), driverLog);
+    }
   };
   try {
     await until('tauri-driver', async () => ((await wd('GET', '/status')) ? true : undefined), 30);
@@ -537,7 +559,7 @@ export async function webdriverStart(exe: string, r: Run): Promise<Driven> {
       120
     );
   } catch (e) {
-    await stop();
+    await stop().catch(() => undefined);
     throw e;
   }
   const script = (body: string) =>
