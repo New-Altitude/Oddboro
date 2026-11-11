@@ -376,7 +376,8 @@ export async function installGrantedPersonas(): Promise<void> {
 export async function askPersona(
   who: StaffRow,
   message: string,
-  chat?: { ownerSaid: string }
+  chat?: { ownerSaid: string },
+  signal?: AbortSignal
 ): Promise<DoorAnswer> {
   const slug = who.package?.slug;
   const issuer = accountIssuer();
@@ -386,7 +387,13 @@ export async function askPersona(
   const token = await freshAccess(p, { serverUrl: () => url, scope: PERSONA_SCOPE });
   // A refused refresh clears the tokens (`invalidateCredentials`); an unreachable one keeps them.
   if (!token) return { outcome: p.tokens() ? 'failed' : 'grant' };
-  const answer = await askDoor({ url, token, message, chat: chat && { odd: who.id, ...chat } });
+  const answer = await askDoor({
+    url,
+    token,
+    message,
+    chat: chat && { odd: who.id, ...chat },
+    signal
+  });
   if (answer.outcome === 'grant') await dropRefused(slug, token);
   return answer;
 }

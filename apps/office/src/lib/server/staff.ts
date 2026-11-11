@@ -125,6 +125,8 @@ import {
   type RecentThread,
   type ReportRow,
   type RunRow,
+  type ConsultationState,
+  type PersonaAnswer,
   type StaffRow,
   type TaskRow,
   type ThreadStory,
@@ -560,6 +562,7 @@ export type Run = {
   saved?: true;
   interrupted?: true;
   checkedFiles?: RunRow['checkedFiles'];
+  consultation?: { key: string; state: ConsultationState; reason: PersonaAnswer['outcome'] };
 };
 const stopped = (): Run => ({ ok: false, text: 'Stopped at your request.', interrupted: true });
 
@@ -688,6 +691,8 @@ export const RUN_ENDED = 'run-ended';
 
 /** What a run is for, and what it may do. */
 export type RunOpts = {
+  /** Stable request identity for a persona retry. Required unless the caller explicitly needs only optional commentary. */
+  persona?: { key: string; required: boolean };
   runId?: string;
   signal?: AbortSignal;
   kind: UsageKind;
@@ -1432,6 +1437,7 @@ export async function followThrough(
   const res = await slot(who.id, work, (onEvent, runId) =>
     run(who, label, {
       kind: 'follow-up',
+      persona: { key: String(f.id), required: true },
       literal:
         f.kind === 'task_done' && t?.responseVersion && t.response
           ? savedTaskWords(t.response)

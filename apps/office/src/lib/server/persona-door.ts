@@ -6,7 +6,15 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { home, OFFICE_FILES } from '@oddboro/ledger';
+import {
+  home,
+  OFFICE_FILES,
+  PERSONA_OUTCOMES,
+  type PersonaOutcome,
+  type PersonaAnswer
+} from '@oddboro/ledger';
+export type DoorOutcome = PersonaOutcome;
+export type DoorAnswer = PersonaAnswer;
 
 /** A persona's door, on the account's authorization server (its issuer). */
 export const doorUrl = (slug: string, issuer: string) => `${issuer}/${slug}/stream`;
@@ -18,29 +26,6 @@ export const PERSONA_MESSAGE_MAX = 4_000;
 const DOOR_TIMEOUT_MS = 360_000;
 /** The earlier exchanges the door reads, newest last. */
 const PRIOR_TURNS_MAX = 50;
-
-/** Every way a turn at the door ends, as New Altitude names them. */
-const DOOR_OUTCOMES = [
-  'answered',
-  'refused_access',
-  'refused_content',
-  'refused_budget',
-  'failed',
-  'abandoned',
-  'interrupted'
-] as const;
-export type DoorOutcome = (typeof DOOR_OUTCOMES)[number];
-
-/**
- * How a turn ended, with what the office shows of it. `grant` is the office's
- * own: the persona's sign-in is gone or New Altitude turned its token down.
- */
-export type DoorAnswer =
-  | { outcome: 'answered'; frame?: string; reply: string; caveat?: string }
-  | { outcome: 'refused_content'; decline?: string }
-  | { outcome: 'refused_budget'; retryAfterSeconds?: number }
-  | { outcome: Exclude<DoorOutcome, 'answered' | 'refused_content' | 'refused_budget'> }
-  | { outcome: 'grant' };
 
 /** One earlier exchange, in the door's own shape: it drops any other silently. */
 type PriorTurn = { message: string; answer: string };
@@ -75,7 +60,7 @@ function readAnswer(body: unknown): { answer: DoorAnswer; ran: Ran } {
     ...(typeof ref.sessionId === 'string' ? { sessionId: ref.sessionId } : {}),
     ...(typeof ref.turnIndex === 'number' ? { turnIndex: ref.turnIndex } : {})
   };
-  const outcome = DOOR_OUTCOMES.find((o) => o === b.outcome) ?? 'failed';
+  const outcome = PERSONA_OUTCOMES.find((o) => o === b.outcome) ?? 'failed';
   return { answer: answerOf(outcome, b), ran };
 }
 
@@ -110,6 +95,7 @@ export async function askDoor(turn: {
   token: string;
   message: string;
   chat?: { odd: string; ownerSaid: string };
+  signal?: AbortSignal;
 }): Promise<DoorAnswer> {
   const session = turn.chat
     ? readSession(turn.chat.odd)
@@ -128,12 +114,16 @@ export async function askDoor(turn: {
         ...(turn.chat ? { priorTurns: session.priorTurns.slice(-PRIOR_TURNS_MAX) } : {}),
         locale: 'en-US'
       }),
-      signal: AbortSignal.timeout(DOOR_TIMEOUT_MS)
+      signal: AbortSignal.any([
+        AbortSignal.timeout(DOOR_TIMEOUT_MS),
+        ...(turn.signal ? [turn.signal] : [])
+      ])
     });
     if (res.status === 401) return { outcome: 'grant' };
     // A slow turn's answer starts with keep-alive spaces, which JSON.parse skips.
     body = res.ok ? JSON.parse(await res.text()) : undefined;
   } catch (e) {
+    if (turn.signal?.aborted) return { outcome: 'interrupted' };
     console.error(`[persona] the door did not answer: ${e instanceof Error ? e.message : e}`);
     return { outcome: 'failed' };
   }

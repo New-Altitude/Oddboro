@@ -5,6 +5,7 @@
 // the account and pat's own sign-in already made. Run with
 // `npm test -w @oddboro/office`.
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { after, test } from 'node:test';
 import {
@@ -122,8 +123,11 @@ test("a chat with a persona Odd runs its hands, then sends the owner's words and
   const own = events.findIndex((e) => e.type === 'delta' && e.text === SAID);
   assert.ok(own > 0, JSON.stringify(events));
   assert.deepEqual(
-    events.slice(0, own).map((e) => e.type),
-    Array(own).fill('tool')
+    events
+      .slice(0, own)
+      .filter((e) => e.type !== 'reply')
+      .map((e) => e.type),
+    Array(events.slice(0, own).filter((e) => e.type !== 'reply').length).fill('tool')
   );
   assert.deepEqual(
     events.filter((e) => e.type === 'delta').map((e) => e.text),
@@ -132,7 +136,7 @@ test("a chat with a persona Odd runs its hands, then sends the owner's words and
   assert.deepEqual(events.at(-1), { type: 'done', text: SAID });
 
   // The hands' system prompt is cut from the door's message with the rest of
-  // their report, and kept nowhere. A draft, which only the hands run, shows it whole.
+  // their report. The full preparation stays local for a retry. A draft shows it whole.
   const drafted = await draft(pat.id, 'Draft a note.');
   assert.equal(doorTurns().length - turns, 1);
   const { system } = JSON.parse(drafted.text.slice(0, drafted.text.lastIndexOf('\nOutcome:'))) as {
@@ -286,7 +290,9 @@ test('every other door answer returns the report with a note, and a budget wait 
   ];
   for (const [name, set, line] of cases) {
     set();
-    const { reply } = await talk(`About ${name}?`);
+    const { reply, events } = await talk(`About ${name}?`);
+    assert.equal(events.at(-1)?.type, 'error', name);
+    assert.equal(history(pat.id).at(-1)?.failed, true, name);
     fake.door = { ...ANSWERED };
     fake.refused.clear();
     fake.down.clear();
@@ -297,6 +303,153 @@ test('every other door answer returns the report with a note, and a budget wait 
   }
   // The refresh that could not reach New Altitude kept pat's sign-in.
   assert.ok(JSON.parse(secrets.get('new-altitude-persona-pat:oauth')!).tokens);
+});
+
+test('a failed judgment keeps its completed preparation, retries only the persona and completes once', async () => {
+  const { personaRun } = await import('./persona-run.ts');
+  const key = randomUUID();
+  const file = L.home('staff', pat.id, 'completed-draft.md');
+  let preparations = 0;
+  const prepare = async () => {
+    preparations++;
+    writeFileSync(file, 'The completed draft.');
+    return { ok: true, text: 'The draft is saved.\nOutcome: done' };
+  };
+  const opts = { kind: 'follow-up' as const, timeoutMs: 10000, persona: { key, required: true } };
+  fake.door = body('failed');
+  const failed = await personaRun(pat, 'Review the draft.', opts, prepare);
+  assert.equal(failed.ok, false);
+  assert.equal(failed.consultation?.state, 'failed');
+  assert.match(failed.text, /Outcome: failed$/);
+  assert.equal(readFileSync(file, 'utf8'), 'The completed draft.');
+  const turns = doorTurns().length;
+  fake.door = { ...ANSWERED };
+  const [one, two] = await Promise.all([
+    personaRun(pat, 'Review the draft.', opts, prepare),
+    personaRun(pat, 'Review the draft.', opts, prepare)
+  ]);
+  assert.equal(one.ok, true);
+  assert.equal(one.consultation?.state, 'answered');
+  assert.deepEqual(two, one);
+  assert.equal(preparations, 1);
+  assert.equal(doorTurns().length, turns + 1);
+  assert.deepEqual(await personaRun(pat, 'Review the draft.', opts, prepare), one);
+  assert.equal(doorTurns().length, turns + 1);
+});
+
+test('an unanswered required hand-off stays failed in the work history', async () => {
+  fake.door = body('failed');
+  const h = await L.handOff({
+    from: 'lead',
+    to: pat.id,
+    work: { title: 'Required price review', brief: 'Judge the ticket price.' },
+    thread: { title: 'The next fair' }
+  });
+  assert.ok('id' in h);
+  const f = (await L.startFollowUp(h.id))!;
+  const r = await followThrough(f);
+  assert.equal(r.outcome, 'failed');
+  assert.doesNotMatch(r.text, /Outcome: done$/);
+  await L.finishFollowUp(f, 'Required price review', r.outcome, r.text, { joined: r.joined });
+  const [saved] = await L.pg`select outcome, result from follow_ups where id = ${f.id}`;
+  assert.equal(saved.outcome, 'failed');
+  assert.match(saved.result, /could not answer/);
+  fake.door = { ...ANSWERED };
+});
+
+test('a restart with no saved preparation never repeats uncertain tool work', async () => {
+  const { personaRun } = await import('./persona-run.ts');
+  const key = randomUUID();
+  await L.beginConsultation({
+    key: `${pat.id}/pat/job/${key}`,
+    staffId: pat.id,
+    slug: 'pat',
+    kind: 'job',
+    asked: 'Prepare and review.',
+    required: true
+  });
+  let tools = 0;
+  const r = await personaRun(
+    pat,
+    'Prepare and review.',
+    { kind: 'job', timeoutMs: 10000, persona: { key, required: true } },
+    async () => {
+      tools++;
+      return { ok: true, text: 'Repeated.' };
+    }
+  );
+  assert.equal(r.ok, false);
+  assert.equal(r.consultation?.state, 'pending');
+  assert.equal(tools, 0);
+  assert.match(r.text, /Check the completed files/);
+});
+
+test('Retry on the saved chat message calls no preparation tools and keeps one owner turn', async () => {
+  fake.door = body('refused_budget', { refusal: { retryAfterSeconds: 30 } });
+  await talk('Review this once.');
+  const owner = history(pat.id).findLast((e) => e.from === 'owner')!;
+  assert.ok(owner.turnId);
+  fake.door = { ...ANSWERED };
+  const { replyToOwnerTurn } = await import('./chat-run.ts');
+  const tools: string[] = [];
+  await replyToOwnerTurn(pat.id, owner.turnId, (e) => {
+    if (e.type === 'tool') tools.push(e.name);
+  });
+  assert.deepEqual(tools, []);
+  const entries = history(pat.id).filter((e) => e.turnId === owner.turnId);
+  assert.equal(entries.filter((e) => e.from === 'owner').length, 1);
+  assert.equal(entries.filter((e) => e.failed).length, 1);
+  assert.equal(entries.at(-1)?.text, SAID);
+});
+
+test('an optional persona comment cannot undo a completed ordinary result', async () => {
+  const { personaRun } = await import('./persona-run.ts');
+  fake.door = body('failed');
+  const r = await personaRun(
+    pat,
+    'Acknowledge the completed save.',
+    {
+      kind: 'follow-up',
+      timeoutMs: 10000,
+      persona: { key: randomUUID(), required: false }
+    },
+    async () => ({ ok: true, text: 'The file was saved.\nOutcome: done' })
+  );
+  assert.equal(r.ok, true);
+  assert.equal(r.consultation?.state, 'failed');
+  assert.match(r.text, /Outcome: done$/);
+  fake.door = { ...ANSWERED };
+});
+
+test('Stop during persona judgment interrupts the call and keeps its preparation for retry', async () => {
+  const { personaRun } = await import('./persona-run.ts');
+  const stop = new AbortController();
+  let preparations = 0;
+  const opts = {
+    kind: 'chat' as const,
+    timeoutMs: 10000,
+    signal: stop.signal,
+    persona: { key: randomUUID(), required: true }
+  };
+  const prepare = async () => {
+    preparations++;
+    return { ok: true, text: 'Preparation remains.' };
+  };
+  const held = fake.hold('/pat/stream');
+  const pending = personaRun(pat, 'Review after preparation.', opts, prepare);
+  const release = await held;
+  stop.abort();
+  const stopped = await pending.finally(release);
+  assert.equal(stopped.interrupted, true);
+  assert.equal(stopped.ok, false);
+  const r = await personaRun(
+    pat,
+    'Review after preparation.',
+    { ...opts, signal: undefined },
+    prepare
+  );
+  assert.equal(r.ok, true);
+  assert.equal(preparations, 1);
 });
 
 test('when the door refuses access the owner still gets the report, the Odd goes quiet and runs nothing next time, and Reconnect signs in afresh', async () => {
@@ -336,7 +489,8 @@ test('when the door refuses access the owner still gets the report, the Odd goes
   const turns = doorTurns().length;
   const kept = history(pat.id).length;
   const quiet = await talk('Hello?');
-  assert.equal(handsRuns, runs);
+  assert.ok(!quiet.events.some((e) => e.type === 'tool'));
+  assert.equal(handsRuns, runs + 1); // The attempt still has one run-registry lifetime.
   assert.equal(doorTurns().length, turns);
   // A quiet Odd's chat ends as any failed chat does: the owner's line and the
   // quiet line stay, marked failed, so a reload shows both (NEW-1658).
@@ -349,5 +503,8 @@ test('when the door refuses access the owner still gets the report, the Odd goes
       { from: 'staff', text: QUIET_LINE.access('Pat'), failed: true }
     ]
   );
-  assert.deepEqual(quiet.events, [{ type: 'error', message: QUIET_LINE.access('Pat') }]);
+  assert.deepEqual(
+    quiet.events.filter((e) => e.type !== 'reply'),
+    [{ type: 'error', message: QUIET_LINE.access('Pat') }]
+  );
 });

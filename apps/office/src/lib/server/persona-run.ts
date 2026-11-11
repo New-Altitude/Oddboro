@@ -2,7 +2,18 @@
 // first, as its hands, then the persona answers through its door on New
 // Altitude, in its own voice. The door takes no tools, so what the hands found
 // reaches it as words. Every word the office sends the door is in this file.
-import { ownerName, setQuiet, type StaffRow } from '@oddboro/ledger';
+import { randomUUID } from 'node:crypto';
+import {
+  beginConsultation,
+  consultationState,
+  forgetFailedPreparation,
+  keepPersonaAnswer,
+  keepPersonaPreparation,
+  ownerName,
+  setQuiet,
+  type StaffRow,
+  type PersonaPreparation
+} from '@oddboro/ledger';
 import { QUIET_LINE } from '#lib/persona.ts';
 import { askPersona } from './persona.ts';
 import { PERSONA_MESSAGE_MAX, type DoorAnswer } from './persona-door.ts';
@@ -71,56 +82,128 @@ function note(name: string, a: Unanswered): string {
   }
 }
 
-/**
- * Run a persona Odd: a quiet one answers its quiet line and runs nothing.
- * Otherwise the hands run (`runTool`, passed in so this module needs nothing
- * of staff.ts's at load), and only their tool steps reach `onEvent`; then the
- * door answers. A door that does not answer still gets the owner the report,
- * under a note. A follow-up keeps the hands' Outcome line, after the voice.
- */
+/** Concurrent retries of one request share the answer, even from two page callbacks. */
+const answering = new Map<string, Promise<Run>>();
+
+/** Preparation and judgment finish separately. A saved request retries only its judgment. */
 export async function personaRun(
   who: StaffRow,
   message: string,
   opts: RunOpts & { kind: Voiced },
   runTool: (who: StaffRow, message: string, opts: RunOpts) => Promise<Run>
 ): Promise<Run> {
+  const key = `${who.id}/${who.package!.slug}/${opts.kind}/${opts.persona?.key ?? opts.runId ?? randomUUID()}`;
+  const pending = answering.get(key);
+  if (pending) return pending;
+  const done = consult(who, message, opts, runTool, key);
+  answering.set(key, done);
+  try {
+    return await done;
+  } finally {
+    if (answering.get(key) === done) answering.delete(key);
+  }
+}
+
+async function consult(
+  who: StaffRow,
+  message: string,
+  opts: RunOpts & { kind: Voiced },
+  runTool: (who: StaffRow, message: string, opts: RunOpts) => Promise<Run>,
+  key: string
+): Promise<Run> {
   const quiet = who.package?.quiet;
   if (quiet) {
-    const line = QUIET_LINE[quiet](who.name);
-    opts.onEvent?.({ type: 'error', message: line });
-    return { ok: false, text: line };
+    const text = QUIET_LINE[quiet](who.name);
+    opts.onEvent?.({ type: 'error', message: text });
+    return {
+      ok: false,
+      text,
+      consultation: {
+        key,
+        state: 'blocked',
+        reason: quiet === 'access' ? 'refused_access' : 'grant'
+      }
+    };
   }
-  const hands = await runTool(who, message, {
-    ...opts,
-    onEvent: (e) => void (e.type === 'tool' && opts.onEvent?.(e))
-  });
-  if (!hands.ok) {
-    opts.onEvent?.({ type: 'error', message: hands.text });
-    return hands;
-  }
-  const outcome = opts.kind === 'follow-up' ? OUTCOME_LINE.exec(hands.text) : null;
-  const report = outcome ? hands.text.slice(0, outcome.index).trim() : hands.text;
   const asked =
     opts.kind === 'chat'
       ? (opts.ownerSaid ?? message)
       : opts.kind === 'job'
         ? message
         : (opts.asked ?? message);
-  const answer = await askPersona(
-    who,
-    voiceMessage({ kind: opts.kind, owner: await ownerName(), asked, report }),
-    opts.kind === 'chat' ? { ownerSaid: asked } : undefined
-  );
-  let reply: string;
-  if (answer.outcome === 'answered')
-    reply = [answer.frame, answer.reply, answer.caveat].filter(Boolean).join('\n\n');
-  else {
-    reply = `${note(who.name, answer)}\n\n${report}`;
+  const { row, created } = await beginConsultation({
+    key,
+    staffId: who.id,
+    slug: who.package!.slug,
+    kind: opts.kind,
+    asked,
+    required: opts.persona?.required !== false
+  });
+  let preparation = row.preparation;
+  if (!preparation) {
+    if (!created)
+      return {
+        ok: false,
+        text: 'Preparation stopped before its report was saved. Check the completed files before starting this work again.',
+        consultation: { key, state: 'pending', reason: 'interrupted' }
+      };
+    const hands = await runTool(who, message, {
+      ...opts,
+      onEvent: (e) => void (e.type === 'tool' && opts.onEvent?.(e))
+    });
+    if (!hands.ok) {
+      await forgetFailedPreparation(key);
+      opts.onEvent?.({ type: 'error', message: hands.text });
+      return hands;
+    }
+    preparation = { text: hands.text, ...(hands.saved ? { saved: true } : {}) };
+    await keepPersonaPreparation(key, preparation);
+  }
+  let answer = row.answer;
+  if (answer?.outcome !== 'answered') {
+    const outcome = OUTCOME_LINE.exec(preparation.text);
+    const report = outcome ? preparation.text.slice(0, outcome.index).trim() : preparation.text;
+    answer = opts.signal?.aborted
+      ? { outcome: 'interrupted' }
+      : await askPersona(
+          who,
+          voiceMessage({ kind: opts.kind, owner: await ownerName(), asked, report }),
+          opts.kind === 'chat' ? { ownerSaid: asked } : undefined,
+          opts.signal
+        ).catch((): DoorAnswer => ({ outcome: 'failed' }));
+    await keepPersonaAnswer(key, answer);
     if (answer.outcome === 'refused_access') await setQuiet(who.id, 'access');
     if (answer.outcome === 'grant') await setQuiet(who.id, 'grant');
   }
-  const text = outcome ? `${reply}\n\n${outcome[0].trim()}` : reply;
+  return result(who.name, opts, key, preparation, answer);
+}
+
+function result(
+  name: string,
+  opts: RunOpts & { kind: Voiced },
+  key: string,
+  hands: PersonaPreparation,
+  answer: DoorAnswer
+): Run {
+  const outcome = OUTCOME_LINE.exec(hands.text);
+  const report = outcome ? hands.text.slice(0, outcome.index).trim() : hands.text;
+  const answered = answer.outcome === 'answered';
+  const ok = answered || opts.persona?.required === false;
+  const reply = answered
+    ? [answer.frame, answer.reply, answer.caveat].filter(Boolean).join('\n\n')
+    : `${note(name, answer)}\n\n${report}`;
+  // A required judgment that never arrived cannot keep the preparation's "done".
+  const text =
+    opts.kind === 'follow-up' && outcome
+      ? `${reply}\n\nOutcome: ${ok ? outcome[1].toLowerCase() : 'failed'}`
+      : reply;
   opts.onEvent?.({ type: 'delta', text: reply });
-  opts.onEvent?.({ type: 'done', text });
-  return { ok: true, text };
+  opts.onEvent?.(ok ? { type: 'done', text } : { type: 'error', message: text });
+  return {
+    ok,
+    text,
+    ...(hands.saved ? { saved: true } : {}),
+    ...(opts.signal?.aborted ? { interrupted: true } : {}),
+    consultation: { key, state: consultationState(answer), reason: answer.outcome }
+  };
 }

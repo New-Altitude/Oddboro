@@ -169,6 +169,13 @@
       "when": 1794383801750,
       "tag": "0023_project_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794384522958,
+      "tag": "0024_persona_consultations",
+      "breakpoints": true
     }
   ]
 }

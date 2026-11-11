@@ -907,3 +907,8 @@ This adds no database migration. Browsing requests use `ask_for_switch`.
 The owner connects one conversation and grants an Odd access to that conversation.
 `src/project-session-tools.ts` is the local Claude plugin entry.
 See `docs/project-sessions.md` for request recovery and native permissions.
+
+`src/persona-consultations.ts` keeps completed preparation and the persona's
+answer separately. The stable request key names the Odd, persona, run kind
+and source request. A retry reuses the saved preparation. A row with no
+preparation after a crash needs inspection before new work starts.

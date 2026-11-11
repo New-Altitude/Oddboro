@@ -226,6 +226,7 @@ export async function replyToOwnerTurn(
       ].join('\n\n');
       r = await run(who, prompt, {
         kind: 'chat',
+        persona: { key: turnId, required: true },
         runId: live.key,
         ownerSaid: message,
         literal: [
@@ -270,9 +271,10 @@ export async function replyToOwnerTurn(
       addToChat(id, { ...common, text, ...(choices.length ? { choices } : {}) });
       onEvent({ type: 'done', text, ...(choices.length ? { choices } : {}) });
     } else {
-      const signIn = usedTool
-        ? undefined
-        : await missingChatSignIn(who, r.text).catch(() => undefined);
+      const signIn =
+        usedTool || r.consultation
+          ? undefined
+          : await missingChatSignIn(who, r.text).catch(() => undefined);
       onEvent({ type: 'error', message: r.text, ...(signIn && { signIn }) });
       addToChat(id, {
         ...common,

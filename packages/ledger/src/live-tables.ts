@@ -25,6 +25,12 @@ export type LiveTable = {
 };
 
 export const LIVE_TABLES: Record<TableName, LiveTable> = {
+  persona_consultations: {
+    trigger: {
+      none: 'The run keeps this preparation and writes its result to chat, jobs or follow-ups.'
+    },
+    page: []
+  },
   project_requests: { trigger: 'all', page: ['refresh', 'version'] },
   project_sessions: { trigger: 'all', page: ['version'] },
   staff: { trigger: 'all', page: ['refresh'] },

@@ -1729,3 +1729,11 @@ The earlier failed reply stays in history. Access cards come from database
 deliveries, never the Odd's chat file.
 
 The Projects window and its local controller live in `src/lib/ui/ProjectSessions.svelte` and `src/lib/server/project-sessions/`. See [project sessions](../../docs/project-sessions.md) for native clients, handover and recovery.
+
+A required persona judgment is unsuccessful until the persona answers.
+`persona-run.ts` returns a structured consultation result and keeps the
+preparation through `persona-consultations.ts`. Chats use the saved turn ID;
+follow-ups use their existing ID. A new scheduled cycle gets a new key.
+Internal callers may set `RunOpts.persona.required` false only when the
+ordinary work itself is complete and the voice is optional commentary.
+Stop aborts a pending persona call and keeps completed preparation.

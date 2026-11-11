@@ -27,6 +27,7 @@ import type { FolderAccess, Level, OwnSwitch } from './access-words.ts';
 import type { GmailFilter } from './filter-words.ts';
 import type { MailAttachment } from './mail-attachments.ts';
 import type { PersonaLink } from './personas.ts';
+import type { PersonaAnswer, PersonaPreparation } from './persona-consultations.ts';
 
 const at = (name: string) => timestamp(name, { withTimezone: true });
 const created = (name = 'created_at') => at(name).notNull().defaultNow();
@@ -1112,3 +1113,18 @@ export const projectRequests = pgTable(
     index('project_requests_session').on(t.sessionId, t.createdAt)
   ]
 );
+
+/** One requested persona judgment, with completed preparation kept for a voice-only retry. */
+export const personaConsultations = pgTable('persona_consultations', {
+  key: text().primaryKey(),
+  staffId: text()
+    .notNull()
+    .references(() => staff.id),
+  slug: text().notNull(),
+  kind: text().$type<'chat' | 'job' | 'follow-up'>().notNull(),
+  asked: text().notNull(),
+  required: boolean().notNull().default(true),
+  preparation: jsonb().$type<PersonaPreparation>(),
+  answer: jsonb().$type<PersonaAnswer>(),
+  createdAt: created()
+});
