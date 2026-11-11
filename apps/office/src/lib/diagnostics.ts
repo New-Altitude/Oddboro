@@ -154,6 +154,7 @@ export const ROUTE_IDS = {
   '/api/pokes/[id]': true,
   '/api/project-sessions': true,
   '/api/project-reviews': true,
+  '/api/runtime': true,
   '/api/project-sessions/[id]/events': true,
   '/api/reports/[id]': true,
   '/api/rooms': true,

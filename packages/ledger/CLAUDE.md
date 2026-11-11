@@ -923,3 +923,7 @@ writer. `test/persona-requests.test.ts` holds the preserved and changed records.
 ## Project reviews
 
 `project-reviews.ts` keeps the approved source and persona answer. Returning it uses `requestProject` in the same transaction. `projectGoalSummaries` reads the existing session and request tables for goal cards. Migration 0026 adds the review and optional goal link without changing existing conversation IDs.
+
+## Runtime evidence
+
+`runtime.ts` keeps bounded checkpoints from the existing clock and reads the desktop shell’s declared runtime fields. It starts no timer and reads no work or secrets. `office_runtime` exposes the same read-only result; packaged `checkService` uses the shell’s login setting.

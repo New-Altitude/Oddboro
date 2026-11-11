@@ -14,6 +14,7 @@ import {
   currentPlatform,
   serviceInstalled
 } from './platform.ts';
+import { runtimeSummary } from './runtime.ts';
 import { secretStore } from './secrets.ts';
 
 export type Check = {
@@ -228,6 +229,27 @@ export async function checkDocker(): Promise<Check> {
 
 /** The login service that keeps the office running with no terminal open. */
 export async function checkService(): Promise<Check> {
+  if (process.env.ODDBORO_APP === '1') {
+    const runtime = runtimeSummary();
+    const enabled = runtime.desktop?.openAtLogin;
+    return {
+      id: 'service',
+      name: 'Open at login',
+      state: enabled === true ? 'ok' : 'optional',
+      found:
+        enabled === true
+          ? 'Enabled in the app'
+          : enabled === false
+            ? 'Off in the app'
+            : 'The app has not reported its login setting',
+      ...(enabled === true
+        ? {}
+        : {
+            fix: 'Use Open at login in Oddboro’s menu bar or tray menu. The app supervises its own server; no development login service is needed.'
+          })
+    };
+  }
+
   return (await serviceInstalled('com.oddboro.office'))
     ? { id: 'service', name: 'Login service', state: 'ok', found: 'The office starts at login' }
     : {

@@ -118,12 +118,19 @@ impl Server {
                 if QUITTING.load(SeqCst) {
                     return Ok(());
                 }
-                self.spawn().map_err(GaveUp::CouldNotStart)?
+                self.spawn().map_err(|e| {
+                    crate::runtime::event(
+                        "start_failed",
+                        serde_json::json!({"state": "failed", "restartReason": "could_not_start"}),
+                    );
+                    GaveUp::CouldNotStart(e)
+                })?
             };
             note(&self.log, &format!("started node, pid {}", child.id()));
 
             let status = match wait_ready(&mut child, self.port) {
                 Ready::Answered => {
+                    crate::runtime::ready();
                     on_ready();
                     child.wait()
                 }
@@ -131,9 +138,17 @@ impl Server {
                 Ready::TimedOut => {
                     terminate(&mut child);
                     mark_gone();
+                    crate::runtime::stopped(false);
+                    crate::runtime::event(
+                        "ready_timeout",
+                        serde_json::json!({"state": "failed", "restartReason": "ready_timeout"}),
+                    );
                     return Err(GaveUp::NoAnswer);
                 }
             };
+            crate::runtime::stopped(
+                QUITTING.load(SeqCst) && status.as_ref().is_ok_and(|s| s.success()),
+            );
             mark_gone();
             if QUITTING.load(SeqCst) {
                 return Ok(());
@@ -144,10 +159,18 @@ impl Server {
 
             restarts.retain(|t| t.elapsed() < RESTART_WINDOW);
             if restarts.len() >= MAX_RESTARTS {
+                crate::runtime::event(
+                    "restart_limit",
+                    serde_json::json!({"state": "exhausted", "restartReason": "restart_limit", "exitCode": code}),
+                );
                 return Err(GaveUp::KeptStopping { code });
             }
             let delay = BACKOFF[restarts.len().min(BACKOFF.len() - 1)];
             restarts.push_back(Instant::now());
+            crate::runtime::event(
+                "restart_planned",
+                serde_json::json!({"state": "restarting", "restartReason": "node_exit", "exitCode": code, "restartDelaySeconds": delay}),
+            );
             note(&self.log, &format!("restarting node in {delay}s"));
             sleep(Duration::from_secs(delay));
         }
@@ -222,6 +245,10 @@ impl Server {
             thread::spawn(move || relay(out, log));
         }
         NODE_PID.store(child.id() as i32, SeqCst);
+        crate::runtime::event(
+            "node_started",
+            serde_json::json!({"state": "starting", "nodePid": child.id()}),
+        );
         keep_awake(child.id());
         Ok(child)
     }
@@ -252,6 +279,7 @@ pub fn stop() {
     if pid <= 0 {
         return;
     }
+    crate::runtime::event("quit_requested", serde_json::json!({"state": "stopping"}));
     ask_to_quit(pid);
     if !wait_gone(STOP_TIMEOUT) {
         kill_now(pid);
@@ -413,8 +441,15 @@ fn keep_awake(pid: u32) {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn();
-    if let Ok(mut caffeinate) = spawned {
-        thread::spawn(move || caffeinate.wait());
+    match spawned {
+        Ok(mut caffeinate) => {
+            crate::runtime::power(pid, "requested");
+            thread::spawn(move || {
+                let _ = caffeinate.wait();
+                crate::runtime::power(pid, "ended");
+            });
+        }
+        Err(_) => crate::runtime::power(pid, "failed"),
     }
 }
 
@@ -431,7 +466,7 @@ static AWAKE: Mutex<Option<Child>> = Mutex::new(None);
 /// Keeps the computer from sleeping on its own while Node runs. Closing a
 /// laptop's lid still suspends it: logind ignores this lock for the lid.
 #[cfg(target_os = "linux")]
-fn keep_awake(_pid: u32) {
+fn keep_awake(pid: u32) {
     let spawned = Command::new("systemd-inhibit")
         .args([
             "--what=sleep",
@@ -444,8 +479,12 @@ fn keep_awake(_pid: u32) {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn();
-    if let Ok(child) = spawned {
-        *AWAKE.lock().unwrap_or_else(|e| e.into_inner()) = Some(child);
+    match spawned {
+        Ok(child) => {
+            crate::runtime::power(pid, "requested");
+            *AWAKE.lock().unwrap_or_else(|e| e.into_inner()) = Some(child);
+        }
+        Err(_) => crate::runtime::power(pid, "failed"),
     }
 }
 
@@ -467,14 +506,15 @@ static AWAKE: Mutex<Option<std::sync::mpsc::Sender<()>>> = Mutex::new(None);
 /// Keeps the computer from sleeping on its own while Node runs. Closing a
 /// laptop's lid still sleeps it, as the lid's own setting says.
 #[cfg(windows)]
-fn keep_awake(_pid: u32) {
+fn keep_awake(pid: u32) {
     use windows_sys::Win32::System::Power::{
         SetThreadExecutionState, ES_CONTINUOUS, ES_SYSTEM_REQUIRED,
     };
     let (held, released) = std::sync::mpsc::channel::<()>();
     thread::spawn(move || {
         // SAFETY: SetThreadExecutionState takes flags and touches no memory.
-        unsafe { SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED) };
+        let previous = unsafe { SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED) };
+        crate::runtime::power(pid, if previous == 0 { "failed" } else { "requested" });
         // Returns when the sender drops.
         let _ = released.recv();
         // SAFETY: as above.

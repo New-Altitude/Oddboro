@@ -23,3 +23,5 @@ Each line says what to do when its trigger comes.
 
 - `persona-recovery.md`: current review guide for connecting an existing request and explicitly converting an ordinary Odd.
 - `project-reviews.md`. Current review guide for selected persona context and return to the original native conversation.
+
+- `runtime-evidence.md`. Current review guide for desktop state, clock gaps and installed-app acceptance.

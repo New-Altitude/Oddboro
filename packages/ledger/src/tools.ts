@@ -29,6 +29,12 @@ export type OfficeTool = {
 
 const TOOLS = [
   {
+    id: 'office_runtime',
+    name: 'Office runtime',
+    does: 'Reads bounded startup, clock, restart and sleep-prevention evidence before investigating an outage.',
+    always: true
+  },
+  {
     id: 'my_project_sessions',
     name: 'Shared projects',
     does: 'Reads assignments and answers in the native conversations you shared with it.',

@@ -8,6 +8,10 @@
 // job: a due one waits and runs once the app is back.
 import {
   claimScheduledRun,
+  startClockEvidence,
+  checkedClock,
+  failedClock,
+  stoppedClock,
   closeStaleRuns,
   enabledJobs,
   finishRun,
@@ -40,28 +44,47 @@ async function plan(): Promise<void> {
   const revision = ++clock.revision;
   const now = new Date();
   let soonest = now.getTime() + LONGEST_WAIT_MS;
-  for (const j of await enabledJobs()) {
-    if (!j.nextRunAt) {
-      await setNextRun(j.id, nextRun(j.schedule, now));
-      continue;
+  try {
+    for (const j of await enabledJobs()) {
+      if (!j.nextRunAt) {
+        await setNextRun(j.id, nextRun(j.schedule, now));
+        continue;
+      }
+      if (j.nextRunAt <= now) {
+        if (!held(now)) void start(j, 'schedule');
+      } else soonest = Math.min(soonest, j.nextRunAt.getTime());
     }
-    if (j.nextRunAt <= now) {
-      if (!held(now)) void start(j, 'schedule');
-    } else soonest = Math.min(soonest, j.nextRunAt.getTime());
+    for (const p of await waitingPokes()) {
+      if (p.at <= now) void deliverPoke(p);
+      else soonest = Math.min(soonest, p.at.getTime());
+    }
+    for (const t of await parkedThreads()) {
+      // A failed wake leaves the time set, so the clock's next look tries again.
+      if (t.resumeAt <= now)
+        void wakeThread(t.id).catch((e: unknown) =>
+          console.error(`Thread ${t.id} did not wake:`, e)
+        );
+      else soonest = Math.min(soonest, t.resumeAt.getTime());
+    }
+    if (g.jobClock !== clock || clock.revision !== revision) return;
+    try {
+      checkedClock(Date.now(), soonest);
+    } catch {
+      /* Runtime evidence must not stop the clock. */
+    }
+  } catch (e) {
+    console.error('The office clock could not check scheduled work:', e);
+    try {
+      failedClock();
+    } catch {
+      /* Runtime evidence must not stop the clock. */
+    }
+    soonest = Date.now() + 30_000;
+  } finally {
+    if (g.jobClock !== clock || clock.revision !== revision) return;
+    clearTimeout(clock.timer);
+    clock.timer = setTimeout(() => void plan(), Math.max(1000, soonest - Date.now()));
   }
-  for (const p of await waitingPokes()) {
-    if (p.at <= now) void deliverPoke(p);
-    else soonest = Math.min(soonest, p.at.getTime());
-  }
-  for (const t of await parkedThreads()) {
-    // A failed wake leaves the time set, so the clock's next look tries again.
-    if (t.resumeAt <= now)
-      void wakeThread(t.id).catch((e: unknown) => console.error(`Thread ${t.id} did not wake:`, e));
-    else soonest = Math.min(soonest, t.resumeAt.getTime());
-  }
-  if (g.jobClock !== clock || clock.revision !== revision) return;
-  clearTimeout(clock.timer);
-  clock.timer = setTimeout(() => void plan(), Math.max(1000, soonest - Date.now()));
 }
 
 /**
@@ -101,10 +124,22 @@ export function startClock(): () => void {
     clearTimeout(g.jobClock?.timer);
     bus.off('event', changed);
     delete g.jobClock;
+    try {
+      stoppedClock();
+    } catch {
+      /* Runtime evidence is best effort. */
+    }
   };
   g.jobClock = { stop, revision: 0 };
+  try {
+    startClockEvidence();
+  } catch {
+    /* Runtime evidence is best effort. */
+  }
   listen();
   bus.on('event', changed);
-  void closeStaleRuns().then(plan);
+  void closeStaleRuns()
+    .catch((e: unknown) => console.error('Could not close stale runs:', e))
+    .then(plan);
   return stop;
 }

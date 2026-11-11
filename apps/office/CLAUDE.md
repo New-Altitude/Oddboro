@@ -1750,3 +1750,7 @@ See `docs/persona-recovery.md` for the conversion and review checks.
 ## Persona reviews in native projects
 
 `server/project-review-source.ts` bounds the owner-selected text and records its revision. `server/project-reviews.ts` calls the existing persona runner with an exact message. Interrupted consultations do not repeat; a saved answer can be recovered. `ProjectReviews.svelte` previews the message in Projects, and `GoalProjects.svelte` shows the same session records on a goal. See `docs/project-reviews.md` for the review and live acceptance checks.
+
+## Runtime diagnosis
+
+`RuntimeStatus.svelte` reads `/api/runtime` when Setup opens or the owner refreshes it. The existing `jobs.ts` clock records successful checks and retries a failed read after thirty seconds. A gap keeps its unknown cause. See `docs/runtime-evidence.md`.

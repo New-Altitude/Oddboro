@@ -1,4 +1,5 @@
 <script lang="ts">
+  import RuntimeStatus from './RuntimeStatus.svelte';
   import { modelSection } from '@oddboro/ledger/access';
   import type { Check } from '@oddboro/ledger/checks';
   import AccountSection from './AccountSection.svelte';
@@ -93,6 +94,7 @@
   </header>
 
   <div class="flex flex-1 flex-col gap-5 overflow-y-auto p-3 text-sm">
+    {#if welcomed}<RuntimeStatus />{/if}
     <section class="flex flex-col gap-2">
       <h3 class="text-xs tracking-[0.16em] text-sea uppercase">1 · You</h3>
       <label class="flex flex-col gap-1">

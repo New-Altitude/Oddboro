@@ -7,6 +7,7 @@
 
 mod diagnostics;
 mod env;
+mod runtime;
 mod secrets;
 mod server;
 mod update;
@@ -56,6 +57,11 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let handle = app.handle().clone();
+            runtime::event(
+                "shell_started",
+                serde_json::json!({"state": "starting", "nodePid": 0}),
+            );
+            runtime::login(handle.autolaunch().is_enabled().ok());
             let quitting = handle.clone();
             server::on_quit_signal(move || quitting.exit(0));
             // A Linux desktop may have no tray (GNOME without an extension).
@@ -417,7 +423,9 @@ fn toggle_open_at_login(app: &AppHandle, item: &CheckMenuItem<tauri::Wry>) {
     } else {
         launcher.enable()
     };
-    let _ = item.set_checked(launcher.is_enabled().unwrap_or(false));
+    let enabled = launcher.is_enabled().ok();
+    runtime::login(enabled);
+    let _ = item.set_checked(enabled.unwrap_or(false));
 }
 
 /// Shows an error. Only call it off the main thread: it waits for OK.

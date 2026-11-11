@@ -18,6 +18,7 @@ export function officeCapabilities(s: {
       (o) =>
         `Installed persona: ${o.slug}, Odd ${o.id}, ${o.quiet ? `waiting: ${o.quiet}` : 'connected'}.`
     ),
+    'Before reporting a runtime outage, use office_runtime. Distinguish an observed clock gap from a proven cause. The packaged app supervises its server; do not prescribe the repository login-service command.',
     'Use request_persona to put account sign-in and offered persona choices in this conversation. Keep the original goal and continuation. Never infer a package from an ordinary Odd name or search private settings for service addresses.',
     'Only the owner maps an ordinary Odd to an offered persona. Its ID, chat and files stay; its previous instructions are retained and access must be granted again. An absent offer is unavailable, not connected.',
     'For an existing outside-tool sign-in failure, use ask_for_access and its existing reconnect task. A prose checklist cannot prove a connection. The owner can review and withdraw a superseded checklist on the connection card.',

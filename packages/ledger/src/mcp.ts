@@ -4,6 +4,7 @@
 // the tools the owner granted that staffer (tools.ts), so the rest do not exist.
 //
 //   node packages/ledger/src/mcp.ts      (stdio; the office starts it)
+import { runtimeSummary } from './runtime.ts';
 import { realpathSync, statSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { McpServer, type ToolCallback } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -626,6 +627,17 @@ const line = (r: LedgerRow) =>
 
 // Connections are granted one at a time by the owner. An Odd can never
 // start a native process or type terminal keys through these tools.
+if (offered('office_runtime'))
+  tool(
+    'office_runtime',
+    {
+      description:
+        'Read local desktop and clock evidence before asking the owner to investigate an outage. A missed check does not prove sleep, network failure or continuous research coverage. This tool changes nothing.',
+      inputSchema: {}
+    },
+    async () => json(runtimeSummary())
+  );
+
 if (offered('my_project_sessions'))
   tool(
     'my_project_sessions',

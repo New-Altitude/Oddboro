@@ -464,3 +464,7 @@ Each line says what to do when its trigger comes.
 - `tauri-plugin-single-instance` 2.5.3 (Linux and Windows)
 - `zbus` 5.19.0 (Linux only; the plugin brings the same zbus)
 - `windows-sys` 0.61.2, `tauri-winrt-notification` 0.8.1 (Windows only)
+
+## Local runtime evidence
+
+`src-tauri/src/runtime.rs` records bounded native event names and state in the office home’s `runtime/desktop.json`. The existing shell supplies startup, login-state checks, Node readiness, restart, power-request and requested clean-exit evidence. It adds no timer or page IPC. The server reads declared fields only; see `docs/runtime-evidence.md`.
