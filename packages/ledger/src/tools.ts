@@ -53,6 +53,18 @@ const TOOLS = [
     does: 'Asks you to turn on Run commands or Browse the web for it. You turn it on with one click.',
     always: true
   },
+  {
+    id: 'ask_for_level',
+    name: 'Ask for a higher level',
+    does: 'Asks you to raise its level. You raise it with one click.',
+    always: true
+  },
+  {
+    id: 'ask_for_office_tool',
+    name: 'Ask for office tools',
+    does: 'Asks you to turn on office tools it needs. You turn them on with one click.',
+    always: true
+  },
   { id: 'my_jobs', name: 'Its jobs', does: 'Sees its own jobs and schedules.', always: true },
   {
     id: 'leave_office',

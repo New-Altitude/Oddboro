@@ -681,6 +681,20 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   tool can no longer run commands, with one ledger line in the Settings tab's
   words and its network note, and starts one `carry_out` per place
   (`carryOutTogether`). `test/switch-asks.test.ts` holds it, the tool included.
+- A `level` ask carries the level an Odd asks for in `asks.level`, raised by
+  `ask_for_level`, and an `office_tool` ask the office tools it asks for in
+  `asks.office_tools`, raised by `ask_for_office_tool`. Every Odd has both
+  (`always`), the Office Manager and persona Odds included. The level tool
+  refuses a level the Odd holds already or passed; the office tool tool takes
+  only tools the Settings tab grants (`GRANTABLE_TOOLS`), leaves out ones the
+  Odd has, and refuses when it has them all. `raiseAsk` treats one from
+  another place asking no more as a twin (`asksNoMore`). A plain approve makes
+  the Settings tab's own change (`grantSetting`: `changeLevel` or
+  `changeTools`) in the transaction that approves it, with the Settings tab's
+  ledger words. A yes never lowers a level set higher since, and starts
+  one `carry_out` per place (`carryOutTogether`); after a raise to Act, a
+  colleague's hand-off and a thread picked back up still run at Draft at
+  most. `test/setting-asks.test.ts` holds it, the tools included.
 - A `call` ask carries one held call in `asks.call` (`HeldCall`: the
   connector, the tool and its exact arguments), raised by the office's gateway
   (`raiseCall`) when an Odd at Draft calls a tool that changes something
@@ -773,7 +787,11 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   checker then names every other place.
   - To add an ask kind, start at `ASK_KINDS` in `src/schema.ts`, then its row
     in `OWNER_ANSWERS` (`src/desk-answers.ts`), which says what each answer
-    does.
+    does. The type checker then names the rest: `TWINS`, the repeat guard's
+    switch in `raiseAsk` and `grantSetting` (`src/office.ts`), the office's
+    `carriedLinesOf` and `carryOutBrief` switches (`follow-up-brief.ts`),
+    `YES_SAID` (`src/lib/ui/yes-said.ts`), and the `ASK_ROWS` record in the
+    office's `named-tools.test.ts`.
   - To add a follow-up kind, start at `FOLLOW_UP_KINDS` in `src/schema.ts`,
     then its rows in `AT_DRAFT` and `SERVES_NO_THREAD` (`src/hand-offs.ts`).
   - To add a connector kind, start at `CONNECTOR_KINDS` in `src/schema.ts`.

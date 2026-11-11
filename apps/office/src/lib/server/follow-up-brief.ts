@@ -7,7 +7,8 @@ import {
   FOLDER_SAID,
   goalWhen,
   home,
-  modelSection,
+  LEVEL_NAME,
+  officeToolsSaid,
   shownFolder,
   SWITCH_NAMES,
   switchesSaid,
@@ -154,7 +155,7 @@ function goalBrief(f: FollowUpRow, r?: ReportRow, g?: GoalRow): string[] {
     ...(g.doneWhen ? [`- Done when: ${g.doneWhen}`] : []),
     '',
     '1. Read the office: office_report for each Odd, what it does, its level and the tools it holds or is waiting on, and list_goals for the goals they already serve.',
-    `2. Work out who does what, how often, and with which tools (find_connectors). Give the work to Odds already here when one fits, with a new job or a change to one. Give a part to an Odd whose level and tools cover it. For a tool an Odd lacks, put any level raise in owner_steps, as a step on ${modelSection("that Odd's")}. Have the Odd ask for the tool itself with ask_for_access when its officeTools include it, or put connecting it in owner_steps when they do not. For ${SWITCH_NAMES.commands} or ${SWITCH_NAMES.web}, never put switching it on in owner_steps: the Odd asks for it itself with ask_for_switch when its part needs it, and office_report says whether {owner} can switch it on for that Odd. Keep every other step only {owner} can do in owner_steps too. Hire only for work nobody here fits.`,
+    `2. Work out who does what, how often, and with which tools (find_connectors). Give the work to Odds already here when one fits, with a new job or a change to one. Give a part to an Odd whose level and tools cover it. Never put a level raise or an office tool in owner_steps: the Odd asks for it itself with ask_for_level or ask_for_office_tool when its part needs it. For an outside tool an Odd lacks, have the Odd ask for it itself with ask_for_access when its officeTools include it, or put connecting it in owner_steps when they do not. For ${SWITCH_NAMES.commands} or ${SWITCH_NAMES.web}, never put switching it on in owner_steps: the Odd asks for it itself with ask_for_switch when its part needs it, and office_report says whether {owner} can switch it on for that Odd. Keep every other step only {owner} can do in owner_steps too. Hire only for work nobody here fits.`,
     '3. If you need answers from {owner} before you can plan it, write the questions to a file in your folder, put it on their desk with give_owner_a_task, attached, then stop. You pick up when they finish it.',
     "4. Otherwise bring the whole plan in one ask with propose_goal_plan. Write each hire's job description to a file first, and pass any intake as its intake_file.",
     '5. Once {owner} approves the plan, you pick up here on the goal and lead the work: you hand each piece to the Odd who does it. So its owner steps hold only what truly needs {owner}, such as signing in to a tool, never passing work or a request to an Odd.',
@@ -233,6 +234,12 @@ function carriedLinesOf(a: AskRow): string[] {
         : [];
     case 'switch':
       return a.switches?.length ? [`- What you asked to turn on: ${switchesSaid(a.switches)}`] : [];
+    case 'level':
+      return a.level ? [`- The level you asked for: ${LEVEL_NAME[a.level]}`] : [];
+    case 'office_tool':
+      return a.officeTools?.length
+        ? [`- What you asked to turn on: ${officeToolsSaid(a.officeTools)}`]
+        : [];
     case 'call':
       return a.call
         ? [
@@ -307,6 +314,36 @@ function carryOutBrief(f: FollowUpRow, a: AskRow | undefined, also: AskRow[]): s
         '1. If work was waiting on it, do it now.',
         '2. If nothing was waiting, stop there.'
       ];
+    case 'level':
+      if (!a.level) return approved();
+      return [
+        `{owner} approved your ask #${a.id} for the ${LEVEL_NAME[a.level]} level, and this run has it.`,
+        // A colleague's hand-off and a thread's pick-up run at Draft at most, whatever the Odd's level.
+        ...(a.level === 'act'
+          ? [
+              'Work a colleague hands you, and a thread you pick back up, still runs at Draft at most.'
+            ]
+          : []),
+        ...alsoAnswers('level'),
+        '',
+        ...askLines,
+        `- Their reason: ${a.reason ?? 'none given'}`,
+        '',
+        '1. If work was waiting on it, do it now.',
+        '2. If nothing was waiting, stop there.'
+      ];
+    case 'office_tool':
+      if (!a.officeTools?.length) return approved();
+      return [
+        `{owner} approved your ask #${a.id} and turned on ${officeToolsSaid(a.officeTools)} for you. This run has ${a.officeTools.length > 1 ? 'them' : 'it'}.`,
+        ...alsoAnswers('office tools'),
+        '',
+        ...askLines,
+        `- Their reason: ${a.reason ?? 'none given'}`,
+        '',
+        '1. If work was waiting on it, do it now.',
+        '2. If nothing was waiting, stop there.'
+      ];
     case 'access':
       if (!a.access) return approved();
       return [
@@ -368,7 +405,7 @@ function reworkBrief(f: FollowUpRow, a?: AskRow): string[] {
     `- What they want changed: ${f.note}`,
     '',
     '1. Do any work the new version needs first, such as rewriting a file in your folder.',
-    `2. Raise the new version with the same tool as before (raise_ask, propose_reply, propose_filter, propose_hire, ask_for_access, ask_for_folder, ask_for_switch, propose_goal or propose_goal_plan), or the one their note calls for, passing revises: ${a?.id}.`,
+    `2. Raise the new version with the same tool as before (raise_ask, propose_reply, propose_filter, propose_hire, ask_for_access, ask_for_folder, ask_for_switch, ask_for_level, ask_for_office_tool, propose_goal or propose_goal_plan), or the one their note calls for, passing revises: ${a?.id}.`,
     '3. Do not carry out the ask itself. They decide the new version.'
   ];
 }

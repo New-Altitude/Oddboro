@@ -71,6 +71,10 @@ export const askReplaced = (a: { status: AskStatus; reason: string | null }): bo
  * - `turn_on`: the switches the ask names turned on with the yes
  *   (`turnOnSwitches`), and the work that waited on them starts, once for each
  *   place a result goes back to.
+ * - `grant_setting`: the level or office tools the ask names change with the
+ *   yes, as the Settings tab changes them (`changeLevel`, `changeTools`), and
+ *   the work that waited on them starts, once for each place a result goes
+ *   back to.
  * - `start_held`: the hand-off the ask held starts, as the ask is claimed.
  * - `answer_window`: the usage window's answer (`answerWindow`).
  * - `answer_hand_offs`: the yes or no to more hand-offs goes to the thread's hub
@@ -92,6 +96,7 @@ export type Effect =
   | 'grant_access'
   | 'give_folder'
   | 'turn_on'
+  | 'grant_setting'
   | 'start_held'
   | 'answer_window'
   | 'answer_hand_offs'
@@ -196,6 +201,9 @@ export const OWNER_ANSWERS = {
     },
     // Plain Approve is the desk's Turn on.
     switch: { approve: ['turn_on'], deny: NO, iterate: REWORK },
+    // Plain Approve is the desk's Raise to (level) or Turn on.
+    level: { approve: ['grant_setting'], deny: NO, iterate: REWORK },
+    office_tool: { approve: ['grant_setting'], deny: NO, iterate: REWORK },
     call: {
       approve: { by: 'Approve the call from its card on the desk', then: ['carry_out'] },
       deny: NO,

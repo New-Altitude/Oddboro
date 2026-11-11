@@ -85,6 +85,15 @@ const ASK_ROWS: Record<AskKind, object[]> = {
     }
   ],
   switch: [{ ...asked, kind: 'switch', status: 'approved', switches: ['commands', 'web'] }],
+  level: [{ ...asked, kind: 'level', status: 'approved', level: 'act' }],
+  office_tool: [
+    {
+      ...asked,
+      kind: 'office_tool',
+      status: 'approved',
+      officeTools: ['office_report', 'list_goals']
+    }
+  ],
   call: [
     {
       ...asked,

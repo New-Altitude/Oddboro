@@ -24,6 +24,7 @@ import type { FolderAccess, Level, OwnSwitch } from './access-words.ts';
 import type { GmailFilter } from './filter-words.ts';
 import type { MailAttachment } from './mail-attachments.ts';
 import type { PersonaLink } from './personas.ts';
+import type { OfficeToolId } from './tools.ts';
 
 const at = (name: string) => timestamp(name, { withTimezone: true });
 const created = (name = 'created_at') => at(name).notNull().defaultNow();
@@ -106,7 +107,10 @@ export type AccountRow = typeof accounts.$inferSelect;
  * changes something, held by the gateway for an Odd at Draft (`asks.call`):
  * on the owner's yes the office makes that exact call. `switch` asks for the
  * owner's Run commands or Browse the web switch, or both (`asks.switches`):
- * the owner's yes turns them on. `remove` asks to let an Odd go (`asks.odd`):
+ * the owner's yes turns them on. `level` asks for a higher level (`asks.level`)
+ * and `office_tool` for office tools the owner grants (`asks.officeTools`): the
+ * owner's yes makes the Settings tab's own change (`changeLevel`, `changeTools`).
+ * `remove` asks to let an Odd go (`asks.odd`):
  * an Odd asking to leave names itself, and the Office Manager names another.
  * `bring_back` is the manager's ask to bring back an Odd that left. The owner's
  * yes does it (`removeOdd`, `bringBack`).
@@ -123,6 +127,8 @@ export const ASK_KINDS = [
   'filter',
   'folder',
   'switch',
+  'level',
+  'office_tool',
   'call',
   'remove',
   'bring_back'
@@ -329,6 +335,10 @@ export const asks = pgTable('asks', {
   call: jsonb().$type<HeldCall>(),
   /** A switch ask's switches, Run commands or Browse the web, to turn on (`ask_for_switch`). */
   switches: jsonb().$type<OwnSwitch[]>(),
+  /** A level ask's level, above the Odd's own when it asked (`ask_for_level`). */
+  level: text().$type<Level>(),
+  /** An office_tool ask's office tools, ones the Settings tab grants (`ask_for_office_tool`). */
+  officeTools: text().array().$type<OfficeToolId[]>(),
   /** A remove or bring_back ask's Odd (a staff id). */
   odd: text(),
   /** The ask this one reworks, after the owner sent that one back. */

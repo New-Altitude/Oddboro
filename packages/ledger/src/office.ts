@@ -126,6 +126,7 @@ import {
   officeToolsSaid,
   ON_BY_DEFAULT,
   tickable,
+  type OfficeToolId,
   yesOrNo
 } from './tools.ts';
 import { HIRE_DEFAULTS } from './grantable.ts';
@@ -1235,6 +1236,10 @@ export async function raiseAsk(
     folder?: FolderRequest;
     /** A switch ask's switches (`ask_for_switch`). */
     switches?: OwnSwitch[];
+    /** A level ask's level (`ask_for_level`). */
+    level?: Level;
+    /** An office_tool ask's office tools (`ask_for_office_tool`). */
+    officeTools?: OfficeToolId[];
     /** A call ask's held call, from the gateway (`holdCall` in the office's gateway.ts). */
     call?: HeldCall;
     /** A remove or bring_back ask's Odd (leaving.ts). */
@@ -1263,8 +1268,8 @@ export async function raiseAsk(
   const ask = await db.transaction(async (tx) => {
     // An Odd's own ask may not repeat one on the desk, a reply may not
     // answer an email twice, and a filter may not file the same mail twice.
-    // A folder or switch ask may not repeat one from the same place. Access
-    // asks have twins instead (`asksNoMore`), and the rest are the office's
+    // A folder or switch ask may not repeat one from the same place. Access,
+    // level and office tool asks have twins instead (`asksNoMore`), and the rest are the office's
     // own or checked where they are made. The office raises `hand_offs` and
     // `window` asks itself, never through here. A new kind fails the type
     // check here until it says which.
@@ -1297,6 +1302,8 @@ export async function raiseAsk(
         await refuseSecondSwitch(tx, staffId, { ...a, switches: a.switches });
         break;
       case 'access':
+      case 'level':
+      case 'office_tool':
       case 'hire':
       case 'plan':
       case 'call':
@@ -1369,8 +1376,8 @@ type Twin = {
 };
 
 /**
- * Which kinds of ask have twins, and how: an outside tool, a folder, and
- * switches. Two runs of one Odd can each find one missing at once, and each
+ * Which kinds of ask have twins, and how: an outside tool, a folder,
+ * switches, a level and office tools. Two runs of one Odd can each find one missing at once, and each
  * raises its own ask. Every other kind is null: an Odd's own words may not
  * repeat (`raiseAsk`), and the office raises its own once. A new kind fails
  * the type check here until it says which.
@@ -1397,6 +1404,16 @@ const TWINS = {
   switch: {
     noMore: (first, later) => (later.switches ?? []).every((s) => first.switches?.includes(s)),
     same: (a, b) => (b.switches ?? []).every((s) => a.switches?.includes(s))
+  },
+  level: {
+    noMore: (first, later) =>
+      !!first.level && !!later.level && levelAtMost(later.level, first.level),
+    same: () => true
+  },
+  office_tool: {
+    noMore: (first, later) =>
+      (later.officeTools ?? []).every((t) => first.officeTools?.includes(t)),
+    same: (a, b) => (b.officeTools ?? []).every((t) => a.officeTools?.includes(t))
   },
   approval: null,
   hire: null,
@@ -1642,6 +1659,47 @@ async function turnOnSwitches(
 }
 
 /**
+ * Make the change a level or office tool ask asked for, in `tx`, with the
+ * yes, or neither happens: the Settings tab's own change (`changeLevel`,
+ * `changeTools`), with its ledger title. A level the Odd already holds or
+ * passed stays as it is, so a yes never undoes a higher level set since, and
+ * tools already on stay on; either still starts the work (`{}`). Nothing for
+ * any other kind, or when the Odd is gone. A new kind fails the type check
+ * here until it says which.
+ */
+async function grantSetting(tx: Tx, claimed: AskRow): Promise<{ title?: string } | undefined> {
+  switch (claimed.kind) {
+    case 'level': {
+      if (!claimed.level) throw fixedError('This ask names no level');
+      const before = await staffer(claimed.staffId, tx);
+      if (!before) return;
+      if (levelAtMost(claimed.level, before.permission)) return {};
+      return changeLevel(tx, claimed.staffId, claimed.level);
+    }
+    case 'office_tool':
+      if (!claimed.officeTools?.length) throw fixedError('This ask names no office tool');
+      return (await changeTools(tx, claimed.staffId, claimed.officeTools, true)) ?? {};
+    case 'approval':
+    case 'access':
+    case 'hire':
+    case 'goal':
+    case 'plan':
+    case 'hand_offs':
+    case 'window':
+    case 'reply':
+    case 'filter':
+    case 'folder':
+    case 'switch':
+    case 'call':
+    case 'remove':
+    case 'bring_back':
+      return;
+    default:
+      claimed.kind satisfies never;
+  }
+}
+
+/**
  * The owner gives the folder a folder ask asked for, or a narrower one, at
  * the level they pick: `path` as typed or picked, checked as the Settings tab
  * checks it (`checkFolder`). The folder is given (`changeFolder`, as
@@ -1733,7 +1791,7 @@ async function decide(
   }
   const status = decision === 'approve' ? 'approved' : decision === 'deny' ? 'denied' : 'revise';
   const at = new Date();
-  const { ask, twins, turned } = await db.transaction(async (tx) => {
+  const { ask, twins, turned, granted } = await db.transaction(async (tx) => {
     const [claimed] = await tx
       .update(asks)
       .set({
@@ -1764,6 +1822,8 @@ async function decide(
       claimed?.kind === 'switch' && decision === 'approve'
         ? await turnOnSwitches(tx, claimed)
         : undefined;
+    // The level or office tools change with the yes, or neither happens.
+    const granted = claimed && decision === 'approve' ? await grantSetting(tx, claimed) : undefined;
     // A yes or a no answers the twins too, at the same moment (`answeredWith`).
     // Sending one back leaves them waiting for the new version's answer.
     const open =
@@ -1787,7 +1847,7 @@ async function decide(
           .where(and(inArray(asks.id, ids), eq(asks.status, 'open')))
           .returning()
       : [];
-    return { ask: claimed, twins: answered, turned };
+    return { ask: claimed, twins: answered, turned, granted };
   });
   if (!ask) return false;
   const sent = decision === 'approve' && ask.reply?.sent ? ask.reply : undefined;
@@ -1800,7 +1860,8 @@ async function decide(
   await record({
     kind: 'decision',
     actor: o.withdrawn ? 'office' : 'owner',
-    // A folder given or a switch turned on from its ask reads as the Settings tab's change does.
+    // A folder given, a switch turned on, a level raised or office tools turned
+    // on from its ask reads as the Settings tab's change does.
     title: o.withdrawn
       ? `Withdrawn: ${ask.title}`
       : made
@@ -1809,9 +1870,11 @@ async function decide(
           ? gaveFolder((await anyStaffer(ask.staffId))?.name ?? ask.staffId, gave.path, gave.level)
           : turned?.on.length
             ? turnedOn(turned.before.name, turned.on)
-            : called
-              ? `${called.ok ? 'Made' : 'Made, and it failed'}: ${ask.title}`
-              : `${verb}: ${ask.title}`,
+            : granted?.title
+              ? granted.title
+              : called
+                ? `${called.ok ? 'Made' : 'Made, and it failed'}: ${ask.title}`
+                : `${verb}: ${ask.title}`,
     body: `${sent ? `To ${sent.to.join(', ')}${sent.cc.length ? `, cc ${sent.cc.join(', ')}` : ''}. Subject: ${sent.subject}. ` : ''}${called ? `It returned: ${callResultText(called, 600)} ` : ''}${turned ? (networkNote(turned.before, turned.after).body ?? '') + ' ' : ''}Asked by ${ask.staffId}. ${ask.why}${
       twins.length
         ? ` This also answers ${twins.map((t) => `#${t.id}`).join(', ')}, the same ask from another of ${ask.staffId}'s runs.`
@@ -1862,6 +1925,10 @@ async function decide(
       // The switches turned on with the claim: the work that waited on them picks up.
       case 'turn_on':
         if (turned) await carryOutTogether([ask, ...twins]);
+        break;
+      // The level or tools changed with the claim: the work that waited on them picks up.
+      case 'grant_setting':
+        if (granted) await carryOutTogether([ask, ...twins]);
         break;
       case 'carry_out':
         await followUp(ask.staffId, 'carry_out', {

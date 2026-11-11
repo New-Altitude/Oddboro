@@ -216,7 +216,12 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    Folders tab's line. Plain Approve refuses a folder ask. A `switch` ask (an
    Odd's `ask_for_switch`) takes Turn on, which approves it and turns Run
    commands, Browse the web or both on for that Odd in one step, as the
-   Settings tab does. A `remove` ask (an Odd's `leave_office`, or the
+   Settings tab does. A `level` ask (an Odd's `ask_for_level`) takes Raise to
+   and the level it names ("Raise to Act"), and an `office_tool` ask (an
+   Odd's `ask_for_office_tool`) takes Turn on; each approves it and makes the
+   Settings tab's own change for that Odd in one step. Each kind's yes button
+   words live in `src/lib/ui/yes-said.ts` (`YES_SAID`), which the Desk
+   imports and `yes-said.test.ts` holds. A `remove` ask (an Odd's `leave_office`, or the
    manager's `remove_odd`) takes Remove, and a `bring_back` ask (the
    manager's `bring_back_odd`) takes Bring back; both take Deny and no
    Iterate. An item a lead raised from a colleague's
@@ -562,8 +567,10 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    access. `setFolder` refuses one inside or holding
    a folder the Odd already has ("That folder is inside one this Odd already
    has, or holds one."); the line shows under the field. An Odd asks for a
-   folder with `ask_for_folder` (item 7), and for Run commands or Browse the
-   web with `ask_for_switch`, never with steps for this tab: a rule in
+   folder with `ask_for_folder` (item 7), for Run commands or Browse the web
+   with `ask_for_switch`, for a higher level with `ask_for_level`, and for
+   office tools with `ask_for_office_tool`, never with steps for this tab: a
+   rule in
    `house.ts` says so. The
    list reads the profile's folders, each with the home folder written `~`
    (`shown`), so it loads nothing of its own and the staff route has no GET;
@@ -580,7 +587,11 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    `ask_for_switch` (`ownToolsSaid` in the ledger's `capabilities.ts`, held
    network included), the same line `my_access` gives. `office_report` gives
    it too, naming the Odd, since another Odd reads it ("Rowan's own tools",
-   "Rowan's Settings tab").
+   "Rowan's Settings tab"). The same way, an outside tool held back by the
+   level tells the Odd to ask with `ask_for_level`, and office tools not all
+   given tell it to ask with `ask_for_office_tool` (`OWNER_GRANTS` in the
+   ledger's `grantable.ts`); another Odd reading the level line in
+   `office_report` still reads that the owner sets it on Rowan's Settings tab.
    `src/lib/server/grok.ts` starts a Grok run from the office's own Grok home,
    `~/.oddboro/grok` (`GROK_HOME`), never the owner's `~/.grok`. The owner signs
    in to it from the office's page (`agent-sign-in.ts`, item 18); a run from a
@@ -978,8 +989,9 @@ pieces under 3,900 bytes a line, so no value is on a command line.
     account it signs in with, the model and how hard it thinks, each the
     office's unless the owner picks another (item 9).
     Hiring grants no tools. The Odd asks for Run commands or Browse the web
-    with `ask_for_switch` when a job needs one, and for outside tools with
-    `ask_for_access`. A first job reports to the owner's desk unless they
+    with `ask_for_switch` when a job needs one, for a higher level with
+    `ask_for_level`, for office tools it lacks with `ask_for_office_tool`, and
+    for outside tools with `ask_for_access`. A first job reports to the owner's desk unless they
     untick it; a proposal can say either way. "Draft it" drafts the job
     description. Both run as the office (`src/lib/server/office-run.ts`),
     never as an Odd, so a new office can hire its first. An office run goes

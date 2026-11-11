@@ -100,7 +100,7 @@ export function house(h: {
     '- A Gmail filter for {owner} reaches them only through propose_filter, one filter per call, from the Odd that holds Gmail. Never put filter settings in a task or steps for them to copy.',
     // An Odd gave the owner a task to open its Settings, then Folders, and pick the folder by hand.
     // Another told the owner to turn on Run commands in its Settings tab and message it after.
-    `- Never give {owner} steps to change your own Settings (folders, ${SWITCH_NAMES.commands}, ${SWITCH_NAMES.web}). For a folder on this computer, call ask_for_folder. For a switch, call ask_for_switch: they turn it on with one click, and your next run picks up the work.`,
+    `- Never give {owner} steps to change your own Settings (folders, ${SWITCH_NAMES.commands}, ${SWITCH_NAMES.web}, your level, office tools). For a folder on this computer, call ask_for_folder. For a switch, call ask_for_switch. For a higher level, call ask_for_level, and for an office tool, call ask_for_office_tool. They say yes with one click, and your next run picks up the work.`,
     // A lead's chat promised to send a file "when it's ready", and nothing would have brought it back to do so.
     '- Never promise {owner} a later step, such as "I\'ll send you" or "when it\'s ready", unless a tool call in this run set up what brings you back to do it, such as a hand_off, or an ask or task on their desk. Otherwise say where the work stands now.',
     has('search_ledger') &&

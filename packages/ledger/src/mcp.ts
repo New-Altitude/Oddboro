@@ -73,6 +73,8 @@ import { currentPlatform } from './platform.ts';
 import {
   FOLDER_SAID,
   grantWorks,
+  LEVEL_NAME,
+  levelAtMost,
   LEVELS,
   NOT_OWN_TOOLS,
   OWN_SWITCHES,
@@ -124,7 +126,7 @@ import {
   searchRegistry
 } from './registry.ts';
 import { GOAL_STATUSES, type GoalPlanItem, type HireProposal } from './schema.ts';
-import type { OwnSwitch as OwnSwitchName } from './access-words.ts';
+import type { Level, OwnSwitch as OwnSwitchName } from './access-words.ts';
 import {
   clockTime,
   describe as describeSchedule,
@@ -140,6 +142,8 @@ import {
   hasTool,
   isGrantable,
   isOffered,
+  OFFICE_TOOLS,
+  officeToolsSaid,
   type OfficeToolId,
   type RIDES_WITH,
   type ToolRun
@@ -1227,6 +1231,7 @@ tool(
     description: `Ask ${OWNER} to turn on ${SWITCH_NAMES.commands} (a shell, to run commands like git, npm or a script) or ${SWITCH_NAMES.web} (search and read web pages) for you, or both. Ask with this instead of giving ${OWNER} steps for your ${SETTINGS_TAB} tab: they turn it on with one click. Ask only for what the work needs; work that downloads, such as git clone or npm install, needs both. You have it from your next run, which starts when they say yes. my_access says which you have.${raisedNote}`,
     inputSchema: {
       switches: z
+        // OWN_SWITCHES is a literal list of two, so it is never empty.
         .array(z.enum(OWN_SWITCHES as [OwnSwitchName, ...OwnSwitchName[]]))
         .min(1)
         .max(2)
@@ -1258,6 +1263,96 @@ tool(
     });
     return text(
       `Ask ${ask.id} is on ${OWNER}'s desk. When they turn it on, a new run of yours picks up the work with it. Check my_asks later for their decision.`
+    );
+  }
+);
+
+// What the owner reads a level lets the Odd do, on a level ask's card.
+const AT_LEVEL: Record<Level, (name: string) => string> = {
+  read: (name) => `At Read, ${name} reads and reports.`,
+  draft: (name) =>
+    `At Draft, ${name} prepares changes outside the office, and each one waits for your yes.`,
+  act: (name) =>
+    `At Act, ${name} uses the tools you connected for ${name} at read and write without asking you first, in chats with you, in ${name}'s jobs and in work you approve. Work a colleague hands ${name}, and a thread ${name} picks back up, still runs at Draft: each change there waits for your yes.`
+};
+
+// A level: only the owner raises it, from this ask's card or the Settings
+// tab. A level the Odd holds already never reaches the desk.
+tool(
+  'ask_for_level',
+  {
+    description: `Ask ${OWNER} to raise your level when a job needs more than it lets you do. Draft: you prepare changes outside the office, and each waits for their yes. Act: you use a tool they connected for you at read and write without asking each time. Ask with this instead of giving ${OWNER} steps for your ${SETTINGS_TAB} tab: they raise it with one click. Ask for the lowest level the work needs. Your next run, which starts when they say yes, works at it; work a colleague hands you still runs at Draft at most. my_access says your level.${raisedNote}`,
+    inputSchema: {
+      level: z.enum(LEVELS).describe('The level the work needs.'),
+      why: z.string().max(1000).describe('What work needs it, in one or two plain sentences.'),
+      revises: revisesArg
+    }
+  },
+  async ({ level, why, revises }) => {
+    const on = await placed({});
+    if ('problem' in on) return refused(on.problem);
+    const now = (await staffer(ME)) ?? me;
+    if (levelAtMost(level, now.permission))
+      return refused(`Your level is ${LEVEL_NAME[now.permission]} already.`);
+    const { ask } = await raiseAsk(ME, {
+      ...on,
+      kind: 'level',
+      title: `Raise ${now.name} from ${LEVEL_NAME[now.permission]} to ${LEVEL_NAME[level]}`,
+      why,
+      ifApproved: `The office raises ${now.name} from ${LEVEL_NAME[now.permission]} to ${LEVEL_NAME[level]}, as the ${SETTINGS_TAB} tab does, and ${now.name} picks up the work with it. ${AT_LEVEL[level](now.name)}`,
+      level,
+      revises,
+      via: VIA
+    });
+    return text(
+      `Ask ${ask.id} is on ${OWNER}'s desk. When they say yes, a new run of yours picks up the work at ${LEVEL_NAME[level]}. Check my_asks later for their decision.`
+    );
+  }
+);
+
+// Office tools: only the owner turns one on, from this ask's card or the
+// Settings tab. Only the ones the Settings tab grants, and only ones the Odd
+// lacks, reach the desk. Named by name in the description, since an Odd
+// reads an id only for a tool it holds.
+const lackedTools = OFFICE_TOOLS.filter((t) => isGrantable(t.id) && !me.tools.includes(t.id));
+tool(
+  'ask_for_office_tool',
+  {
+    description: `Ask ${OWNER} to turn on office tools you lack when a job needs them. Ask with this instead of giving ${OWNER} steps for your ${SETTINGS_TAB} tab: they turn them on with one click. Ask only for what the work needs. You have them from your next run, which starts when they say yes. The office tools you lack:${lackedTools.map((t) => `\n${t.name}: ${t.does}`).join('')}${raisedNote}`,
+    inputSchema: {
+      tools: z
+        // GRANTABLE_TOOLS is never empty: setting-asks.test.ts pins it.
+        .array(z.enum(GRANTABLE_TOOLS as [OfficeToolId, ...OfficeToolId[]]))
+        .min(1)
+        .max(GRANTABLE_TOOLS.length)
+        .describe('The office tools the work needs, from the list above.'),
+      why: z.string().max(1000).describe('What work needs them, in one or two plain sentences.'),
+      revises: revisesArg
+    }
+  },
+  async ({ tools, why, revises }) => {
+    const on = await placed({});
+    if ('problem' in on) return refused(on.problem);
+    const now = (await staffer(ME)) ?? me;
+    const lacked = tools.filter((t) => !now.tools.includes(t));
+    if (!lacked.length) return refused(`You already have ${officeToolsSaid(tools)}.`);
+    const said = officeToolsSaid(lacked);
+    const { ask } = await raiseAsk(ME, {
+      ...on,
+      kind: 'office_tool',
+      title: `Turn on ${said}`,
+      why,
+      ifApproved: `The office turns on ${said} for ${now.name}, as the ${SETTINGS_TAB} tab does, and ${now.name} picks up the work with it.${OFFICE_TOOLS.filter(
+        (t) => lacked.includes(t.id)
+      )
+        .map((t) => `\n- ${t.name}: ${t.does}`)
+        .join('')}`,
+      officeTools: lacked,
+      revises,
+      via: VIA
+    });
+    return text(
+      `Ask ${ask.id} is on ${OWNER}'s desk. When they turn them on, a new run of yours picks up the work with them. Check my_asks later for their decision.`
     );
   }
 );

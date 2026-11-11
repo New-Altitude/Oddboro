@@ -550,7 +550,7 @@ test('a run off its threads hands off and names which thread it raises for, a ru
   });
 });
 
-test("office_report says where a colleague's level is set on that Odd's card, and ask_for_access above the level says where the Odd's own is", async () => {
+test("office_report says where a colleague's level is set on that Odd's card, and ask_for_access above the level tells the Odd to ask with ask_for_level", async () => {
   const r = await manager.callTool({ name: 'office_report', arguments: {} });
   const text = (r.content as { type: string; text: string }[])[0]?.text ?? '';
   const report = JSON.parse(text) as { staff: { id: string; outsideTools?: string[] }[] };

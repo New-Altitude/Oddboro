@@ -247,7 +247,7 @@ export function outsideLines(c: Capabilities, owner: string, about?: string): st
     const what = `${a.connector.name} (${GRANT_LABEL[a.level === 'act' ? 'act' : 'read'].toLowerCase()})`;
     switch (a.heldBack) {
       case 'above its level':
-        return `${what}: held back. It needs the ${LEVEL_NAME[GRANT_NEEDS[a.level === 'act' ? 'act' : 'read']]} level or higher, and the current level is ${LEVEL_NAME[c.level]}. It works again once ${owner} raises it. ${OWNER_GRANTS.level.missing({ owner, whose: whoseOf(about) })}`;
+        return `${what}: held back. It needs the ${LEVEL_NAME[GRANT_NEEDS[a.level === 'act' ? 'act' : 'read']]} level or higher, and the current level is ${LEVEL_NAME[c.level]}. It works again once ${owner} raises it. ${OWNER_GRANTS.level.missing({ owner, whose: about === undefined ? undefined : whoseOf(about) })}`;
       case 'still connecting':
         return `${what}: held back until ${owner} finishes connecting it.`;
       case 'sign-in ran out':
@@ -279,12 +279,12 @@ export function levelLine(level: Level, owner: string): string {
 }
 
 /**
- * ask_for_access's refusal of a grant above the Odd's level (`held`): where
- * the owner sets the level, and to say so in the reply, since approving an
- * ask never changes a level: the owner changes it on the card.
+ * ask_for_access's refusal of a grant above the Odd's level (`held`): ask for
+ * the level first (`ask_for_level`), since an access ask's yes changes no
+ * level, then ask for the grant again.
  */
 export function askAboveLevel(held: Level, asked: 'read' | 'write', owner: string): string {
-  return `You hold ${held}, so you cannot ask for ${asked}. ${OWNER_GRANTS.level.missing({ owner, whose: 'your' })} If this job needs a higher one, say so in your reply.`;
+  return `You hold ${held}, so you cannot ask for ${asked}. ${OWNER_GRANTS.level.missing({ owner })} Once you have it, ask for ${asked} again.`;
 }
 
 /**

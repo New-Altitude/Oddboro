@@ -85,7 +85,7 @@ test('each held-back reason tells the Odd what brings the tool back', () => {
   const atRead = (a: ReturnType<typeof accessOf>) => ({ ...caps(a), level: 'read' as const });
   assert.equal(
     outsideLines(atRead(accessOf(grant('act'), 'read')), 'Sam')[0],
-    'Notion (read and write): held back. It needs the Draft level or higher, and the current level is Read. It works again once Sam raises it. Sam sets your level on your Settings tab, under Model.'
+    'Notion (read and write): held back. It needs the Draft level or higher, and the current level is Read. It works again once Sam raises it. When a job needs a higher level, ask Sam for it with ask_for_level.'
   );
   // office_report reads it about a colleague, so the card is that Odd's.
   assert.equal(
@@ -134,11 +134,11 @@ test('the switches are placed on whose Settings tab, under the section the card 
   assert.ok(officeSection('your').endsWith(`, under ${OFFICE_SECTION}`));
 });
 
-test("ask_for_access's refusal above the level says where the owner sets it and asks for no raise", () => {
+test("ask_for_access's refusal above the level tells the Odd to ask for the level with ask_for_level, then ask again", () => {
   const said = askAboveLevel('read', 'write', 'Sam');
   assert.equal(
     said,
-    'You hold read, so you cannot ask for write. Sam sets your level on your Settings tab, under Model. If this job needs a higher one, say so in your reply.'
+    'You hold read, so you cannot ask for write. When a job needs a higher level, ask Sam for it with ask_for_level. Once you have it, ask for write again.'
   );
 });
 
@@ -207,7 +207,7 @@ test("my_access says a capped run's level and why, and an uncapped run's own lev
       "This run was started by a colleague or by the office, not by Sam's yes, so it works at Draft at most.",
       'Your runs go through Claude Code.',
       'Your own tools work on files only. No shell: ask Sam to turn on Run commands with ask_for_switch. No web: ask Sam to turn on Browse the web with ask_for_switch.',
-      'Sam grants other office tools in your Settings tab, under Office; when a job needs one, say which and why in your reply.',
+      'Sam grants other office tools in your Settings tab, under Office; when a job needs one, ask for it with ask_for_office_tool.',
       'Sam has given you no folders. When a job needs a folder outside the office, ask with ask_for_folder.',
       `- (id: notion) Notion (read and write): every tool. Each call that changes something waits for Sam's yes: the office puts that exact call on their desk and makes it once they approve, then you carry on with what it returned. Call it once and move on; never call it again to retry, and never say it is done before you hear.`
     ].join('\n')
@@ -218,7 +218,7 @@ test("my_access says a capped run's level and why, and an uncapped run's own lev
       levelLine('act', 'Sam'),
       'Your runs go through Claude Code.',
       'Your own tools work on files only. No shell: ask Sam to turn on Run commands with ask_for_switch. No web: ask Sam to turn on Browse the web with ask_for_switch.',
-      'Sam grants other office tools in your Settings tab, under Office; when a job needs one, say which and why in your reply.',
+      'Sam grants other office tools in your Settings tab, under Office; when a job needs one, ask for it with ask_for_office_tool.',
       'Sam has given you no folders. When a job needs a folder outside the office, ask with ask_for_folder.',
       '- (id: notion) Notion (read and write): every tool.'
     ].join('\n')
@@ -253,7 +253,7 @@ test('my_access says the tool, what its own tools reach and each folder, and a h
     levelLine('draft', 'Sam'),
     'Your runs go through Claude Code.',
     `Your own tools work on files, plus ${shell}, which can reach the internet, and web search and fetch.`,
-    'Sam grants other office tools in your Settings tab, under Office; when a job needs one, say which and why in your reply.',
+    'Sam grants other office tools in your Settings tab, under Office; when a job needs one, ask for it with ask_for_office_tool.',
     'Folders Sam gave you:',
     '- /Users/Shared/p (read only)',
     '- /Users/Shared/q (read and change)',

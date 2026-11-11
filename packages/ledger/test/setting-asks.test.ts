@@ -1,31 +1,49 @@
 // The owner changes an Odd's level and office tools in the Settings tab, and
 // each change writes its own access line in the Ledger, in the tab's words.
+// An Odd asks for a higher level with ask_for_level, or for office tools with
+// ask_for_office_tool, in the tool server's own process, as the office starts
+// one for each run; the owner's yes makes the Settings tab's own change in the
+// transaction that approves the ask, with the tab's ledger words, and starts
+// the run that needs it. Two runs asking for no more are twins.
 // Run with `npm test -w @oddboro/ledger`.
 import assert from 'node:assert/strict';
 import { beforeEach, test } from 'node:test';
-import { eq } from 'drizzle-orm';
-import { ledger, staff } from '../src/schema.ts';
-import { db } from './pglite.ts';
+import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { db, sql, toolServer } from './tool-server.ts';
 
-// The ledger rows embed nothing: no Ollama answers here.
-process.env.OLLAMA_URL = 'http://127.0.0.1:9';
-const { setPermission, setTool } = await import('../src/office.ts');
+const { asks, followUps, ledger, staff } = await import('../src/schema.ts');
+const { eq } = await import('drizzle-orm');
+const O = await import('../src/office.ts');
+const { setPermission, setTool } = O;
+const { GRANTABLE_TOOLS } = await import('../src/tools.ts');
+const { MANAGER_ROLE } = await import('../src/managers.ts');
 
-await db.insert(staff).values({
-  id: 'ada',
-  name: 'Ada',
+const odd = (id: string, name: string, more: Partial<typeof staff.$inferInsert> = {}) => ({
+  id,
+  name,
   role: 'Tester',
   remit: 'Tests.',
   variant: 'a',
   portrait: 'a',
-  permission: 'draft',
+  permission: 'draft' as const,
   tools: [],
-  desk: 'You are Ada.'
+  desk: `You are ${name}.`,
+  ...more
 });
+await db
+  .insert(staff)
+  .values([
+    odd('ada', 'Ada'),
+    odd('sage', 'Sage'),
+    odd('max', 'Max', { role: MANAGER_ROLE }),
+    odd('pat', 'Pat', { package: { slug: 'pat', version: 1, disclosure: 'Pat is an AI persona.' } })
+  ]);
 
 beforeEach(async () => {
-  await db.delete(ledger);
-  await db.update(staff).set({ permission: 'draft', tools: [] }).where(eq(staff.id, 'ada'));
+  await sql`delete from ledger`;
+  await sql`delete from follow_ups`;
+  await sql`delete from asks`;
+  await db.update(staff).set({ permission: 'draft', tools: [] });
 });
 
 const lines = () =>
@@ -34,6 +52,42 @@ const lines = () =>
     .from(ledger)
     .orderBy(ledger.id);
 const ada = async () => (await db.select().from(staff).where(eq(staff.id, 'ada')))[0];
+const sage = async () => (await db.select().from(staff).where(eq(staff.id, 'sage')))[0];
+const row = async (id: number) => (await db.select().from(asks).where(eq(asks.id, id)))[0];
+const titles = async () => (await db.select().from(ledger)).map((l) => l.title);
+const runsOf = async (id: number) =>
+  (await db.select().from(followUps).where(eq(followUps.askId, id))).map((f) => f.kind);
+
+/** The first text a tool call returned, and whether it was an error. */
+async function call(c: Client, name: string, args: Record<string, unknown>) {
+  const r = await c.callTool({ name, arguments: args });
+  return {
+    text: (r.content as { text: string }[])[0]?.text ?? '',
+    error: r.isError === true
+  };
+}
+const level = (staffId: string, l: 'draft' | 'act', place: { handOffId?: number } = {}) =>
+  O.raiseAsk(staffId, {
+    kind: 'level',
+    title: 'Raise',
+    why: 'To send the replies.',
+    ifApproved: 'i',
+    level: l,
+    ...place
+  }).then((r) => r.ask);
+const tools = (
+  staffId: string,
+  officeTools: (typeof GRANTABLE_TOOLS)[number][],
+  place: { handOffId?: number } = {}
+) =>
+  O.raiseAsk(staffId, {
+    kind: 'office_tool',
+    title: 'Turn on',
+    why: 'To read the office.',
+    ifApproved: 'i',
+    officeTools,
+    ...place
+  }).then((r) => r.ask);
 
 test("the Settings tab's level and tool changes still write their own access line", async () => {
   await setPermission('ada', 'act');
@@ -72,4 +126,127 @@ test('a tool the owner does not grant is refused, and nothing changes', async ()
   await assert.rejects(setTool('ada', 'my_access', true));
   assert.deepEqual((await ada()).tools, []);
   assert.deepEqual(await lines(), []);
+});
+
+test('an Odd asks for a higher level in one call, and is refused one it already holds', async () => {
+  const c = await toolServer('sage', { RUN_KEY: 'k-level' });
+  const first = await call(c, 'ask_for_level', { level: 'act', why: 'To send the replies.' });
+  assert.equal(first.error, false, first.text);
+  const [a] = await db.select().from(asks).where(eq(asks.kind, 'level'));
+  assert.equal(a.level, 'act');
+  assert.equal(a.title, 'Raise Sage from Draft to Act');
+  const held = await call(c, 'ask_for_level', { level: 'draft', why: 'Again.' });
+  assert.equal(held.error, true);
+  assert.equal(held.text, "Nothing went on the owner's desk. Your level is Draft already.");
+});
+
+test('an Odd asks for any office tool the Settings tab grants, and only the ones it lacks reach the desk', async () => {
+  assert.ok(GRANTABLE_TOOLS.length > 0);
+  await db
+    .update(staff)
+    .set({ tools: ['search_ledger'] })
+    .where(eq(staff.id, 'sage'));
+  const c = await toolServer('sage', { RUN_KEY: 'k-tools' });
+  const listed = (await c.listTools()).tools.find((t) => t.name === 'ask_for_office_tool');
+  const input = listed?.inputSchema.properties?.tools as { items: { enum: string[] } };
+  assert.deepEqual(input.items.enum, GRANTABLE_TOOLS);
+  const asked = await call(c, 'ask_for_office_tool', {
+    tools: ['remove_odd', 'search_ledger'],
+    why: 'To help the owner tidy up.'
+  });
+  assert.equal(asked.error, false, asked.text);
+  const [a] = await db.select().from(asks).where(eq(asks.kind, 'office_tool'));
+  assert.deepEqual(a.officeTools, ['remove_odd']);
+  assert.equal(a.title, 'Turn on Remove Odds');
+  const held = await call(c, 'ask_for_office_tool', { tools: ['search_ledger'], why: 'Again.' });
+  assert.equal(held.error, true, held.text);
+  assert.equal(held.text, "Nothing went on the owner's desk. You already have Search the ledger.");
+});
+
+test('the Office Manager and a persona Odd may each ask for a higher level and for office tools', async () => {
+  for (const id of ['max', 'pat']) {
+    const c = await toolServer(id, { RUN_KEY: `k-${id}` });
+    const l = await call(c, 'ask_for_level', { level: 'act', why: 'To send the replies.' });
+    assert.equal(l.error, false, l.text);
+    const t = await call(c, 'ask_for_office_tool', { tools: ['office_report'], why: 'To see.' });
+    assert.equal(t.error, false, t.text);
+    const kinds = (await db.select().from(asks).where(eq(asks.staffId, id))).map((a) => a.kind);
+    assert.deepEqual(kinds.sort(), ['level', 'office_tool'], id);
+  }
+});
+
+test("a yes to a level ask sets exactly that level with the Settings tab's ledger line, and starts the work that waited", async () => {
+  const a = await level('sage', 'act');
+  await O.decideAsk(a.id, 'approve', null);
+  assert.equal((await sage()).permission, 'act');
+  assert.equal((await row(a.id)).status, 'approved');
+  assert.deepEqual(await titles(), ['Raised Sage from draft to act']);
+  assert.deepEqual(await runsOf(a.id), ['carry_out']);
+});
+
+test('a yes to a level ask the Odd already passed changes nothing and still starts the work', async () => {
+  const a = await level('sage', 'draft');
+  await db.update(staff).set({ permission: 'act' }).where(eq(staff.id, 'sage'));
+  await O.decideAsk(a.id, 'approve', null);
+  assert.equal((await sage()).permission, 'act');
+  assert.equal((await row(a.id)).status, 'approved');
+  assert.deepEqual(await runsOf(a.id), ['carry_out']);
+});
+
+test("a yes to an office tool ask turns on exactly those tools with the Settings tab's ledger line, and starts the work", async () => {
+  await db
+    .update(staff)
+    .set({ tools: ['search_ledger'] })
+    .where(eq(staff.id, 'sage'));
+  const a = await tools('sage', ['list_goals', 'office_report']);
+  await O.decideAsk(a.id, 'approve', null);
+  assert.deepEqual([...(await sage()).tools].sort(), [
+    'list_goals',
+    'office_report',
+    'search_ledger'
+  ]);
+  assert.deepEqual(await titles(), ['Gave Sage Office report and All goals']);
+  assert.deepEqual(await runsOf(a.id), ['carry_out']);
+});
+
+test("a yes whose grant fails leaves the ask open and the Odd's tools as they were", async () => {
+  const a = await tools('sage', ['office_report']);
+  await db
+    .update(asks)
+    .set({ officeTools: ['raise_ask'] })
+    .where(eq(asks.id, a.id));
+  await assert.rejects(O.decideAsk(a.id, 'approve', null), /not an office tool you grant/);
+  assert.equal((await row(a.id)).status, 'open');
+  assert.deepEqual((await sage()).tools, []);
+  assert.deepEqual(await titles(), []);
+});
+
+test('two runs asking for no more are twins: the desk shows the first, and one yes answers both', async () => {
+  for (const [first, twin] of [
+    [await level('sage', 'act'), await level('sage', 'draft', { handOffId: 7 })],
+    [
+      await tools('sage', ['office_report', 'list_goals']),
+      await tools('sage', ['office_report'], { handOffId: 8 })
+    ]
+  ]) {
+    const shown = (await O.desk()).asks.map((x) => x.id);
+    assert.ok(shown.includes(first.id) && !shown.includes(twin.id), 'the twin waits behind it');
+    await O.decideAsk(first.id, 'approve', null);
+    assert.equal((await row(twin.id)).status, 'approved');
+    const runs = await db.select().from(followUps).where(eq(followUps.askId, twin.id));
+    assert.equal(runs.length, 1, 'one run, the hand-off twin, does the work');
+    assert.deepEqual(await runsOf(first.id), [], first.kind);
+  }
+});
+
+test('Deny leaves the level and tools as they were', async () => {
+  const l = await level('sage', 'act');
+  const t = await tools('sage', ['office_report']);
+  await O.decideAsk(l.id, 'deny', 'Not now.');
+  await O.decideAsk(t.id, 'deny', 'Not now.');
+  const after = await sage();
+  assert.equal(after.permission, 'draft');
+  assert.deepEqual(after.tools, []);
+  assert.equal((await row(l.id)).status, 'denied');
+  assert.equal((await row(t.id)).status, 'denied');
 });

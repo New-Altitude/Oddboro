@@ -1785,7 +1785,7 @@ test("an Odd signs in through the account it is on: its own folder for each, the
   }
 });
 
-test("a new hire's first day and the manager's planning say how an Odd gets Run commands or Browse the web, the planning says where a level is raised, and a lesson never does", async () => {
+test("a new hire's first day and the manager's planning say how an Odd gets Run commands or Browse the web, the planning has each Odd ask for its own level and office tools, and a lesson never does", async () => {
   await L.startFirstDay('sam');
   const [day] = await L.pg<{ id: number }[]>`
     select id from follow_ups where staff_id = 'sam' and kind = 'first_day' order by id desc limit 1`;
@@ -1815,9 +1815,10 @@ test("a new hire's first day and the manager's planning say how an Odd gets Run 
   const plan = JSON.parse(r.text) as Gave;
   const planText = `${plan.system}\n${plan.message}`;
   const owner = await L.ownerName();
+  // The Odd asks for a level or an office tool itself, so the plan never hands the owner steps for one.
   assert.ok(
     planText.includes(
-      "put any level raise in owner_steps, as a step on that Odd's Settings tab, under Model. Have the Odd ask"
+      'Never put a level raise or an office tool in owner_steps: the Odd asks for it itself with ask_for_level or ask_for_office_tool when its part needs it.'
     ),
     planText
   );
