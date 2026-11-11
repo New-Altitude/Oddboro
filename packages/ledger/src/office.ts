@@ -1371,9 +1371,19 @@ export type Decision = (typeof DECISIONS)[number];
 type Twin = {
   /** `later` asks for nothing `first` does not. */
   noMore: (first: AskRow, later: AskRow) => boolean;
-  /** Both want the same thing, whatever the level. */
+  /** Both want the same thing, whatever the level, whichever was answered. */
   same: (a: AskRow, b: AskRow) => boolean;
 };
+
+/**
+ * Whether `wide` holds every item `narrow` asks for: one switch or office
+ * tool ask asking for no more than another. `noMore` and `same` both read it,
+ * so which asks one answer settles and which of them stand for each other
+ * cannot disagree.
+ */
+function holdsAll(wide: readonly string[] | null, narrow: readonly string[] | null): boolean {
+  return (narrow ?? []).every((x) => wide?.includes(x));
+}
 
 /**
  * Which kinds of ask have twins, and how: an outside tool, a folder,
@@ -1402,8 +1412,8 @@ const TWINS = {
     same: (a, b) => a.folder?.path === b.folder?.path
   },
   switch: {
-    noMore: (first, later) => (later.switches ?? []).every((s) => first.switches?.includes(s)),
-    same: (a, b) => (b.switches ?? []).every((s) => a.switches?.includes(s))
+    noMore: (first, later) => holdsAll(first.switches, later.switches),
+    same: (a, b) => holdsAll(a.switches, b.switches) || holdsAll(b.switches, a.switches)
   },
   level: {
     noMore: (first, later) =>
@@ -1411,9 +1421,8 @@ const TWINS = {
     same: () => true
   },
   office_tool: {
-    noMore: (first, later) =>
-      (later.officeTools ?? []).every((t) => first.officeTools?.includes(t)),
-    same: (a, b) => (b.officeTools ?? []).every((t) => a.officeTools?.includes(t))
+    noMore: (first, later) => holdsAll(first.officeTools, later.officeTools),
+    same: (a, b) => holdsAll(a.officeTools, b.officeTools) || holdsAll(b.officeTools, a.officeTools)
   },
   approval: null,
   hire: null,

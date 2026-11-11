@@ -135,9 +135,44 @@ test('an Odd asks for a higher level in one call, and is refused one it already 
   const [a] = await db.select().from(asks).where(eq(asks.kind, 'level'));
   assert.equal(a.level, 'act');
   assert.equal(a.title, 'Raise Sage from Draft to Act');
+  assert.equal(
+    a.ifApproved,
+    "The office raises Sage from Draft to Act, as the Settings tab does, and Sage picks up the work with it. At Act, Sage uses the tools you connected for Sage at read and write without asking you first, in chats with you, in Sage's jobs and in work you approve. Work a colleague hands Sage, and a thread Sage picks back up, still runs at Draft: each change there waits for your yes."
+  );
   const held = await call(c, 'ask_for_level', { level: 'draft', why: 'Again.' });
   assert.equal(held.error, true);
   assert.equal(held.text, "Nothing went on the owner's desk. Your level is Draft already.");
+});
+
+test('an Odd at Read asking for Draft tells the owner what Draft lets it do', async () => {
+  await db.update(staff).set({ permission: 'read' }).where(eq(staff.id, 'ada'));
+  const c = await toolServer('ada', { RUN_KEY: 'k-read' });
+  const asked = await call(c, 'ask_for_level', { level: 'draft', why: 'To draft the replies.' });
+  assert.equal(asked.error, false, asked.text);
+  const [a] = await db.select().from(asks).where(eq(asks.kind, 'level'));
+  assert.equal(a.title, 'Raise Ada from Read to Draft');
+  assert.equal(
+    a.ifApproved,
+    'The office raises Ada from Read to Draft, as the Settings tab does, and Ada picks up the work with it. At Draft, Ada prepares changes outside the office, and each one waits for your yes.'
+  );
+});
+
+test("a run serving a colleague's hand-off, held to Draft, is told why raising its level would not change it", async () => {
+  await db.update(staff).set({ permission: 'act' }).where(eq(staff.id, 'sage'));
+  for (const [env, said] of [
+    [
+      { CEILING: 'draft', HAND_OFF_ID: '7' },
+      "Nothing went on the owner's desk. Your level is Act already. Work a colleague hands you runs at Draft whatever your level, so raising it does not change this run."
+    ],
+    [{ CEILING: 'draft' }, "Nothing went on the owner's desk. Your level is Act already."],
+    [{ HAND_OFF_ID: '7' }, "Nothing went on the owner's desk. Your level is Act already."]
+  ] as const) {
+    const c = await toolServer('sage', { RUN_KEY: 'k-capped', ...env });
+    const held = await call(c, 'ask_for_level', { level: 'act', why: 'To send the replies.' });
+    assert.equal(held.error, true, held.text);
+    assert.equal(held.text, said, JSON.stringify(env));
+  }
+  assert.deepEqual(await db.select().from(asks), []);
 });
 
 test('an Odd asks for any office tool the Settings tab grants, and only the ones it lacks reach the desk', async () => {
@@ -158,6 +193,10 @@ test('an Odd asks for any office tool the Settings tab grants, and only the ones
   const [a] = await db.select().from(asks).where(eq(asks.kind, 'office_tool'));
   assert.deepEqual(a.officeTools, ['remove_odd']);
   assert.equal(a.title, 'Turn on Remove Odds');
+  assert.equal(
+    a.ifApproved,
+    'The office turns on Remove Odds for Sage, as the Settings tab does, and Sage picks up the work with it.\n- Remove Odds: Asks you to let another Odd go from the office. It goes only on your yes.'
+  );
   const held = await call(c, 'ask_for_office_tool', { tools: ['search_ledger'], why: 'Again.' });
   assert.equal(held.error, true, held.text);
   assert.equal(held.text, "Nothing went on the owner's desk. You already have Search the ledger.");
@@ -236,6 +275,11 @@ test('two runs asking for no more are twins: the desk shows the first, and one y
     const runs = await db.select().from(followUps).where(eq(followUps.askId, twin.id));
     assert.equal(runs.length, 1, 'one run, the hand-off twin, does the work');
     assert.deepEqual(await runsOf(first.id), [], first.kind);
+    assert.deepEqual(
+      (await O.standsFor(await row(twin.id))).map((x) => x.id),
+      [first.id],
+      `the ${first.kind} run is told it stands for the first`
+    );
   }
 });
 

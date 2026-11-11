@@ -16,8 +16,19 @@ export const LEVEL_LABEL: Record<Level, string> = {
   draft: 'Drafts for your yes',
   act: 'Acts on its own'
 };
-/** What the Odd reads for each level. */
+/**
+ * Each level's name. The Odd reads it, and so does the owner where an ask
+ * names a level: a level ask's title, card and button.
+ */
 export const LEVEL_NAME: Record<Level, string> = { read: 'Read', draft: 'Draft', act: 'Act' };
+/** What the owner reads a level lets the Odd `name` do, on a level ask's card. */
+export const AT_LEVEL: Record<Level, (name: string) => string> = {
+  read: (name) => `At Read, ${name} reads and reports.`,
+  draft: (name) =>
+    `At Draft, ${name} prepares changes outside the office, and each one waits for your yes.`,
+  act: (name) =>
+    `At Act, ${name} uses the tools you connected for ${name} at read and write without asking you first, in chats with you, in ${name}'s jobs and in work you approve. Work a colleague hands ${name}, and a thread ${name} picks back up, still runs at Draft: each change there waits for your yes.`
+};
 /** A grant to an outside tool is read or act. */
 export type GrantLevel = Extract<Level, 'read' | 'act'>;
 /** What the owner reads for a grant level; the Odd reads the same words in lower case. */

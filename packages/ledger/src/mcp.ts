@@ -71,6 +71,7 @@ import {
 import { AGENT_NAMES, commandsOnline } from './agents.ts';
 import { currentPlatform } from './platform.ts';
 import {
+  AT_LEVEL,
   FOLDER_SAID,
   grantWorks,
   LEVEL_NAME,
@@ -78,6 +79,7 @@ import {
   LEVELS,
   NOT_OWN_TOOLS,
   OWN_SWITCHES,
+  parseLevel,
   SETTINGS_TAB,
   SWITCH_NAMES,
   switchesSaid
@@ -126,7 +128,7 @@ import {
   searchRegistry
 } from './registry.ts';
 import { GOAL_STATUSES, type GoalPlanItem, type HireProposal } from './schema.ts';
-import type { Level, OwnSwitch as OwnSwitchName } from './access-words.ts';
+import type { OwnSwitch as OwnSwitchName } from './access-words.ts';
 import {
   clockTime,
   describe as describeSchedule,
@@ -209,6 +211,11 @@ const APPROVED_ASK = Number(process.env.APPROVED_ASK) || undefined;
  * raises carry it, so the owner's answer goes back, and it cannot hand off.
  */
 const HAND_OFF_ID = Number(process.env.HAND_OFF_ID) || undefined;
+/**
+ * The level this run works at most, set by the office when it is below the
+ * Odd's own. my_access reads it from the env (`accessInRun`).
+ */
+const CEILING = parseLevel(process.env.CEILING);
 /**
  * The thread this run works on, either side, set by the office. Asks and tasks
  * it raises carry it. The hub's runs hand off into it and may park it.
@@ -1267,15 +1274,6 @@ tool(
   }
 );
 
-// What the owner reads a level lets the Odd do, on a level ask's card.
-const AT_LEVEL: Record<Level, (name: string) => string> = {
-  read: (name) => `At Read, ${name} reads and reports.`,
-  draft: (name) =>
-    `At Draft, ${name} prepares changes outside the office, and each one waits for your yes.`,
-  act: (name) =>
-    `At Act, ${name} uses the tools you connected for ${name} at read and write without asking you first, in chats with you, in ${name}'s jobs and in work you approve. Work a colleague hands ${name}, and a thread ${name} picks back up, still runs at Draft: each change there waits for your yes.`
-};
-
 // A level: only the owner raises it, from this ask's card or the Settings
 // tab. A level the Odd holds already never reaches the desk.
 tool(
@@ -1292,8 +1290,17 @@ tool(
     const on = await placed({});
     if ('problem' in on) return refused(on.problem);
     const now = (await staffer(ME)) ?? me;
+    // A run held below its level only by serving a colleague's hand-off is
+    // told why, since it was told a lower level than this refusal names.
+    // Handed-back and resume runs are capped too, for other reasons.
     if (levelAtMost(level, now.permission))
-      return refused(`Your level is ${LEVEL_NAME[now.permission]} already.`);
+      return refused(
+        `Your level is ${LEVEL_NAME[now.permission]} already.${
+          HAND_OFF_ID !== undefined && CEILING
+            ? ` Work a colleague hands you runs at ${LEVEL_NAME[CEILING]} whatever your level, so raising it does not change this run.`
+            : ''
+        }`
+      );
     const { ask } = await raiseAsk(ME, {
       ...on,
       kind: 'level',
