@@ -134,7 +134,8 @@ const SERVER_CODE = [
  * is the one way to take a path away. Each is its real path, since macOS
  * links /tmp and /var into /private, and only if it exists, since on Linux a
  * deny path that cannot be bound stops Grok from starting. /etc stays: Grok
- * refuses to start without it.
+ * refuses to start without it. On Linux, /tmp and /var stay open
+ * (`grokShut` in sandbox-paths.ts).
  */
 const shut = () => [
   ...new Set(

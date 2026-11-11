@@ -69,11 +69,17 @@ const INSTRUCTIONS = [
   'GEMINI.md',
   '.gemini'
 ];
-/** Each instruction file in `w` shut, at the top and below, the path and everything under it. */
-const shut = (w: string) =>
+/**
+ * Each instruction file in `w` shut, at the top and below, the path and
+ * everything under it. On Linux Codex mounts the exact `.codex` and `.agents`
+ * itself, so the office leaves those two paths to it (`SELF_SHUT` in codex.ts).
+ */
+const shut = (w: string, platform: NodeJS.Platform = 'darwin') =>
   Object.fromEntries(
     INSTRUCTIONS.flatMap((n) =>
-      [`${w}/${n}`, `${w}/${n}/**`, `${w}/**/${n}`, `${w}/**/${n}/**`].map((p) => [p, 'deny'])
+      [`${w}/${n}`, `${w}/${n}/**`, `${w}/**/${n}`, `${w}/**/${n}/**`]
+        .filter((p) => !(platform === 'linux' && (p === `${w}/.codex` || p === `${w}/.agents`)))
+        .map((p) => [p, 'deny'])
     )
   );
 /** A profile's paths with this machine's folder and each run's id as stand-ins. */
@@ -102,7 +108,8 @@ const forget = (id: string) => {
 };
 
 test("a Codex Odd's first chat starts codex exec with every switch the office sets, its message on stdin, and the office's file tools in place of a shell", async () => {
-  const run = await chatOf('cody');
+  // The Mac's switches; Linux adds one (`project_doc_max_bytes`, tested below).
+  const run = await onPlatform('darwin', () => chatOf('cody'));
   assert.deepEqual(plain(hideSets(run.args)), [
     'exec',
     '--json',
@@ -173,7 +180,7 @@ test("a Codex Odd's first chat starts codex exec with every switch the office se
 });
 
 // One test per system, faked, so a Mac proves both: only Linux reads Codex's
-// own install (`codexInstall`), the folder of the codex first on PATH, which
+// own install (`codexInstall`) and leaves two exact paths to Codex (`selfShut`), the folder of the codex first on PATH, which
 // here is the stand-in's bin folder.
 for (const platform of ['darwin', 'linux'] as const)
   test(`on ${platform}, a Codex Odd's chat is held by the kernel to its own folder and its own temp folder, reads the owner's data folder it is told of, the developer folder xcode-select picks and node's OpenSSL config, and never reaches an instruction file, /tmp or the network`, () =>
@@ -195,7 +202,7 @@ for (const platform of ['darwin', 'linux'] as const)
           '<home>/data': 'read',
           '<home>/staff/cody': 'write',
           '<home>/codex-tmp/<id>': 'write',
-          ...shut('<home>/staff/cody')
+          ...shut('<home>/staff/cody', platform)
         });
       })
     ));
@@ -294,6 +301,24 @@ test("every glob in a Codex run's profile is a deny, and it names no repository,
   assert.deepEqual(repo, []);
 });
 
+test("on Linux a Codex run leaves the exact .codex and .agents paths to Codex's own read-only mount, shuts what is under them, and reads no AGENTS.md", async () => {
+  const w = join(folder, 'staff', 'cody');
+  const linux = await onPlatform('linux', () => chatOf('cody'));
+  const fs = linux.permissions?.filesystem ?? {};
+  for (const n of ['.codex', '.agents']) {
+    assert.equal(fs[`${w}/${n}`], undefined, `${n} is denied as an exact path`);
+    for (const p of [`${w}/${n}/**`, `${w}/**/${n}`, `${w}/**/${n}/**`])
+      assert.equal(fs[p], 'deny', p);
+  }
+  assert.equal(fs[`${w}/AGENTS.md`], 'deny');
+  assert.ok(linux.args.includes('project_doc_max_bytes=0'), linux.args.join(' '));
+  // On a Mac nothing clashes, so both stay and AGENTS.md is left to the deny.
+  const mac = await onPlatform('darwin', () => chatOf('cody'));
+  for (const n of ['.codex', '.agents'])
+    assert.equal(mac.permissions?.filesystem?.[`${w}/${n}`], 'deny');
+  assert.ok(!mac.args.includes('project_doc_max_bytes=0'), mac.args.join(' '));
+});
+
 test('a Codex run reads the developer folder xcode-select names by its real path, never the link it named', async () => {
   const fs = (await chatOf('cody')).permissions?.filesystem ?? {};
   // The test's own folder may sit behind a link too (/var is one on a Mac).
@@ -310,7 +335,8 @@ test("a Codex run asks xcode-select with PATH alone, so DEVELOPER_DIR in the off
 
 test("a Codex colleague's run on a thread reads the thread's folder and the owner's data folder, and writes only its own part of the thread", async () => {
   const h = await gave('cody', 'cass', { title: 'Codex thread' });
-  const run = await runOf(h.id);
+  // The Mac's walls; Linux leaves two exact paths to Codex (tested above).
+  const run = await onPlatform('darwin', () => runOf(h.id));
   const thread = L.threadFolder(h.thread);
   const fs = run.permissions?.filesystem ?? {};
   assert.equal(fs[thread], 'read');
