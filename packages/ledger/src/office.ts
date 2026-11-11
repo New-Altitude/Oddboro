@@ -1,3 +1,4 @@
+import { hasResultRequirement, scheduledResultActivity } from './scheduled-results.ts';
 import { isOddboroCheckout } from './oddboro-source.ts';
 import { runsGoing } from './run-registry.ts';
 // What the office does with its tables. The office app and the staff tool
@@ -3823,7 +3824,7 @@ export function latestScheduledRuns(ids: number[], checked = false): Promise<Run
     .where(
       and(
         inArray(runs.jobId, ids),
-        eq(runs.trigger, 'schedule'),
+        inArray(runs.trigger, ['schedule', 'recovery']),
         checked ? isNotNull(runs.checkedFiles) : undefined
       )
     )
@@ -3852,8 +3853,9 @@ export async function finishRun(
       .where(and(eq(runs.id, r.id), eq(runs.status, 'running')))
       .returning({ id: runs.id });
     if (!finished) return;
+    const required = await hasResultRequirement(j.id, tx);
     // A repeated block stays in the run history. Put the repair on the desk once.
-    if (j.files && !ok && r.trigger === 'schedule') {
+    if (!required && j.files && !ok && r.trigger === 'schedule') {
       const [prior] = await tx
         .select()
         .from(runs)
@@ -3865,7 +3867,7 @@ export async function finishRun(
         return;
       }
     }
-    if (ok && j.report) await addReport(j.staffId, j.name, summary, r.id, tx);
+    if (ok && j.report && !required) await addReport(j.staffId, j.name, summary, r.id, tx);
     else
       await record(
         {
@@ -3952,6 +3954,7 @@ export async function officeActivity(since: Date) {
     ? await Promise.all([latestScheduledRuns(fileJobs), latestScheduledRuns(fileJobs, true)])
     : [[], []];
   return {
+    requiredResults: await scheduledResultActivity(since),
     since: pt(since),
     now: pt(new Date()),
     staff: people.map((p) => ({

@@ -98,6 +98,8 @@ const encoded = (v: string) =>
 export type Outgoing = {
   /** Addresses, separated by commas. */
   to: string;
+  /** The office’s stable identity for one scheduled edition. Not an Odd tool input. */
+  messageId?: string;
   cc?: string;
   bcc?: string;
   /** The thread's own, as "Re: ...", when a reply gives none. */
@@ -228,6 +230,11 @@ function contentParts(m: Outgoing): string[] {
 /** The email as MIME text, and the thread it goes in. */
 async function mime(token: Token, m: Outgoing): Promise<{ text: string; threadId?: string }> {
   const headers: Record<string, string> = { To: m.to };
+  if (m.messageId) {
+    if (!/^<[a-f0-9-]+@oddboro\.local>$/.test(m.messageId))
+      throw new Error('Invalid edition Message-ID.');
+    headers['Message-ID'] = m.messageId;
+  }
   if (m.cc) headers.Cc = m.cc;
   if (m.bcc) headers.Bcc = m.bcc;
   let subject = m.subject;
@@ -377,17 +384,28 @@ export async function saveDraft(token: Token, m: Outgoing): Promise<string> {
 }
 
 /** Send an email. Only the office calls this, on the owner's click. Gives the sent message's id. */
-export async function sendMail(token: Token, m: Outgoing): Promise<string> {
+export async function sendMail(token: Token, m: Outgoing, signal?: AbortSignal): Promise<string> {
   if (m.attachments?.length) {
     const { text, threadId } = await mime(token, m);
     return (await upload<Message>(token, 'messages/send', text, threadId ? { threadId } : {})).id;
   }
-  const sent = await google<Message>(
-    token,
-    `${GMAIL}/messages/send`,
-    send('POST', await message(token, m))
-  );
+  const sent = await google<Message>(token, `${GMAIL}/messages/send`, {
+    ...send('POST', await message(token, m)),
+    signal
+  });
   return sent.id;
+}
+
+/** Search only Sent mail for this edition. No match does not prove it was not sent. */
+export async function sentEdition(token: Token, messageId: string, signal?: AbortSignal) {
+  if (!/^<[a-f0-9-]+@oddboro\.local>$/.test(messageId))
+    throw new Error('Invalid edition Message-ID.');
+  const result = await google<{ messages?: { id: string }[] }>(
+    token,
+    `${GMAIL}/messages?labelIds=SENT&q=${encodeURIComponent(`rfc822msgid:${messageId}`)}&maxResults=2`,
+    { signal }
+  );
+  return result.messages?.length === 1 ? result.messages[0].id : undefined;
 }
 
 /** One email as the owner reads it: who sent it, when, its subject and its body as plain text. */

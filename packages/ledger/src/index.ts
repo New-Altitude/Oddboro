@@ -55,3 +55,6 @@ export * from './persona-requests.ts';
 export * from './project-reviews.ts';
 
 export * from './runtime.ts';
+
+export * from './scheduled-results.ts';
+export * from './scheduled-result-types.ts';

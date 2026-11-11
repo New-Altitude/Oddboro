@@ -139,7 +139,7 @@ export const OUTBOUND: readonly Outbound[] = [
     to: 'Google: Gmail and Drive.',
     sends:
       "The owner's token, and what each call needs: an Odd's read, search, draft, change or send, or a reply or filter the owner sends from its card on the desk, with any files from the Odd's own folder attached to it (`mailAttachments`).",
-    yes: "The owner signing Gmail or Drive in and granting the Odd it at Read only or Read and write, or the owner's Send, Save to drafts or Create on the card."
+    yes: "The owner signing Gmail or Drive in and granting the Odd it at Read only or Read and write, or the owner's Send, Save to drafts or Create on the card. Scheduled results use the owner's exact destination and current Act/write grant, or the exact edition approval at Draft. Unknown sends get only bounded Sent-mail searches."
   },
   {
     file: 'apps/office/src/lib/server/oauth.ts',

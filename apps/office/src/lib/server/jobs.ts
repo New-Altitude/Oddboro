@@ -23,10 +23,12 @@ import {
   waitingPokes,
   wakeThread,
   type JobRow,
+  type RunRow,
   type RunTrigger
 } from '@oddboro/ledger';
 import { bus, listen, type OfficeEvent } from './events.ts';
 import { deliverPoke, runJob } from './staff.ts';
+import { checkScheduledResults } from './scheduled-results.ts';
 import { held } from './update.ts';
 
 // macOS stops timers while it sleeps, so the clock never waits longer than
@@ -54,6 +56,11 @@ async function plan(): Promise<void> {
         if (!held(now)) void start(j, 'schedule');
       } else soonest = Math.min(soonest, j.nextRunAt.getTime());
     }
+    if (!held(now))
+      soonest = Math.min(
+        soonest,
+        await checkScheduledResults((j, r) => void start(j, 'recovery', r), now)
+      );
     for (const p of await waitingPokes()) {
       if (p.at <= now) void deliverPoke(p);
       else soonest = Math.min(soonest, p.at.getTime());
@@ -91,12 +98,19 @@ async function plan(): Promise<void> {
  * Run a job. A scheduled run moves the schedule on first, so a slow run never
  * runs twice. A manual one (Run now) leaves the schedule where it was.
  */
-export async function start(j: JobRow, trigger: RunTrigger): Promise<void> {
-  if (running.has(j.id)) return;
+export async function start(j: JobRow, trigger: RunTrigger, claimed?: RunRow): Promise<void> {
+  if (running.has(j.id)) {
+    if (claimed)
+      await finishRun(claimed, j, false, 'This job is already running. No duplicate was started.');
+    return;
+  }
   running.add(j.id);
   try {
     const run =
-      trigger === 'schedule' ? await claimScheduledRun(j, new Date()) : await startRun(j, trigger);
+      claimed ??
+      (trigger === 'schedule'
+        ? await claimScheduledRun(j, new Date())
+        : await startRun(j, trigger));
     if (!run) return;
     const r = await runJob(j, trigger).catch((e: unknown) => ({
       ok: false,
@@ -106,6 +120,7 @@ export async function start(j: JobRow, trigger: RunTrigger): Promise<void> {
     await finishRun(run, j, r.ok, r.text, r.checkedFiles);
   } finally {
     running.delete(j.id);
+    if (g.jobClock) void plan();
   }
 }
 
@@ -118,7 +133,20 @@ export async function runNow(id: number): Promise<void> {
 export function startClock(): () => void {
   if (g.jobClock) return g.jobClock.stop;
   const changed = (e: OfficeEvent) => {
-    if (e.type === 'change' && ['jobs', 'pokes', 'threads'].includes(e.table)) void plan();
+    if (
+      e.type === 'change' &&
+      [
+        'jobs',
+        'pokes',
+        'threads',
+        'runs',
+        'scheduled_results',
+        'grants',
+        'staff',
+        'connectors'
+      ].includes(e.table)
+    )
+      void plan();
   };
   const stop = () => {
     clearTimeout(g.jobClock?.timer);
@@ -142,4 +170,9 @@ export function startClock(): () => void {
     .catch((e: unknown) => console.error('Could not close stale runs:', e))
     .then(plan);
   return stop;
+}
+
+/** Recheck after an owner decision without creating another timer. */
+export function refreshClock() {
+  if (g.jobClock) void plan();
 }

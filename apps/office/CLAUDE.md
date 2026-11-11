@@ -1754,3 +1754,7 @@ See `docs/persona-recovery.md` for the conversion and review checks.
 ## Runtime diagnosis
 
 `RuntimeStatus.svelte` reads `/api/runtime` when Setup opens or the owner refreshes it. The existing `jobs.ts` clock records successful checks and retries a failed read after thirty seconds. A gap keeps its unknown cause. See `docs/runtime-evidence.md`.
+
+## Required daily results
+
+`server/scheduled-results.ts` reconciles edition evidence from the existing clock. It reuses `scheduled-files.ts`, the current job runner and Gmail adapter. It has no timer. `ScheduledResults.svelte` configures existing job pairs and shows the same records on goals. Saved output, review, Desk availability and provider acceptance have separate timestamps. See `docs/scheduled-results.md` for authority, uncertainty and release checks.

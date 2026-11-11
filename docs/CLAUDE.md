@@ -25,3 +25,4 @@ Each line says what to do when its trigger comes.
 - `project-reviews.md`. Current review guide for selected persona context and return to the original native conversation.
 
 - `runtime-evidence.md`. Current review guide for desktop state, clock gaps and installed-app acceptance.
+- `scheduled-results.md`. Current review guide for required daily editions, bounded recovery and delivery evidence.

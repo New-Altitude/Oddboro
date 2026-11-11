@@ -1,6 +1,7 @@
 // Every table the office keeps. Staff, what they ask the owner, what the owner has to do,
 // the access the owner grants, the jobs they run, and the ledger: one row for every
 // thing that was decided or done, searchable by meaning.
+import type { ResultDestination, ResultEvidence, DeliveryState } from './scheduled-result-types.ts';
 import { sql } from 'drizzle-orm';
 import {
   boolean,
@@ -847,7 +848,7 @@ export const followUps = pgTable('follow_ups', {
 
 export type RunStatus = 'running' | 'done' | 'failed';
 /** Why a run started: its schedule came due, or the owner pressed Run now. */
-export type RunTrigger = 'schedule' | 'manual';
+export type RunTrigger = 'schedule' | 'manual' | 'recovery';
 
 export const runs = pgTable('runs', {
   id: id(),
@@ -1199,3 +1200,63 @@ export const projectReviews = pgTable('project_reviews', {
   requestId: text().references(() => projectRequests.id),
   createdAt: created()
 });
+
+/** The owner's result requirement, attached to existing jobs without replacing them. */
+export const scheduledResults = pgTable('scheduled_results', {
+  id: id(),
+  producerId: integer()
+    .notNull()
+    .unique()
+    .references(() => jobs.id),
+  reviewerId: integer()
+    .notNull()
+    .references(() => jobs.id),
+  threadId: integer()
+    .notNull()
+    .references(() => threads.id),
+  responsibleId: text()
+    .notNull()
+    .references(() => staff.id),
+  title: text().notNull(),
+  deadline: text().notNull(),
+  zone: text().notNull(),
+  destination: jsonb().$type<ResultDestination>().notNull(),
+  repairs: integer().notNull().default(2),
+  enabled: boolean().notNull().default(true),
+  revision: integer().notNull().default(1),
+  producerChangedAt: at('producer_changed_at').notNull(),
+  reviewerChangedAt: at('reviewer_changed_at').notNull(),
+  lastDay: text(),
+  incidentId: integer().references(() => reports.id),
+  createdAt: created()
+});
+export const resultEditions = pgTable(
+  'result_editions',
+  {
+    id: text().primaryKey(),
+    resultId: integer()
+      .notNull()
+      .references(() => scheduledResults.id),
+    day: text().notNull(),
+    deadline: at('deadline').notNull(),
+    revision: integer().notNull(),
+    destination: jsonb().$type<ResultDestination>().notNull(),
+    evidence: jsonb().$type<ResultEvidence>().notNull().default({ gaps: [] }),
+    attempts: integer().notNull().default(0),
+    repairRun: integer().references(() => runs.id),
+    repairSha: text(),
+    reportId: integer().references(() => reports.id),
+    deskAt: at('desk_at'),
+    delivery: text().$type<DeliveryState>().notNull().default('waiting'),
+    messageId: text().notNull(),
+    sendAttempts: integer().notNull().default(0),
+    checks: integer().notNull().default(0),
+    nextCheck: at('next_check'),
+    approvedHash: text(),
+    acceptedAt: at('accepted_at'),
+    receipt: text(),
+    reason: text(),
+    createdAt: created()
+  },
+  (t) => [unique().on(t.resultId, t.day)]
+);

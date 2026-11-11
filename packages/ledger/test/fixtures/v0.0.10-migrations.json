@@ -1,0 +1,146 @@
+[
+  {
+    "idx": 0,
+    "version": "7",
+    "when": 1793666502517,
+    "tag": "0000_baseline",
+    "breakpoints": true,
+    "hash": "11de356029e956e130942e59d1b58081eae73e71e86d694a42d5a5c3f2672ce7"
+  },
+  {
+    "idx": 1,
+    "version": "7",
+    "when": 1793668237307,
+    "tag": "0001_app-update",
+    "breakpoints": true,
+    "hash": "0656a91c8762c51a024db8fb99c33b02d97a8d49fb23f51dc442902c21df7eb3"
+  },
+  {
+    "idx": 2,
+    "version": "7",
+    "when": 1793757899600,
+    "tag": "0002_hand-offs",
+    "breakpoints": true,
+    "hash": "08fc5c94e55fe6fe53d1b5c4c0a25376294de0efbe2af6277f63e794ebd45c18"
+  },
+  {
+    "idx": 3,
+    "version": "7",
+    "when": 1793787546585,
+    "tag": "0003_simplify-cuts",
+    "breakpoints": true,
+    "hash": "811689262a5f2815c85f778d449b3616a5a8b1aed33a89998d5af6abc3393a1c"
+  },
+  {
+    "idx": 4,
+    "version": "7",
+    "when": 1793791632248,
+    "tag": "0004_agent",
+    "breakpoints": true,
+    "hash": "e113c991b942ff2426159fc79f9bfc0900f5ab847c65fbe2eeb61726cf432e78"
+  },
+  {
+    "idx": 5,
+    "version": "7",
+    "when": 1793838260935,
+    "tag": "0005_own-tools",
+    "breakpoints": true,
+    "hash": "f5bf1a4e214ac543c512601c52a8228bb52e0fe0be495130adb80f4c20284e48"
+  },
+  {
+    "idx": 6,
+    "version": "7",
+    "when": 1793925219793,
+    "tag": "0006_effort",
+    "breakpoints": true,
+    "hash": "5f5d4a7774fbafaf5da6a5826739a1794c3e9b7200bc7f536c61d61129f0c321"
+  },
+  {
+    "idx": 7,
+    "version": "7",
+    "when": 1793927000295,
+    "tag": "0007_model",
+    "breakpoints": true,
+    "hash": "b4d9b0e1bf0ca71dc176543a337078e43a29cc641d8175928189f3ff874d0bca"
+  },
+  {
+    "idx": 8,
+    "version": "7",
+    "when": 1793929776239,
+    "tag": "0008_accounts",
+    "breakpoints": true,
+    "hash": "0a08ff5bb9d0c28cd88ce93a69968d9b5f50bf4d3d424c3991847000afb31747"
+  },
+  {
+    "idx": 9,
+    "version": "7",
+    "when": 1794049305472,
+    "tag": "0009_google",
+    "breakpoints": true,
+    "hash": "aff36c7f74150674008526f8facb318e967f5efa249cc1693db0b7f113a2357a"
+  },
+  {
+    "idx": 10,
+    "version": "7",
+    "when": 1794055386709,
+    "tag": "0010_replies",
+    "breakpoints": true,
+    "hash": "9191fb98570e70264e6e896b54b71b45d6c404645f9bfa8801e1bb791bbb35de"
+  },
+  {
+    "idx": 11,
+    "version": "7",
+    "when": 1794058382412,
+    "tag": "0011_filters",
+    "breakpoints": true,
+    "hash": "f8e3f9f798186e9e824dc7fc7291805a43c05a7938edb54707e6b1cf820bcf94"
+  },
+  {
+    "idx": 12,
+    "version": "7",
+    "when": 1794065164179,
+    "tag": "0012_folder_asks",
+    "breakpoints": true,
+    "hash": "110e8de9e1dc88ccd82fe18ae24628a12a9a6bb6265f4bb48869121989b0d0fd"
+  },
+  {
+    "idx": 13,
+    "version": "7",
+    "when": 1794072899007,
+    "tag": "0013_calls",
+    "breakpoints": true,
+    "hash": "015fa5bb4aa5d424587143f4537f130182edea3ddbb513f7b5468e0dbe66306b"
+  },
+  {
+    "idx": 14,
+    "version": "7",
+    "when": 1794223900912,
+    "tag": "0014_switch_asks",
+    "breakpoints": true,
+    "hash": "42f9fbb790fc55364e7808a6a5e4fb060c448e77a591eb703a6b772177df1d94"
+  },
+  {
+    "idx": 15,
+    "version": "7",
+    "when": 1794261929364,
+    "tag": "0015_persona-package",
+    "breakpoints": true,
+    "hash": "8c64eab73c51961305165080804dfda79b1a6763f74ba5acae75d70ce7938322"
+  },
+  {
+    "idx": 16,
+    "version": "7",
+    "when": 1794294461968,
+    "tag": "0016_leaving",
+    "breakpoints": true,
+    "hash": "ef11b1517673788a14da52f10e182aee896887d9cee2d01ca6e6387dd5bbbf26"
+  },
+  {
+    "idx": 17,
+    "version": "7",
+    "when": 1794300345026,
+    "tag": "0017_see-office",
+    "breakpoints": true,
+    "hash": "37f20b931403686e87424dabdc81c8216e1d1e28bfd79c9c422b5b48ec779d79"
+  }
+]

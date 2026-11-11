@@ -25,6 +25,8 @@ export type LiveTable = {
 };
 
 export const LIVE_TABLES: Record<TableName, LiveTable> = {
+  scheduled_results: { trigger: 'all', page: ['version'] },
+  result_editions: { trigger: 'all', page: ['version'] },
   persona_requests: { trigger: 'all', page: ['version'] },
   persona_revisions: { trigger: { none: 'Read on request from the connected Odd.' }, page: [] },
   persona_consultations: {

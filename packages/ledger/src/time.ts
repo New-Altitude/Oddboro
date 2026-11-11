@@ -91,9 +91,9 @@ function format(z: string): Intl.DateTimeFormat {
 }
 
 /** The office's wall clock at an instant. */
-export function wallClock(t: Date) {
+export function wallClock(t: Date, z = zone()) {
   const p = Object.fromEntries(
-    format(zone())
+    format(z)
       .formatToParts(t)
       .map((x) => [x.type, x.value])
   );
@@ -113,10 +113,10 @@ export function officeDay(t: Date): string {
 }
 
 /** The instant an office wall-clock time names. */
-export function instant(y: number, m: number, d: number, h: number, min: number): Date {
+export function instant(y: number, m: number, d: number, h: number, min: number, z = zone()): Date {
   const guess = Date.UTC(y, m - 1, d, h, min);
   const offset = (t: number) => {
-    const p = wallClock(new Date(t));
+    const p = wallClock(new Date(t), z);
     return Date.UTC(p.y, p.m - 1, p.d, p.h, p.min) - t;
   };
   return new Date(guess - offset(guess - offset(guess)));

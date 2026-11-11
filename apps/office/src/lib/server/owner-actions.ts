@@ -117,6 +117,7 @@ export const OWNER_ACTIONS = {
   'POST /api/project-sessions': {
     none: 'Connections, grants and instructions are kept in project_sessions and project_requests. Native terminal input never enters the office ledger.'
   },
+  'POST /api/scheduled-results': { records: 'work' },
   'POST /api/jobs/[id]': { none: NO_ROW },
   'PATCH /api/lessons/[id]': { records: 'decision' },
   'POST /api/looks': {

@@ -11,7 +11,7 @@ import {
 import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { test } from 'node:test';
-import { L, bin, gave, setOwn } from './office-under-test.ts';
+import { L, bin, gave, setOwn, secrets } from './office-under-test.ts';
 const { startClock } = await import('./jobs.ts');
 
 // The test driver replaces only the model. Its file calls go over stdio to
@@ -182,6 +182,40 @@ else (async () => {
     assert.equal((await L.pg`select id from runs`).length, 2);
     await assert.rejects(() => share({}), /changed/);
     await share(linked.files);
+    await L.pg`insert into grants (staff_id,connector_id,level) values ('paige','gmail','act') on conflict (staff_id,connector_id) do update set level='act'`;
+    await L.pg`update staff set permission='act' where id='paige'`;
+    secrets.set(
+      'gmail:oauth',
+      JSON.stringify({
+        tokens: { access_token: 'synthetic-clock-token', expires_in: 3600 },
+        savedAt: Date.now()
+      })
+    );
+    const realFetch = globalThis.fetch;
+    let sent = 0;
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url === 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send') {
+        sent++;
+        const mime = Buffer.from(JSON.parse(String(init?.body)).raw, 'base64url').toString();
+        assert.match(mime, /Message-ID:/);
+        return Response.json({ id: 'clock-delivery' });
+      }
+      return realFetch(input, init);
+    }) as typeof fetch;
+    t.after(() => {
+      globalThis.fetch = realFetch;
+    });
+    const required = await L.saveScheduledResult({
+      producerId: writer.id,
+      reviewerId: reader.id,
+      responsibleId: 'paige',
+      title: 'Clock edition',
+      deadline: '23:59',
+      zone: 'UTC',
+      repairs: 0,
+      destination: { kind: 'gmail', connector: 'gmail', to: 'clock@example.test' }
+    });
     const w = await result(writer, await due(writer.id));
     assert.equal(w.status, 'done', w.summary);
     assert.equal(w.checked_files.output, 'lead/wire.md');
@@ -203,7 +237,20 @@ else (async () => {
       );
     assert.equal(readFileSync(edition, 'utf8'), 'Edition: Source: fixture-27\n');
     assert.equal((await state()).state, 'verified files');
-    assert.ok((await L.desk()).reports.some((p) => p.title === 'Edition'));
+    const deliveryLimit = Date.now() + 10000;
+    while (
+      (await L.editionsFor(required.id))[0]?.delivery !== 'accepted' &&
+      Date.now() < deliveryLimit
+    )
+      await wait(50);
+    const [editionResult] = await L.editionsFor(required.id);
+    assert.equal(editionResult.delivery, 'accepted');
+    assert.equal(editionResult.evidence.producerRun, w.id);
+    assert.equal(editionResult.evidence.reviewerRun, r.id);
+    assert.equal(editionResult.receipt, 'clock-delivery');
+    assert.equal(sent, 1);
+    assert.ok((await L.desk()).reports.some((p) => p.title.startsWith('Clock edition')));
+    await L.pauseScheduledResult(required.id, false);
 
     // Today's writer fails while yesterday's wire stays byte-for-byte intact.
     await L.updateJob(writer.id, { instructions: 'Say it is done.' });

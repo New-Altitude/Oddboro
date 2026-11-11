@@ -927,3 +927,7 @@ writer. `test/persona-requests.test.ts` holds the preserved and changed records.
 ## Runtime evidence
 
 `runtime.ts` keeps bounded checkpoints from the existing clock and reads the desktop shell’s declared runtime fields. It starts no timer and reads no work or secrets. `office_runtime` exposes the same read-only result; packaged `checkService` uses the shell’s login setting.
+
+## Scheduled results
+
+`scheduled-results.ts` binds a daily requirement to the existing producer and reviewer. Migration 0027 adds requirements and editions. The edition freezes its destination and reviewed message. Recovery claims the allowance and existing run atomically; send claims recheck current authority. `officeActivity` gives the manager these distinct facts and the current repair. See `docs/scheduled-results.md`.

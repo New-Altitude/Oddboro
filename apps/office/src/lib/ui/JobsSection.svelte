@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { JobRow, RunRow, Schedule } from '@oddboro/ledger';
   import { describe, zoneName } from '@oddboro/ledger/time';
+  import ScheduledResults from './ScheduledResults.svelte';
   import SchedulePicker from './SchedulePicker.svelte';
   import ChatSignInCard from './ChatSignInCard.svelte';
   import type { ChatSignIn } from '../staff/chat.ts';
@@ -124,6 +125,10 @@
           aria-label="What to do each run"
           bind:value={instructions}></textarea>
         <SchedulePicker bind:value={schedule} />
+        {#if typeof editing === 'number' && files}<ScheduledResults
+            producerId={editing}
+            {version}
+          />{/if}
         {#if files}
           <div aria-live="polite" class="text-xs text-muted">
             {#if review}

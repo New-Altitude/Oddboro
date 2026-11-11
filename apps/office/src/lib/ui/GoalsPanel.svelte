@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScheduledResults from './ScheduledResults.svelte';
   import GoalProjects from './GoalProjects.svelte';
   import type {
     GoalHorizon,
@@ -324,6 +325,7 @@
 
         {#if isOpen}
           <div class="flex flex-col gap-3 border-t border-hairline px-3 py-3 text-sm">
+            <ScheduledResults goalId={g.id} {version} />
             <GoalProjects goalId={g.id} {staff} {version} />
             {#if g.why || g.doneWhen}
               <dl class="flex flex-col gap-2">

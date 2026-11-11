@@ -221,6 +221,11 @@ async function addPersona(slug: string): Promise<Record<string, string>> {
 type Send = (call: Call) => Promise<void>;
 /** For each action that records: any rows it needs, then the call that makes it act. */
 const TRY: Record<Recording, (send: Send) => Promise<void>> = {
+  'POST /api/scheduled-results': async (send) => {
+    const { resultFixture } = await import('./scheduled-result-under-test.ts');
+    const f = await resultFixture();
+    await send({ body: { op: 'pause', id: f.plan.id, enabled: false } });
+  },
   'POST /api/accounts': (send) => send({ body: { agent: 'claude', label: 'Work' } }),
   'PATCH /api/accounts': async (send) =>
     send({ body: { id: await accountOf('Old'), label: 'New' } }),

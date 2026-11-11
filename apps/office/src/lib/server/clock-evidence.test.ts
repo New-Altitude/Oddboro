@@ -30,6 +30,9 @@ mock.module(new URL('./staff.ts', import.meta.url).href, {
   exports: { deliverPoke: async () => {}, runJob: async () => {} }
 });
 mock.module(new URL('./update.ts', import.meta.url).href, { exports: { held: () => false } });
+mock.module(new URL('./scheduled-results.ts', import.meta.url).href, {
+  exports: { checkScheduledResults: async () => Date.now() + 600000 }
+});
 const { startClock } = await import('./jobs.ts');
 after(() => {
   mock.timers.reset();

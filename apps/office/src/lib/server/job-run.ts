@@ -53,7 +53,7 @@ export async function runJob(job: JobRow, trigger: RunTrigger = 'schedule'): Pro
       if (
         !current ||
         current.changedAt.getTime() !== job.changedAt.getTime() ||
-        (trigger === 'schedule' && !current.enabled)
+        (trigger !== 'manual' && !current.enabled)
       )
         return {
           ok: false,
