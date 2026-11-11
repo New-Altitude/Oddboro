@@ -3,7 +3,8 @@
 // server's `handle` in hooks.server.ts) checks every request before a route
 // sees it:
 //
-// - The request must come from this computer (`fromThisComputer`). Through
+// - The request must come from this computer (`fromThisComputer`, in
+//   this-computer.ts, which Vite's dev server asks first too). Through
 //   Caddy, which on a Mac and Linux listens on every address, the connection
 //   is always from 127.0.0.1, so the office reads the address Caddy forwards
 //   for (X-Forwarded-For), which Caddy writes itself. A program on this
@@ -25,10 +26,10 @@
 // A plain comparison of Origin with the office's own address would refuse the
 // owner's page through Caddy, which reaches the office over http while the
 // page is https, so `fromOwnerPage` compares what the browser itself says.
-import { isIPv4 } from 'node:net';
 import type { Handle } from '@sveltejs/kit/hooks';
 import { HOSTS } from './hosts.ts';
 import { fromRun, GATEWAY_PATH } from './gateway.ts';
+import { fromThisComputer, NOT_THIS_COMPUTER } from './this-computer.ts';
 import { fromShell } from './update.ts';
 
 /**
@@ -47,16 +48,6 @@ function toThisOffice(request: Request): boolean {
   // `[::1]:4500` gives `[::1]`. Anything that is not exactly a name and a port matches no name.
   const name = (request.headers.get('host') ?? '').replace(/:\d+$/, '');
   return NAMES.has(name.toLowerCase());
-}
-
-/** True when the connection and every X-Forwarded-For entry are loopback (127.0.0.0/8, ::1, ::ffff:127.x). */
-function fromThisComputer(request: Request, peer: string): boolean {
-  const hops = request.headers.get('x-forwarded-for')?.split(',') ?? [];
-  return [peer, ...hops].every((hop) => {
-    const address = hop.trim().toLowerCase();
-    const v4 = address.replace(/^::ffff:/, '');
-    return address === '::1' || (isIPv4(v4) && v4.startsWith('127.'));
-  });
 }
 
 /**
@@ -79,8 +70,13 @@ const refuse = (message: string) => new Response(message, { status: 403 });
 /** The server's `handle`: every request passes here before a route sees it. */
 export const guardOffice: Handle = ({ event, resolve }) => {
   const { request } = event;
-  if (!fromThisComputer(request, event.getClientAddress()))
-    return refuse('This office answers only its own computer');
+  if (
+    !fromThisComputer({
+      forwardedFor: request.headers.get('x-forwarded-for'),
+      peer: event.getClientAddress()
+    })
+  )
+    return refuse(NOT_THIS_COMPUTER);
   if (!toThisOffice(request)) return refuse('This office answers only at its own address');
   if (
     READS.has(request.method) ||

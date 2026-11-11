@@ -1355,10 +1355,14 @@ https, so that check refuses the owner's own http page. So the page's `call()`
    (127.0.0.0/8, ::1, or ::ffff:127.x), and anything else, an entry that is
    not a plain address included, gets 403, reads too. Through Caddy the
    connection is always from 127.0.0.1, and Caddy writes the client it served
-   into that header and drops one the client sent, so this is what keeps
-   another machine on the network out. A program on this computer can write
-   the header too; this rule is not for that. The files built into the page
-   and Vite's dev routes are served before it.
+   into that header and drops one the client sent, or adds the real address
+   last when it trusts the client, so this is what keeps another machine on
+   the network out. A program on this computer can write the header too; this
+   rule is not for that. The built server serves the files built into the
+   page before it. Under `vite dev`, which setup and the login service run,
+   the same rule (`src/lib/server/this-computer.ts`) runs first in
+   `onlyThisComputer` (rule 6), so Vite's own routes and its live-reload
+   websocket refuse another machine too.
 2. The Host must be one of the office's names, whatever the port: 127.0.0.1,
    [::1], localhost, the addresses through Caddy (`HOSTS` in
    `src/lib/server/hosts.ts`) and the app's `ORIGIN`. A site that points its
@@ -1374,9 +1378,12 @@ https, so that check refuses the owner's own http page. So the page's `call()`
 5. `/account/callback` and `/connect/callback` arrive as GETs from the
    owner's browser, sent back by the service's sign-in page, so they pass
    rule 3 with no Origin.
-6. Vite's dev server has its own route, `/__open-in-editor`, that opens a file
-   in an editor and runs before the handle. `noEditorLaunch` in
-   `vite.config.ts` refuses it with 403, always: nothing in the office uses it.
+6. Vite's dev server answers before the handle. `onlyThisComputer` in
+   `vite.config.ts`, the first plugin, asks rule 1 before Vite's routes and
+   its websocket: another machine gets 403, and its websocket is closed.
+   Vite also has its own route, `/__open-in-editor`, that opens a file in an
+   editor. `noEditorLaunch` refuses it with 403, always, this computer
+   included: nothing in the office uses it.
 
 ## Diagnostics
 
