@@ -477,7 +477,11 @@ test("a Codex Odd's chat gets the owner's pictures as --image, after resume on a
     '-'
   ]);
   // The PDF is not a picture: Codex reads it with its shell, told where it is.
-  assert.ok(!next.args.some((a) => a.includes(pdf.name)), 'the PDF went as a picture');
+  // Its name is in the tool server's settings, for tell_lead, but never on an --image.
+  assert.ok(
+    !next.args.some((a) => a.startsWith('--image') && a.includes(pdf.name)),
+    'the PDF went as a picture'
+  );
   assert.ok(next.message.includes(`- [Image #1]: ${files[0].path} (image/png)`), next.message);
   assert.ok(
     next.message.includes(`- [lease.pdf]: ${files[1].path} (application/pdf)`),

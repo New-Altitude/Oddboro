@@ -170,6 +170,12 @@ const HOME = home('staff', ME);
  * the staffer, so a change made "because the owner asked" carries their real words.
  */
 const OWNER_SAID = process.env.OWNER_SAID || undefined;
+/**
+ * The files the owner attached to that message, set by the office: each one's
+ * tag in their message and its path in this Odd's folder. `tell_lead` takes
+ * every one to the lead with their words.
+ */
+const OWNER_FILES = ownerFiles(process.env.OWNER_FILES);
 // Each Gmail account is a connector of its own. With more than one, the Odd
 // names the one the email came to, and the reply goes out from it.
 const mailboxes = (await grantsFor(ME))
@@ -365,6 +371,58 @@ function officeName(p: string): string {
   return work ? `${THREADS_DIR}/${work.split(sep).join('/')}` : p;
 }
 
+/** Why a file cannot go with work an Odd passes on, by `hand_off` or `tell_lead`. */
+type Unfit = 'unread' | 'link' | 'instruction' | 'hidden' | 'office';
+
+/**
+ * A file named to go with work, as the office found it, or why it cannot go.
+ * `hand_off` and `tell_lead` refuse the same files, each in its own words.
+ */
+async function fitToCarry(
+  asked: string
+): Promise<
+  | { file: { name: string; real: string }; inWork?: { thread: number; inside: string } }
+  | { unfit: Unfit }
+> {
+  const file = await readableFile(asked);
+  if (!file) return { unfit: 'unread' };
+  const inWork = workPath(file.name);
+  // `ownFile` names the file where its real path is, so a link on the way,
+  // such as an attachments folder swapped for one, names another file.
+  // `workFile` refuses a link in the work already.
+  if (!inWork && !isWhereNamed({ realInside: file.name, named: asked })) return { unfit: 'link' };
+  if (isInstructionFile(file.name)) return { unfit: 'instruction' };
+  if (file.name.split(/[\\/]/).some((step) => step.startsWith('.'))) return { unfit: 'hidden' };
+  if (!inWork && isOfficeFile(file.name)) return { unfit: 'office' };
+  return { file, inWork };
+}
+
+/** The name a file from an Odd's own folder lands under in its part of the work. */
+const landingName = (name: string): string => name.replace(/[\\/]/g, '-');
+
+/** What `hand_off` says of a file it refuses, named as the Odd named it. */
+const HAND_OFF_UNFIT: Record<Unfit, (p: string) => string> = {
+  unread: (p) =>
+    `You cannot read ${p}. Name a file in your folder by its path inside it or its full path, or one in the folder of work you are on from ${THREADS_DIR}/, and call hand_off again.`,
+  link: (p) =>
+    `${p} is reached through a link, and a hand-off carries only a file where it really is. Name the file itself, and call hand_off again.`,
+  instruction: (p) =>
+    `${p} is an instruction file, and those never go with a hand-off. Say what your colleague needs in the brief, and call hand_off again.`,
+  hidden: (p) =>
+    `${p} is a hidden file, and those never go with a hand-off. Name another file, or leave it out, and call hand_off again.`,
+  office: (p) =>
+    `${p} is one of the office's own files, and those never go with a hand-off. Say what your colleague needs in the brief, and call hand_off again.`
+};
+
+/** Why a file the owner attached did not go to the lead with `tell_lead`, as the lead's note says it. */
+const TELL_LEAD_UNFIT: Record<Unfit, string> = {
+  unread: 'the office cannot read it',
+  link: 'it is reached through a link',
+  instruction: 'it is an instruction file',
+  hidden: 'it is a hidden file',
+  office: "it is one of the office's own files"
+};
+
 /**
  * The files a hand_off names, as paths inside the folder of work `on` for
  * those already there, and what to copy there for the rest, or why the
@@ -379,35 +437,11 @@ async function filesForHandOff(
   // Each landing name to the file there: as the office found it, and as the Odd named it.
   const landing = new Map<string, { name: string; named: string }>();
   for (const p of named) {
-    const asked = officeName(p);
-    const file = await readableFile(asked);
-    if (!file)
-      return {
-        problem: `You cannot read ${p}. Name a file in your folder by its path inside it or its full path, or one in the folder of work you are on from ${THREADS_DIR}/, and call hand_off again.`
-      };
-    const inWork = workPath(file.name);
-    // `ownFile` names the file where its real path is, so a link on the way,
-    // such as an attachments folder swapped for one, names another file.
-    // `workFile` refuses a link in the work already.
-    if (!inWork && !isWhereNamed({ realInside: file.name, named: asked }))
-      return {
-        problem: `${p} is reached through a link, and a hand-off carries only a file where it really is. Name the file itself, and call hand_off again.`
-      };
-    if (isInstructionFile(file.name))
-      return {
-        problem: `${p} is an instruction file, and those never go with a hand-off. Say what your colleague needs in the brief, and call hand_off again.`
-      };
-    const steps = file.name.split(/[\\/]/);
-    if (steps.some((step) => step.startsWith('.')))
-      return {
-        problem: `${p} is a hidden file, and those never go with a hand-off. Name another file, or leave it out, and call hand_off again.`
-      };
-    if (!inWork && isOfficeFile(file.name))
-      return {
-        problem: `${p} is one of the office's own files, and those never go with a hand-off. Say what your colleague needs in the brief, and call hand_off again.`
-      };
+    const found = await fitToCarry(officeName(p));
+    if ('unfit' in found) return { problem: HAND_OFF_UNFIT[found.unfit](p) };
+    const { file, inWork } = found;
     const inside = inWork && inWork.thread === on ? inWork.inside : undefined;
-    const name = file.name.replace(/[\\/]/g, '-');
+    const name = landingName(file.name);
     // Lower case, since a Mac's and Windows's disks hold those as one file.
     const lands = (inside ?? `${ME}/${name}`).toLowerCase();
     const first = landing.get(lands);
@@ -421,6 +455,39 @@ async function filesForHandOff(
     else carry.push({ real: file.real, name, named: p });
   }
   return { here, carry };
+}
+
+/** The owner's attachments the office set, or none when it set nothing readable. */
+function ownerFiles(env: string | undefined): { tag: string; path: string }[] {
+  if (!env) return [];
+  try {
+    const read = z
+      .array(z.object({ tag: z.string(), path: z.string() }))
+      .safeParse(JSON.parse(env));
+    return read.success ? read.data : [];
+  } catch {
+    // Not JSON: the office sets it, so this is no message of the owner's.
+    return [];
+  }
+}
+
+/**
+ * The files the owner attached to their message, as `tell_lead` takes them to
+ * the lead: what to copy, named by each one's tag, and why any cannot go. The
+ * same checks as `hand_off`'s files, and every file goes, not a pick.
+ */
+async function attachedForLead(): Promise<{
+  carry: CarriedFile[];
+  unfit: { named: string; why: string }[];
+}> {
+  const carry: CarriedFile[] = [];
+  const unfit: { named: string; why: string }[] = [];
+  for (const { tag, path } of OWNER_FILES) {
+    const found = await fitToCarry(path);
+    if ('unfit' in found) unfit.push({ named: tag, why: TELL_LEAD_UNFIT[found.unfit] });
+    else carry.push({ real: found.file.real, name: landingName(found.file.name), named: tag });
+  }
+  return { carry, unfit };
 }
 
 /** What propose_hire and propose_goal_plan both take to describe one hire. */
@@ -1945,7 +2012,7 @@ if (workingOn.length)
   tool(
     'tell_lead',
     {
-      description: `Pass what ${OWNER} just told you about work you are on to the Odd who leads it, which picks it back up with their words. Copy the part of their message about that work exactly: it goes as theirs. Then tell ${OWNER} you passed it on. ${PASS_ONLY_WORK} The work you are on:\n${workingOn.map((t) => `- ${t.id}: ${t.title}, led by ${t.lead}`).join('\n')}`,
+      description: `Pass what ${OWNER} just told you about work you are on to the Odd who leads it, which picks it back up with their words. Copy the part of their message about that work exactly: it goes as theirs.${OWNER_FILES.length ? ` Every file they attached to it goes too, into your part of that work's folder.` : ''} Then tell ${OWNER} you passed it on. ${PASS_ONLY_WORK} The work you are on:\n${workingOn.map((t) => `- ${t.id}: ${t.title}, led by ${t.lead}`).join('\n')}`,
       inputSchema: {
         work: z.number().int().describe('The number of the work, from the list.'),
         words: z
@@ -1972,12 +2039,19 @@ if (workingOn.length)
         said: OWNER_SAID ?? '',
         words,
         reading,
-        exchange: process.env.CHAT_EXCHANGE || undefined
+        exchange: process.env.CHAT_EXCHANGE || undefined,
+        files: await attachedForLead()
       });
+      if ('problem' in r) return text(r.problem);
+      const files = r.files ?? [];
+      const went = files.filter((f) => 'at' in f).length;
+      const left = files.flatMap((f) => ('why' in f ? [`${f.named}, since ${f.why}`] : []));
       return text(
-        'problem' in r
-          ? r.problem
-          : `Passed to ${r.lead}, who picks work ${work} back up with ${OWNER}'s words.`
+        [
+          `Passed to ${r.lead}, who picks work ${work} back up with ${OWNER}'s words.`,
+          ...(went ? [`The ${went === 1 ? 'file' : `${went} files`} they attached went too.`] : []),
+          ...(left.length ? [`Did not go: ${left.join('; ')}. Tell ${OWNER} so.`] : [])
+        ].join(' ')
       );
     }
   );

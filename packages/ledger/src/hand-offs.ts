@@ -58,8 +58,17 @@ export type CarriedFile = {
   named: string;
 };
 
-/** Why a hand-off's files cannot land in its work: the hand-off is taken back with it. */
-class NotCarried extends Error {}
+/**
+ * Why a hand-off's files cannot land in its work: the hand-off is taken back
+ * with it. `why` says it of one file, for a note that names the file itself.
+ */
+class NotCarried extends Error {
+  readonly why: string;
+  constructor(message: string, why: string) {
+    super(message);
+    this.why = why;
+  }
+}
 
 /** Whether the office can open `path` to read it. */
 function opens(path: string): boolean {
@@ -83,14 +92,18 @@ function carryFiles(thread: number, from: string, carry: CarriedFile[]): void {
   const unread = carry.find((c) => !opens(c.real));
   if (unread)
     throw new NotCarried(
-      `The office cannot open ${unread.named} to copy it. Make it readable, or leave it out, and call hand_off again.`
+      `The office cannot open ${unread.named} to copy it. Make it readable, or leave it out, and call hand_off again.`,
+      'the office cannot open it'
     );
   const part = threadPart(thread, from);
   mkdirSync(part, { recursive: true });
   // The sender's runs write in its part, and the tool server copying here is
   // outside their walls: a link left in the part must not take the copy elsewhere.
   if (realpathSync(part) !== join(realpathSync(threadFolder(thread)), from))
-    throw new NotCarried('Your part of this work is a link, so files cannot land in it.');
+    throw new NotCarried(
+      'Your part of this work is a link, so files cannot land in it.',
+      'the part of the work it would land in is a link'
+    );
   const copies = carry.filter(({ real, name, named }) => {
     const to = join(part, name);
     const there = lstatSync(to, { throwIfNoEntry: false });
@@ -98,12 +111,36 @@ function carryFiles(thread: number, from: string, carry: CarriedFile[]): void {
     // A link is never read through, so it counts as a different file.
     if (there.isFile() && readFileSync(to).equals(readFileSync(real))) return false;
     throw new NotCarried(
-      `${named} would land on ${workName(thread, `${from}/${name}`)}, a different file already in this work. Rename your file, or name the work's file instead, and call hand_off again.`
+      `${named} would land on ${workName(thread, `${from}/${name}`)}, a different file already in this work. Rename your file, or name the work's file instead, and call hand_off again.`,
+      'a different file is already in the work under its name'
     );
   });
   // Never over a file that landed after the check.
   for (const { real, name } of copies)
     copyFileSync(real, join(part, name), constants.COPYFILE_EXCL);
+}
+
+/** A file that went with work into the sender's part of it, at its full path there, or why it did not. */
+export type Carried = { named: string; at: string } | { named: string; why: string };
+
+/**
+ * Copy each file on its own into the sender's part of thread `thread`, by the
+ * same checks and copy as a hand-off's files (`carryFiles`), as `tellLead`
+ * passes on the owner's attachments: a file that cannot land is left out, with
+ * why, and the rest still land. One already there with the same bytes counts
+ * as landed.
+ */
+export function carryEach(thread: number, from: string, carry: CarriedFile[]): Carried[] {
+  return carry.map((c) => {
+    try {
+      carryFiles(thread, from, [c]);
+      return { named: c.named, at: join(threadPart(thread, from), c.name) };
+    } catch (e) {
+      if (e instanceof NotCarried) return { named: c.named, why: e.why };
+      // A copy that fails on the disk itself, such as one that is full.
+      return { named: c.named, why: 'the office could not copy it' };
+    }
+  });
 }
 
 /**
@@ -165,7 +202,8 @@ export async function handOff(h: {
 /**
  * When a hand-off ends, however it ended, its result goes back to the staffer
  * that handed it: the follow-up to write, in the same transaction as the
- * outcome. A restart that cut it off counts too, so nobody waits forever.
+ * outcome, unless that staffer left the office (`leadLeft`). A restart that
+ * cut it off counts too, so nobody waits forever.
  */
 export function handBack(
   f: FollowUpRow,
@@ -181,6 +219,22 @@ export function handBack(
     handOff: back,
     threadId: f.threadId
   };
+}
+
+/**
+ * The name of a lead that left the office, or undefined while it works here.
+ * No result goes back to one: it runs nothing, so the result would wait
+ * forever. The row is locked, so a removal under way either lands first, and
+ * this sees it, or waits for the hand-back to commit and then ends it
+ * (`removeOdd`).
+ */
+export async function leadLeft(q: Db, id: string): Promise<string | undefined> {
+  const [lead] = await q
+    .select({ name: staff.name, leftAt: staff.leftAt })
+    .from(staff)
+    .where(eq(staff.id, id))
+    .for('share');
+  return lead?.leftAt ? lead.name : undefined;
 }
 
 /**
@@ -304,7 +358,8 @@ export async function resultsToJoin(f: FollowUpRow): Promise<FollowUpRow[]> {
 
 /**
  * The owner answered something a hand-off put on the desk, and no run follows:
- * a denial, a dropped task, an approved hire. The answer itself goes back.
+ * a denial, a dropped task, an approved hire. The answer itself goes back,
+ * unless the lead left the office: then nothing would ever pick it up.
  */
 export async function handBackLater(
   handOffId: number,
@@ -316,8 +371,11 @@ export async function handBackLater(
     .from(followUps)
     .where(and(eq(followUps.id, handOffId), eq(followUps.kind, 'hand_off')));
   const back = origin && handBack(origin, outcome, answer);
-  if (back?.handOff)
-    await addFollowUp(db, { ...back, handOff: { ...back.handOff, answered: true } });
+  if (!back?.handOff) return;
+  const handOff = { ...back.handOff, answered: true };
+  await db.transaction(async (tx) => {
+    if (!(await leadLeft(tx, back.staffId))) await addFollowUp(tx, { ...back, handOff });
+  });
 }
 
 /** Where a hand-off stands: not started yet, being worked on, or how it ended. */

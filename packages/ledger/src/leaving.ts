@@ -10,13 +10,17 @@ import { asks, followUps, jobs, pokes, staff, tasks, threads, type AskKind } fro
 import {
   anyStaffer,
   finishFollowUp,
+  pokeUnreturned,
   record,
+  recordUnreturned,
   roster,
   staffer,
   withdrawAsk,
   withdrawTask,
-  workTitle
+  workTitle,
+  type Unreturned
 } from './office.ts';
+import { flat } from './desk-answers.ts';
 import { MANAGER_ROLE } from './managers.ts';
 import { nextRun } from './time.ts';
 
@@ -68,11 +72,11 @@ export function whenOddLeaves(fn: (id: string) => void): () => void {
 /**
  * Let an Odd go. In one transaction it leaves the floor, its jobs turn off
  * (and are remembered, to turn on again if it comes back), its waiting pokes
- * are cancelled, and every thread it leads stops. Then its open work closes:
- * each open ask is withdrawn and each open task dropped, with the line going
- * back to whoever waits on it, and each follow-up it has yet to start fails,
- * so a lead that handed it work hears at once. Any run going now stops.
- * Returns the refusal, or undefined once it left.
+ * are cancelled, and every thread it leads stops, waiting on nothing. Then its
+ * open work closes: each open ask is withdrawn and each open task dropped,
+ * with the line going back to whoever waits on it, and each follow-up it has
+ * yet to start fails, so a lead that handed it work hears at once. Any run
+ * going now stops. Returns the refusal, or undefined once it left.
  */
 export async function removeOdd(
   id: string,
@@ -97,9 +101,16 @@ export async function removeOdd(
       .update(pokes)
       .set({ status: 'cancelled' })
       .where(and(eq(pokes.staffId, id), eq(pokes.status, 'waiting')));
+    // Nothing it waited on wakes it: a task, a time, or the usage window's hold.
     await tx
       .update(threads)
-      .set({ status: 'stopped', endedAt: new Date(), resumeOnTask: null })
+      .set({
+        status: 'stopped',
+        endedAt: new Date(),
+        resumeOnTask: null,
+        resumeAt: null,
+        heldBy: null
+      })
       .where(and(eq(threads.hubId, id), ne(threads.status, 'stopped')));
     return on.length;
   });
@@ -119,18 +130,47 @@ export async function removeOdd(
     .from(tasks)
     .where(and(eq(tasks.staffId, id), eq(tasks.status, 'open')));
   for (const t of given) await withdrawTask(t.id, line);
-  // Last: withdrawing above may have started runs for it, such as its pick-up of a thread.
+  // Last, so nothing written for it as it left is missed. A run on work it led
+  // ends with no report, since the owner let it go and the work stopped with
+  // it. A colleague's result waiting there goes to no one: that colleague
+  // tells the owner (`Unreturned`).
   const waiting = await db
     .select()
     .from(followUps)
     .where(and(eq(followUps.staffId, id), isNull(followUps.startedAt)));
-  for (const f of waiting)
+  const led = new Set(
+    (await db.select({ id: threads.id }).from(threads).where(eq(threads.hubId, id))).map(
+      (t) => t.id
+    )
+  );
+  for (const f of waiting) {
+    const stopped = f.threadId !== null && led.has(f.threadId);
     await finishFollowUp(
       f,
       await workTitle(f),
       'failed',
-      `${who.name} left the office before starting this.`
+      `${who.name} left the office before starting this.`,
+      { stopped }
     );
+    const h = f.handOff;
+    // Not the owner's own answer going back: the colleague did nothing after it.
+    if (
+      !stopped ||
+      f.kind !== 'handed_back' ||
+      !h?.outcome ||
+      h.outcome === 'waiting' ||
+      h.answered
+    )
+      continue;
+    const u: Unreturned = {
+      colleague: { id: h.from, name: (await anyStaffer(h.from))?.name ?? h.from },
+      lead: who.name,
+      title: flat(h.title),
+      outcome: h.outcome
+    };
+    await pokeUnreturned(db, u);
+    await recordUnreturned(u);
+  }
   await record({
     kind: 'hire',
     actor: 'owner',

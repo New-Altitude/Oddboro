@@ -10,12 +10,14 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import {
   asks,
   followUps,
   goals,
+  ledger,
   planLimits,
+  pokes,
   reports,
   staff,
   tasks,
@@ -23,6 +25,7 @@ import {
   type FollowUpKind
 } from '../src/schema.ts';
 import { db } from './pglite.ts';
+import { ownerWords } from './owner-words.ts';
 
 // The ledger rows a finished run writes embed nothing: no Ollama answers here.
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
@@ -1227,6 +1230,33 @@ test("a lead run that ended a park on another Odd's task fails after that Odd le
   assert.equal((await threadOf(parked)).resumeOnTask, null);
 });
 
+test("a lead run that ended a park on another Odd's task fails after that Odd left and was brought back: the work is still told the task was taken off the desk, and that no run carries the Odd's stopped work", async () => {
+  const { hub, parked, back, owner } = await liftedColleaguesPark('hub-back-mid-run');
+  assert.equal(await L.removeOdd(hub), undefined);
+  // Back before the run fails: nothing about the Odd says it ever left.
+  assert.equal(await L.bringBack(hub), undefined);
+  await fails(back);
+  const woken = await onThread(parked, 'resume');
+  assert.equal(woken.length, 1);
+  assert.equal(
+    woken[0].note,
+    `"Check the hub-back-mid-run copy", the task you parked this work on, was taken off ${owner}'s desk, so it will not be finished. Decide what comes of the work now: Lead hub-back-mid-run left the office, so this will not go ahead.`
+  );
+  assert.equal((await threadOf(parked)).resumeOnTask, null);
+});
+
+test("a lead run that ended a park on another Odd's task fails after that Odd took it off the desk itself: the work is told so, never that the owner dropped it", async () => {
+  const { parked, back, task, owner } = await liftedColleaguesPark('hub-withdraws-mid-run');
+  await O.withdrawTask(task, 'Not needed now.');
+  await fails(back);
+  const woken = await onThread(parked, 'resume');
+  assert.equal(woken.length, 1);
+  assert.equal(
+    woken[0].note,
+    `"Check the hub-withdraws-mid-run copy", the task you parked this work on, was taken off ${owner}'s desk, so it will not be finished. A run on "Work on hub-withdraws-mid-run", the work that task was given on, was set going when the task ended, and its lead carries that work's own part: do only this work's part here. Decide what comes of the work now: Not needed now.`
+  );
+});
+
 test("a lead run that ended a park on another Odd's task fails after the owner dropped it: the work is told it was dropped, even when that Odd left after the drop", async () => {
   const plain = await liftedColleaguesPark('dropped-mid-run');
   await O.finishTask(plain.task, false, 'Not this week.');
@@ -1281,6 +1311,139 @@ test('work its lead parked until a time, and then left the office, is never woke
   assert.ok(!(await T.parkedThreads()).some((p) => p.id === work), 'the clock finds nothing due');
   await T.wakeThread(work);
   assert.deepEqual(await onThread(work, 'resume'), []);
+});
+
+test("a lead that leaves takes its work out of the usage window's hold, so the window's ask leaves the desk once the other work it held wakes", async () => {
+  const gone = await ownWork('held-lead-leaves');
+  const stays = await ownWork('held-lead-stays');
+  const { ask: hold } = await O.raiseAsk(stays.lead, {
+    title: 'Hold both for the window',
+    why: 'w',
+    ifApproved: 'i'
+  });
+  const reset = new Date(Date.now() + 3_600_000);
+  for (const work of [gone.work, stays.work])
+    await db.update(threads).set({ heldBy: hold.id, resumeAt: reset }).where(eq(threads.id, work));
+  assert.equal(await L.removeOdd(gone.lead), undefined);
+  const stopped = await threadOf(gone.work);
+  assert.equal(stopped.heldBy, null, 'nothing holds work its lead left');
+  assert.equal(stopped.resumeAt, null, 'nothing wakes it at the reset');
+  // The window resets.
+  await db
+    .update(threads)
+    .set({ resumeAt: new Date(Date.now() - 1000) })
+    .where(eq(threads.id, stays.work));
+  await T.wakeThread(stays.work);
+  const [ask] = await db.select().from(asks).where(eq(asks.id, hold.id));
+  assert.equal(ask.status, 'denied', 'the reset took the ask off the desk');
+  assert.deepEqual(await onThread(gone.work, 'resume'), []);
+});
+
+/** Every report an Odd ever put on the desk, read or not. */
+const reportsOf = (staffId: string) =>
+  db.select().from(reports).where(eq(reports.staffId, staffId));
+
+test('a lead that leaves with a task open on its own work is woken by nothing, and no report says it could not pick the work back up, even once it is back', async () => {
+  const { lead, work } = await ownWork('leaves-with-own-task');
+  await O.giveTask(lead, { title: 'Sign the lease', why: 'w', steps: ['Sign it'], threadId: work });
+  assert.equal(await L.removeOdd(lead), undefined);
+  assert.deepEqual(await onThread(work, 'resume'), [], 'nothing wakes a lead that left');
+  assert.deepEqual(await reportsOf(lead), []);
+  assert.equal(await L.bringBack(lead), undefined);
+  assert.deepEqual(
+    (await O.desk()).reports.filter((r) => r.staffId === lead),
+    []
+  );
+  const toEnd = await db
+    .select()
+    .from(followUps)
+    .where(and(eq(followUps.staffId, lead), isNull(followUps.outcome)));
+  assert.deepEqual(toEnd, [], 'nothing runs on the work it left');
+});
+
+test('a pick-up still to start when its lead leaves ends failed, with no report on the desk', async () => {
+  const { lead, work } = await ownWork('leaves-with-pick-up');
+  await T.answerThread(work, 'Use blue.');
+  assert.equal(await L.removeOdd(lead), undefined);
+  const [pickUp] = await onThread(work, 'resume');
+  assert.equal(pickUp.outcome, 'failed');
+  assert.deepEqual(await reportsOf(lead), []);
+});
+
+/** What the owner hears of a colleague's result that no lead takes: its pokes, and its Ledger lines. */
+async function heardOf(colleague: string) {
+  const poked = await db.select().from(pokes).where(eq(pokes.staffId, colleague));
+  const lines = await db.select().from(ledger).where(eq(ledger.actor, colleague));
+  return { poked, lines };
+}
+
+test('a colleague that finishes after its lead left hands nothing back: it pokes the owner, the Ledger says nothing picks the work up, and the desk gets nothing', async () => {
+  const { lead, colleague, h, work } = await ownWork('lead-leaves-mid-step');
+  assert.ok(await O.startFollowUp(h.id));
+  assert.equal(await L.removeOdd(lead), undefined);
+  const before = await deskItems();
+  await O.finishFollowUp(h, 'Step of lead-leaves-mid-step', 'done', 'Drew it.');
+  assert.deepEqual(await onThread(work, 'handed_back'), [], 'nothing waits on a lead that left');
+  assert.equal(await deskItems(), before);
+  const { poked, lines } = await heardOf(colleague);
+  assert.equal(poked.length, 1);
+  assert.equal(
+    poked[0].message,
+    'Colleague lead-leaves-mid-step finished "Step of lead-leaves-mid-step", but could not hand it back to Lead lead-leaves-mid-step because Lead lead-leaves-mid-step is no longer here.'
+  );
+  assert.equal(poked[0].status, 'waiting');
+  assert.ok(poked[0].at <= new Date(), 'it goes now');
+  const line = lines.find((l) => l.title.startsWith('Finished, but Lead lead-leaves-mid-step'));
+  assert.ok(line, lines.map((l) => l.title).join('\n'));
+  assert.match(
+    line.body ?? '',
+    /nothing picks the work up\. What .+ did stays in the work's folder\./
+  );
+  ownerWords(line.title, line.body, poked[0].message);
+});
+
+test('a step that starts after its lead left, and fails, hands nothing back, and the colleague says it could not finish', async () => {
+  const { lead, colleague, h, work } = await ownWork('lead-left-before-step');
+  assert.equal(await L.removeOdd(lead), undefined);
+  await runs(h, 'failed', 'The ink ran out.');
+  assert.deepEqual(await onThread(work, 'handed_back'), []);
+  assert.deepEqual(await reportsOf(colleague), [], 'the poke tells the owner, not the desk');
+  const { poked } = await heardOf(colleague);
+  assert.deepEqual(
+    poked.map((p) => p.message),
+    [
+      'Colleague lead-left-before-step could not finish "Step of lead-left-before-step", and could not hand it back to Lead lead-left-before-step because Lead lead-left-before-step is no longer here.'
+    ]
+  );
+});
+
+test('a result waiting for its lead when the lead leaves ends there: the colleague pokes the owner, and no report says the lead could not pick it up', async () => {
+  const { lead, colleague, h, work } = await ownWork('lead-leaves-with-result');
+  await runs(h, 'done', 'Drew it.');
+  const [back] = await onThread(work, 'handed_back');
+  assert.equal(back.startedAt, null);
+  assert.equal(await L.removeOdd(lead), undefined);
+  assert.equal((await byId(back.id)).outcome, 'failed');
+  assert.deepEqual(await reportsOf(lead), []);
+  const { poked } = await heardOf(colleague);
+  assert.deepEqual(
+    poked.map((p) => p.message),
+    [
+      'Colleague lead-leaves-with-result finished "Step of lead-leaves-with-result", but could not hand it back to Lead lead-leaves-with-result because Lead lead-leaves-with-result is no longer here.'
+    ]
+  );
+});
+
+test("the owner's answer to what a colleague raised goes back to no lead that left, and leaves nothing waiting", async () => {
+  const { lead, h, work } = await ownWork('lead-leaves-before-answer');
+  const ask = await raises(h, 'Which ink?');
+  await runs(h, 'waiting', 'Asked which ink.');
+  const [waiting] = await onThread(work, 'handed_back');
+  await runs(waiting, 'done', 'Waited.');
+  assert.equal(await L.removeOdd(lead), undefined);
+  await O.decideAsk(ask.id, 'deny', 'No ink this week.');
+  const open = (await onThread(work, 'handed_back')).filter((f) => f.outcome === null);
+  assert.deepEqual(open, [], 'no result waits on a lead that left');
 });
 
 test('a lead run that ended no park and fails ends the work failed, parked on nothing', async () => {

@@ -322,6 +322,90 @@ test("tell_lead hands the lead the chat's last exchange, as the office set it", 
   );
 });
 
+test("tell_lead copies every file the owner attached into the colleague's part of the work, lists each for the lead, and says which did not come and why, never holding back the words", async (t) => {
+  await db.insert(staff).values(odd('una', 'Una'));
+  const [roof] = await db.insert(goals).values({ title: 'Fix the roof' }).returning();
+  const [mend] = await db
+    .insert(threads)
+    .values({ title: roof.title, goalId: roof.id, hubId: 'mo', holderId: 'mo' })
+    .returning();
+  await db.insert(staffGoals).values({ staffId: 'una', goalId: roof.id, part: 'The tiles' });
+  const shot = 'attachments/20261111-090000-aaaa-roof.png';
+  const notes = 'attachments/20261111-090000-bbbb-notes.md';
+  const plan = 'attachments/20261111-090000-cccc-plan.md';
+  for (const [path, text] of [
+    [shot, 'png'],
+    [notes, 'the owner notes'],
+    [plan, 'the plan']
+  ])
+    put(join(home('staff', 'una'), path), text);
+  const part = threadPart(mend.id, 'una');
+  // Already in the work: a different file where the notes would land, and the same plan.
+  put(join(part, 'attachments-20261111-090000-bbbb-notes.md'), "Una's own notes");
+  put(join(part, 'attachments-20261111-090000-cccc-plan.md'), 'the plan');
+  const c = await toolServer('una', {
+    OWNER_SAID: 'Una, the leak is by the chimney [Image #1].',
+    OWNER_FILES: JSON.stringify([
+      { tag: 'Image #1', path: shot },
+      { tag: 'notes.md', path: notes },
+      { tag: 'plan.md', path: plan },
+      { tag: 'gone.png', path: 'attachments/20261111-090000-dddd-gone.png' }
+    ]),
+    RUN_KEY: 'k-una'
+  });
+  t.after(() => c.close());
+  const tool = (await c.listTools()).tools.find((x) => x.name === 'tell_lead');
+  assert.match(tool?.description ?? '', /Every file they attached to it goes too/);
+  const r = await c.callTool({
+    name: 'tell_lead',
+    arguments: {
+      work: mend.id,
+      words: 'the leak is by the chimney [Image #1].',
+      reading: 'The leak is near the chimney.'
+    }
+  });
+  assert.equal(r.isError, undefined, said(r));
+  assert.match(said(r), /The 2 files they attached went too\./);
+  assert.match(said(r), /Did not go: notes\.md, since .+; gone\.png, since .+\. Tell .+ so\./);
+  assert.deepEqual(partNow(part), {
+    'attachments-20261111-090000-aaaa-roof.png': 'png',
+    'attachments-20261111-090000-bbbb-notes.md': "Una's own notes",
+    'attachments-20261111-090000-cccc-plan.md': 'the plan'
+  });
+  const [wake] = await db.select().from(followUps).where(eq(followUps.threadId, mend.id));
+  assert.equal(wake.staffId, 'mo');
+  const note = wake.note ?? '';
+  assert.ok(note.includes("words: the leak is by the chimney [Image #1]. Una's own reading"), note);
+  assert.ok(
+    note.endsWith(
+      ` attached 2 files to that message, now in this work: Image #1 at ${join(part, 'attachments-20261111-090000-aaaa-roof.png')}; plan.md at ${join(part, 'attachments-20261111-090000-cccc-plan.md')}. 2 files the owner attached did not come: notes.md, since a different file is already in the work under its name; gone.png, since the office cannot read it.`
+    ),
+    note
+  );
+  assert.ok(!note.includes('\n'), 'the note stays on one line');
+});
+
+test('tell_lead with no files attached says nothing of files, to the lead or in its description', async (t) => {
+  await db.insert(staff).values(odd('xan', 'Xan'));
+  await db.insert(staffGoals).values({ staffId: 'xan', goalId: fair.id, part: 'The till' });
+  const c = await toolServer('xan', { OWNER_SAID: 'Xan, count the till twice.', RUN_KEY: 'k-xan' });
+  t.after(() => c.close());
+  const tool = (await c.listTools()).tools.find((x) => x.name === 'tell_lead');
+  assert.doesNotMatch(tool?.description ?? '', /attached/);
+  const r = await c.callTool({
+    name: 'tell_lead',
+    arguments: { work: sale.id, words: 'count the till twice.', reading: 'Count it twice.' }
+  });
+  assert.equal(r.isError, undefined, said(r));
+  assert.doesNotMatch(said(r), /attached|Did not go/);
+  const wakes = await db.select().from(followUps).where(eq(followUps.threadId, sale.id));
+  assert.ok(
+    wakes.some((w) =>
+      w.note?.endsWith("Xan's own reading, which is not the owner's words: Count it twice.")
+    )
+  );
+});
+
 test('a goal hire with no job opens no work and puts nothing on the desk, whatever tool it reaches for', async () => {
   const c = await toolServer('pia', { ...chat, RUN_KEY: 'k-pia-all' });
   const work = {

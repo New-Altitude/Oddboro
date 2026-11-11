@@ -45,6 +45,7 @@ import {
 } from './schema.ts';
 import { flat, type DeskItem } from './desk-answers.ts';
 import { heldTools, lacking, sharing, toolNames, type Tool } from './sharing.ts';
+import { carryEach, type Carried, type CarriedFile } from './hand-offs.ts';
 import { holdForWindow, WINDOW_RESET, windowWoke } from './usage-window.ts';
 import { THREADS_DIR, workPath } from './work-paths.ts';
 
@@ -493,8 +494,15 @@ export async function wakeThread(id: number): Promise<void> {
  */
 export async function answerThread(id: number, answer: string, askId?: number): Promise<void> {
   await db.transaction(async (tx) => {
-    const [t] = await tx.select({ hubId: threads.hubId }).from(threads).where(eq(threads.id, id));
-    if (!t) return;
+    const [t] = await tx
+      .select({ hubId: threads.hubId, leftAt: staff.leftAt })
+      .from(threads)
+      .innerJoin(staff, eq(staff.id, threads.hubId))
+      .where(eq(threads.id, id));
+    // A lead that left the office runs nothing, so nothing wakes it: its
+    // pick-up would wait for ever, or run on work its leaving stopped once it
+    // came back (`removeOdd`).
+    if (!t || t.leftAt) return;
     // Locked, so a claim cannot start it between this look and the join: the
     // claim waits, then returns the joined note, or it went first and this
     // answer writes a pick-up of its own.
@@ -788,6 +796,10 @@ export function exchangeForLead(
  * colleague understood them to mean, which goes labelled as the colleague's,
  * since a lead cannot judge a clarifying "no" from the bare word. `exchange` is
  * the last two lines of that chat, as the office set them (`exchangeForLead`).
+ * `files` are every file the owner attached to that message, as the tool
+ * server checked them: each that can land is copied into the colleague's part
+ * of the work (`carryEach`), and the note lists where each landed, or why it
+ * did not come. A file that does not come never stops the words.
  */
 export async function tellLead(t: {
   staffId: string;
@@ -797,7 +809,8 @@ export async function tellLead(t: {
   words: string;
   reading: string;
   exchange?: string;
-}): Promise<{ lead: string } | { problem: string }> {
+  files?: { carry: CarriedFile[]; unfit: { named: string; why: string }[] };
+}): Promise<{ lead: string; files?: Carried[] } | { problem: string }> {
   const words = flat(t.words);
   if (!words || !flat(t.said).includes(words))
     return {
@@ -837,12 +850,30 @@ export async function tellLead(t: {
     ? lacking(await heldTools([row.hubId, t.staffId]), row.hubId, [t.staffId])
     : [];
   const exchange = exchangeForLead(t.exchange ?? '', name, lacks, REPLY_A_LEAD_LACKS);
+  const files: Carried[] = [
+    ...carryEach(t.threadId, t.staffId, t.files?.carry ?? []),
+    ...(t.files?.unfit ?? [])
+  ];
   // A lead once read this as the colleague taking it on, and sent no work.
   await answerThread(
     t.threadId,
-    `${name} passed you what ${t.owner} told them in chat about this work. You decide what comes of it and hand on any work it needs; ${name} does nothing more with it. ${t.owner}'s words: ${words} ${name}'s own reading, which is not ${t.owner}'s words: ${reading}${exchange ? ` ${exchange}` : ''}`
+    `${name} passed you what ${t.owner} told them in chat about this work. You decide what comes of it and hand on any work it needs; ${name} does nothing more with it. ${t.owner}'s words: ${words} ${name}'s own reading, which is not ${t.owner}'s words: ${reading}${exchange ? ` ${exchange}` : ''}${attachedLine(files, t.owner)}`
   );
-  return { lead: row.lead };
+  return { lead: row.lead, ...(files.length ? { files } : {}) };
+}
+
+/** What the lead's note says of the files the owner attached: where each landed, and which did not come and why. */
+function attachedLine(files: Carried[], owner: string): string {
+  const landed = files.flatMap((f) => ('at' in f ? [`${flat(f.named)} at ${f.at}`] : []));
+  const left = files.flatMap((f) => ('why' in f ? [`${flat(f.named)}, since ${f.why}`] : []));
+  return [
+    landed.length
+      ? ` ${owner} attached ${landed.length === 1 ? 'a file' : `${landed.length} files`} to that message, now in this work: ${landed.join('; ')}.`
+      : '',
+    left.length
+      ? ` ${left.length === 1 ? 'One file' : `${left.length} files`} ${owner} attached did not come: ${left.join('; ')}.`
+      : ''
+  ].join('');
 }
 
 /** Something a thread put on the owner's desk that is still open. */

@@ -1,5 +1,5 @@
 {
-  "id": "91f48d22-32aa-4059-bb65-75380e82a3d4",
+  "id": "0e56e216-ad5b-4bff-a999-15c4c6949069",
   "prevId": "bd859bde-38b6-4ed2-ab48-1c892e1f5537",
   "version": "7",
   "dialect": "postgresql",
@@ -300,18 +300,6 @@
         "switches": {
           "name": "switches",
           "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "level": {
-          "name": "level",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "office_tools": {
-          "name": "office_tools",
-          "type": "text[]",
           "primaryKey": false,
           "notNull": false
         },
@@ -2418,6 +2406,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "withdrawn": {
+          "name": "withdrawn",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "created_at": {
           "name": "created_at",

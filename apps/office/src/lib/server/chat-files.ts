@@ -70,6 +70,9 @@ export function keepAttachment(
   }
 }
 
+/** A kept file's path in the Odd's own folder, as its office tools name it. */
+export const keptAt = (name: string): string => `${FOLDER}/${name}`;
+
 /** The full path of a kept file, only when it is a plain file in the Odd's own attachments folder. */
 export function attachmentPath(id: string, name: string): string | undefined {
   if (!KEPT.test(name) || !ownAttachments(id)) return undefined;

@@ -336,7 +336,8 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    colleague's chat also lists the threads it works on and does not lead,
    those it was handed work on and those of a goal it serves, tells it each
    one's story and what the owner said on it, and `tell_lead` passes what the
-   owner says there about one to its lead, who decides the next step. Raising a goal's work there itself is refused, pointing to
+   owner says there about one to its lead, who decides the next step, with
+   every file they attached to that message (`OWNER_FILES`, from `officeEnv`). Raising a goal's work there itself is refused, pointing to
    `tell_lead`. Each
    message also tells the session what no run of it wrote (`chatPreface` in
    `src/lib/server/chat-preface.ts`): what the Odd delivered, and the asks

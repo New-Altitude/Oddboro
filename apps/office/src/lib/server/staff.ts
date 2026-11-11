@@ -175,7 +175,7 @@ import {
   type RetoldEntry,
   type Session
 } from './chat-preface.ts';
-import { filesNow } from './chat-files.ts';
+import { filesNow, keptAt } from './chat-files.ts';
 import { officeEnv } from './run-env.ts';
 import { runEnv, toolServerEnv } from './run-env-allow.ts';
 import { firstDayOf } from './first-day.ts';
@@ -867,6 +867,8 @@ export type RunOpts = {
   ownerSaid?: string;
   /** That chat as it stood before the owner's message: `tell_lead` passes on its last exchange. */
   chatBefore?: ChatEntry[];
+  /** The files the owner attached to that message, which `tell_lead` takes to the lead. */
+  ownerFiles?: ChatFile[];
   /** What a follow-up was asked, in words a persona can read: its `message` is only a label. */
   asked?: string;
   /** The ask the owner approved that this run carries out: the only one its self-edits may cite. */
@@ -1008,6 +1010,7 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
       key,
       ownerSaid: opts.ownerSaid,
       chatExchange: opts.chatBefore && lastExchange(opts.chatBefore, { owner, odd: who.name }),
+      ownerFiles: opts.ownerFiles?.map((f) => ({ tag: f.tag, path: keptAt(f.name) })),
       approvedAsk: opts.approvedAsk,
       signedOut: caps.outside
         .filter((a) => a.heldBack === 'sign-in ran out')
@@ -1468,6 +1471,7 @@ export async function chat(
         kind: 'chat',
         ownerSaid: message,
         chatBefore: past,
+        ownerFiles: attached,
         images: [...files, ...missed].flatMap((f: KeptFile) =>
           'gone' in f || !isPicture(f.mediaType) ? [] : [{ path: f.path, mediaType: f.mediaType }]
         ),
