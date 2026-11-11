@@ -1,13 +1,13 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
-  import type { HandOffLine, HandOffStep, LessonLine, PokeRow, ThreadLine } from '@oddboro/ledger';
+  import type { HandOffLine, PokeRow, ThreadLine } from '@oddboro/ledger';
   import { FIRST_QUESTIONS, firstQuestionIn } from '@oddboro/ledger/first-questions';
   import { clockTime } from '@oddboro/ledger/time';
   import Markdown from './Markdown.svelte';
   import Lesson from './Lesson.svelte';
   import PersonaQuiet from './PersonaQuiet.svelte';
-  import { call, sendFile } from './api.ts';
+  import { call, sendFile, type ApiUrl } from './api.ts';
   import ChatFiles from './ChatFiles.svelte';
   import { hideChoiceLines } from '#lib/choices.ts';
   import { hasToken, tagFor, withTokens, withoutToken, type Pending } from './chat-attach.ts';
@@ -23,6 +23,7 @@
   import { chatRequest, takeDraft, type Delivered } from './chat-about.svelte.ts';
   import type { StaffProfile } from '../staff/roster.ts';
   import { runningFor, toolWords, type Work } from '../staff/work.ts';
+  import type { ChatEntry, ChatEvent } from '../staff/chat.ts';
   import { counting, dayBreaks, fullDate, stamp, took } from './chat-lines.ts';
   import { serviceNames } from './service-names.svelte.ts';
 
@@ -51,45 +52,8 @@
     if (visible) scrollDown();
   });
 
-  type Line = {
-    from: 'owner' | 'staff';
-    text: string;
-    pending?: boolean;
-    failed?: boolean;
-    /** Delivered later by the office, at `at`. */
-    poke?: boolean;
-    at?: string;
-    /** Something the staffer put on the desk, shown where it landed. */
-    item?: Delivered & { status: string };
-    /** What the owner's message replied about. */
-    re?: Delivered;
-    /** A lesson the staffer kept, shown where it kept it. */
-    lesson?: LessonLine;
-    /** One step of work handed to a colleague, or from one. */
-    handOff?: { line: HandOffLine; step: HandOffStep; back?: number };
-    /** A thread the staffer leads, with each hand-off it gave on it. */
-    thread?: { line: ThreadLine; steps: HandOffLine[] };
-    /** How long the run behind a reply took, in milliseconds. */
-    took?: number;
-    /** On the owner's line: the files they attached. */
-    files?: ChatFile[];
-    /** On a reply: the choices it ended with, shown as buttons while it is the last line. */
-    choices?: string[];
-  };
-  type Entry = {
-    at: string;
-    from: 'owner' | 'staff';
-    text: string;
-    poke?: true;
-    item?: Delivered & { status: string };
-    re?: Delivered;
-    lesson?: LessonLine;
-    handOff?: { line: HandOffLine; step: HandOffStep; back?: number };
-    thread?: { line: ThreadLine; steps: HandOffLine[] };
-    took?: number;
-    files?: ChatFile[];
-    choices?: string[];
-  };
+  /** A chat line as the page keeps it: one sent or streaming has no time yet. */
+  type Line = Omit<ChatEntry, 'at'> & { at?: string; pending?: boolean };
 
   /** Where a hand-off stands, in words, and whether the owner has to act. */
   function progress(h: HandOffLine): { text: string; yours: boolean } {
@@ -277,9 +241,9 @@
   let upcoming = $state<PokeRow[]>([]);
 
   function load(id: string) {
-    fetch(`/api/staff/${id}/chat`)
+    fetch(`/api/staff/${id}/chat` satisfies ApiUrl)
       .then((r) => r.json())
-      .then((d: { history: Entry[]; busy: boolean }) => {
+      .then((d: { history: ChatEntry[]; busy: boolean }) => {
         // A message that started meanwhile is streaming into the list: keep it.
         if (sending) return;
         lines = d.history.map((h) => ({ ...h }));
@@ -413,7 +377,7 @@
     scrollDown();
     onstart();
     try {
-      const res = await fetch(`/api/staff/${profile.id}/chat`, {
+      const res = await fetch(`/api/staff/${profile.id}/chat` satisfies ApiUrl, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -434,11 +398,7 @@
           const chunk = buffer.slice(0, cut);
           buffer = buffer.slice(cut + 2);
           if (!chunk.startsWith('data: ')) continue;
-          const ev = JSON.parse(chunk.slice(6)) as
-            | { type: 'delta'; text: string }
-            | { type: 'tool'; name: string }
-            | { type: 'done'; text: string; choices?: string[] }
-            | { type: 'error'; message: string };
+          const ev = JSON.parse(chunk.slice(6)) as ChatEvent;
           if (ev.type === 'delta') {
             reply.text += ev.text;
             status = '';
@@ -959,8 +919,7 @@
           class="max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed break-words
           {line.from === 'owner'
             ? 'ms-auto rounded-ee-md bg-sea/25 whitespace-pre-wrap text-ink'
-            : 'me-auto rounded-es-md bg-raise text-ink'}"
-          class:text-coral={line.failed}
+            : `me-auto rounded-es-md bg-raise ${line.failed ? 'text-coral' : 'text-ink'}`}"
         >
           {#if line.pending && !line.text}
             <span class="dots" aria-label="Replying"><span></span><span></span><span></span></span>

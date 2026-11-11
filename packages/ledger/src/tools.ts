@@ -3,6 +3,7 @@
 // The owner grants the rest one staffer at a time, from the Settings tab. Safe to
 // import in the browser.
 import type { AskKind, Step } from './schema.ts';
+import { OWNER_ANSWERS } from './desk-answers.ts';
 
 export type OfficeTool = {
   id: string;
@@ -10,11 +11,21 @@ export type OfficeTool = {
   /** What it lets a staffer do, for the owner. */
   does: string;
   always?: boolean;
-  /** It shapes the run's prompt (`see_office`) and is no tool the Odd calls. */
+  /** Offered only while the Odd holds Gmail (`mailboxes` in mcp.ts), even by `always`. */
+  withGmail?: boolean;
+  /**
+   * Offered only in a chat, where the office sets the owner's words
+   * (`OWNER_SAID` in mcp.ts), even by `always`: the tool acts on what the
+   * owner just said, and a job or a follow-up has no such words.
+   */
+  inChat?: boolean;
+  /** Never offered to the Office Manager, even by `always`: the manager never leaves. */
+  notToManager?: boolean;
+  /** It shapes the run's prompt (`see_office`) and is no tool the Odd calls, so never offered. */
   prompt?: boolean;
 };
 
-export const OFFICE_TOOLS: readonly OfficeTool[] = [
+const TOOLS = [
   { id: 'raise_ask', name: 'Ask you', does: 'Puts an ask on your desk.', always: true },
   { id: 'my_asks', name: 'Its asks', does: 'Sees how you decided its asks.', always: true },
   { id: 'my_access', name: 'Its access', does: 'Sees the tools you gave it.', always: true },
@@ -41,13 +52,16 @@ export const OFFICE_TOOLS: readonly OfficeTool[] = [
     id: 'leave_office',
     name: 'Ask to leave',
     does: 'Asks you to let it go from the office, when you tell it to leave. It goes only on your yes.',
-    always: true
+    always: true,
+    inChat: true,
+    notToManager: true
   },
   {
     id: 'withdraw',
     name: 'Take things off your desk',
     does: 'Takes its own open asks and tasks off your desk, when you tell it to in chat.',
-    always: true
+    always: true,
+    inChat: true
   },
   {
     id: 'keep_lesson',
@@ -77,7 +91,8 @@ export const OFFICE_TOOLS: readonly OfficeTool[] = [
     id: 'tell_lead',
     name: 'Tell the lead',
     does: 'Passes what you tell it in chat about work another Odd leads to that Odd, in your words.',
-    always: true
+    always: true,
+    inChat: true
   },
   {
     id: 'search_ledger',
@@ -123,16 +138,18 @@ export const OFFICE_TOOLS: readonly OfficeTool[] = [
     id: 'propose_reply',
     name: 'Propose replies',
     does: 'Brings you one email reply at a time to edit, then send or save to Gmail drafts. Only with Gmail, and nothing goes until you click.',
-    // Every Odd's, offered only while it holds Gmail (mcp.ts): a hire proposal's
-    // list of tools once left it out, and its replies went into a file instead.
-    always: true
+    // Every Odd's, offered only while it holds Gmail: a hire proposal's list
+    // of tools once left it out, and its replies went into a file instead.
+    always: true,
+    withGmail: true
   },
   {
     id: 'propose_filter',
     name: 'Propose filters',
     does: 'Brings you one Gmail filter at a time to change, then create. Only with Gmail, and nothing changes until you click.',
     // Every Odd's, offered only while it holds Gmail, as propose_reply is.
-    always: true
+    always: true,
+    withGmail: true
   },
   {
     id: 'propose_hire',
@@ -168,29 +185,45 @@ export const OFFICE_TOOLS: readonly OfficeTool[] = [
   {
     id: 'remove_odd',
     name: 'Remove Odds',
-    does: 'Asks you to let another Odd go from the office. It goes only on your yes.'
+    does: 'Asks you to let another Odd go from the office. It goes only on your yes.',
+    inChat: true
   },
   {
     id: 'bring_back_odd',
     name: 'Bring Odds back',
-    does: 'Asks you to bring back an Odd that left the office, as it was. It comes back only on your yes.'
+    does: 'Asks you to bring back an Odd that left the office, as it was. It comes back only on your yes.',
+    inChat: true
   },
   {
     id: 'update_goal',
     name: 'Update goals',
     does: 'Marks a goal met or paused, or rewords it, when you ask in chat or approve an ask.'
   }
-];
+] as const satisfies readonly OfficeTool[];
+export type OfficeToolId = (typeof TOOLS)[number]['id'];
+/** Every office tool, each with its id from the list above, so a typo in an id fails the type check. */
+export const OFFICE_TOOLS: readonly (OfficeTool & { id: OfficeToolId })[] = TOOLS;
+
+/**
+ * Tools the tool server registers beside a listed one, held with it: an Odd
+ * that may poke the owner sees and cancels its pokes, and one that hands off
+ * may park its thread until a time.
+ */
+export const RIDES_WITH = {
+  my_pokes: 'poke_owner',
+  cancel_poke: 'poke_owner',
+  resume_at: 'hand_off'
+} as const satisfies Record<string, OfficeToolId>;
 
 /**
  * Tools every new hire starts with, whatever tools its hire names, which the
  * owner may then take off. Migration 0017 gave `see_office` to every Odd
  * already hired.
  */
-export const ON_BY_DEFAULT = ['see_office'];
+export const ON_BY_DEFAULT: OfficeToolId[] = ['see_office'];
 
 /** What a new hire starts with. The owner adds or removes from there. */
-export const STARTER_TOOLS = [
+export const STARTER_TOOLS: OfficeToolId[] = [
   ...ON_BY_DEFAULT,
   'search_ledger',
   'give_owner_a_task',
@@ -202,12 +235,41 @@ export const STARTER_TOOLS = [
   'poke_owner'
 ];
 
-const GRANTABLE = new Set(OFFICE_TOOLS.filter((t) => !t.always).map((t) => t.id));
-export const isGrantable = (id: string) => GRANTABLE.has(id);
+/** The office tools the owner gives an Odd, beyond the ones every Odd has. */
+export const GRANTABLE_TOOLS = OFFICE_TOOLS.filter((t) => !t.always).map((t) => t.id);
+const GRANTABLE = new Set<string>(GRANTABLE_TOOLS);
+export const isGrantable = (id: string): id is OfficeToolId => GRANTABLE.has(id);
 
 /** Whether a staffer holding `granted` may use the office tool `id`. */
 export const hasTool = (granted: readonly string[], id: string) =>
   OFFICE_TOOLS.some((t) => t.id === id && (t.always || granted.includes(id)));
+
+/** What about a run decides which office tools it is offered, beyond what its Odd holds. */
+export type ToolRun = {
+  /** The Odd holds Gmail, at any level. */
+  gmail: boolean;
+  /** A chat, where the office sets the owner's words (`OWNER_SAID`). */
+  chat: boolean;
+  /** The Odd is the Office Manager. */
+  manager: boolean;
+};
+
+/**
+ * Whether `run` is offered the office tool `id`: its Odd, holding `granted`,
+ * has it (`hasTool`), it is a tool the Odd calls (not `prompt`), and each
+ * condition the tool's row sets holds (`withGmail`, `inChat`, `notToManager`).
+ * The tool server registers by it.
+ */
+export const isOffered = (granted: readonly string[], id: string, run: ToolRun): boolean => {
+  const row = OFFICE_TOOLS.find((t) => t.id === id);
+  return (
+    hasTool(granted, id) &&
+    !row?.prompt &&
+    (!row?.withGmail || run.gmail) &&
+    (!row?.inChat || run.chat) &&
+    (!row?.notToManager || !run.manager)
+  );
+};
 
 /** A task step the owner ticks by hand: one with no control, or a sign-in. */
 export const tickable = (s: Step) => !s.action || s.action.kind === 'oauth';
@@ -218,4 +280,4 @@ export const tickable = (s: Step) => !s.action || s.action.kind === 'oauth';
  * brings one back, which has nothing to rework.
  */
 export const yesOrNo = (kind: AskKind | undefined): boolean =>
-  kind === 'hand_offs' || kind === 'window' || kind === 'remove' || kind === 'bring_back';
+  kind !== undefined && OWNER_ANSWERS.ask[kind].iterate === 'refused';

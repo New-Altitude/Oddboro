@@ -7,6 +7,7 @@ import { eq, sql } from 'drizzle-orm';
 import type { DrawnPart, LookSpec } from '@oddboro/sprites/look';
 import { db } from './db.ts';
 import { fixedError } from './errors.ts';
+import { HIRE_DEFAULTS } from './grantable.ts';
 import { hire, ownerName, record, roster, staffer, type StaffRow } from './office.ts';
 import { parts, staff } from './schema.ts';
 
@@ -79,8 +80,8 @@ export async function personaParts(slug: string): Promise<Set<string>> {
 
 /**
  * Hire a persona from its checked package, with no drawing: the package's look,
- * portrait and parts. Draft level, the starter tools and Claude Code, as any
- * new Odd. Refuses a persona already in the office.
+ * portrait and parts, at its level and tools in `HIRE_DEFAULTS`, on the
+ * office's own tool. Refuses a persona already in the office.
  */
 export async function hirePersona(p: {
   slug: string;
@@ -96,7 +97,7 @@ export async function hirePersona(p: {
     remit: pkg.remit,
     desk: personaDesk(pkg.name, p.displayName, await ownerName()),
     room: 'workspace',
-    permission: 'draft',
+    ...HIRE_DEFAULTS.persona,
     variant: 'look',
     portrait: 'look',
     look: pkg.look,

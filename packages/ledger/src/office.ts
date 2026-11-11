@@ -29,7 +29,7 @@ import { db, sql as pg } from './db.ts';
 import { deleteSecret, getSecret } from './secrets.ts';
 import { embed } from './embed.ts';
 import { fixedError } from './errors.ts';
-import { chatSession, CODE, home } from './home.ts';
+import { accountsHome, chatSession, CODE, home } from './home.ts';
 import {
   answeredAll,
   handBack,
@@ -104,9 +104,12 @@ import {
 } from './agents.ts';
 // Read only inside functions, so the import cycle with managers.ts is safe.
 import { MANAGER_ROLE } from './managers.ts';
+import { currentPlatform } from './platform.ts';
 import { bringBack, leavingRefused, removeOdd } from './leaving.ts';
 import {
+  GRANT_LABEL,
   grantWorks,
+  LEVEL_LABEL,
   levelAtMost,
   SWITCH_NAMES,
   switchesSaid,
@@ -116,14 +119,15 @@ import {
 } from './access-words.ts';
 import { filterWords, sameCriteria, type GmailFilter } from './filter-words.ts';
 import { nextRun, zone } from './time.ts';
+import { isGrantable, OFFICE_TOOLS, ON_BY_DEFAULT, tickable, yesOrNo } from './tools.ts';
+import { HIRE_DEFAULTS } from './grantable.ts';
 import {
-  isGrantable,
-  OFFICE_TOOLS,
-  ON_BY_DEFAULT,
-  STARTER_TOOLS,
-  tickable,
-  yesOrNo
-} from './tools.ts';
+  OWNER_ANSWERS,
+  type AskAnswer,
+  type AskEffect,
+  type DeskItem,
+  type TaskEffect
+} from './desk-answers.ts';
 import { lookSignature, type DrawnPart, type LookSpec } from '@oddboro/sprites/look';
 import type { PersonaLink } from './personas.ts';
 
@@ -256,7 +260,7 @@ export function heldReach<T extends { network: boolean }>(
  * office holds it says the hold's words instead.
  */
 function networkNote(before: StaffRow, after: StaffRow): { body?: string } {
-  const [was, is] = [before, after].map((s) => commandsOnline(s.agent, process.platform, s));
+  const [was, is] = [before, after].map((s) => commandsOnline(s.agent, currentPlatform(), s));
   if (was === is) return {};
   if (!is) return { body: NETWORK_NOTE.off };
   const opened = heldReach(after.agent, { network: is }, networkHeld()).network;
@@ -264,25 +268,50 @@ function networkNote(before: StaffRow, after: StaffRow): { body?: string } {
 }
 
 /** The tool the office runs on, from `.env` as it stands now (`officeAgentOf`). */
-export const officeAgent = (): Agent => officeAgentOf(process.env.OFFICE_AGENT, process.platform);
+export const officeAgent = (): Agent => officeAgentOf(process.env.OFFICE_AGENT, currentPlatform());
+
+/**
+ * Why Run commands cannot be stored for `agent` on this system, or nothing
+ * when its tool follows the switch. A stored yes must be the owner's own
+ * choice, or it would turn commands on unasked after a later move to a tool
+ * that follows it.
+ */
+function commandsRefused(agent: Agent): { refused: string } | undefined {
+  const how = commandsHow(agent, currentPlatform());
+  return how.state === 'switch' ? undefined : { refused: how.why };
+}
 
 /**
  * Only the owner moves a staffer to another coding tool. Its chat session
  * belongs to the tool it left, which could not resume it, so the next chat
- * starts a fresh one.
+ * starts a fresh one. With `commands`, the move also sets Run commands (the
+ * one click the Settings tab offers under a switch the Odd's own tool cannot
+ * follow), refused before anything changes when the new tool does not follow
+ * it, so the Odd never moves without the commands it was moved for.
  */
-export async function setAgent(id: string, agent: Agent): Promise<void> {
+export async function setAgent(
+  id: string,
+  agent: Agent,
+  commands?: boolean
+): Promise<{ refused: string } | undefined> {
   const before = await staffer(id);
-  if (!before || before.agent === agent) return;
-  // An account belongs to one tool, so the Odd starts the new one on its Office account.
-  await db.update(staff).set({ agent, account: null }).where(eq(staff.id, id));
-  rmSync(chatSession(id), { force: true });
-  await record({
-    kind: 'access',
-    actor: 'owner',
-    title: `Moved ${before.name} from ${AGENT_NAMES[before.agent]} to ${AGENT_NAMES[agent]}`,
-    ...networkNote(before, { ...before, agent })
-  });
+  if (!before) return;
+  if (commands !== undefined) {
+    const refused = commandsRefused(agent);
+    if (refused) return refused;
+  }
+  if (before.agent !== agent) {
+    // An account belongs to one tool, so the Odd starts the new one on its Office account.
+    await db.update(staff).set({ agent, account: null }).where(eq(staff.id, id));
+    rmSync(chatSession(id), { force: true });
+    await record({
+      kind: 'access',
+      actor: 'owner',
+      title: `Moved ${before.name} from ${AGENT_NAMES[before.agent]} to ${AGENT_NAMES[agent]}`,
+      ...networkNote(before, { ...before, agent })
+    });
+  }
+  if (commands !== undefined) return setOwnTool(id, 'commands', commands);
 }
 
 /** Only the owner grants or removes an office tool. Takes effect on the staffer's next run. */
@@ -364,14 +393,23 @@ export async function setModel(
   });
 }
 
-/** Only the owner switches Run commands or Browse the web. Takes effect on the staffer's next run. */
+/**
+ * Only the owner switches Run commands or Browse the web. Takes effect on the
+ * staffer's next run. Run commands, on or off, is refused for a tool that does
+ * not follow the switch on this system, a repeat included.
+ */
 export async function setOwnTool(
   id: string,
   which: 'commands' | 'web',
   on: boolean
-): Promise<void> {
+): Promise<{ refused: string } | undefined> {
   const before = await staffer(id);
-  if (!before || before[which] === on) return;
+  if (!before) return;
+  if (which === 'commands') {
+    const refused = commandsRefused(before.agent);
+    if (refused) return refused;
+  }
+  if (before[which] === on) return;
   await db
     .update(staff)
     .set({ [which]: on })
@@ -395,21 +433,27 @@ export async function setOwnTool(
 
 /**
  * Only the owner gives an Odd a folder outside the office, to read or to read
- * and change, or takes it back (`access` null). `path` is the real path
- * `checkFolder` gave, or, to take one back, the path as stored, so a folder
- * deleted from the disk can still be taken back. A folder is the same one
+ * and change, or takes it back (`access` null). A folder given is the path as
+ * the owner typed it: `checkFolder` refuses it or gives its real path, which
+ * is what is stored. A folder taken back is the path as stored, unchecked, so
+ * a folder deleted from the disk can still be taken back. A folder is the same one
  * when its real path is (`real`), so a level change replaces it, even one
  * stored in another case. A new folder inside or holding one the Odd already
- * has is refused (`FOLDER_REFUSED.nested`): one would carry two levels.
- * Takes effect on the next run.
+ * has is refused (`FOLDER_REFUSED.nested`): one would carry two levels. A
+ * stored folder no run gets (`touchesSecretStore`) carries none, so the owner
+ * can give a clean folder inside it. It still counts against a folder that
+ * would hold it, which would put the store it was dropped for in a run. A
+ * whole drive or system files comes back as a `warning` and changes nothing
+ * until the owner accepts it (`accept`). Takes effect on the next run.
  */
 export async function setFolder(
   id: string,
   path: string,
-  access: FolderAccess | null
-): Promise<{ refused: string } | undefined> {
-  const done = await changeFolder(db, id, path, access);
-  if (!done || 'refused' in done) return done;
+  access: FolderAccess | null,
+  accept = false
+): Promise<{ refused: string } | { warning: string } | undefined> {
+  const done = await changeFolder(db, id, path, access, { accept });
+  if (!done || 'refused' in done || 'warning' in done) return done;
   await record({ kind: 'access', actor: 'owner', title: done.title });
 }
 
@@ -421,17 +465,26 @@ async function changeFolder(
   q: Db,
   id: string,
   path: string,
-  access: FolderAccess | null
-): Promise<{ refused: string } | { title: string } | undefined> {
+  access: FolderAccess | null,
+  owner: { accept: boolean }
+): Promise<{ refused: string } | { warning: string } | { title: string } | undefined> {
   const before = await staffer(id, q);
   if (!before) return;
+  if (access !== null) {
+    const checked = checkFolder(path, owner.accept);
+    if ('refused' in checked || 'warning' in checked) return checked;
+    path = checked.real;
+  }
   const at = real(path);
   const same = (f: { path: string }) => real(f.path) === at;
   const had = before.folders.find(same);
   const write = access === 'write';
   if (access === null ? !had : had?.write === write) return;
   const rest = before.folders.filter((f) => !same(f));
-  if (access !== null && rest.some((f) => within(at, real(f.path)) || within(real(f.path), at)))
+  if (
+    access !== null &&
+    rest.some((f) => (touchesSecretStore(f.path) ? within(real(f.path), at) : nests(at, f)))
+  )
     return { refused: FOLDER_REFUSED.nested };
   const folders = access === null ? rest : [...rest, { path, write }];
   await q.update(staff).set({ folders }).where(eq(staff.id, id));
@@ -447,11 +500,19 @@ async function changeFolder(
 const gaveFolder = (name: string, path: string, access: FolderAccess) =>
   `Let ${name} ${access === 'write' ? 'read and change' : 'read'} ${shownFolder(path)}`;
 
+/** Whether `at` (a real path) sits inside the stored folder `f`, or holds it. */
+const nests = (at: string, f: { path: string }) =>
+  within(at, real(f.path)) || within(real(f.path), at);
+
 /**
  * Why an Odd may not ask for `path` (a real path from `checkFolder`) at
  * `level`, or nothing when it may: it has that folder, or one holding it,
  * at that level or above; or the owner could not give it, since it sits
- * inside or holds another folder the Odd has (`setFolder`).
+ * inside or holds another folder the Odd has (`setFolder`). A stored folder
+ * no run gets (`touchesSecretStore`) never covers what is asked for, so the
+ * Odd is never told that a folder it does not get covers it, and a clean
+ * folder inside one can be asked for. It still counts against a folder that
+ * would hold it, which would put the store it was dropped for in a run.
  */
 export function folderAskRefused(
   who: Pick<StaffRow, 'folders'>,
@@ -459,12 +520,15 @@ export function folderAskRefused(
   level: FolderAccess
 ): string | undefined {
   const at = real(path);
-  const covers = who.folders.find((f) => within(at, real(f.path)) && (f.write || level === 'read'));
+  const held = who.folders.filter((f) => !touchesSecretStore(f.path));
+  const covers = held.find((f) => within(at, real(f.path)) && (f.write || level === 'read'));
   if (covers)
     return `You already have ${shownFolder(covers.path)} (${covers.write ? 'read and change' : 'read only'}), which covers it.`;
-  const other = (f: { path: string }) => real(f.path) !== at;
-  if (who.folders.some((f) => other(f) && (within(at, real(f.path)) || within(real(f.path), at))))
-    return FOLDER_REFUSED.nested;
+  const nested = who.folders.some(
+    (f) =>
+      real(f.path) !== at && (touchesSecretStore(f.path) ? within(real(f.path), at) : nests(at, f))
+  );
+  if (nested) return FOLDER_REFUSED.nested;
 }
 
 /**
@@ -477,7 +541,7 @@ export function switchAskRefused(
   who: Pick<StaffRow, 'agent' | 'commands' | 'web'>,
   wanted: readonly OwnSwitch[]
 ): string | undefined {
-  const how = commandsHow(who.agent, process.platform);
+  const how = commandsHow(who.agent, currentPlatform());
   if (wanted.includes('commands') && how.state === 'never')
     return `${SWITCH_NAMES.commands} is not open to an Odd on ${AGENT_NAMES[who.agent]} here: ${how.why}`;
   if (!switchesOff(who, wanted).length) return `You already have ${switchesSaid(wanted)} on.`;
@@ -494,26 +558,56 @@ const turnedOn = (name: string, on: readonly OwnSwitch[]) =>
   `Let ${name} ${switchesSaid(on).toLowerCase()}`;
 
 /**
- * Secret stores in the home folder, by name: keys, sign-ins and settings,
- * including those other apps on this computer keep there, like the Google
- * Workspace MCP server's, and each coding tool's own home. AppData is where
- * Windows apps keep theirs. No run reads them (`unreadable` in the office's
- * staff.ts), and no folder given to an Odd holds or sits in one (`checkFolder`).
+ * Secret stores, by name, each with how it is found anywhere but the top of
+ * the home, where the name alone is enough (`touchesSecretStore`). An empty
+ * list means the name alone everywhere. A list names what marks the real
+ * store, for a name a project may use for its own files (`.ssh`, `.aws`,
+ * `.gnupg`, `.claude`, `.codex`, `.docker`, `.kube`, `.config`) or an ordinary
+ * word (`Library`, `AppData`): a key, a sign-in, a tool's history or a
+ * cluster's keys, or a Mac user's keychain and cookies, which `/Library` has
+ * none of, so that system folder stays a warning. `.ssh` and `.aws` leave out
+ * `config` on purpose, since a project may well hold one.
+ *
+ * Where the check stops (`inOrHoldsStore`): the folder, the folders above it
+ * and one level down. A store deeper than that, or under another name, is not
+ * found, and a `.ssh` with only custom-named keys and no `known_hosts` is given
+ * anywhere but the top of the home.
  */
-export const SECRET_STORES: string[] = [
-  '.ssh',
-  '.aws',
-  '.gnupg',
-  '.config',
-  'Library',
-  'AppData',
-  '.claude',
-  '.claude.json',
-  '.google_workspace_mcp',
-  '.grok',
-  '.codex',
-  '.gemini'
-];
+export const STORE_MARKS: Record<string, string[]> = {
+  '.ssh': [
+    'id_rsa',
+    'id_ecdsa',
+    'id_ecdsa_sk',
+    'id_ed25519',
+    'id_ed25519_sk',
+    'id_dsa',
+    'authorized_keys',
+    'known_hosts'
+  ],
+  '.aws': ['credentials', 'sso', 'cli/cache', 'login'],
+  '.gnupg': ['private-keys-v1.d', 'secring.gpg', 'pubring.kbx'],
+  '.config': ['gcloud', 'gh/hosts.yml'],
+  Library: ['Keychains/login.keychain-db', 'Cookies'],
+  AppData: ['Roaming', 'Local'],
+  '.claude': ['.credentials.json', 'history.jsonl', 'projects'],
+  '.claude.json': [],
+  '.google_workspace_mcp': [],
+  '.grok': ['auth.json', 'sessions'],
+  '.codex': ['auth.json', 'sessions'],
+  '.gemini': ['oauth_creds.json', 'google_accounts.json'],
+  '.docker': ['config.json'],
+  '.kube': ['config']
+};
+
+/**
+ * The secret stores' names: keys, sign-ins and settings in the home folder,
+ * including those other apps on this computer keep there, like the Google
+ * Workspace MCP server's, Docker's registry sign-ins and Kubernetes' cluster
+ * keys, and each coding tool's own home. AppData is where Windows apps keep
+ * theirs. No run reads them (`unreadable` in the office's staff.ts), and no
+ * folder given to an Odd holds or sits in one (`checkFolder`).
+ */
+export const SECRET_STORES: string[] = Object.keys(STORE_MARKS);
 
 /** What the owner reads when a folder cannot be given to an Odd. */
 export const FOLDER_REFUSED = {
@@ -534,35 +628,20 @@ export const FOLDER_REFUSED = {
 export const FOLDER_WARNING =
   "This folder is a whole drive or holds system files, so an Odd could reach everything inside it. We don't recommend giving it.";
 
-/**
- * Secret stores found by what they hold, for a folder outside the home, where
- * no store sits at a known place: by name, and for a coding tool's home, a
- * file only its sign-in or history leaves, since a project keeps its own
- * `.claude` or `.codex` of settings. An empty list means the name alone.
- */
-const STORE_MARKS: Record<string, string[]> = {
-  '.ssh': [],
-  '.aws': [],
-  '.gnupg': [],
-  '.google_workspace_mcp': [],
-  '.claude': ['.credentials.json', 'history.jsonl', 'projects'],
-  '.codex': ['auth.json', 'sessions'],
-  '.grok': ['auth.json', 'sessions'],
-  '.gemini': ['oauth_creds.json', 'google_accounts.json']
-};
-
 /** Whether `p` is a secret store by `STORE_MARKS`. */
 function marksStore(p: string): boolean {
-  const marks = STORE_MARKS[basename(p).toLowerCase()];
+  const name = basename(p).toLowerCase();
+  const marks = Object.entries(STORE_MARKS).find(([store]) => store.toLowerCase() === name)?.[1];
   return !!marks && existsSync(p) && (!marks.length || marks.some((m) => existsSync(join(p, m))));
 }
 
 /**
- * Whether `p`, outside the home, is in a secret store or holds one at its
- * top (`STORE_MARKS`). Deeper folders are not looked at, so giving one is
- * never a walk of a whole drive.
+ * Whether `p` is in a secret store or holds one directly (`STORE_MARKS`).
+ * Folders deeper than one level down are not looked at, so giving one is
+ * never a walk of a whole drive, and a store renamed to another folder name
+ * cannot be found at all.
  */
-function holdsStoreOutside(p: string): boolean {
+function inOrHoldsStore(p: string): boolean {
   for (let at = p; dirname(at) !== at; at = dirname(at)) if (marksStore(at)) return true;
   return Object.keys(STORE_MARKS).some((name) => marksStore(join(p, name)));
 }
@@ -571,14 +650,14 @@ function holdsStoreOutside(p: string): boolean {
 function systemFolders(): string[] {
   const env = process.env;
   const list =
-    process.platform === 'win32'
+    currentPlatform() === 'win32'
       ? [
           env.SystemRoot ?? 'C:\\Windows',
           env.ProgramFiles ?? 'C:\\Program Files',
           env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)',
           env.ProgramData ?? 'C:\\ProgramData'
         ]
-      : process.platform === 'darwin'
+      : currentPlatform() === 'darwin'
         ? ['/System', '/Library', '/Applications', '/usr', '/bin', '/sbin', '/private', '/dev']
         : [
             ...['/etc', '/usr', '/bin', '/sbin', '/lib', '/lib32', '/lib64', '/boot'],
@@ -623,7 +702,7 @@ const real = (p: string): string => (existsSync(p) ? realpathSync.native(p) : p)
 /** Whether `p` is `parent` or sits inside it. A Windows disk ignores case. */
 export function within(p: string, parent: string): boolean {
   const [a, b] =
-    process.platform === 'win32' ? [p.toLowerCase(), parent.toLowerCase()] : [p, parent];
+    currentPlatform() === 'win32' ? [p.toLowerCase(), parent.toLowerCase()] : [p, parent];
   return a === b || a.startsWith(b.endsWith(sep) ? b : b + sep);
 }
 
@@ -635,17 +714,38 @@ export function shownFolder(path: string): string {
 }
 
 /**
+ * Whether the folder at `path`, by its real path, is a secret store at the
+ * top of the home (`SECRET_STORES`, by name) or the office's own accounts
+ * folder, where each tool's sign-ins live (`accountsHome`), sits in one or
+ * holds one, or anywhere else is, sits in or directly holds a store found by
+ * what it holds (`inOrHoldsStore`). `checkFolder` refuses such a folder as it
+ * is given, and `ownTools` leaves out one stored before its store was listed,
+ * or written past `setFolder`, so no run is given it. By real path, so on a
+ * disk that ignores case `~/.SSH` is `~/.ssh`.
+ */
+export function touchesSecretStore(path: string): boolean {
+  const p = real(path);
+  const h = real(homedir());
+  const known = [...SECRET_STORES.map((s) => join(h, s)), accountsHome()].some((s) => {
+    const store = real(s);
+    return within(p, store) || within(store, p);
+  });
+  return known || inOrHoldsStore(p);
+}
+
+/**
  * Whether `path`, as the owner typed it, may be given to an Odd, and its real
  * path when it may. Any folder on the computer but the home itself, and one
- * that holds or sits in a secret store (`SECRET_STORES` in the home, and
- * outside it `holdsStoreOutside`), the office's own home or Oddboro's code:
- * those would let an Odd past the office's walls, so no Accept gives them. A
- * deny inside a folder a run reads is not held by every tool, so a folder
- * that holds one is refused at the door. A real path with a character Codex
- * cannot take (`GLOB`) is refused too, by the real path, since that is what a
- * run is given. A whole drive or system files (`broadFolder`) comes back as
- * a `warning` until the owner accepts it (`accept`). Only the folder routes
- * call this, so a folder given before a rule is not checked again.
+ * that holds or sits in a secret store (`touchesSecretStore`), the office's
+ * own home or Oddboro's code: those would let an Odd past the office's walls,
+ * so no Accept gives them. A deny inside a folder a run reads is not held by
+ * every tool, so a folder that holds one is refused at the door. A real path
+ * with a character Codex cannot take (`GLOB`) is refused too, by the real
+ * path, since that is what a run is given. A whole drive or system files
+ * (`broadFolder`) comes back as a `warning` until the owner accepts it
+ * (`accept`). Only the ways a folder is given call this, so a folder given
+ * before a rule was added is not checked again, but for the secret stores,
+ * which every run checks again (`touchesSecretStore`).
  */
 export function checkFolder(
   path: string,
@@ -659,9 +759,7 @@ export function checkFolder(
   const h = real(homedir());
   if (p === h) return { refused: FOLDER_REFUSED.home };
   const either = (q: string) => within(p, q) || within(q, p);
-  if ([...SECRET_STORES.map((s) => real(join(h, s))), real(home())].some(either))
-    return { refused: FOLDER_REFUSED.secrets };
-  if (!within(p, h) && holdsStoreOutside(p)) return { refused: FOLDER_REFUSED.secrets };
+  if (touchesSecretStore(p) || either(real(home()))) return { refused: FOLDER_REFUSED.secrets };
   if (either(real(CODE))) return { refused: FOLDER_REFUSED.code };
   const glob = GLOB.exec(p)?.[0];
   if (glob) return { refused: FOLDER_REFUSED.glob(glob) };
@@ -671,8 +769,10 @@ export function checkFolder(
 
 export type Hire = Pick<
   StaffRow,
-  'name' | 'role' | 'variant' | 'portrait' | 'room' | 'permission' | 'remit' | 'desk'
+  'name' | 'role' | 'variant' | 'portrait' | 'room' | 'remit' | 'desk'
 > & {
+  /** Its level; `HIRE_DEFAULTS` when left out. */
+  permission?: Level;
   /** The office they work in, by name. */
   office?: string;
   sprite?: string;
@@ -761,7 +861,12 @@ export async function hire(h: Hire): Promise<StaffRow> {
   const [row] = await db
     .insert(staff)
     // With no tool picked, the hire runs on the office's own.
-    .values({ ...values, agent: values.agent ?? officeAgent(), id, tools: tools ?? STARTER_TOOLS })
+    .values({
+      ...values,
+      agent: values.agent ?? officeAgent(),
+      id,
+      tools: tools ?? HIRE_DEFAULTS.staff.tools
+    })
     .returning();
   await saveParts(newParts, id);
   await record({
@@ -1182,7 +1287,8 @@ export async function asksFor(staffId: string): Promise<AskRow[]> {
     .limit(30);
 }
 
-export type Decision = 'approve' | 'deny' | 'iterate';
+export const DECISIONS = ['approve', 'deny', 'iterate'] as const;
+export type Decision = (typeof DECISIONS)[number];
 
 /** The kinds of ask that have twins (`asksNoMore`): an outside tool, a folder, and switches. */
 const TWINNED: AskKind[] = ['access', 'folder', 'switch'];
@@ -1420,7 +1526,7 @@ async function turnOnSwitches(
   const [before] = await tx.select().from(staff).where(eq(staff.id, a.staffId));
   if (!before) return;
   const on = switchesOff(before, a.switches ?? []);
-  if (on.includes('commands') && commandsHow(before.agent, process.platform).state === 'never')
+  if (on.includes('commands') && commandsHow(before.agent, currentPlatform()).state === 'never')
     throw fixedError(
       "This Odd's tool cannot run commands here. Move it to another tool on its Settings tab first"
     );
@@ -1503,24 +1609,25 @@ async function decide(
       .from(asks)
       .where(eq(asks.id, id));
     // Refused before the ask closes, so a no-longer-possible yes leaves it open with the reason.
-    if (decision === 'approve' && (raised?.kind === 'remove' || raised?.kind === 'bring_back')) {
-      const held = await leavingRefused(raised.kind, raised.odd);
+    if (decision === 'approve' && raised) {
+      const move = oddMoveOf(raised.kind);
+      const held = move && (await leavingRefused(LEAVING_CHECK[move], raised.odd));
       if (held) throw new Error(held);
     }
     if (decision === 'iterate' && yesOrNo(raised?.kind))
       throw new Error('Say yes or no: nobody reworks this one');
     // Only the office's send or save approves a reply, once Gmail took it.
     if (decision === 'approve' && raised?.kind === 'reply' && !o.reply)
-      throw new Error('Send the reply, or save it to Gmail drafts');
+      throw new Error(OWNER_ANSWERS.ask.reply.approve.by);
     // Only the office's Create filter approves a filter, once Gmail made it.
     if (decision === 'approve' && raised?.kind === 'filter' && !o.filter)
-      throw new Error('Create the filter from its card on the desk');
+      throw new Error(OWNER_ANSWERS.ask.filter.approve.by);
     // Only the office's own call approves a held call, once it made it.
     if (decision === 'approve' && raised?.kind === 'call' && !o.call)
-      throw new Error('Approve the call from its card on the desk');
+      throw new Error(OWNER_ANSWERS.ask.call.approve.by);
     // Only the office's Give access approves a folder ask, giving the folder with it.
     if (decision === 'approve' && raised?.kind === 'folder' && !o.folder?.given)
-      throw new Error('Give the folder from its card on the desk');
+      throw new Error(OWNER_ANSWERS.ask.folder.approve.by);
   }
   const status = decision === 'approve' ? 'approved' : decision === 'deny' ? 'denied' : 'revise';
   const at = new Date();
@@ -1539,11 +1646,15 @@ async function decide(
       .where(and(eq(asks.id, id), eq(asks.status, 'open')))
       .returning();
     if (claimed) await o.link?.(claimed, tx);
-    if (claimed?.kind === 'hand_offs' && decision === 'approve') await startHeld(tx, claimed);
+    if (claimed && effectsOf(claimed.kind, decision).includes('start_held'))
+      await startHeld(tx, claimed);
     // The folder goes to the Odd with the yes, or neither happens.
     const given = claimed?.kind === 'folder' && decision === 'approve' && o.folder?.given;
     if (claimed && given) {
-      const changed = await changeFolder(tx, claimed.staffId, given.path, given.level);
+      // `giveFolder` checked this path with the owner's Accept, so no warning comes back.
+      const changed = await changeFolder(tx, claimed.staffId, given.path, given.level, {
+        accept: true
+      });
       if (changed && 'refused' in changed) throw new FolderRefused(changed.refused);
     }
     // The switches turn on with the yes, or neither happens.
@@ -1608,76 +1719,128 @@ async function decide(
     askId: ask.id
   });
   await o.carryOut?.(ask);
-  if (decision === 'approve' && ask.access) {
-    const { task, connector: granted } = await grantAccess(ask.staffId, ask.access, ask.id);
-    // Another Google account is a new connector: the ask and its twins name
-    // it from now on, so finishing the connect task finds them.
-    if (ask.access.another)
-      await db
-        .update(asks)
-        .set({ access: { ...ask.access, connector: granted } })
-        .where(
-          inArray(
-            asks.id,
-            [ask, ...twins].map((a) => a.id)
-          )
+  const owner = await ownerName();
+  const said = sent
+    ? `${owner} ${sent.sent?.action === 'draft' ? 'saved to Gmail drafts' : 'sent'} "${ask.title}"`
+    : made
+      ? `${owner} created the Gmail filter "${ask.title}" as: ${filterDone(made)}`
+      : `${owner} ${decision === 'deny' ? 'said no to' : 'approved'} "${ask.title}"`;
+  const answer = o.withdrawn ?? (ask.reason ? `${said}: ${ask.reason}` : `${said}.`);
+  for (const effect of effectsOf(ask.kind, decision)) {
+    if (typeof effect === 'object') continue;
+    switch (effect) {
+      // Done before this loop: the caller's approval, and the held hand-off with the claim.
+      case 'approval_work':
+      case 'start_held':
+        break;
+      case 'grant_access': {
+        if (!ask.access) break;
+        const { task, connector: granted } = await grantAccess(ask.staffId, ask.access, ask.id);
+        // Another Google account is a new connector: the ask and its twins name
+        // it from now on, so finishing the connect task finds them.
+        if (ask.access.another)
+          await db
+            .update(asks)
+            .set({ access: { ...ask.access, connector: granted } })
+            .where(
+              inArray(
+                asks.id,
+                [ask, ...twins].map((a) => a.id)
+              )
+            );
+        // Connected already: the work that waited picks up now. Otherwise finishing
+        // the connect task starts it (`finishTask`).
+        if (!task) await carryOutTogether([ask, ...twins]);
+        break;
+      }
+      // The folder went to the Odd with the claim: the work that waited on it picks up.
+      case 'give_folder':
+        if (gave) await carryOutTogether([ask, ...twins]);
+        break;
+      // The switches turned on with the claim: the work that waited on them picks up.
+      case 'turn_on':
+        if (turned) await carryOutTogether([ask, ...twins]);
+        break;
+      case 'carry_out':
+        await followUp(ask.staffId, 'carry_out', {
+          askId: ask.id,
+          note: ask.reason,
+          reportWhenDone: o.reportWhenDone
+        });
+        break;
+      case 'rework':
+        await followUp(ask.staffId, 'rework', { askId: ask.id, note: ask.reason });
+        break;
+      case 'answer_window': {
+        // The title asks whether to pause the work or let it carry on, so "approved" would not say which.
+        const ran = `${owner} let hand-offs run until the usage window resets. Hand on the work the office held.`;
+        await answerWindow(
+          ask.id,
+          decision === 'approve',
+          ask.reason ? `${ran} They said: ${ask.reason}` : ran
         );
-    // Connected already: the work that waited picks up now. Otherwise finishing
-    // the connect task starts it (`finishTask`).
-    if (!task) await carryOutTogether([ask, ...twins]);
-  } else if (gave || turned)
-    // The folder or the switches are the Odd's now: the work that waited on them picks up.
-    await carryOutTogether([ask, ...twins]);
-  else if (decision === 'approve' && (ask.kind === 'approval' || ask.kind === 'call'))
-    await followUp(ask.staffId, 'carry_out', {
-      askId: ask.id,
-      note: ask.reason,
-      reportWhenDone: o.reportWhenDone
-    });
-  else if (decision === 'iterate')
-    await followUp(ask.staffId, 'rework', { askId: ask.id, note: ask.reason });
-  // No run carries out a denial, or a hire, goal, plan or more hand-offs the owner
-  // approved: the answer itself goes back to a hand-off the ask came from, or
-  // to the thread's hub. A yes to more hand-offs started the hand-off it held
-  // with the claim, and a no stops the thread. A yes to the usage window wakes the threads it held.
-  else {
-    const owner = await ownerName();
-    const said = sent
-      ? `${owner} ${sent.sent?.action === 'draft' ? 'saved to Gmail drafts' : 'sent'} "${ask.title}"`
-      : made
-        ? `${owner} created the Gmail filter "${ask.title}" as: ${filterDone(made)}`
-        : `${owner} ${decision === 'deny' ? 'said no to' : 'approved'} "${ask.title}"`;
-    const answer = o.withdrawn ?? (ask.reason ? `${said}: ${ask.reason}` : `${said}.`);
-    if (ask.kind === 'window') {
-      // The title asks whether to pause the work or let it carry on, so "approved" would not say which.
-      const ran = `${owner} let hand-offs run until the usage window resets. Hand on the work the office held.`;
-      await answerWindow(
-        ask.id,
-        decision === 'approve',
-        ask.reason ? `${ran} They said: ${ask.reason}` : ran
-      );
-    } else if (ask.kind === 'hand_offs' && ask.threadId)
-      await answerHandOffs({ ...ask, threadId: ask.threadId }, decision === 'approve', answer);
-    else
-      for (const a of [ask, ...twins])
-        await answerLater(
-          { handOffId: a.handOffId, threadId: a.threadId, askId: a.id },
-          decision === 'deny' ? 'failed' : 'done',
-          answer
-        );
-    // A no with a reason may be a lesson: the Odd that asked reads it once. The
-    // office raised a window ask, not the Odd named on it, so it has none to learn,
-    // and an ask withdrawn because its Odd left has nobody to read it.
-    if (decision === 'deny' && ask.reason && ask.kind !== 'window' && !o.withdrawn)
-      await followUp(ask.staffId, 'denied', { askId: ask.id, note: ask.reason });
-    // Last, so the answer above went back first, and leaving closes any run it started.
-    if (decision === 'approve' && ask.odd && ask.kind === 'remove')
-      await removeOdd(ask.odd, { askId: ask.id });
-    if (decision === 'approve' && ask.odd && ask.kind === 'bring_back')
-      await bringBack(ask.odd, { askId: ask.id });
+        break;
+      }
+      // A yes started the hand-off it held with the claim, and a no stops the thread.
+      case 'answer_hand_offs':
+        if (ask.threadId)
+          await answerHandOffs({ ...ask, threadId: ask.threadId }, decision === 'approve', answer);
+        else await answerBack(ask, decision, answer);
+        break;
+      case 'answer_back':
+        for (const a of [ask, ...twins]) await answerBack(a, decision, answer);
+        break;
+      // A no with a reason may be a lesson: the Odd that asked reads it once. An
+      // ask withdrawn because its Odd left has nobody to read it.
+      case 'denied_lesson':
+        if (ask.reason && !o.withdrawn)
+          await followUp(ask.staffId, 'denied', { askId: ask.id, note: ask.reason });
+        break;
+      // Last in its row, so the answer went back first, and leaving closes any run it started.
+      case 'odd_leaves':
+        if (ask.odd) await removeOdd(ask.odd, { askId: ask.id });
+        break;
+      case 'odd_returns':
+        if (ask.odd) await bringBack(ask.odd, { askId: ask.id });
+        break;
+      default:
+        effect satisfies never;
+    }
   }
   return true;
 }
+
+/** What the owner's decision on an ask of this kind does, from its row in `OWNER_ANSWERS`. */
+function effectsOf(kind: AskKind, decision: Decision): readonly AskEffect[] {
+  const cell = (OWNER_ANSWERS.ask[kind] as AskAnswer)[decision];
+  return cell === 'refused' ? [] : 'by' in cell ? cell.then : cell;
+}
+
+/**
+ * What `leavingRefused` checks before a yes that moves an Odd, by the move.
+ * Any kind whose yes makes that move gets the same check.
+ */
+const LEAVING_CHECK = {
+  odd_leaves: 'remove',
+  odd_returns: 'bring_back'
+} as const satisfies Partial<
+  Record<Extract<AskEffect, string>, Parameters<typeof leavingRefused>[0]>
+>;
+
+/** The move the owner's yes to an ask of this kind makes, from its row in `OWNER_ANSWERS`. */
+function oddMoveOf(kind: AskKind): keyof typeof LEAVING_CHECK | undefined {
+  return effectsOf(kind, 'approve').find(
+    (e): e is keyof typeof LEAVING_CHECK => typeof e === 'string' && Object.hasOwn(LEAVING_CHECK, e)
+  );
+}
+
+/** No run carries out this answer: it goes back to the hand-off or thread the ask came from. */
+const answerBack = (ask: AskRow, decision: Decision, answer: string) =>
+  answerLater(
+    { handOffId: ask.handOffId, threadId: ask.threadId, askId: ask.id },
+    decision === 'deny' ? 'failed' : 'done',
+    answer
+  );
 
 /**
  * The Odd that raised an open ask left the office: the office closes it as a
@@ -2680,8 +2843,8 @@ export async function narrowReadTools(id: string, gone: string[]): Promise<void>
   await record({
     kind: 'access',
     actor: 'office',
-    title: `Read only for ${c.name} no longer reaches ${gone.join(', ')}`,
-    body: `${c.name} does not mark ${gone.length === 1 ? 'it' : 'them'} as only reading, or the name says ${gone.length === 1 ? 'it changes' : 'they change'} something. Read and write reaches ${gone.length === 1 ? 'it' : 'them'}: at Drafts for your yes each use waits for your yes, and at Acts on its own it goes.`
+    title: `${GRANT_LABEL.read} for ${c.name} no longer reaches ${gone.join(', ')}`,
+    body: `${c.name} does not mark ${gone.length === 1 ? 'it' : 'them'} as only reading, or the name says ${gone.length === 1 ? 'it changes' : 'they change'} something. ${GRANT_LABEL.act} reaches ${gone.length === 1 ? 'it' : 'them'}: at ${LEVEL_LABEL.draft} each use waits for your yes, and at ${LEVEL_LABEL.act} it goes.`
   });
 }
 
@@ -2890,42 +3053,55 @@ export async function finishTask(id: number, done: boolean, note: string | null)
     .where(and(eq(tasks.id, id), eq(tasks.status, 'open')))
     .returning();
   if (!t) return;
+  const owner = await ownerName();
   const answers = t.steps
     .filter((s) => s.answer && s.action?.kind === 'choice')
     .map((s) => `${s.text} ${s.answer}`);
   await record({
     kind: 'work',
     actor: 'owner',
-    title: `${done ? 'Done' : 'Dropped'} by ${await ownerName()}: ${t.title}`,
+    title: `${done ? 'Done' : 'Dropped'} by ${owner}: ${t.title}`,
     body: [t.why, ...answers].join('\n'),
     reason: t.note,
     taskId: t.id
   });
-  if (!done) {
-    // No run follows a dropped task: the answer itself goes back. A tool's connect
-    // task belongs to the access ask it came from.
-    const from = t.askId ? await ask(t.askId) : undefined;
-    await answerLater(
-      {
-        handOffId: t.handOffId ?? from?.handOffId ?? null,
-        threadId: t.threadId ?? from?.threadId ?? null
-      },
-      'failed',
-      `${await ownerName()} dropped "${t.title}"${t.note ? `: ${t.note}` : '.'}`
-    );
-    return;
+  // A tool's connect task belongs to the access ask it came from.
+  const from = t.askId ? await ask(t.askId) : undefined;
+  const effects: readonly TaskEffect[] = !done
+    ? OWNER_ANSWERS.task.dropped
+    : !t.staffId
+      ? OWNER_ANSWERS.task.done.noOdd
+      : from?.kind === 'access'
+        ? OWNER_ANSWERS.task.done.fromAccess
+        : OWNER_ANSWERS.task.done.other;
+  for (const effect of effects) {
+    if (typeof effect === 'object') continue;
+    switch (effect) {
+      // No run follows a dropped task: the answer itself goes back.
+      case 'answer_back':
+        await answerLater(
+          {
+            handOffId: t.handOffId ?? from?.handOffId ?? null,
+            threadId: t.threadId ?? from?.threadId ?? null
+          },
+          done ? 'done' : 'failed',
+          `${owner} ${done ? 'finished' : 'dropped'} "${t.title}"${t.note ? `: ${t.note}` : '.'}`
+        );
+        break;
+      // The owner finished connecting a tool an Odd asked for: it can start the
+      // work that was waiting on it, once however many asks that one answer settled.
+      case 'carry_out':
+        if (t.staffId && from) await carryOutTogether([from, ...(await answeredWith(from))]);
+        break;
+      // Any other task an Odd gave them: the Odd picks up whatever waited on
+      // it, such as hiring from an intake the owner just filled in.
+      case 'task_done':
+        if (t.staffId) await followUp(t.staffId, 'task_done', { taskId: t.id, note: t.note });
+        break;
+      default:
+        effect satisfies never;
+    }
   }
-  if (!t.staffId) return;
-  // The owner finished connecting a tool a staffer asked for: it can start the
-  // work that was waiting on it.
-  const a = t.askId ? await ask(t.askId) : undefined;
-  if (a?.kind === 'access') {
-    await carryOutTogether([a, ...(await answeredWith(a))]);
-    return;
-  }
-  // Any other task a staffer gave them: the staffer picks up whatever waited on
-  // it, such as hiring from an intake the owner just filled in.
-  await followUp(t.staffId, 'task_done', { taskId: t.id, note: t.note });
 }
 
 export async function tasksFrom(staffId: string): Promise<TaskRow[]> {
@@ -3041,7 +3217,7 @@ export async function stillOnDesk(
 
 /** Something a staffer put on the owner's desk, as its chat shows it. */
 export type Delivery = {
-  kind: 'ask' | 'task' | 'report';
+  kind: DeskItem;
   id: number;
   title: string;
   at: Date;

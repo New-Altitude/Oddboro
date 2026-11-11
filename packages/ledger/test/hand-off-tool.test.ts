@@ -18,10 +18,11 @@ import { afterEach, test } from 'node:test';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { db, sql, toolServer } from './tool-server.ts';
 import { oneThreadPerGoal } from './one-thread.ts';
+import { TEMP_IN_APPDATA } from './store-states.ts';
 
 const { connectors, goals, grants, staff, threads } = await import('../src/schema.ts');
 const { eq, inArray } = await import('drizzle-orm');
-const { OFFICE_TOOLS, STARTER_TOOLS } = await import('../src/tools.ts');
+const { isOffered, OFFICE_TOOLS, RIDES_WITH, STARTER_TOOLS } = await import('../src/tools.ts');
 const { MANAGER_ROLE } = await import('../src/managers.ts');
 const { HAND_OFF_LIMIT, LEADS_NONE } = await import('../src/threads.ts');
 afterEach(() => oneThreadPerGoal(sql, MANAGER_ROLE));
@@ -479,40 +480,140 @@ test('every office tool refuses a key it does not take, and says which keys it d
   assert.deepEqual(await db.select().from(threads).where(eq(threads.hubId, 'all')), []);
 });
 
-test("the hand_off tool names what each colleague lacks of the lead's tools once, in plain words", async () => {
-  // The tool server's home, holding the folder Lena gave her Odds, so it is
-  // shown as ~/x and is on the disk for a colleague that has it.
-  const home = realpathSync(mkdtempSync(join(tmpdir(), 'oddboro-lacks-')));
-  const x = join(home, 'x');
-  mkdirSync(x);
-  const folders = [{ path: x, write: false }];
-  await db.update(staff).set({ web: true, folders }).where(eq(staff.id, 'lead'));
-  // Wes has Gmail and the web, so lacks the folder; Fay has Gmail and the folder, so lacks the web.
-  await db.insert(staff).values([
-    { ...odd('wes', 'Wes'), web: true },
-    { ...odd('fay', 'Fay'), folders }
-  ]);
-  await db
-    .insert(grants)
-    .values(
-      ['wes', 'fay'].map((staffId) => ({ staffId, connectorId: 'gmail', level: 'read' as const }))
+// Three Odds serving the bake sale Mo leads, holding no office tool, one, and
+// every one. A chat with the owner's words offers tell_lead, and a run on the
+// sale's thread offers resume_at.
+const HOLDERS: Record<string, readonly string[]> = {
+  nil: [],
+  uno: ['poke_owner'],
+  tot: OFFICE_TOOLS.map((t) => t.id)
+};
+await db
+  .insert(staff)
+  .values(
+    Object.entries(HOLDERS).map(([id, tools]) => ({ ...odd(id, `Odd ${id}`), tools: [...tools] }))
+  );
+await db
+  .insert(staffGoals)
+  .values(Object.keys(HOLDERS).map((staffId) => ({ staffId, goalId: fair.id, part: 'Some' })));
+// `withGmail` tools come only with Gmail, which only Tot holds.
+await db.insert(grants).values({ staffId: 'tot', connectorId: 'gmail', level: 'read' });
+const RUNS = { chat, thread: { THREAD_ID: String(sale.id) } };
+type Run = keyof typeof RUNS;
+/**
+ * A tool that rides with a listed one and is offered in one kind of run only.
+ * A listed tool says so on its own row (`inChat`), which the test reads and a
+ * test below pins.
+ */
+const RIDES_ONLY_IN: Partial<Record<keyof typeof RIDES_WITH, Run>> = { resume_at: 'thread' };
+const registered = async (staffId: string, run: Run) => {
+  const c = await toolServer(staffId, { ...RUNS[run], RUN_KEY: `k-${staffId}-${run}` });
+  return (await c.listTools()).tools.map((t) => t.name).sort();
+};
+
+test('every tool the server registers is a listed office tool or rides with one', async () => {
+  const listed = new Set<string>([...OFFICE_TOOLS.map((t) => t.id), ...Object.keys(RIDES_WITH)]);
+  for (const run of ['chat', 'thread'] as const)
+    assert.deepEqual(
+      (await registered('tot', run)).filter((n) => !listed.has(n)),
+      [],
+      run
     );
-  try {
-    const t = await handOffTool(await toolServer('lead', { RUN_KEY: 'k-lacks', HOME: home }));
-    const lines = (t?.description ?? '').split('\n');
-    for (const line of [
-      '- wes: Wes, Tester. Tests. Lacks your folder ~/x.',
-      '- fay: Fay, Tester. Tests. Lacks the web.',
-      '- paige: Paige, Tester. Tests. Lacks your Gmail, the web, and your folder ~/x.'
-    ])
-      assert.ok(lines.includes(line), `${line}\n${t?.description}`);
-  } finally {
-    await db.delete(grants).where(inArray(grants.staffId, ['wes', 'fay']));
-    await db.delete(staff).where(inArray(staff.id, ['wes', 'fay']));
-    await db.update(staff).set({ web: false, folders: [] }).where(eq(staff.id, 'lead'));
-    rmSync(home, { recursive: true, force: true });
-  }
 });
+
+// One test per tool server: each takes seconds to start, and a test has 15.
+for (const [id, holds] of Object.entries(HOLDERS))
+  for (const run of ['chat', 'thread'] as const)
+    test(`an Odd holding ${holds.length} of the office tools (${id}) in a ${run} has exactly the always tools, the ones it holds and the ones that ride with them, as each row's conditions allow`, async () => {
+      // None of these Odds is the Office Manager, so `notToManager` takes nothing away.
+      const offered = new Set<string>(
+        OFFICE_TOOLS.filter(
+          (t) =>
+            (t.always || holds.includes(t.id)) &&
+            !t.prompt &&
+            (!t.withGmail || id === 'tot') &&
+            (!t.inChat || run === 'chat')
+        ).map((t) => t.id)
+      );
+      // A cast only to name the keys: Object.keys types them as strings.
+      const riding = (Object.keys(RIDES_WITH) as (keyof typeof RIDES_WITH)[]).filter(
+        (name) => offered.has(RIDES_WITH[name]) && (RIDES_ONLY_IN[name] ?? run) === run
+      );
+      const want = [...offered, ...riding].sort();
+      assert.deepEqual(await registered(id, run), want, `${id} in a ${run}`);
+    });
+
+// The test above reads each row's conditions to work out what a run gets, so
+// a condition dropped from a row changes what it expects too. These hold the
+// rows themselves, and that `isOffered` never offers a `prompt` row.
+test('only leave_office, withdraw, tell_lead, remove_odd and bring_back_odd wait for a chat, only leave_office is kept from the manager, and only see_office shapes the prompt and is never offered, even to a chat holding it', () => {
+  const where = (field: 'inChat' | 'notToManager' | 'prompt') =>
+    OFFICE_TOOLS.filter((t) => t[field]).map((t) => t.id);
+  assert.deepEqual(where('inChat'), [
+    'leave_office',
+    'withdraw',
+    'tell_lead',
+    'remove_odd',
+    'bring_back_odd'
+  ]);
+  assert.deepEqual(where('notToManager'), ['leave_office']);
+  assert.deepEqual(where('prompt'), ['see_office']);
+  assert.equal(
+    isOffered(['see_office'], 'see_office', { chat: true, manager: false, gmail: false }),
+    false
+  );
+});
+
+test('a hire proposal names every office tool the owner can give, and none every Odd has', async () => {
+  const c = await toolServer('tot', { RUN_KEY: 'k-tot-hint' });
+  const hire = (await c.listTools()).tools.find((t) => t.name === 'propose_hire');
+  const hint = (hire?.inputSchema.properties?.office_tools as { description?: string })
+    ?.description;
+  const named = hint?.match(/has: (.*)\. Leave/)?.[1].split(', ');
+  assert.deepEqual(
+    named,
+    OFFICE_TOOLS.filter((t) => !t.always).map((t) => t.id)
+  );
+});
+
+test(
+  "the hand_off tool names what each colleague lacks of the lead's tools once, in plain words",
+  { skip: TEMP_IN_APPDATA },
+  async () => {
+    // The tool server's home, holding the folder Lena gave her Odds, so it is
+    // shown as ~/x and is on the disk for a colleague that has it.
+    const home = realpathSync(mkdtempSync(join(tmpdir(), 'oddboro-lacks-')));
+    const x = join(home, 'x');
+    mkdirSync(x);
+    const folders = [{ path: x, write: false }];
+    await db.update(staff).set({ web: true, folders }).where(eq(staff.id, 'lead'));
+    // Wes has Gmail and the web, so lacks the folder; Fay has Gmail and the folder, so lacks the web.
+    await db.insert(staff).values([
+      { ...odd('wes', 'Wes'), web: true },
+      { ...odd('fay', 'Fay'), folders }
+    ]);
+    await db
+      .insert(grants)
+      .values(
+        ['wes', 'fay'].map((staffId) => ({ staffId, connectorId: 'gmail', level: 'read' as const }))
+      );
+    try {
+      const t = await handOffTool(await toolServer('lead', { RUN_KEY: 'k-lacks', HOME: home }));
+      const lines = (t?.description ?? '').split('\n');
+      for (const line of [
+        '- wes: Wes, Tester. Tests. Lacks your folder ~/x.',
+        '- fay: Fay, Tester. Tests. Lacks the web.',
+        '- paige: Paige, Tester. Tests. Lacks your Gmail, the web, and your folder ~/x.'
+      ])
+        assert.ok(lines.includes(line), `${line}\n${t?.description}`);
+    } finally {
+      await db.delete(grants).where(inArray(grants.staffId, ['wes', 'fay']));
+      await db.delete(staff).where(inArray(staff.id, ['wes', 'fay']));
+      await db.update(staff).set({ web: false, folders: [] }).where(eq(staff.id, 'lead'));
+      rmSync(home, { recursive: true, force: true });
+    }
+  }
+);
 
 test("an Odd that names GitHub's address with a key header gets the catalog's GitHub, which signs in", async () => {
   const c = await toolServer('jo', { RUN_KEY: 'k-jo-github' });

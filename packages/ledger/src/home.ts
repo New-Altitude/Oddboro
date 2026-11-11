@@ -40,8 +40,22 @@ export const accountsHome = (): string => home('accounts');
 export const accountHome = (tool: string, account: string): string =>
   home('accounts', tool, account);
 
+/**
+ * The office's own files at the top of an Odd's folder, by what each holds:
+ * the chat log (staff.ts), the chat's run session, and a persona's session at
+ * its door (persona-door.ts). Each writer takes its name from here, so an
+ * Odd never mails one, the Storage tab never lists one, and a replay never
+ * names one as a change (`OFFICE_FILE_NAMES`).
+ */
+export const OFFICE_FILES = {
+  chat: 'chat.jsonl',
+  session: 'session.json',
+  personaSession: 'persona-session.json'
+} as const;
+export const OFFICE_FILE_NAMES: readonly string[] = Object.values(OFFICE_FILES);
+
 /** An Odd's one chat session, which every chat resumes (staff.ts). */
-export const chatSession = (id: string): string => home('staff', id, 'session.json');
+export const chatSession = (id: string): string => home('staff', id, OFFICE_FILES.session);
 
 /** The code: this repo in development, the app's Resources/server folder in a release. */
 export const CODE = process.env.ODDBORO_CODE || fileURLToPath(new URL('../../..', import.meta.url));

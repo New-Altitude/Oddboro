@@ -43,6 +43,7 @@ import {
   type Outcome,
   type ThreadStatus
 } from './schema.ts';
+import type { DeskItem } from './desk-answers.ts';
 import { sharing } from './sharing.ts';
 import { holdForWindow, WINDOW_RESET, windowWoke } from './usage-window.ts';
 import { THREADS_DIR, workPath } from './work-paths.ts';
@@ -786,7 +787,7 @@ export async function tellLead(t: {
 }
 
 /** Something a thread put on the owner's desk that is still open. */
-export type ThreadWaiting = { kind: 'ask' | 'task'; id: number; title: string };
+export type ThreadWaiting = { kind: Exclude<DeskItem, 'report'>; id: number; title: string };
 
 /** A hub's run on its thread that was not a pick-up: woken at a time, or by the owner's answer. */
 export type ThreadRun = { at: Date; outcome?: Outcome; text?: string };

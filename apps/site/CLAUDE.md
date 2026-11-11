@@ -5,6 +5,9 @@ Tailwind 4, TypeScript, and `@sveltejs/adapter-static`: every page prerenders
 to plain files in `build/`, so any static host serves it. Port 4501 for `dev`
 and `preview`, fixed.
 
+Where a new kind of thing starts, the shared function for each job, and the
+check that catches a missed place: `docs/architecture.md`.
+
 ## The name and the words
 
 - The product is **Oddboro**. Its AI workers are **Odds** (one Odd, many

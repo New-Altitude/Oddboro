@@ -9,3 +9,13 @@ backlog. Read a doc's status before acting on it: **proposed** (not agreed),
 - `office.gif`. The animation at the top of the README. `npm run office-gif -w @oddboro/site` makes it.
 - `hard-rules.md`. **Ratified.** The reason behind each hard rule in the root `CLAUDE.md`, one section per rule, same order.
 - `code-standard.md`. **Ratified.** The twelve rules, Q1 to Q12, that code is written to and a pull request is reviewed against.
+- `architecture.md`. **Built.** The picture: the parts, one function per job, and where each new kind of thing starts and which check catches a missed place.
+
+## Later
+
+Each line says what to do when its trigger comes.
+
+- When a `CLAUDE.md` gets long enough to cost its readers, so that someone
+  working in its folder has to read past detail they do not need: move that
+  detail into the code's comments or a doc the file points at, and keep what
+  someone working there needs.

@@ -45,8 +45,9 @@
   import { fly } from 'svelte/transition';
   import { placesFor, type Place } from '#lib/staff/places.ts';
   import PixelPencil from '#lib/ui/PixelPencil.svelte';
-  import { call } from '#lib/ui/api.ts';
+  import { call, type ApiUrl } from '#lib/ui/api.ts';
   import { setZone, zone, zoneName, zoneShort } from '@oddboro/ledger/time';
+  import { LIVE_TABLES, type LiveTable } from '@oddboro/ledger/live-tables';
 
   let { data } = $props();
   // Every time on the page is in the office's zone, which only the server knows.
@@ -155,6 +156,12 @@
   let cardShow = $state<{ id: string; tab: 'work'; n: number } | undefined>();
   /** Bumps when jobs, runs, access, goals, threads or lessons change, so the card's tabs and the Goals and Lessons windows reload. */
   let version = $state(0);
+  /** Bumped on a change to the ledger's rows, so the Ledger window searches again. */
+  let ledgerVersion = $state(0);
+  /** What the page does when each table changes, by the name the event carries. */
+  const ON_CHANGE = new Map<string, LiveTable['page']>(
+    Object.entries(LIVE_TABLES).map(([table, live]) => [table, live.page])
+  );
   /** The start panel is open while it holds windows and the owner has not folded it away. */
   const leftOpen = $derived(wins.shown && wins.list.length > 0);
   const front = $derived(wins.list.find((w) => w.id === wins.active));
@@ -587,15 +594,24 @@
    * else a report on its own. False when there is nothing to open.
    */
   function openDelivered(staffId: string, d: Delivered): boolean {
-    const waiting =
-      d.kind === 'ask'
-        ? desk.asks.some((a) => a.id === d.id)
-        : d.kind === 'task'
-          ? desk.tasks.some((t) => t.id === d.id)
-          : desk.reports.some((r) => r.id === d.id);
-    if (waiting) void openDesk(`${d.kind}-${d.id}`);
-    else if (d.kind === 'report') openReport({ id: d.id, staff: staffId, title: d.title });
-    return waiting || d.kind === 'report';
+    const waiting = (rows: { id: number }[]) => {
+      const found = rows.some((r) => r.id === d.id);
+      if (found) void openDesk(`${d.kind}-${d.id}`);
+      return found;
+    };
+    switch (d.kind) {
+      case 'ask':
+        return waiting(desk.asks);
+      case 'task':
+        return waiting(desk.tasks);
+      case 'report':
+        if (!waiting(desk.reports)) openReport({ id: d.id, staff: staffId, title: d.title });
+        return true;
+      default: {
+        const missed: never = d.kind;
+        throw new Error(`Nothing opens a ${String(missed)}`);
+      }
+    }
   }
 
   /** A thread from the Goals window: the oldest thing it waits on, else its hub's chat, which shows it as a card. */
@@ -658,7 +674,7 @@
     const timer = setInterval(() => (now = new Date()), 15_000);
 
     // One live line from the server. Changes arrive as they happen.
-    const events = new EventSource('/api/events');
+    const events = new EventSource('/api/events' satisfies ApiUrl);
     events.onmessage = (m) => {
       const e = JSON.parse(m.data) as OfficeEvent;
       if (e.type === 'account') {
@@ -687,46 +703,14 @@
       // Only the persona offers hear this: the floor meets a persona Odd, or
       // sees it go quiet, through the staff table's change, as any hire.
       if (e.type === 'persona') return void personaNews(e);
+      const page = ON_CHANGE.get(e.table) ?? [];
       // A move into another layout rebuilds the whole floor.
       // During the first run, and until its last drawn pieces land, the floor
       // already shows the office being moved into.
-      if (e.table === 'offices') return firstRun || landing ? void refresh() : location.reload();
-      if (
-        [
-          'staff',
-          'asks',
-          'tasks',
-          'reports',
-          'room_names',
-          'switched_off',
-          'pokes',
-          'lessons',
-          'threads',
-          'connectors'
-        ].includes(e.table)
-      )
-        refresh();
-      if (
-        [
-          'jobs',
-          'runs',
-          'grants',
-          'asks',
-          'tasks',
-          'reports',
-          'connectors',
-          'usage',
-          'plan_limits',
-          'pokes',
-          'goals',
-          'staff_goals',
-          'goal_progress',
-          'lessons',
-          'lesson_uses',
-          'threads'
-        ].includes(e.table)
-      )
-        version++;
+      if (page.includes('reload')) return firstRun || landing ? void refresh() : location.reload();
+      if (page.includes('refresh')) refresh();
+      if (page.includes('version')) version++;
+      if (page.includes('ledger')) ledgerVersion++;
     };
 
     (async () => {
@@ -1304,7 +1288,7 @@
               {:else if w.kind === 'lessons'}
                 <LessonsLibrary {staff} {version} bind:filter={w.filter} />
               {:else if w.kind === 'ledger'}
-                <LedgerPanel {staff} />
+                <LedgerPanel {staff} version={ledgerVersion} />
               {:else if w.kind === 'services'}
                 <ServicesPanel {staff} {version} onstaff={select} />
               {:else if w.kind === 'setup'}

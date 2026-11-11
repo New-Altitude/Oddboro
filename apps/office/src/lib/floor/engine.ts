@@ -295,30 +295,6 @@ export class Floor {
   private shelves: Hit[] = [];
   /** Called when the owner taps a library shelf that no switch covers. */
   onShelf: (() => void) | undefined;
-  /** Every placed prop with an id in its room, for picking one by hand. */
-  private items: (Hit & {
-    obj: string;
-    item: string;
-    /** The footprint's top-left tile, and its size in tiles. */
-    tile: [number, number];
-    size: [number, number];
-  })[] = [];
-  /**
-   * Set while arranging a room: a press on a placed thing that then moves
-   * carries it, and letting go asks to put it at the tile under the pointer
-   * (its footprint's top-left). Dragging empty floor still moves the camera.
-   */
-  onMove: ((hit: { obj: string; item: string }, tile: [number, number]) => void) | undefined;
-  /** The thing being carried, and how far the press was from its top-left tile. */
-  private carrying:
-    { obj: string; item: string; size: [number, number]; grip: [number, number] } | undefined;
-  private dropOutline = new Graphics();
-  /**
-   * Set while arranging a room: a tap picks the prop on top there, if any, and
-   * the tile, instead of switching anything.
-   */
-  onPick: ((hit: { obj?: string; item?: string; tile: [number, number] }) => void) | undefined;
-  private outline = new Graphics();
   /** Floor, wall, objects and overlay. Objects is shared with staff, so it is never cleared. */
   private layers: Container[] = [];
   /** Everything the world put on stage, to take down when it changes. */
@@ -383,7 +359,7 @@ export class Floor {
       this.objects,
       layers[3]
     );
-    this.stage.addChild(this.lightScene, this.glow, this.moteLayer, this.outline, this.dropOutline);
+    this.stage.addChild(this.lightScene, this.glow, this.moteLayer);
     this.app.stage.addChild(this.stage);
     // After the page's own ticker work, so a staffer's step draws the same frame.
     this.app.ticker.add(() => this.tick(), undefined, UPDATE_PRIORITY.LOW);
@@ -411,7 +387,6 @@ export class Floor {
     this.doors = [];
     this.shelves = [];
     this.windows = [];
-    this.items = [];
     this.lightSprites = [];
     this.lightParts = [];
     this.motes = [];
@@ -505,18 +480,6 @@ export class Floor {
         if (e) sw.glows.push({ s: e, anim: this.anims.find((a) => a.s === e) });
         this.switches.set(d.obj, sw);
       }
-      if (d.obj && d.item)
-        this.items.push({
-          obj: d.obj,
-          item: d.item,
-          box,
-          rank: i,
-          tile: [
-            Math.round((d.x + meta.origin[0]) / TILE),
-            Math.round((d.y + meta.origin[1]) / TILE)
-          ],
-          size: meta.footprint
-        });
       if (meta.tags.includes('shelf') && meta.tags.includes('library'))
         this.shelves.push({ box, rank: i });
       // A door with open and closed frames opens when staff come near.
@@ -874,48 +837,6 @@ export class Floor {
     ];
   }
 
-  /** The prop drawn on top at a screen point, and the tile under it. */
-  private pickAt(clientX: number, clientY: number) {
-    const [x, y] = this.toWorld(clientX, clientY);
-    const best = topAt(this.items, [x, y]);
-    const tile: [number, number] = [Math.floor(x / TILE), Math.floor(y / TILE)];
-    return { obj: best?.obj, item: best?.item, tile };
-  }
-
-  /** The tile a screen point is over. */
-  tileAt(clientX: number, clientY: number): [number, number] {
-    const [x, y] = this.toWorld(clientX, clientY);
-    return [Math.floor(x / TILE), Math.floor(y / TILE)];
-  }
-
-  /** Where a carried thing's top-left tile lands for a pointer at this screen point. */
-  private carriedTo(clientX: number, clientY: number, c = this.carrying): [number, number] {
-    const [tx, ty] = this.tileAt(clientX, clientY);
-    return c ? [tx - c.grip[0], ty - c.grip[1]] : [tx, ty];
-  }
-
-  /** Outline where something will land, `size` tiles from `tile`, or clear it. */
-  showDrop(tile: [number, number] | undefined, size: [number, number] = [1, 1]) {
-    this.dropOutline.clear();
-    if (tile)
-      this.dropOutline
-        .rect(tile[0] * TILE, tile[1] * TILE, size[0] * TILE, size[1] * TILE)
-        .fill({ color: 0x2fb3a6, alpha: 0.18 })
-        .stroke({ width: 1, color: 0x2fb3a6 });
-    this.dirty = true;
-  }
-
-  /** Outline a prop, or clear the outline. */
-  highlight(obj: string | undefined) {
-    this.outline.clear();
-    const it = obj && this.items.find((i) => i.obj === obj);
-    if (it) {
-      const [x, y, w, h] = it.box;
-      this.outline.rect(x - 1, y - 1, w + 2, h + 2).stroke({ width: 1, color: 0xf2b45a });
-    }
-    this.dirty = true;
-  }
-
   /** What a tap at a screen point does, if anything. */
   private tapAtScreen(clientX: number, clientY: number) {
     return tapAt(this.switches.values(), this.shelves, this.toWorld(clientX, clientY));
@@ -1191,36 +1112,14 @@ export class Floor {
     canvas.addEventListener('pointerdown', (e) => {
       this.drag = { x: e.clientX, y: e.clientY, sx: this.stage.x, sy: this.stage.y };
       still = true;
-      // Arranging: a press on a placed thing picks it up.
-      const hit = this.onMove ? this.pickAt(e.clientX, e.clientY) : undefined;
-      const it = hit?.obj && this.items.find((i) => i.obj === hit.obj);
-      this.carrying = it
-        ? {
-            obj: it.obj,
-            item: it.item,
-            size: it.size,
-            grip: [hit!.tile[0] - it.tile[0], hit!.tile[1] - it.tile[1]]
-          }
-        : undefined;
     });
     window.addEventListener('pointermove', (e) => {
       if (!this.drag) {
         if (e.target === canvas)
-          canvas.style.cursor = this.onPick
-            ? 'crosshair'
-            : this.tapAtScreen(e.clientX, e.clientY)
-              ? 'pointer'
-              : '';
+          canvas.style.cursor = this.tapAtScreen(e.clientX, e.clientY) ? 'pointer' : '';
         return;
       }
       if (Math.hypot(e.clientX - this.drag.x, e.clientY - this.drag.y) > 4) still = false;
-      if (this.carrying) {
-        if (!still) {
-          canvas.style.cursor = 'grabbing';
-          this.showDrop(this.carriedTo(e.clientX, e.clientY), this.carrying.size);
-        }
-        return;
-      }
       if (
         Math.hypot(e.clientX - this.drag.x, e.clientY - this.drag.y) > 4 &&
         (this.target || this.overviewing)
@@ -1234,25 +1133,10 @@ export class Floor {
       this.place(this.drag.sx + e.clientX - this.drag.x, this.drag.sy + e.clientY - this.drag.y);
     });
     window.addEventListener('pointerup', (e) => {
-      const carried = this.carrying;
-      this.carrying = undefined;
-      if (carried && !still) {
-        this.showDrop(undefined);
-        canvas.style.cursor = '';
-        this.onMove?.(
-          { obj: carried.obj, item: carried.item },
-          this.carriedTo(e.clientX, e.clientY, carried)
-        );
-        this.drag = undefined;
-        return;
-      }
       if (this.drag && still && e.target === canvas) {
-        if (this.onPick) this.onPick(this.pickAt(e.clientX, e.clientY));
-        else {
-          const tap = this.tapAtScreen(e.clientX, e.clientY);
-          if (tap === 'shelf') this.onShelf?.();
-          else if (tap) this.onTap?.(tap.switch);
-        }
+        const tap = this.tapAtScreen(e.clientX, e.clientY);
+        if (tap === 'shelf') this.onShelf?.();
+        else if (tap) this.onTap?.(tap.switch);
       }
       this.drag = undefined;
       still = false;

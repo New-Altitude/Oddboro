@@ -18,6 +18,7 @@
   import { OFFICE_TOOLS } from '@oddboro/ledger/tools';
   import { describe } from '@oddboro/ledger/time';
   import { tickable, yesOrNo } from '@oddboro/ledger/tools';
+  import type { DeskItem } from '@oddboro/ledger/desk-answers';
   import { untrack } from 'svelte';
   import { goalWhen } from '@oddboro/ledger/goals';
   import { LEVEL_LABEL, type FolderAccess } from '@oddboro/ledger/access';
@@ -38,10 +39,9 @@
   };
   let { desk, staff, focus, onhire, onplan, onstaff }: Props = $props();
 
-  type Item =
-    | { key: string; kind: 'ask'; at: string; row: AskRow }
-    | { key: string; kind: 'task'; at: string; row: TaskRow }
-    | { key: string; kind: 'report'; at: string; row: ReportRow };
+  /** The row each kind of desk item shows. */
+  type DeskRow = { ask: AskRow; task: TaskRow; report: ReportRow };
+  type Item = { [K in DeskItem]: { key: string; kind: K; at: string; row: DeskRow[K] } }[DeskItem];
 
   /**
    * The connect task an approved access ask just made, until the desk reloads
@@ -104,7 +104,7 @@
     const f = focus;
     if (f) untrack(() => go(f));
   });
-  const attached = (kind: 'ask' | 'task', id: number) =>
+  const attached = (kind: Exclude<DeskItem, 'report'>, id: number) =>
     desk.attachments.filter((f) => (kind === 'ask' ? f.askId : f.taskId) === id);
   const open = $derived(items.find((i) => i.key === openKey));
   const who = (id: string | null) => staff.find((p) => p.id === id);

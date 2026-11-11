@@ -15,6 +15,7 @@
 // that tool gets 409.
 import { error, json } from '@sveltejs/kit';
 import {
+  currentPlatform,
   account as accountRow,
   AGENT_NAMES,
   OFFICE_ACCOUNT,
@@ -42,7 +43,7 @@ import type { RequestHandler } from './$types';
  * here, and nothing is installing it.
  */
 function toolOf(name: string): Agent {
-  const tool = offeredAgent(name, process.platform);
+  const tool = offeredAgent(name, currentPlatform());
   if (!tool) error(404, 'No such tool to sign in to here.');
   const running = SLOTS[tool].running?.action;
   if (running === 'install' || running === 'update')

@@ -11,7 +11,7 @@ import {
   staff,
   staffGoals,
   threads,
-  type GoalStatus,
+  GOAL_STATUSES,
   type Outcome
 } from './schema.ts';
 import {
@@ -26,6 +26,7 @@ import {
   type ThreadWaiting
 } from './threads.ts';
 import { THREADS_DIR, workName } from './work-paths.ts';
+import { GOAL_IS_LIVE } from './goal-words.ts';
 
 /** One hand-off in a thread, as the hub's brief tells it. */
 type Step = { title: string; to: string; outcome?: Outcome; text?: string };
@@ -220,7 +221,7 @@ export function threadBrief(b: { story: ThreadStory; shown?: number[] }): string
 }
 
 /** The goals whose threads a lead's chat is told of: those still worked on. */
-const LIVE: GoalStatus[] = ['active', 'paused'];
+const LIVE = GOAL_STATUSES.filter((s) => GOAL_IS_LIVE[s]);
 
 /**
  * The stories a lead's run is told, read as the run starts, so a run that

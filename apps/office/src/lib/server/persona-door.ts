@@ -6,7 +6,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { home } from '@oddboro/ledger';
+import { home, OFFICE_FILES } from '@oddboro/ledger';
 
 /** A persona's door, on the account's authorization server (its issuer). */
 export const doorUrl = (slug: string, issuer: string) => `${issuer}/${slug}/stream`;
@@ -48,7 +48,7 @@ type PriorTurn = { message: string; answer: string };
 type Session = { sessionId: string; turnIndex: number; priorTurns: PriorTurn[] };
 
 /** Apart from the hands' chat session (`chatSession`): the door's is New Altitude's, not the coding tool's. */
-const sessionFile = (odd: string) => home('staff', odd, 'persona-session.json');
+const sessionFile = (odd: string) => home('staff', odd, OFFICE_FILES.personaSession);
 
 function readSession(odd: string): Session {
   const file = sessionFile(odd);

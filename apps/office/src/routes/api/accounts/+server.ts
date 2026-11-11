@@ -6,6 +6,7 @@
 // reaches it (see "Who the office answers").
 import { error, json } from '@sveltejs/kit';
 import {
+  currentPlatform,
   account,
   addAccount,
   agentsOn,
@@ -18,8 +19,8 @@ import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = async ({ request }) => {
   const b = (await request.json().catch(() => ({}))) as { agent?: unknown; label?: unknown };
-  const agent = offeredAgent(b.agent, process.platform);
-  if (!agent) error(400, `Pick ${agentsOn(process.platform).join(' or ')}`);
+  const agent = offeredAgent(b.agent, currentPlatform());
+  if (!agent) error(400, `Pick ${agentsOn(currentPlatform()).join(' or ')}`);
   if (agent === 'gemini') error(400, 'Gemini takes one API key for the office.');
   try {
     const row = await addAccount(agent, typeof b.label === 'string' ? b.label : '');

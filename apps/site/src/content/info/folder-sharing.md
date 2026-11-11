@@ -22,7 +22,7 @@ These folders would let an Odd past the limits you set for it, so Oddboro refuse
 - **Other AI tools' homes.** The folders where Claude Code, Codex, Grok and Gemini keep their sign-ins and history, such as `~/.claude` and `~/.codex`.
 - **Oddboro itself.** The office's own folder, `~/.oddboro`, and Oddboro's code. An Odd that could change these could change its own access.
 
-In your home folder, Oddboro knows where these live. Outside it, on another drive for example, Oddboro looks in the folder you pick, the folders it sits in, and the folders directly inside it. It does not look deeper. Before you give a folder outside your home, make sure nothing deeper inside it holds keys or sign-ins.
+Oddboro knows the ones at the top of your home folder by name; everywhere else, inside your home or on another drive, it looks in the folder you pick, the folders it sits in, and the folders directly inside it for the files only these folders hold. It does not look deeper. Before you give a folder, make sure nothing deeper inside it holds keys or sign-ins.
 
 ## Why some folders warn first
 

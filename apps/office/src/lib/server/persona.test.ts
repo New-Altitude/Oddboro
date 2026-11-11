@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, mock, test } from 'node:test';
 import type { RequestEvent } from '@sveltejs/kit';
+import { HIRE_DEFAULTS } from '@oddboro/ledger/grantable';
 import { fakeNewAltitude, MEMBER, PAT } from './fake-new-altitude.ts';
 
 const ACCOUNT = 'new-altitude-account:oauth';
@@ -304,6 +305,11 @@ test('a persona granted before the office opens joins right after the manager', 
   );
   const pat = await odd('pat');
   assert.ok(pat);
+  assert.deepEqual(
+    { permission: pat.permission, tools: pat.tools },
+    HIRE_DEFAULTS.persona,
+    'a persona starts at its own level and tools'
+  );
   assert.deepEqual(
     history(pat.id).map((m) => m.text),
     ["Hi Ada, I'm Pat. Ask me what I think of anything."]

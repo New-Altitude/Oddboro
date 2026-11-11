@@ -1,13 +1,40 @@
 // What a chat message tells the staffer's chat session before the owner's
-// words: the lines in its chat that no run of the session wrote, the work it
-// put on the desk, and the asks the owner decided, since the session last
-// heard. Without it, an answer to a
+// words: the lines in its chat that no run of the session wrote, the owner's
+// messages whose run failed, the work it put on the desk, and the asks the
+// owner decided, since the session last heard. Without it, an answer to a
 // new manager's hello, or "How did the call go?" after a poke, means nothing
 // to the session.
-import type { ChatEntry } from './staff.ts';
+import type { ChatEntry } from '../staff/chat.ts';
+import type { ChatFile } from '#lib/attachments.ts';
 
-/** A line the session never saw: a poke the office delivered, or a line it said in the staffer's name. */
-const unseen = (e: ChatEntry) => e.poke || e.told;
+/** An attached file as a run hears it: kept, with its full path, or gone from the attachments folder since. */
+export type KeptFile = (ChatFile & { path: string }) | { tag: string; gone: true };
+
+/** A chat line as the office retells it: an owner line carries its files as they are now (`filesNow`). */
+export type RetoldEntry = ChatEntry & { now?: KeptFile[] };
+
+/** How a run hears one attached file, on the owner's new message and on a line the office retells alike. */
+export const fileLine = (f: KeptFile): string =>
+  'gone' in f
+    ? `- [${f.tag}]: gone, deleted from your folder since`
+    : `- [${f.tag}]: ${f.path} (${f.mediaType})`;
+
+/** The files under an owner line the office retells, as they are now, or nothing when it has none. */
+export const retoldFiles = (e: RetoldEntry): string =>
+  e.now?.length
+    ? [
+        '\n(Files attached, each kept in your folder and named by its tag in brackets. Read each one the answer needs.',
+        ...e.now.map(fileLine),
+        ')'
+      ].join('\n')
+    : '';
+
+/** A chat line the office retells (`replay`, `chatPreface`), with its files under it, so each file sits under its own line. */
+export const retoldLine = (e: RetoldEntry): string =>
+  `${e.from === 'owner' ? '{owner}' : 'You'}: ${e.text}${retoldFiles(e)}`;
+
+/** A line the session never saw: a poke the office delivered, a line it said in the staffer's name, or a failed run's error. */
+const unseen = (e: ChatEntry) => e.poke || e.told || e.failed;
 
 /** Something the staffer put on the desk, as the chat lists it, and when the owner decided an ask. */
 type Landed = { kind: string; title: string; at: Date; status?: string; decidedAt?: Date | null };
@@ -19,12 +46,50 @@ const DECIDED: Record<string, string> = {
   revise: 'sent back'
 };
 
-export function chatPreface(past: ChatEntry[], landed: Landed[]): string[] {
-  const since = past.slice(past.findLastIndex((e) => e.from === 'owner') + 1);
+/**
+ * The chat resumes the session saved last, or starts a new one that hears the
+ * lines of `past` at `replayed` word for word (`replay` in replay.ts).
+ */
+export type Session = 'resumed' | { replayed: Set<number> };
+
+/** Where `past` stands for `session`: which lines it holds, and the failed runs since the owner last wrote. */
+function heardOf(past: ChatEntry[], session: Session) {
+  // The office saves a failed run's error right after the owner's line (`chat` in staff.ts).
+  const failedOn = (i: number) => past[i].from === 'owner' && past[i + 1]?.failed === true;
+  // The last failed run whose tool named a session (`inSession`): the session
+  // a resumed chat takes up is the one it saved.
+  const saved = past.findLastIndex((_, i) => failedOn(i) && past[i + 1].inSession === true);
+  // A new session holds what its replay keeps. A resumed one holds every
+  // failed run's owner line up to that run's: the run took its own line, and
+  // its preface carried each earlier one the session did not hold. It never
+  // holds a told or poke line, which no run of it wrote.
+  const holds = (i: number) =>
+    session === 'resumed' ? failedOn(i) && i <= saved : session.replayed.has(i);
+  const heard = past.findLastIndex((e, i) => e.from === 'owner' && !failedOn(i)) + 1;
+  const failed = past.flatMap((_, i) => (i >= heard && failedOn(i) ? [i] : []));
+  return { failedOn, holds, heard, failed };
+}
+
+/** Where in `past` sit the failed runs' owner lines the session never saw, which `chatPreface` retells. */
+export function missedAt(past: ChatEntry[], session: Session): number[] {
+  const { failed, holds } = heardOf(past, session);
+  return failed.filter((i) => !holds(i));
+}
+
+/**
+ * Each told, poke and failed run's owner line since the owner last wrote is
+ * said once: here only when the session does not hold it already. A failed
+ * run's owner line comes as the replay retells it, with its files as they are now under it.
+ */
+export function chatPreface(past: RetoldEntry[], landed: Landed[], session: Session): string[] {
+  const { failedOn, holds, heard, failed } = heardOf(past, session);
+  const since = past.flatMap((e, i) => (i >= heard && !holds(i) ? [e] : []));
   const told = since.filter((e) => e.told);
   const poked = since.filter((e) => e.poke);
+  const missed = missedAt(past, session).map((i) => past[i]);
+  const ran = failed.filter(holds).length;
   // The session saw what it delivered up to the end of its last reply.
-  const last = past.findLast((e) => !unseen(e))?.at ?? '';
+  const last = past.findLast((e, i) => !unseen(e) && !failedOn(i))?.at ?? '';
   const put = landed.filter((d) => d.at.toISOString() > last);
   // Without this, a resumed session says an ask still waits after the owner decided it.
   const decided = landed.filter((d) => d.decidedAt && d.decidedAt.toISOString() > last);
@@ -37,6 +102,23 @@ export function chatPreface(past: ChatEntry[], landed: Landed[]): string[] {
     ...(poked.length
       ? [
           `(Since {owner} last wrote, the office delivered your pokes to them: ${poked.map((e) => `"${e.text}"`).join(', ')}.)`
+        ]
+      : []),
+    // The session holds these messages, but not that its run on them failed.
+    ...(ran
+      ? [
+          ran === 1
+            ? "(Your run on {owner}'s last message you saw before this one failed, so they have no reply from you to it.)"
+            : `(Your runs on {owner}'s last ${ran} messages you saw before this one failed, so they have no reply from you to them.)`
+        ]
+      : []),
+    // Each line with its own files, since pasted pictures are numbered from #1 in every message.
+    ...(missed.length
+      ? [
+          [
+            '({owner} wrote to you before this, but your run failed each time, so you never saw it:)',
+            ...missed.map(retoldLine)
+          ].join('\n')
         ]
       : []),
     ...(put.length

@@ -26,6 +26,7 @@ import { homedir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import type { McpServer } from './launch.ts';
 import {
   L,
   PATCH,
@@ -58,11 +59,13 @@ import {
 } from './office-under-test.ts';
 // After the office under test is set up, as its own imports are: the office reads where everything is as it loads.
 const { agentCommand } = await import('./agent-sign-in.ts');
+const { configServers } = await import('./launch.ts');
+const { LAUNCHES } = await import('./cli.ts');
 const { deniedEdits } = await import('./files.ts');
 // The model an Odd with none of its own runs on each tool, which the picker sends for its Office default card.
-const { officeModel } = await import('./profile.ts');
+const { shownOfficeModel } = await import('./claude.ts');
 
-test("a colleague's run on a hand-off works at Draft, and its key is held while it goes and only then", async () => {
+test("a colleague's run on a hand-off works at Draft, is not told to hand its colleagues work, and its key is held while it goes and only then", async () => {
   const h = await L.handOff({
     from: 'lead',
     to: 'paige',
@@ -71,6 +74,9 @@ test("a colleague's run on a hand-off works at Draft, and its key is held while 
   });
   assert.ok('id' in h, JSON.stringify(h));
   const run = await runOf(h.id);
+  // Paige holds hand_off, but a colleague's run is not offered it, so it is not told to call it.
+  assert.match(run.system, /You cannot hand them work/);
+  assert.doesNotMatch(run.system, /call hand_off/);
   assert.equal(run.env.CEILING, 'draft');
   assert.equal(run.env.LESSON_RUN, undefined);
   assert.equal(run.env.HAND_OFF_ID, String(h.id));
@@ -88,6 +94,8 @@ test("a run that reads the owner's no for a lesson works at Draft, hands nothing
   assert.equal(lesson.env.LESSON_RUN, '1');
   assert.equal(lesson.env.CEILING, 'draft');
   assert.doesNotMatch(lesson.system, /Plan the picnic/);
+  assert.match(lesson.system, /You cannot hand them work/);
+  assert.doesNotMatch(lesson.system, /call hand_off/);
   const yes = await L.raiseAsk('lead', { title: 'Book the hall', why: 'w', ifApproved: 'i' });
   await L.decideAsk(yes.ask.id, 'approve', null);
   const carry = await runOf(await startedBy(yes.ask.id, 'carry_out'), yes.ask.id);
@@ -179,6 +187,53 @@ test("the colleague's run a yes to keep going starts is handed the held work as 
   assert.match(told, /Lena handed you a piece of work/);
   assert.match(told, /- What: Plan a stall/);
   assert.match(told, /Plan it\./);
+});
+
+/** One command server and one hosted one, as access() builds them, and as a run's config has always written them. */
+const SERVERS = {
+  office: { type: 'stdio', command: 'node', args: ['mcp.ts'], env: { RUN_KEY: 'k' } },
+  notes: { type: 'http', url: 'https://notes.example/mcp', headers: { Authorization: 'a' } }
+} satisfies Record<string, McpServer>;
+const WRITTEN = {
+  office: { command: 'node', args: ['mcp.ts'], env: { RUN_KEY: 'k' } },
+  notes: { type: 'http', url: 'https://notes.example/mcp', headers: { Authorization: 'a' } }
+};
+
+test("a Claude Code run's MCP config gives a command server and a hosted one in the shape it always had", async () => {
+  const { mcp } = await chatOf('cleo');
+  const config = mcp as { mcpServers: Record<string, object> };
+  assert.deepEqual(Object.keys(config.mcpServers.office), ['command', 'args', 'env']);
+  assert.deepEqual(configServers(SERVERS), WRITTEN);
+});
+
+test("a Grok run's agent file gives a command server and a hosted one in the shape it always had", async () => {
+  const dir = join(folder, 'staff', 'gus');
+  const launch = await LAUNCHES.grok({
+    key: 'agent-file-shape',
+    account: 'office',
+    staffId: 'gus',
+    dir,
+    reads: [],
+    writes: [dir],
+    granted: [],
+    commands: false,
+    network: false,
+    system: 'You are Gus.',
+    input: 'Hello.',
+    servers: SERVERS,
+    allowed: [],
+    timeoutMs: 60_000,
+    web: false
+  });
+  assert.ok('args' in launch, JSON.stringify(launch));
+  const agent = readFileSync(launch.args[launch.args.indexOf('--agent') + 1], 'utf8');
+  launch.done();
+  // Grok takes a list of one-server objects, in the order the run's servers
+  // come, and each command server keeps the owner's home (`ownersHome`).
+  assert.deepEqual(JSON.parse(/^mcpServers: (.*)$/m.exec(agent)![1]), [
+    { office: { ...WRITTEN.office, env: { ...WRITTEN.office.env, HOME: homedir() } } },
+    { notes: WRITTEN.notes }
+  ]);
 });
 
 test("a Claude Code Odd's chat gets the arguments it always had, with its rules, sandbox and system prompt in files, the office's file tools in place of its own, plus the new instruction files' denies", async () => {
@@ -815,6 +870,8 @@ const patch = (id: string, body: unknown) =>
   } as unknown as Parameters<typeof PATCH>[0]);
 const refused = (status: number) => (e: unknown) => (e as { status?: number }).status === status;
 
+// Each tool's model is written out, not read from `shownOfficeModel`, so a
+// change to which model the picker shows fails here.
 test('the "Runs on" picker hears only of the tools on this Mac', async () => {
   const only = join(folder, 'only-claude');
   mkdirSync(only, { recursive: true });
@@ -842,7 +899,8 @@ test('the "Runs on" picker hears only of the tools on this Mac', async () => {
           installed: true,
           signIn: { how: 'browser', installing: false, signedIn: false },
           commandsHow: L.commandsHow('claude', 'darwin'),
-          officeModel: officeModel('claude')
+          // Setup's model, Opus until the owner picks Sonnet.
+          officeModel: 'claude-opus-5-5'
         },
         {
           id: 'grok',
@@ -850,7 +908,8 @@ test('the "Runs on" picker hears only of the tools on this Mac', async () => {
           installed: false,
           signIn: { how: 'browser', installing: false, signedIn: false },
           commandsHow: L.commandsHow('grok', 'darwin'),
-          officeModel: officeModel('grok')
+          // No Grok model set, so Grok's own default.
+          officeModel: 'grok-4.7'
         },
         // The office under test's Codex home holds a sign-in file with no account in it.
         {
@@ -859,7 +918,8 @@ test('the "Runs on" picker hears only of the tools on this Mac', async () => {
           installed: false,
           signIn: { how: 'browser', installing: false, signedIn: true },
           commandsHow: L.commandsHow('codex', 'darwin'),
-          officeModel: officeModel('codex')
+          // No Codex model set, so Codex's own default.
+          officeModel: 'gpt-6.1-sol'
         }
       ]
     });
@@ -914,7 +974,7 @@ require(${JSON.stringify(join(bin, 'claude'))});
       installed: false,
       signIn: out,
       commandsHow: L.commandsHow('grok', 'win32'),
-      officeModel: officeModel('grok')
+      officeModel: shownOfficeModel('grok')
     },
     {
       id: 'codex',
@@ -923,7 +983,7 @@ require(${JSON.stringify(join(bin, 'claude'))});
       // The office's Codex home is signed in under test.
       signIn: { ...out, signedIn: true },
       commandsHow: L.commandsHow('codex', 'win32'),
-      officeModel: officeModel('codex')
+      officeModel: shownOfficeModel('codex')
     }
   ];
   const installed = [
@@ -933,7 +993,7 @@ require(${JSON.stringify(join(bin, 'claude'))});
       installed: true,
       signIn: out,
       commandsHow,
-      officeModel: officeModel('claude'),
+      officeModel: shownOfficeModel('claude'),
       version: '2.1.318'
     },
     ...others
@@ -955,7 +1015,7 @@ require(${JSON.stringify(join(bin, 'claude'))});
               installed: false,
               signIn: { how: 'browser', installing: false, signedIn: false },
               commandsHow,
-              officeModel: officeModel('claude')
+              officeModel: shownOfficeModel('claude')
             },
             ...others
           ],
@@ -981,7 +1041,7 @@ require(${JSON.stringify(join(bin, 'claude'))});
             installed: true,
             signIn: out,
             commandsHow,
-            officeModel: officeModel('claude')
+            officeModel: shownOfficeModel('claude')
           },
           ...others
         ]);
@@ -1277,6 +1337,28 @@ test("a lead woken by a colleague's tell_lead is told the work is its to decide 
     system,
     /- Paige passed you what Sam told them in chat about this work\. You decide what comes of it and hand on any work it needs; Paige does nothing more with it\. Sam's words: Make the barn red\./
   );
+});
+
+test("a lead's pick-up on a thread is not told the other work it leads, since it hands on only there", async () => {
+  // Other work Lena leads, which her runs on no thread are told of.
+  await L.pg`insert into threads (title, hub_id, holder_id) values ('Sweep the yard', 'lead', 'lead')`;
+  const h = await L.handOff({
+    from: 'lead',
+    to: 'paige',
+    work: { title: 'Count the cones', brief: 'Count them.' },
+    thread: { title: 'The fete' }
+  });
+  assert.ok('id' in h, JSON.stringify(h));
+  const f = await L.startFollowUp(h.id);
+  assert.ok(f, "Paige's hand-off could not start");
+  await L.finishFollowUp(f, 'Count the cones', 'done', 'Twelve cones.');
+  const [back] = await L.pg<{ id: number }[]>`
+    select id from follow_ups where staff_id = 'lead' and kind = 'handed_back' and thread_id = ${h.thread}`;
+  assert.ok(back, "Paige's result woke no pick-up");
+  const pickUp = await runOf(back.id);
+  assert.match(pickUp.system, /Count the cones/);
+  assert.doesNotMatch(pickUp.system, /## Work you lead/);
+  assert.doesNotMatch(pickUp.system, /Sweep the yard/);
 });
 
 test('no test reached the keychain', () => {

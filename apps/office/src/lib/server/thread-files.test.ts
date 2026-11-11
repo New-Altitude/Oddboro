@@ -19,6 +19,7 @@ import { createServer } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { after, mock, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { ownerWords } from '../../../../../packages/ledger/test/owner-words.ts';
 
 const folder = mkdtempSync(join(tmpdir(), 'oddboro-thread-files-'));
@@ -57,7 +58,7 @@ const resolveRoute = await import('../../routes/api/files/resolve/+server.ts');
 const fileRoute = await import('../../routes/api/files/+server.ts');
 const openRoute = await import('../../routes/api/files/open/+server.ts');
 assert.notEqual(L.openFile, platform.openFile, 'the system opener is stubbed before any test');
-const { openStaffPage } = await import('./files.ts');
+const { giveIntake, openStaffPage } = await import('./files.ts');
 const { askAbout } = await import('../ui/file-links.ts');
 const { renderMarkdown } = await import('../ui/markdown.ts');
 const { offers, openInBrowser, whose } = await import('../ui/viewer.ts');
@@ -394,7 +395,7 @@ async function lenasTools() {
   await client.connect(
     new StdioClientTransport({
       command: process.execPath,
-      args: [new URL('../../../../../packages/ledger/src/mcp.ts', import.meta.url).pathname],
+      args: [fileURLToPath(new URL('../../../../../packages/ledger/src/mcp.ts', import.meta.url))],
       env: { ...env, STAFF_ID: 'lena', THREAD_ID: String(gameWork), RUN_KEY: 'k-lena' },
       stderr: 'ignore'
     })
@@ -652,6 +653,56 @@ test("two given folders with one name, or a drive's top, name nothing, and a fil
     ]);
     await give([{ path: '/', write: false }]);
     assert.deepEqual(await opens(page), [null]);
+  } finally {
+    await give([]);
+  }
+});
+
+test("a given folder its runs no longer get, holding keys or gone from the disk, opens nothing, says why by its name alone and gives no hire's intake", async () => {
+  const oldMac = join(folder, 'old-mac');
+  const notes = put(join(oldMac, 'notes.md'), 'From the old Mac.');
+  put(join(oldMac, 'plan.md'), 'The old plan.');
+  const keys = join(oldMac, '.ssh');
+  put(join(keys, 'known_hosts'), 'host key');
+  put(own('folders/old-mac/notes.md'), "Paige's own notes.");
+  const page = put(join(site, 'index.html'));
+  const gone = join(folder, 'gone');
+  try {
+    await give([
+      { path: oldMac, write: false },
+      { path: site, write: false },
+      // In a store and gone from the disk: no refusal below names it or fails on it.
+      { path: join(keys, 'gone'), write: false }
+    ]);
+    // By its full path and by its name in the office, the folder's name alone.
+    assert.equal(
+      await refusal(notes),
+      'notes.md is in old-mac, which holds keys or sign-ins, so Paige no longer gets it.'
+    );
+    assert.equal(
+      await refusal('folders/old-mac/plan.md'),
+      'plan.md is in old-mac, which holds keys or sign-ins, so Paige no longer gets it.'
+    );
+    assert.equal(await refusal(join(oldMac, 'missing.md')), 'No file at missing.md');
+    assert.equal(await refusal('folders/old-mac/missing.md'), 'No file at missing.md');
+    assert.deepEqual(await opens(notes, page), [null, 'folders/site/index.html']);
+    assert.equal((await open('paige:folders/site/index.html')).path, 'folders/site/index.html');
+    await giveIntake('paige', 'folders/old-mac/notes.md', 'lena');
+    assert.equal(
+      readFileSync(join(L.home('staff', 'lena'), 'notes', 'intake.md'), 'utf8'),
+      "Paige's own notes."
+    );
+    rmSync(keys, { recursive: true });
+    assert.deepEqual(await opens(notes), ['folders/old-mac/notes.md']);
+    await give([
+      { path: site, write: false },
+      { path: gone, write: false }
+    ]);
+    assert.deepEqual(await opens(page, join(gone, 'notes.md'), 'folders/gone/notes.md'), [
+      'folders/site/index.html',
+      null,
+      null
+    ]);
   } finally {
     await give([]);
   }

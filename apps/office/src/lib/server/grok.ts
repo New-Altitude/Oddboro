@@ -49,19 +49,23 @@ import {
   CODE,
   home,
   OFFICE_ACCOUNT,
+  OFFICE_MODEL_VAR,
   runsGoing,
   toolHome,
+  currentPlatform,
   type Effort
 } from '@oddboro/ledger';
 import { andBelow, denyRules, instructionPaths } from './files.ts';
 import { mcpGrant, NOT_SIGNED_IN, replace, sweep, vendorEnv, type RunImage } from './launch.ts';
+import { runEnv } from './run-env-allow.ts';
 import { onPath } from './on-path.ts';
+import { sandboxPaths } from './sandbox-paths.ts';
 
 /**
  * One account's Grok home (`toolHome`) and what Grok keeps in it: its
  * sandbox profiles, its config, each run's agent file (Grok has no
  * --mcp-config), its own temp folder (so it needs none of the temp folders
- * every app shares, `SHUT`), the sign-in (per xAI account, its tokens, its
+ * every app shares, `shut`), the sign-in (per xAI account, its tokens, its
  * `email` and when they run out, `expires_at`; Sign out from the page
  * removes it), the leader socket every grok outside a run talks to
  * (Grok's default is ~/.grok/leader.sock, the owner's own Grok, whatever
@@ -132,9 +136,9 @@ const SERVER_CODE = [
  * deny path that cannot be bound stops Grok from starting. /etc stays: Grok
  * refuses to start without it.
  */
-const SHUT = [
+const shut = () => [
   ...new Set(
-    [join(homedir(), 'Library'), '/Library', '/tmp', '/var']
+    [join(homedir(), 'Library'), ...sandboxPaths().grokShut]
       .filter((p) => existsSync(p))
       .map((p) => realpathSync(p))
   )
@@ -143,12 +147,9 @@ const SHUT = [
 /**
  * What `strict` reads besides the run's cwd and Grok's home, as Grok 1.0.46
  * on macOS logged it (ProfileApplied in its sessions' sandbox-events.jsonl).
- * Grok and node need what `SHUT` leaves of it to start.
+ * Grok and node need what `shut` leaves of it to start.
  */
-const STRICT_READS = [
-  ...['/usr', '/bin', '/sbin', '/etc', '/dev', '/System', '/Library', '/private', '/tmp', '/var'],
-  join(homedir(), 'Library')
-];
+const strictReads = () => [...sandboxPaths().strictReads, join(homedir(), 'Library')];
 
 /**
  * Everything the kernel may let a Grok run read besides the Odd's own
@@ -158,7 +159,7 @@ const STRICT_READS = [
  * on each folder and everything in it, are a further wall should Grok ever
  * give it one.
  */
-const UNREADABLE = () => [...GROK_HOMES(), ...SERVER_CODE, ...STRICT_READS];
+const UNREADABLE = () => [...GROK_HOMES(), ...SERVER_CODE, ...strictReads()];
 
 /**
  * Every compatibility cell Grok has an environment variable for, switched
@@ -388,17 +389,17 @@ export function grokLaunch(r: GrokRun): GrokLaunch {
   grokHomeReady(h);
   const sandbox = r.part ? `run-${r.key}` : `odd-${r.staffId}`;
   // Grok has no sandbox on Windows: the office's file tools are the wall there.
-  const kernel = process.platform !== 'win32';
+  const kernel = currentPlatform() !== 'win32';
   if (kernel)
     setProfile(h, sandbox, {
       // The office's file server runs inside the sandbox, so the kernel reads and writes what it may.
       readOnly: [...SERVER_CODE, ...r.reads],
       // `strict` already writes the cwd, the Odd's own folder.
       readWrite: [h.temp, ...r.writes.filter((w) => w !== r.dir)],
-      deny: [...instructionPaths(r.writes), ...SHUT].flatMap(andBelow)
+      deny: [...instructionPaths(r.writes), ...shut()].flatMap(andBelow)
     });
   const agent = agentFile(h, r.key, ownersHome(r.servers));
-  const model = r.model ?? process.env.OFFICE_GROK_MODEL;
+  const model = r.model ?? process.env[OFFICE_MODEL_VAR.grok];
   const args = [
     messageArg(r.message, r.images),
     '--output-format',
@@ -437,7 +438,8 @@ export function grokLaunch(r: GrokRun): GrokLaunch {
     ...(r.resume ? ['-r', r.resume] : ['-s', r.newSession])
   ];
   // web_fetch is off in every other grok the office starts (`grokEnv`).
-  const env = r.web ? { ...grokEnv(h), GROK_WEB_FETCH: '1' } : grokEnv(h);
+  const env = grokEnv(h, runEnv('grok'));
+  if (r.web) env.GROK_WEB_FETCH = '1';
   const runsIn = kernel ? runHome(h) : undefined;
   if (runsIn) env.HOME = runsIn;
   return { args, env, done: () => rmSync(agent, { force: true }) };
@@ -493,7 +495,7 @@ export function grokCommand(): string | undefined {
     homedir(),
     '.grok',
     'bin',
-    process.platform === 'win32' ? 'grok.exe' : 'grok'
+    currentPlatform() === 'win32' ? 'grok.exe' : 'grok'
   );
   try {
     accessSync(installed, constants.X_OK);
@@ -529,10 +531,14 @@ export function grokSignIn(account: string = OFFICE_ACCOUNT): {
   return { args: ['login', '--oauth', '--leader-socket', h.leader], env: grokEnv(h) };
 }
 
-/** The environment every `grok` the office starts gets: the office's Grok home, and no key or setup of the office's own. */
-function grokEnv(h: GrokHome): NodeJS.ProcessEnv {
-  const env = vendorEnv(['GROK_', 'XAI_']);
-  return Object.assign(env, COMPAT_OFF, {
+/**
+ * The environment every `grok` the office starts gets: the office's Grok
+ * home, and no key or setup of the office's own. A run starts from `base`,
+ * its `runEnv`; the sign-in, its renewal and the version check from the
+ * owner-side `vendorEnv`.
+ */
+function grokEnv(h: GrokHome, base = vendorEnv(['GROK_', 'XAI_'])): NodeJS.ProcessEnv {
+  return Object.assign(base, COMPAT_OFF, {
     GROK_HOME: h.dir,
     TMPDIR: h.temp,
     GROK_MEMORY: '0',

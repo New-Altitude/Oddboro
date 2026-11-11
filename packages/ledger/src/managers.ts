@@ -9,20 +9,9 @@ import { db } from './db.ts';
 import { firstAsk } from './first-questions.ts';
 import { hire, ownerName, type StaffRow } from './office.ts';
 import { jobs } from './schema.ts';
-import { STARTER_TOOLS } from './tools.ts';
+import { HIRE_DEFAULTS } from './grantable.ts';
 
 export const MANAGER_ROLE = 'Office Manager';
-export const MANAGER_TOOLS = [
-  ...STARTER_TOOLS,
-  'office_report',
-  'propose_hire',
-  'list_goals',
-  'propose_goal',
-  'propose_goal_plan',
-  'update_goal',
-  'remove_odd',
-  'bring_back_odd'
-];
 
 export type ManagerPreset = {
   id: string;
@@ -235,8 +224,7 @@ export async function hireManager(choice: ManagerChoice): Promise<StaffRow> {
   const base = {
     role: MANAGER_ROLE,
     room: 'workspace',
-    permission: 'draft' as const,
-    tools: MANAGER_TOOLS,
+    ...HIRE_DEFAULTS.manager,
     remit
   };
   let row: StaffRow;

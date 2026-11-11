@@ -338,6 +338,16 @@ test('when the door refuses access the owner still gets the report, the Odd goes
   const quiet = await talk('Hello?');
   assert.equal(handsRuns, runs);
   assert.equal(doorTurns().length, turns);
-  assert.equal(history(pat.id).length, kept);
+  // A quiet Odd's chat ends as any failed chat does: the owner's line and the
+  // quiet line stay, marked failed, so a reload shows both (NEW-1658).
+  assert.deepEqual(
+    history(pat.id)
+      .slice(kept)
+      .map(({ from, text, failed }) => ({ from, text, failed })),
+    [
+      { from: 'owner', text: 'Hello?', failed: undefined },
+      { from: 'staff', text: QUIET_LINE.access('Pat'), failed: true }
+    ]
+  );
   assert.deepEqual(quiet.events, [{ type: 'error', message: QUIET_LINE.access('Pat') }]);
 });

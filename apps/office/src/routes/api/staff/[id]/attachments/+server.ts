@@ -3,6 +3,7 @@
 // application/octet-stream so the server's form check never applies; its
 // name and type ride in headers.
 import { error, json } from '@sveltejs/kit';
+import { isFixedError } from '@oddboro/ledger/errors';
 import { isStaff } from '#lib/server/staff.ts';
 import { keepAttachment } from '#lib/server/chat-files.ts';
 import { FILE_MAX, refusal } from '#lib/attachments.ts';
@@ -22,5 +23,11 @@ export const POST: RequestHandler = async ({ params, request }) => {
   const bytes = new Uint8Array(await request.arrayBuffer());
   const refused = refusal(name, type, bytes.byteLength);
   if (refused) error(bytes.byteLength > FILE_MAX ? 413 : 400, refused);
-  return json(keepAttachment(params.id, name, type, bytes));
+  try {
+    return json(keepAttachment(params.id, name, type, bytes));
+  } catch (e) {
+    // A refusal the office wrote reads as written; a disk error goes to the log.
+    if (isFixedError(e)) error(409, e.message);
+    throw e;
+  }
 };

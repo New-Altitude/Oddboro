@@ -31,7 +31,7 @@
   import { setZone } from '@oddboro/ledger/time';
   import type { StaffProfile } from '../../staff/roster.ts';
   import { AgentTools } from '../agent-tools.svelte.ts';
-  import { call, follow } from '../api.ts';
+  import { call, follow, type ApiUrl } from '../api.ts';
   import AiCard from './AiCard.svelte';
   import MacCard, { type Setup } from './MacCard.svelte';
   import ManagerCard, { type Custom, type Preset } from './ManagerCard.svelte';
@@ -208,10 +208,10 @@
     }
     design = {};
     strip = 'Planning the office.';
-    let url = '/api/office/design';
+    let url: ApiUrl = '/api/office/design';
     try {
       const job = await call<{ id: number }>('/api/office/design', { description });
-      url += `?id=${job.id}`;
+      url = `/api/office/design?id=${job.id}`;
     } catch {
       // Already drawing one, from before a reload: follow that.
     }

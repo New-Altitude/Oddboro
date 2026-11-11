@@ -55,7 +55,7 @@ import {
   updateGoal,
   type GoalView
 } from './goals.ts';
-import { goalWhen, HEALTH_WORDS, HORIZONS, STATUS_WORDS } from './goal-words.ts';
+import { GOAL_IS_LIVE, goalWhen, HEALTH_WORDS, HORIZONS, STATUS_WORDS } from './goal-words.ts';
 import {
   accessInRun,
   askAboveLevel,
@@ -67,10 +67,10 @@ import {
   ownToolsSaid
 } from './capabilities.ts';
 import { AGENT_NAMES, commandsOnline } from './agents.ts';
+import { currentPlatform } from './platform.ts';
 import {
   FOLDER_SAID,
   grantWorks,
-  levelAtMost,
   LEVELS,
   NOT_OWN_TOOLS,
   OWN_SWITCHES,
@@ -119,18 +119,27 @@ import {
   GITHUB_ID,
   searchRegistry
 } from './registry.ts';
-import type { GoalPlanItem, HireProposal } from './schema.ts';
+import { GOAL_STATUSES, type GoalPlanItem, type HireProposal } from './schema.ts';
 import type { OwnSwitch as OwnSwitchName } from './access-words.ts';
 import {
   clockTime,
   describe as describeSchedule,
   officeAt,
   officeDay,
+  SCHEDULE_RULE,
   WEEKDAYS,
   zone,
   zoneName
 } from './time.ts';
-import { hasTool, isGrantable } from './tools.ts';
+import {
+  GRANTABLE_TOOLS,
+  hasTool,
+  isGrantable,
+  isOffered,
+  type OfficeToolId,
+  type RIDES_WITH,
+  type ToolRun
+} from './tools.ts';
 import { home } from './home.ts';
 import { trustSystemCertificates } from './certificates.ts';
 
@@ -142,7 +151,7 @@ if (!me) throw new Error(`STAFF_ID "${ME}" names no Odd in this office`);
 const OWNER = await ownerName();
 /** The office's time zone in words, like "Pacific Time". */
 const ZONE = zoneName();
-const has = (tool: string) => hasTool(me.tools, tool);
+const has = (tool: OfficeToolId) => hasTool(me.tools, tool);
 /** This staffer's own folder. Files it names are relative to it. */
 const HOME = home('staff', ME);
 
@@ -151,6 +160,22 @@ const HOME = home('staff', ME);
  * the staffer, so a change made "because the owner asked" carries their real words.
  */
 const OWNER_SAID = process.env.OWNER_SAID || undefined;
+// Each Gmail account is a connector of its own. With more than one, the Odd
+// names the one the email came to, and the reply goes out from it.
+const mailboxes = (await grantsFor(ME))
+  .filter((g) => g.connector.config.google === 'gmail')
+  .map((g) => ({ id: g.connectorId, account: g.connector.config.account }));
+/** This run, as the office tools' row conditions read it. */
+const RUN: ToolRun = {
+  gmail: mailboxes.length > 0,
+  chat: OWNER_SAID !== undefined,
+  manager: me.role === MANAGER_ROLE
+};
+/**
+ * Whether this run is offered `tool` (`isOffered`). A tool with a condition is
+ * registered behind this, never behind a rule of its own.
+ */
+const offered = (tool: OfficeToolId) => isOffered(me.tools, tool, RUN);
 /**
  * The owner's note a follow-up carries out: their reason on an ask, what to
  * change, or their note on a task. Lessons may quote it; it is no go-ahead.
@@ -267,9 +292,9 @@ async function attachable(
   return { paths: [...new Set(out)] };
 }
 
-const atArg = z.string().regex(/^\d\d:\d\d$/);
+const atArg = z.string().regex(SCHEDULE_RULE.oddAt);
 const scheduleArg = z.discriminatedUnion('every', [
-  z.object({ every: z.literal('minutes'), n: z.number().int().min(15) }),
+  z.object({ every: z.literal('minutes'), n: z.number().int().min(SCHEDULE_RULE.oddMinMinutes) }),
   z.object({ every: z.literal('day'), at: atArg }),
   z.object({ every: z.literal('weekday'), at: atArg }),
   z
@@ -313,7 +338,7 @@ const hireFields = {
     .array(z.string())
     .optional()
     .describe(
-      'Office tools beyond the ones every Odd has: search_ledger, give_owner_a_task, find_connectors, ask_for_access, edit_my_job, edit_my_description, hand_off, poke_owner, propose_hire, office_report. Leave out for the usual starters.'
+      `Office tools beyond the ones every Odd has: ${GRANTABLE_TOOLS.join(', ')}. Leave out for the usual starters.`
     ),
   appearance: z
     .string()
@@ -416,7 +441,7 @@ const server = new McpServer({ name: 'office', version: '1.0.0' });
  * one, since an old name may say a word the Odd never reads.
  */
 function tool<Shape extends z.ZodRawShape>(
-  name: string,
+  name: OfficeToolId | keyof typeof RIDES_WITH,
   { description, inputSchema }: { description: string; inputSchema: Shape },
   run: ToolCallback<Shape>
 ) {
@@ -492,7 +517,7 @@ if (has('search_ledger'))
 // In a chat, the threads this Odd works on and does not lead (`threadsOn`):
 // what the owner asks there about one goes to its lead with tell_lead.
 const said = OWNER_SAID;
-const workingOn = said && has('tell_lead') ? await threadsOn(ME) : [];
+const workingOn = offered('tell_lead') ? await threadsOn(ME) : [];
 const goalRule = await goalWork(ME, workingOn);
 // A hub in a run on no thread, such as a chat or a job, names the thread an ask
 // or task is for, or null, so what it raises about a thread lands there.
@@ -665,11 +690,6 @@ const address = z
   .min(3)
   .max(320)
   .regex(/^[^\r\n,;]+$/, 'One address each, on one line.');
-// Each Gmail account is a connector of its own. With more than one, the Odd
-// names the one the email came to, and the reply goes out from it.
-const mailboxes = (await grantsFor(ME))
-  .filter((g) => g.connector.config.google === 'gmail')
-  .map((g) => ({ id: g.connectorId, account: g.connector.config.account }));
 const mailboxIds = mailboxes.map((m) => m.id) as [string, ...string[]];
 const mailboxArg = mailboxes.length
   ? (() => {
@@ -699,7 +719,7 @@ function mailbox(
   return { connector: m.id, account: m.account };
 }
 
-if (has('propose_reply') && mailboxes.length)
+if (offered('propose_reply'))
   tool(
     'propose_reply',
     {
@@ -789,7 +809,7 @@ if (has('propose_reply') && mailboxes.length)
 // then the office creates it in Gmail. Only for an Odd that holds Gmail at any
 // level, since it files mail the Odd read there.
 const filterText = z.string().trim().max(500).optional();
-if (has('propose_filter') && mailboxes.length)
+if (offered('propose_filter'))
   tool(
     'propose_filter',
     {
@@ -1104,7 +1124,7 @@ tool(
     const held = switchAskRefused(now, switches);
     if (held) return refused(held);
     const off = switchesOff(now, switches);
-    const online = commandsOnline(now.agent, process.platform, {
+    const online = commandsOnline(now.agent, currentPlatform(), {
       commands: now.commands || off.includes('commands'),
       web: now.web || off.includes('web')
     });
@@ -1183,7 +1203,7 @@ tool(
     inputSchema: {}
   },
   async () => {
-    const rows = (await goalsFor(ME)).filter((g) => g.status === 'active' || g.status === 'paused');
+    const rows = (await goalsFor(ME)).filter((g) => GOAL_IS_LIVE[g.status]);
     return text(
       rows.length ? rows.map((g) => goalText(g)).join('\n\n') : 'You serve no goals yet.'
     );
@@ -1450,7 +1470,7 @@ if (has('update_goal'))
       description: `Change a goal: mark it met, paused, dropped or active again, or reword it. When ${OWNER} asks in chat, do it at once. Outside a chat, only to carry out an ask they approved, passing its id. To propose it, raise_ask first.`,
       inputSchema: {
         goal_id: z.number().int(),
-        status: z.enum(['active', 'paused', 'met', 'dropped']).optional(),
+        status: z.enum(GOAL_STATUSES).optional(),
         title: goalFields.title.optional(),
         why: goalFields.why,
         done_when: goalFields.done_when,
@@ -1677,7 +1697,7 @@ if (HANDS_OFF.tool) {
     );
 }
 
-// Only in a chat, where the office set the owner's words, and only for threads
+// Only in a chat (`inChat` on its row), and only for threads
 // this Odd works on and does not lead: their words reach the lead, not its own.
 if (said && workingOn.length)
   tool(
@@ -1798,7 +1818,7 @@ if (has('propose_hire'))
 // Taking its own open asks and tasks off the owner's desk, only in a chat, on
 // the owner's own words. A withdrawn ask is a no by the office: its line goes
 // back where it came from, and no run reads it for a lesson (`withdrawAsk`).
-if (OWNER_SAID && has('withdraw'))
+if (offered('withdraw'))
   tool(
     'withdraw',
     {
@@ -1814,6 +1834,7 @@ if (OWNER_SAID && has('withdraw'))
     },
     async ({ asks: askIds = [], tasks: taskIds = [] }) => {
       if (!askIds.length && !taskIds.length) return refused('Name the asks or tasks to take off.');
+      // Offered only in a chat (`inChat` on its row), where the office sets OWNER_SAID.
       const line = `${me.name} took it off your desk, as you said in chat: "${OWNER_SAID!.slice(0, 300)}"`;
       const gone: string[] = [];
       const left: string[] = [];
@@ -1839,11 +1860,11 @@ if (OWNER_SAID && has('withdraw'))
   );
 
 // Leaving the office (leaving.ts). Each only in a chat, on the owner's own
-// words, and each only raises an ask: the Odd leaves or comes back on the
-// owner's yes alone.
+// words (`inChat` on its row in tools.ts), and each only raises an ask: the
+// Odd leaves or comes back on the owner's yes alone.
 const leaveNote = `It lands on ${OWNER}'s desk as an ask, and nothing happens until they say yes. Use it only when ${OWNER} told you so in this chat, never on your own.`;
 
-if (OWNER_SAID && has('leave_office') && me.role !== MANAGER_ROLE)
+if (offered('leave_office'))
   tool(
     'leave_office',
     {
@@ -1874,13 +1895,20 @@ if (OWNER_SAID && has('leave_office') && me.role !== MANAGER_ROLE)
     }
   );
 
-if (OWNER_SAID && has('remove_odd'))
+if (offered('remove_odd')) {
+  // Listed here, as bring_back_odd lists the Odds that left, so the tool names
+  // no other tool the Odd may not hold to find an id.
+  const here = (await roster()).filter((p) => p.id !== ME && p.role !== MANAGER_ROLE);
   tool(
     'remove_odd',
     {
-      description: `${OWNER} told you to let another Odd go: ask them to confirm. On their yes it leaves at once: off the floor, its jobs off, its open work handed back or withdrawn. Its history stays, and you can bring it back with bring_back_odd. Never the ${MANAGER_ROLE}. ${leaveNote}`,
+      description: `${OWNER} told you to let another Odd go: ask them to confirm. On their yes it leaves at once: off the floor, its jobs off, its open work handed back or withdrawn. Its history stays${offered('bring_back_odd') ? ', and you can bring it back with bring_back_odd' : ''}. Never the ${MANAGER_ROLE}. ${leaveNote} ${
+        here.length
+          ? `Odds you can ask about: ${here.map((p) => `${p.id} (${p.name}, ${p.role})`).join('; ')}.`
+          : 'No other Odd works here.'
+      }`,
       inputSchema: {
-        odd: z.string().describe('The id of the Odd to let go, as office_report lists it.'),
+        odd: z.string().describe('The id of the Odd to let go, from the list above.'),
         why: z.string().max(600).describe(`What ${OWNER} said, in their words.`)
       }
     },
@@ -1901,8 +1929,9 @@ if (OWNER_SAID && has('remove_odd'))
       );
     }
   );
+}
 
-if (OWNER_SAID && has('bring_back_odd')) {
+if (offered('bring_back_odd')) {
   const gone = await formerStaff();
   tool(
     'bring_back_odd',

@@ -17,9 +17,10 @@ function sent(t: TestContext): RequestInit[] {
 
 test('a request that changes something says JSON even with no body, and a GET says nothing', async (t) => {
   const seen = sent(t);
-  for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) await call('/api/x', undefined, method);
-  await call('/api/x', { a: 1 }, 'PUT');
-  await call('/api/x');
+  for (const method of ['POST', 'PUT', 'PATCH', 'DELETE'])
+    await call('/api/office', undefined, method);
+  await call('/api/office', { a: 1 }, 'PUT');
+  await call('/api/office');
   assert.deepEqual(
     seen.map((r) => [r.method, r.headers, r.body]),
     [

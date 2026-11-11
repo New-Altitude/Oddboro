@@ -11,12 +11,14 @@ import { beforeEach, test } from 'node:test';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { db, sql, toolServer } from './tool-server.ts';
 
-const { asks, followUps, jobs, ledger, pokes, reports, staff, tasks } =
+const { ASK_KINDS, asks, followUps, jobs, ledger, pokes, reports, staff, tasks } =
   await import('../src/schema.ts');
+const { OWNER_ANSWERS } = await import('../src/desk-answers.ts');
 const { eq } = await import('drizzle-orm');
 const O = await import('../src/office.ts');
 const L = await import('../src/leaving.ts');
-const { MANAGER_ROLE, MANAGER_TOOLS } = await import('../src/managers.ts');
+const { MANAGER_ROLE } = await import('../src/managers.ts');
+const { HIRE_DEFAULTS } = await import('../src/grantable.ts');
 
 const odd = (id: string, name: string, more: Partial<typeof staff.$inferInsert> = {}) => ({
   id,
@@ -46,7 +48,10 @@ beforeEach(async () => {
   await sql`delete from staff`;
   await db
     .insert(staff)
-    .values([odd('rico', 'Rico'), odd('mo', 'Mo', { role: MANAGER_ROLE, tools: MANAGER_TOOLS })]);
+    .values([
+      odd('rico', 'Rico'),
+      odd('mo', 'Mo', { role: MANAGER_ROLE, tools: HIRE_DEFAULTS.manager.tools })
+    ]);
 });
 
 /** The first text a tool call returned, and whether it was an error. */
@@ -213,4 +218,22 @@ test('a remove or bring_back ask takes yes or no only', async () => {
   // A no keeps the Odd, and it reads the reason as any no.
   await O.decideAsk(ask.id, 'deny', 'Stay, please.');
   assert.ok(await O.staffer('rico'));
+});
+
+test('every kind whose yes moves an Odd refuses a yes it cannot carry out, and stays open', async () => {
+  const moves = ASK_KINDS.filter((kind) => {
+    const yes = OWNER_ANSWERS.ask[kind].approve;
+    return ('by' in yes ? yes.then : yes).some((e) => e === 'odd_leaves' || e === 'odd_returns');
+  });
+  assert.ok(moves.length, 'no ask kind moves an Odd');
+  for (const kind of moves) {
+    const [ask] = await db
+      .insert(asks)
+      .values({ staffId: 'mo', kind, odd: 'ghost', title: kind, why: 'w', ifApproved: 'i' })
+      .returning();
+    await assert.rejects(O.decideAsk(ask.id, 'approve', null), {
+      message: 'No Odd by that name ever worked here.'
+    });
+    assert.equal((await askOf(ask.id)).status, 'open', kind);
+  }
 });

@@ -9,6 +9,9 @@ service. On Windows: a per-user installer (NSIS) for x64 or arm64, Windows 10
 or 11, not code-signed yet. No UI framework: the only page of its own is
 `loading/index.html`.
 
+Where a new kind of thing starts, the shared function for each job, and the
+check that catches a missed place: `docs/architecture.md`.
+
 What differs between the systems is in `#[cfg(...)]` branches, one per
 function: the home and log folders and the PATH (`env.rs`), asking Node to
 quit, keeping the computer awake and notifications (`server.rs`), opening
@@ -432,6 +435,16 @@ office:
 ODDBORO_PORT=4510 ODDBORO_DB_PORT=54510 ODDBORO_HOME=/tmp/oddboro-test-home \
   src-tauri/target/debug/oddboro
 ```
+
+## Later
+
+Each line says what to do when its trigger comes.
+
+- Building NEW-1673: add a smoke test to the release that starts the built
+  app and makes one call of each HTTP method its office answers. A built
+  app's server can refuse what the dev server allows: in a release,
+  SvelteKit's origin check refuses any action from the owner's own page that
+  is not sent as JSON (`apps/office/CLAUDE.md`, "Who the office answers").
 
 ## Pinned versions
 

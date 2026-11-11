@@ -2,7 +2,7 @@
 // `npm test -w @oddboro/office`.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { OFFICE_SECTION, SETTINGS_TAB } from '@oddboro/ledger/access';
+import { OWNER_GRANTS } from '@oddboro/ledger/grantable';
 import { house, stillOnDeskSection, whoIsHereSection } from './house.ts';
 
 const section = house({ has: () => false, now: '9:00', zone: 'London time' });
@@ -83,12 +83,10 @@ test('every run speaks of the owner by name or as "they" unless the owner said o
 test('every run is told Run commands and Browse the web are its own tools, which my_access says how to get, never outside tools to find', () => {
   assert.ok(
     section.includes(
-      '- my_access lists your outside tools and your own. Run commands and Browse the web are your own tools, not outside tools: my_access says whether you have each, and if not, whether {owner} can switch it on in your Settings tab, under Office. When a job needs one they can switch on, call ask_for_switch. When an outside tool stops working'
+      '- my_access lists your outside tools and your own. Run commands and Browse the web are your own tools, not outside tools: my_access says whether you have each, and if not, whether you can ask for it. When a job needs one you can ask for, call ask_for_switch. When an outside tool stops working'
     ),
     section
   );
-  // The tab and its section are named as the card names them.
-  assert.ok(section.includes(`in your ${SETTINGS_TAB} tab, under ${OFFICE_SECTION}.`), section);
 });
 
 test('a run that can ask for access is told where more outside tools come from', () => {
@@ -103,6 +101,19 @@ test('a run that can ask for access is told where more outside tools come from',
     /ask_for_switch\. For more outside tools, call ask_for_access\. When an outside tool/
   );
   assert.doesNotMatch(section, /For more outside tools/);
+});
+
+test("a run is told where more outside tools come from in the words of the outside-tools grant's line", () => {
+  for (const held of [['ask_for_access', 'find_connectors'], ['ask_for_access'], []]) {
+    const has = (t: string) => held.includes(t);
+    const more = OWNER_GRANTS.outside_tools.missing({ has });
+    assert.ok(
+      house({ has, now: '9:00', zone: 'London time' }).includes(
+        `call ask_for_switch.${more} When an outside tool`
+      ),
+      held.join(', ')
+    );
+  }
 });
 
 test("every run is told to read what it has on the owner's desk before raising anything, and to revise rather than raise again", () => {

@@ -132,16 +132,40 @@ export function handBack(
  * office tells its tool server so (`LESSON_RUN`), which then offers no
  * `hand_off`.
  */
-export const servesNoThread = (kind: FollowUpKind): boolean =>
-  kind === 'denied' || kind === 'edited';
+export const SERVES_NO_THREAD: Record<FollowUpKind, boolean> = {
+  carry_out: false,
+  rework: false,
+  denied: true,
+  feedback: false,
+  task_done: false,
+  goal: false,
+  first_day: false,
+  hand_off: false,
+  handed_back: false,
+  resume: false,
+  edited: true
+};
+export const servesNoThread = (kind: FollowUpKind): boolean => SERVES_NO_THREAD[kind];
 
 /**
  * Whether a follow-up's run works at Draft at most: both sides of a hand-off,
  * the hub picking its thread back up, and a run that only reads the owner's
- * reason or edit for a lesson (`servesNoThread`).
+ * reason or edit for a lesson (every kind `SERVES_NO_THREAD` marks).
  */
-export const atDraft = (kind: FollowUpKind): boolean =>
-  kind === 'hand_off' || kind === 'handed_back' || kind === 'resume' || servesNoThread(kind);
+export const AT_DRAFT: Record<FollowUpKind, boolean> = {
+  carry_out: false,
+  rework: false,
+  denied: true,
+  feedback: false,
+  task_done: false,
+  goal: false,
+  first_day: false,
+  hand_off: true,
+  handed_back: true,
+  resume: true,
+  edited: true
+};
+export const atDraft = (kind: FollowUpKind): boolean => AT_DRAFT[kind];
 
 /**
  * The hand-off a follow-up's work serves: its own, or the one the ask or task it

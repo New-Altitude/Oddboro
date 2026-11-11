@@ -1,11 +1,11 @@
 // Files the owner attaches in a chat, kept in the Odd's attachments folder (`chat-files.ts`).
 // Run with `npm test -w @oddboro/office`.
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { home } from '@oddboro/ledger/home';
-import { attachedFiles, attachmentPath, keepAttachment } from './chat-files.ts';
+import { attachedFiles, attachmentPath, filesNow, keepAttachment } from './chat-files.ts';
 
 const bytes = new TextEncoder().encode('picture');
 
@@ -44,6 +44,38 @@ test('only a plain file in the attachments folder is found, by a bare name', () 
   assert.equal(attachmentPath('ada', 'link.md'), undefined, 'a link');
   mkdirSync(join(dir, 'folder.md'));
   assert.equal(attachmentPath('ada', 'folder.md'), undefined, 'a folder');
+});
+
+test('an attachments folder the Odd swapped for a link keeps, finds and retells nothing through it', () => {
+  // Outside the Odd's folder, and inside it but not `attachments/` itself: both are refused.
+  const outside = join(home(), 'outside');
+  const beside = join(home('staff'), 'ivy', 'elsewhere');
+  mkdirSync(join(home('staff'), 'ivy'), { recursive: true });
+  for (const target of [outside, beside]) {
+    mkdirSync(target, { recursive: true });
+    writeFileSync(join(target, 'secret.png'), 'picture');
+    const dir = join(home('staff'), 'ivy', 'attachments');
+    rmSync(dir, { recursive: true, force: true });
+    symlinkSync(target, dir);
+    assert.equal(attachmentPath('ivy', 'secret.png'), undefined, target);
+    assert.deepEqual(
+      filesNow('ivy', [{ tag: 'Image #1', name: 'secret.png', mediaType: 'image/png', size: 7 }]),
+      [{ tag: 'Image #1', gone: true }]
+    );
+    assert.throws(
+      () => keepAttachment('ivy', 'shot.png', 'image/png', bytes),
+      /attachments folder is not its own/
+    );
+    assert.deepEqual(readdirSync(target), ['secret.png'], 'a file was kept through the link');
+    rmSync(dir);
+  }
+  // Its own folder again: kept, found and retold.
+  const kept = keepAttachment('ivy', 'shot.png', 'image/png', bytes);
+  const path = join(home('staff'), 'ivy', 'attachments', kept.name);
+  assert.equal(attachmentPath('ivy', kept.name), path);
+  assert.deepEqual(filesNow('ivy', [{ tag: 'Image #1', ...kept }]), [
+    { tag: 'Image #1', ...kept, path }
+  ]);
 });
 
 test('a message names only files in its Odd attachments folder, each with a tag', () => {

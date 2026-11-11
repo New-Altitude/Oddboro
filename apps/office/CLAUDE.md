@@ -4,6 +4,9 @@ The floor the owner watches, and the desk they work from. SvelteKit 3 with Svelt
 runes, PixiJS for the pixel-art floor, Tailwind for the page around it, and
 Postgres through `@oddboro/ledger`. Port 4500 on 127.0.0.1, or `ODDBORO_PORT`.
 
+Where a new kind of thing starts, the shared function for each job, and the
+check that catches a missed place: `docs/architecture.md`.
+
 `vite build` leaves `@oddboro/*` out of the server build (a Rolldown external
 in `vite.config.ts`), so each package finds its own files beside its code and
 the app ships them whole (`apps/desktop/scripts/stage.ts`). In the app
@@ -291,7 +294,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    reads as its work's title and its path there, never a thread's number or
    folder. It comes from `/api/staff/[id]/storage`
    (`oddStorage` in `src/lib/server/storage.ts`): never the office's own
-   `chat.jsonl` and `session.json`, an instruction file, a hidden entry or a
+   files (`OFFICE_FILES` in the ledger's `home.ts`), an instruction file, a hidden entry or a
    link, and at most 5,000 entries across both, which it says. A file opens
    in the viewer. It is read when the tab opens and when the office says something
    changed. The Odd's name in the header, with an info icon beside
@@ -364,7 +367,14 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    progress. The owner can type while the Odd replies; a message sent then
    shows as waiting under the reply, with Cancel to take it back to the box,
    and goes when the reply ends. A second Send while one waits joins it, so
-   the Odd answers both in one turn (`waiting` in `ChatPanel.svelte`). The
+   the Odd answers both in one turn (`waiting` in `ChatPanel.svelte`). A chat
+   whose run fails, or throws on the way to a reply, keeps
+   the owner's line, and the error in place of the reply, marked `failed`
+   (`ChatEntry`), so a reload shows both as the chat showed them live; the
+   next message tells the session what the owner wrote that it never had, and
+   only that the run failed on a message it has: a resumed session has each
+   one up to the last failed run whose tool named a session (`inSession`,
+   `chatPreface`), since that run's message carried the earlier ones. The
    owner attaches pictures, PDFs and text files (`ATTACHABLE` in
    `src/lib/attachments.ts`, up to 10 of 10 MB each): pasting or dropping
    one on the box puts its tag at the caret (`[Image #1]` for a pasted
@@ -519,7 +529,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    `heldReach`). The Odds list shows `reach` as chips beside each Odd's
    role: Commands, Web and its folder count. Run commands shows
    `reach.commands` and how the Odd's tool takes it (`commandsHow`): a switch
-   on Claude Code on a Mac, else checked (Codex) or unchecked and locked,
+   on Claude Code on a Mac and Codex on a Mac and Linux, else unchecked and locked,
    with its reason under it, and the PATCH refuses `{commands}` for a locked
    one. Under one locked off, when a tool on this system follows the switch
    (`offer`), one click moves the Odd there with Run commands on ("Switch Sam
@@ -532,8 +542,9 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    "Search and read web pages. With Run commands on, its commands can reach
    the internet too." A folder is typed as a path and set to Can
    read or Can read and change, anywhere on the computer; `checkFolder`
-   refuses the home folder and one that holds or sits in a secret store (outside
-   the home, found by what it holds, one level down at most), the office's
+   refuses the home folder and one that holds or sits in a secret store (at the
+   home's top by name, anywhere else by what it holds, in the folder, the folders
+   above it and one level down), the office's
    home or Oddboro's code, comparing real paths as the disk spells
    them (`realpathSync.native`), and one whose real path holds `*`, `?`, `[`
    or `]`, which Codex cannot take ("That folder's path has a character an
@@ -551,13 +562,17 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    `house.ts` says so. The
    list reads the profile's folders, each with the home folder written `~`
    (`shown`), so it loads nothing of its own and the staff route has no GET;
-   a level change or Remove sends the path as stored. `run()` takes the
+   a level change or Remove sends the path as stored. A folder that holds or
+   sits in a secret store (`touchesStore` on the profile, `touchesSecretStore`
+   on the server) reaches no run, so it says "Holds keys or sign-ins, so this
+   Odd no longer gets it." and can still be removed. One gone from the disk
+   reaches no run either, and gets that line only if its stored path is in a store. `run()` takes the
    switches and folders as its tool takes them from `capabilities()`
    (`caps.own`), less a held network, and passes the given folders still on
-   the disk; the prompt lists them under "Where things are", and "What you
+   the disk and in no secret store (`touchesSecretStore` in the ledger); the prompt lists them under "Where things are", and "What you
    can do" says what the Odd's own tools reach and, for Run commands or
-   Browse the web when it lacks one, whether the owner can switch it on in
-   its Settings tab (`ownToolsSaid` in the ledger's `capabilities.ts`, held
+   Browse the web when it lacks one, whether it can ask for it with
+   `ask_for_switch` (`ownToolsSaid` in the ledger's `capabilities.ts`, held
    network included), the same line `my_access` gives. `office_report` gives
    it too, naming the Odd, since another Odd reads it ("Rowan's own tools",
    "Rowan's Settings tab").
@@ -601,10 +616,11 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    sign-in check, so the sign-in from the office's page (item 18), where a run
    without one points, is kept as a file. Every run
    passes the office's switches as `-c` (`SWITCHES`) under `--strict-config`.
-   A Codex Odd has a shell, held by one kernel permission profile per run
+   With Run commands on (a Mac or Linux), a Codex Odd has a shell, held by
+   one kernel permission profile per run
    (`filesystem` in `codex.ts`): everything shut but the system's own folders
-   and Apple's developer tools (`DEVELOPER_TOOLS`, and the folder `xcode-select -p`
-   names, Xcode.app's on a Mac that uses it, found once: `developerReads`) and node's OpenSSL config (`NODE_OPENSSL`), read, `/tmp` shut, its thread folders, the owner's data folder, the folders the owner gave it
+   and Apple's developer tools (`codexReads` in `SANDBOX_PATHS`, and the folder `xcode-select -p`
+   names, Xcode.app's on a Mac that uses it, found once: `developerReads`) and node's OpenSSL config (`opensslConf`), read, `/tmp` shut, its thread folders, the owner's data folder, the folders the owner gave it
    and the owner's developer tool folders (`devReads` in `sandbox.ts`, as
    Claude Code's commands read them) read, their listed credential files shut
    but not their env files or projects' git configs, its
@@ -612,8 +628,11 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    (`codex-tmp/<run key>`) written, instruction files and the edited file
    never, and no network, Browse the web or not (`network` in the profile,
    from `commandsOnline`: with it on, Codex's commands reached the office's own
-   API and database on this Mac). Codex reads files through that shell, so its Run
-   commands shows on and locked. Its own web search is set per run, `live`
+   API and database on this Mac). The office carries its files
+   (`FILES_VIA_OFFICE`), so with Run commands off it has no shell. On Windows
+   it never has one: Codex's own sandbox opened every Odd's folder to reads,
+   so a run there is in Codex's read-only mode and Run commands stays locked
+   off. Its own web search is set per run, `live`
    with Browse the web and `disabled` without (`web_search`, not one of
    `SWITCHES`). The run is a process group of its
    own; when it ends or times out, that group and each of its commands'
@@ -649,13 +668,15 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    A chat that starts a new session (after a move to another tool, or with
    `session.json` gone or unreadable: `sessionIdIn`) opens with the latest of
    the chat instead, word for word, oldest first: the newest lines whose text
-   fits in 24,000 characters (`REPLAY_CHARS`), and the files changed since
+   and retold files fit in 24,000 characters (`REPLAY_CHARS`), never a failed run's error, and the files changed since
    the oldest of them (since the owner line before it, when that is the Odd's
    reply: `replaySince`) in the Odd's own folder and the folders the owner
    gave it to change, among the first 2,000 entries of each, 30 named and the
    rest counted (`replay` and `changedSince` in `src/lib/server/replay.ts`).
-   `chatPreface` leaves out the told and poke lines the replay holds and keeps
-   those the budget cut, so each since the owner last wrote is said once.
+   `chatPreface` leaves out the told, poke and failed run's owner lines the
+   replay holds and keeps those the budget cut, so each since the owner last
+   wrote is said once; of a failed run's line the replay holds, it says only
+   that the run failed.
    Nothing on screen shows it.
    The office tells each run's tool server about the run through its
    environment (`officeEnv` in `src/lib/server/run-env.ts`): every run gets a
@@ -669,8 +690,9 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    `inProgress` (the `Work` shape in `src/lib/staff/work.ts`) with what it
    is, when it started, and the tool it is using now. The list reaches the
    page with each `working` event; only work starting or ending reloads the
-   card's tabs. Every Claude Code run gets five file
-   tools (Read, Glob, Grep, Write, Edit), `Bash` with Run commands and
+   card's tabs. Every Claude Code run gets the
+   office's file tools where `FILES_VIA_OFFICE` says, else its own five
+   (Read, Glob, Grep, Write, Edit), `Bash` with Run commands and
    `WebSearch` and `WebFetch` with Browse the web, and reads only its own
    folder, the owner's data folder (as a Grok run does), Claude
    Code's sessions folder for its own folder, where long
@@ -685,7 +707,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    `~/.aws`, `~/.gnupg`, `~/.config`, `~/Library`, `~/AppData`,
    `~/.claude.json`, `~/.google_workspace_mcp` (where
    that MCP server keeps its sign-ins for other apps on the Mac), `~/.grok`,
-   `~/.codex` and `~/.gemini`, everything
+   `~/.codex`, `~/.gemini`, `~/.docker` and `~/.kube`, everything
    in `~/.oddboro` besides `staff/` and `data/` (and `threads/<id>/` for a
    run on that thread), every other
    Odd's folder, and everything in `~/.claude` besides this run's sessions.
@@ -812,10 +834,10 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    variables and a second `set` would replace the first. Nor does it write the file a run
    reading the owner's edit is reading. It gets no skills, no
    plugins, none of the owner's own CLAUDE.md files, no Claude Code
-   auto-memory and none of the office process's own `GIT_` variables, which
-   every tool's launch drops (`cleanEnv` in `claude.ts`), nor any `AWS_`
-   variable (a tool server runs outside the sandbox and could sign in as the
-   owner), the office's own MCP server (`packages/ledger/src/mcp.ts`) with
+   auto-memory, and of the office process's own environment only the names
+   `RUN_ENV_ALLOW` lists (`runEnv` in `run-env-allow.ts`; no `GIT_` or `AWS_`
+   variable among them, since a tool server runs outside the sandbox and could
+   sign in as the owner). It gets the office's own MCP server (`packages/ledger/src/mcp.ts`) with
    only the office tools the owner ticked under "In the office" on the Settings tab,
    and whatever outside access the owner granted: servers at read (the tools
    the server marks as only reading, less any whose name says it changes
@@ -826,9 +848,14 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    `/api/gateway/<connector>`): the run gets the office's address and a
    token that lives as long as the run, never the server's address, key or
    sign-in. The gateway connects to the real server (`upstream` in
-   `access.ts`), lists only the tools the grant reaches, refuses any other
+   `access.ts`, which starts a command's server with only the names a run
+   may have, `outsideToolEnv` in `run-env-allow.ts`, and its own secrets),
+   lists only the tools the grant reaches, refuses any other
    call, and takes a tool that no longer passes `readsOnly` off the
-   connector's stored list with a Ledger line (`narrowReadTools`). A write
+   connector's stored list with a Ledger line (`narrowReadTools`). A connector
+   that cannot start during a run gets one Ledger line naming it, per run, in
+   the office's own words for why and never the error's text, which can repeat
+   a key (`whyNoStart`); the run still gets the error itself. A write
    grant at Draft (`writesWait`, either the Odd's own level or a run capped
    there) lists every tool, passes reads on, and holds each call that does
    not pass `readsOnly` (or `readsByRole`) as a `call` ask on the desk
@@ -997,8 +1024,10 @@ pieces under 3,900 bytes a line, so no value is on a command line.
     viewer and the Ledger still show only the bare name.
     `src/lib/server/files.ts` serves only text files up to 1 MB that already
     exist inside that Odd's own folder, its parts of thread folders, or a
-    folder the owner gave it (`givenFile`), never through a link to a file or
-    a folder. It takes a bare name, or a path
+    folder the owner gave it that its runs still get (`givenFile`, through the
+    ledger's `ownTools`: never one gone from the disk or in or holding a secret
+    store, so a proposed hire's intake never copies a file from one), never
+    through a link to a file or a folder. It takes a bare name, or a path
     inside the Odd's own folder such as `site/index.html`, which opens only
     when its real path lands inside that folder; never a full path but one
     into a folder the owner gave it, which opens that one path, by the
@@ -1010,7 +1039,10 @@ pieces under 3,900 bytes a line, so no value is on a command line.
     path into), which opens that one file in any part of the
     folder while the Odd is on that thread (`workFile` in the ledger). A folder
     it may not read hides only what is in it. An error the owner reads names
-    only the file's bare name (`ownerMessage`); the rest goes to the log. It
+    only the file's bare name (`ownerMessage`); the rest goes to the log. A
+    file that is there, in a given folder its runs no longer get, says so by
+    the folder's name alone ("notes.md is in old-mac, which holds keys or
+    sign-ins, so Paige no longer gets it."; `noFile`). It
     refuses a save if the Odd changed the file
     since the owner opened it, and records each save in the ledger. A save
     that changed the file starts an `edited` follow-up (`learnFromEdit`): the
@@ -1196,19 +1228,10 @@ its spec as `current`, and a note redraws it from that spec. Each note is
 added to the layout's words as a "Then:" line, so a later change starts from
 everything asked so far. A change in words also shows Claude every room's
 items by id and tile, so it can return room `edits` (remove, move, add) that
-name the very thing. In the large view, **Arrange by hand** turns on arranging: dragging a placed
-thing carries it (the floor's `onMove`, with an outline where it lands) to a
-tile in its own room, or its own area (the halls, the street, the grounds),
-and a tap picks it (`onPick`, `highlight`) to Move or
-Remove. The **Library** panel down the right lists what the office drew for
-itself, then every library piece by the room kind it belongs to
-(`libraryPieces`), the halls, the street and the grounds, searchable; drag one
-onto the floor, or pick one and tap where it goes. Undo steps back. Each change
-is an edit on its room, or under `areas` for one outside the rooms, in the spec,
-kept in the order made; one the office refuses is not kept, and its reason
-shows over the floor. Each is built at once by `POST /api/office/build`
-(`buildOnly`, no Claude run). **Save to the office** in the large view moves in
-at once. For a whole look the library lacks, like a
+name the very thing. The window has no arranging by hand, and no refurnishing
+by the latest rules: both built each change through a route the office never
+had, so they are out until it has one (NEW-1615). **Save to the office** in the
+large view moves in at once. For a whole look the library lacks, like a
 dungeon, Claude makes a theme: it draws stand-ins with `replaces` (drawn over
 the original, keeping its footprint and spots) and maps them in the spec's
 `swaps`, with `windows: false` for a place underground. Once a drawing builds,
@@ -1221,8 +1244,7 @@ round (`drawAll`), and the office keeps everything it asked for if that
 builds, else only the room edits, else the first version. A change keeps to
 what it touched (`scopeOf`): the look-over sees only rooms whose spec changed,
 and the front and street only if the theme did; its edits elsewhere are
-ignored, and with nothing touched it does not run. The office the owner is in can be refurnished by
-the latest rules, or arranged by hand, the same way. Nothing changes until **Move in**:
+ignored, and with nothing touched it does not run. Nothing changes until **Move in**:
 `POST /api/office/move-in` (`moveInto` in `src/lib/server/move-in.ts`) checks
 the art and builds the spec again on the server, keeps the layout and its art (`saveArt`), and `moveIn` makes it the
 office. Kept art joins the library for every later drawing: `officeLibrary()`
@@ -1552,35 +1574,35 @@ the persona's voice.
 
 ## Where things live
 
-| Path                                  | What it holds                                                                                                                        |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `src/lib/floor/`                      | The PixiJS floor and the Odds on it                                                                                                  |
-| `src/lib/staff/roster.ts`             | The Odd shape the page gets (`StaffProfile`), hiring looks, and the label for each activity                                          |
-| `src/lib/ui/`                         | The card and its tabs, the Desk, the Ledger, hiring, chat                                                                            |
-| `src/lib/server/`                     | Staff runs, office runs, looks, the job clock, events, keychain                                                                      |
-| `src/lib/server/profile.ts`           | An Odd as the page gets it (`toProfile`): its stored switches and folders, and what its runs reach now                               |
-| `src/lib/server/sandbox.ts`           | What a run's commands reach: the variables hidden from them, Claude Code's sandbox, the developer tool folders, and the refusal line |
-| `src/lib/server/aws.ts`               | AWS: the office's one sign-in, each AWS tool's role and the read check, the names-only Secrets Manager tool, and keys from AWS       |
-| `src/lib/site.ts`                     | Links to the public site's guides (`siteLink`): `localhost:4501` under `npm run dev`, else oddboro.com, or `ODDBORO_SITE_URL`        |
-| `src/routes/api/`                     | One folder per thing the page reads or changes                                                                                       |
-| `src/lib/server/office-design.ts`     | Drawing an office from the owner's words, and where Odds move to                                                                     |
-| `src/lib/server/design-job.ts`        | The drawing as a job on the server, which pages follow                                                                               |
-| `src/lib/ui/onboarding/`              | A new owner's first visit: the cards, the reveal's story, the music                                                                  |
-| `src/lib/floor/reveal.ts`             | The office going up beat by beat, and the bus                                                                                        |
-| `src/lib/diagnostics.ts`              | What a report may carry, and when a trace is taken: the server's, the relay's and the page's one rule                                |
-| `src/lib/server/diagnostics.ts`       | The SDK's options and the gate every report passes, with the owner's answer                                                          |
-| `src/lib/server/account.ts`           | The New Altitude sign-in: start, callback, refresh, sign out                                                                         |
-| `src/lib/account.ts`                  | The account and its states, shared by the server and the page                                                                        |
-| `src/lib/server/persona.ts`           | The personas New Altitude offers: sync, each persona's sign-in, install, Disconnect                                                  |
-| `src/lib/server/persona-package.ts`   | A persona's package checked before the office trusts it                                                                              |
-| `src/lib/server/persona-run.ts`       | A persona Odd's run: its hands, then its voice, and every word sent to its door                                                      |
-| `src/lib/server/persona-door.ts`      | The persona's door on New Altitude: its address, scope, what a turn sends and what comes back                                        |
-| `src/lib/persona.ts`                  | The offers, the quiet reasons and their lines, shared by the server and the page                                                     |
-| `src/lib/ui/persona-offers.svelte.ts` | The page's offers and each persona's wait or problem, with Add, Reconnect, Disconnect and Check again                                |
-| `src/lib/ui/PersonaQuiet.svelte`      | A quiet persona Odd's line and its one button                                                                                        |
-| `src/lib/server/hosts.ts`             | The office's names through Caddy (`HOSTS`), alone so reporting loads before Postgres                                                 |
-| `scripts/office-service.ts`           | The login service                                                                                                                    |
-| `src/app.css`                         | Tokens. Every colour in the chrome reads these.                                                                                      |
+| Path                                  | What it holds                                                                                                                         |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/lib/floor/`                      | The PixiJS floor and the Odds on it                                                                                                   |
+| `src/lib/staff/roster.ts`             | The Odd shape the page gets (`StaffProfile`), hiring looks, and the label for each activity                                           |
+| `src/lib/ui/`                         | The card and its tabs, the Desk, the Ledger, hiring, chat                                                                             |
+| `src/lib/server/`                     | Staff runs, office runs, looks, the job clock, events, keychain. Where to start a change there: [CLAUDE.md](src/lib/server/CLAUDE.md) |
+| `src/lib/server/profile.ts`           | An Odd as the page gets it (`toProfile`): its stored switches and folders, and what its runs reach now                                |
+| `src/lib/server/sandbox.ts`           | What a run's commands reach: the variables hidden from them, Claude Code's sandbox, the developer tool folders, and the refusal line  |
+| `src/lib/server/aws.ts`               | AWS: the office's one sign-in, each AWS tool's role and the read check, the names-only Secrets Manager tool, and keys from AWS        |
+| `src/lib/site.ts`                     | Links to the public site's guides (`siteLink`): `localhost:4501` under `npm run dev`, else oddboro.com, or `ODDBORO_SITE_URL`         |
+| `src/routes/api/`                     | One folder per thing the page reads or changes                                                                                        |
+| `src/lib/server/office-design.ts`     | Drawing an office from the owner's words, and where Odds move to                                                                      |
+| `src/lib/server/design-job.ts`        | The drawing as a job on the server, which pages follow                                                                                |
+| `src/lib/ui/onboarding/`              | A new owner's first visit: the cards, the reveal's story, the music                                                                   |
+| `src/lib/floor/reveal.ts`             | The office going up beat by beat, and the bus                                                                                         |
+| `src/lib/diagnostics.ts`              | What a report may carry, and when a trace is taken: the server's, the relay's and the page's one rule                                 |
+| `src/lib/server/diagnostics.ts`       | The SDK's options and the gate every report passes, with the owner's answer                                                           |
+| `src/lib/server/account.ts`           | The New Altitude sign-in: start, callback, refresh, sign out                                                                          |
+| `src/lib/account.ts`                  | The account and its states, shared by the server and the page                                                                         |
+| `src/lib/server/persona.ts`           | The personas New Altitude offers: sync, each persona's sign-in, install, Disconnect                                                   |
+| `src/lib/server/persona-package.ts`   | A persona's package checked before the office trusts it                                                                               |
+| `src/lib/server/persona-run.ts`       | A persona Odd's run: its hands, then its voice, and every word sent to its door                                                       |
+| `src/lib/server/persona-door.ts`      | The persona's door on New Altitude: its address, scope, what a turn sends and what comes back                                         |
+| `src/lib/persona.ts`                  | The offers, the quiet reasons and their lines, shared by the server and the page                                                      |
+| `src/lib/ui/persona-offers.svelte.ts` | The page's offers and each persona's wait or problem, with Add, Reconnect, Disconnect and Check again                                 |
+| `src/lib/ui/PersonaQuiet.svelte`      | A quiet persona Odd's line and its one button                                                                                         |
+| `src/lib/server/hosts.ts`             | The office's names through Caddy (`HOSTS`), alone so reporting loads before Postgres                                                  |
+| `scripts/office-service.ts`           | The login service                                                                                                                     |
+| `src/app.css`                         | Tokens. Every colour in the chrome reads these.                                                                                       |
 
 ## Rules for this app
 
@@ -1642,8 +1664,9 @@ the persona's voice.
   (`src/lib/ui/Welcome.svelte`) after that.
 - Never show demo numbers as real ones. The card's back shows only measured
   usage.
-- A tool connects at read or write: read gets the tools the owner ticked as
-  read-only, write gets every tool from Draft, and at Draft each change waits for the owner's yes.
+- A tool connects at read or write: read gets the tools its server marks as
+  only reading (`readsOnly`), write gets every tool from Draft, and at Draft
+  each change waits for the owner's yes.
 - A headless Odd cannot reuse Claude Code's own MCP sign-ins (it reports
   `needs-auth`). That is why the office runs OAuth itself.
 - Charts use LayerChart. Its tooltip reads `--color-surface-*`; set them from
@@ -1654,3 +1677,10 @@ the persona's voice.
   renderer in `packages/world` still multiplies, so its night renders differ
   a little from the office.
 - In dev, `window.floor` holds the `Floor` for poking at from the console.
+- When the next new panel comes, or NEW-1665 is built: first give the whole
+  page one pass at phone and desktop width with an accessibility check, one
+  helper for the page's actions, tables for its words, one source for its
+  colours and one shared snapshot of the office. Text that tells the owner
+  how an action went is built from the server's result (NEW-1709). Add a
+  lint that fails on a promise nobody awaits or catches; that brings ESLint,
+  a new dependency, so the change says why.

@@ -17,6 +17,7 @@ import {
   agentsOn,
   approveHire,
   ask,
+  currentPlatform,
   EFFORT_ORDER,
   effortsOf,
   hire,
@@ -68,9 +69,9 @@ export const POST: RequestHandler = async ({ request }) => {
   if (!rooms.has(room)) error(400, 'Pick a room on the floor');
   if (!permission) error(400, 'Pick read, draft or act');
   // Left out, the hire runs on the column's default, Claude Code.
-  const agent = b.agent === undefined ? undefined : offeredAgent(b.agent, process.platform);
+  const agent = b.agent === undefined ? undefined : offeredAgent(b.agent, currentPlatform());
   if (b.agent !== undefined && !agent)
-    error(400, `Pick ${agentsOn(process.platform).join(' or ')}`);
+    error(400, `Pick ${agentsOn(currentPlatform()).join(' or ')}`);
   // Checked against the tool it will run on before anything is made, as the Model tab checks a change.
   const on = agent ?? officeAgent();
   const model = typeof b.model === 'string' && b.model ? b.model : null;

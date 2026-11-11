@@ -4,7 +4,7 @@
 // email and again when the office sends it, since the file may change.
 import { lstatSync, realpathSync } from 'node:fs';
 import { basename, isAbsolute, join, relative, sep } from 'node:path';
-import { home } from './home.ts';
+import { home, OFFICE_FILE_NAMES } from './home.ts';
 
 /** One file on an email, by its path inside the Odd's folder. */
 export type MailAttachment = { path: string; name: string; mediaType: string; size: number };
@@ -12,9 +12,6 @@ export type MailAttachment = { path: string; name: string; mediaType: string; si
 export const MAIL_FILES_MAX = 10;
 /** All of an email's files together; Gmail takes 25 MB, and base64 adds a third. */
 export const MAIL_BYTES_MAX = 18 * 1024 * 1024;
-
-/** The office's own files at the top of an Odd's folder, never sent anywhere. */
-const OFFICE_FILES = ['chat.jsonl', 'session.json'];
 
 const TYPES: Record<string, string> = {
   png: 'image/png',
@@ -62,7 +59,10 @@ export function mailAttachment(
   const rel = isAbsolute(named) ? relative(dir, named) : named;
   const parts = rel.split(/[\\/]/);
   if (!rel || isAbsolute(rel) || parts.some((p) => !p || p === '.' || p === '..')) return nope;
-  if (parts.some((p) => p.startsWith('.')) || (parts.length === 1 && OFFICE_FILES.includes(rel)))
+  if (
+    parts.some((p) => p.startsWith('.')) ||
+    (parts.length === 1 && OFFICE_FILE_NAMES.includes(rel))
+  )
     return nope;
   const path = join(dir, rel);
   try {

@@ -59,9 +59,14 @@
 
   /** Its walking look, facing front and to the side: a drawn look's frames, read once. */
   let frames = $state<{ sheet: string; frames: Record<string, number> } | undefined>();
+  const isLookRoute = (url: string): url is `/api/staff/${string}/look?${string}` =>
+    /^\/api\/staff\/[^/?]+\/look\?/.test(url);
   onMount(() => {
-    if (!profile.look) return;
-    call<{ sheet: string; frames: Record<string, number> }>(profile.look.sheet)
+    // The profile carries the look route's address as a plain string, so check
+    // it is that route before calling it. Anything else draws no frames.
+    const sheet = profile.look?.sheet;
+    if (!sheet || !isLookRoute(sheet)) return;
+    call<{ sheet: string; frames: Record<string, number> }>(sheet)
       .then((f) => (frames = f))
       .catch(() => {});
   });

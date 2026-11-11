@@ -46,11 +46,12 @@ export type StaffProfile = {
    * Folders outside the office the owner gave it, as stored, so one gone from
    * the disk can still be taken back, each with its home folder written `~`.
    */
-  folders: (GrantedFolder & { shown: string })[];
+  /** `touchesStore`: in or holding a secret store, so no run gets it (`touchesSecretStore`). */
+  folders: (GrantedFolder & { shown: string; touchesStore: boolean })[];
   /**
    * What its runs get now. The stored switches and folders above are the
    * owner's choice; this is what its tool makes of them, less folders gone
-   * from the disk and a network this office holds back.
+   * from the disk or touching a secret store, and a network this office holds back.
    */
   reach: OwnTools & { held: boolean };
   /** One sentence on what this staffer is for, shown on the card. */

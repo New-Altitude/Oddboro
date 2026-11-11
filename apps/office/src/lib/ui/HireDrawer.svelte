@@ -12,6 +12,7 @@
     type Agent,
     type Effort
   } from '@oddboro/ledger/agents';
+  import { HIRE_DEFAULTS } from '@oddboro/ledger/grantable';
   import { OFFICE_TOOLS } from '@oddboro/ledger/tools';
   import Pixel from './Pixel.svelte';
   import LookStudio, { type Drawn } from './LookStudio.svelte';
@@ -75,7 +76,7 @@
   let brief = $state('');
   let remit = $state('');
   let desk = $state('');
-  let permission = $state<Level>('read');
+  let permission = $state<Level>(HIRE_DEFAULTS.staff.permission);
   /**
    * What its runs go through, its hello first, picked as on an Odd's Model
    * tab: the tool (the office's own until the owner picks another), the

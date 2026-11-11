@@ -4,7 +4,9 @@
 // Odd's attachments folder first, `attachments/+server.ts`), and streams the reply back as
 // server-sent events.
 import { error, json } from '@sveltejs/kit';
-import { chat, chatLog, isBusy, isStaff, type ChatEvent } from '#lib/server/staff.ts';
+import { DESK_ITEMS, type DeskItem } from '@oddboro/ledger/desk-answers';
+import { chat, chatLog, isBusy, isStaff } from '#lib/server/staff.ts';
+import type { ChatEvent } from '#lib/staff/chat.ts';
 import { attachedFiles } from '#lib/server/chat-files.ts';
 import { FILES_MAX } from '#lib/attachments.ts';
 import type { RequestHandler } from './$types';
@@ -32,10 +34,8 @@ export const POST: RequestHandler = async ({ params, request }) => {
   // Files alone are a message too: their tags say it.
   const message = typed || files.map((f) => `[${f.tag}]`).join(' ');
   const r = body.re as { kind?: unknown; id?: unknown } | undefined;
-  const re =
-    r && ['ask', 'task', 'report'].includes(r.kind as string) && Number.isInteger(r.id)
-      ? { kind: r.kind as 'ask' | 'task' | 'report', id: r.id as number }
-      : undefined;
+  const kind = DESK_ITEMS.find((k: DeskItem) => k === r?.kind);
+  const re = kind && Number.isInteger(r?.id) ? { kind, id: r?.id as number } : undefined;
   if (!message) error(400, 'Say something first');
   if (message.length > 8000) error(400, 'That message is too long');
   if (isBusy(params.id)) error(409, 'Still replying to the last message');

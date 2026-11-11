@@ -19,10 +19,10 @@ import {
   type GoogleProduct
 } from '@oddboro/ledger';
 import { secretNamesClient, toolKeys } from './aws.ts';
-import { cleanEnv } from './claude.ts';
 import { driveServer } from './google/drive.ts';
 import { gmailServer, heldWords, type HeldWords } from './google/gmail.ts';
 import { bearer, BuiltWithout, startSignIn } from './oauth.ts';
+import { outsideToolEnv } from './run-env-allow.ts';
 
 export type ToolInfo = { name: string; description: string; readOnly: boolean };
 
@@ -35,21 +35,35 @@ export async function upstream(c: ConnectorRow, open = false): Promise<Client> {
   // AWS Secrets Manager's names come from the office itself, never a server.
   if (c.id === AWS_SECRETS_ID) return secretNamesClient();
   const { env, headers } = await toolKeys(c);
-  const transport =
-    c.kind === 'http'
-      ? new StreamableHTTPClientTransport(new URL(c.config.url!), {
-          requestInit: {
-            headers: {
-              ...headers,
-              ...(c.config.oauth && !open ? { Authorization: `Bearer ${await bearer(c.id)}` } : {})
-            }
+  let transport: StdioClientTransport | StreamableHTTPClientTransport;
+  switch (c.kind) {
+    case 'http':
+      // A hosted connector is saved with its address (registry.ts).
+      transport = new StreamableHTTPClientTransport(new URL(c.config.url!), {
+        requestInit: {
+          headers: {
+            ...headers,
+            ...(c.config.oauth && !open ? { Authorization: `Bearer ${await bearer(c.id)}` } : {})
           }
-        })
-      : new StdioClientTransport({
-          ...toolCommand(c.config.command!, c.config.args ?? []),
-          env: { ...(cleanEnv() as Record<string, string>), ...env },
-          stderr: 'ignore'
-        });
+        }
+      });
+      break;
+    case 'stdio':
+      transport = new StdioClientTransport({
+        ...toolCommand(c.config.command!, c.config.args ?? []),
+        // Only what a run may have of the office's environment, as when the
+        // run's own tool started the server, and the connector's own keys. No
+        // `AWS_` setting of the owner's is listed: a tool server runs outside
+        // the sandbox and could sign in as the owner.
+        env: { ...outsideToolEnv(), ...env },
+        stderr: 'ignore'
+      });
+      break;
+    default: {
+      const missed: never = c.kind;
+      throw new Error(`No way to start a ${String(missed)} connector`);
+    }
+  }
   const client = new Client({ name: 'oddboro-office', version: '1.0.0' });
   await client.connect(transport);
   return client;

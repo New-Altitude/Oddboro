@@ -18,7 +18,7 @@ import {
 import type { ArtKind, Place } from '@oddboro/sprites/art';
 import type { LookSpec, PartKind } from '@oddboro/sprites/look';
 import type { FloorPlan, OfficeSpec, RoomKind, RoomTemplate } from '@oddboro/world';
-import { STARTER_TOOLS } from './tools.ts';
+import { HIRE_DEFAULTS } from './grantable.ts';
 import type { Agent, Effort, GrantedFolder } from './agents.ts';
 import type { FolderAccess, Level, OwnSwitch } from './access-words.ts';
 import type { GmailFilter } from './filter-words.ts';
@@ -39,11 +39,11 @@ export const staff = pgTable('staff', {
   portrait: text().notNull(),
   /** The room template it works in. */
   room: text().notNull().default('workspace'),
-  permission: text().$type<Level>().notNull().default('read'),
+  permission: text().$type<Level>().notNull().default(HIRE_DEFAULTS.staff.permission),
   /** The coding tool its runs go through. The owner picks it at hire and on the Settings tab. */
   agent: text().$type<Agent>().notNull().default('claude'),
   /** The office tools the owner granted, beyond the ones every staffer has. See tools.ts. */
-  tools: text().array().notNull().default(STARTER_TOOLS),
+  tools: text().array().notNull().default(HIRE_DEFAULTS.staff.tools),
   /** The account its runs sign in with on its tool (accounts.ts); null is the tool's Office account. */
   account: text(),
   /** The model its runs use on its tool (`MODELS` in agents.ts); null is the office's. */
@@ -51,11 +51,11 @@ export const staff = pgTable('staff', {
   /** How hard its runs think, as the owner picked it; null is Medium (`effortFor` in agents.ts). */
   effort: text().$type<Effort>(),
   /** The owner's Run commands switch. Whether a run gets a shell also depends on its tool (`commandsHow`). */
-  commands: boolean().notNull().default(false),
+  commands: boolean().notNull().default(HIRE_DEFAULTS.staff.commands),
   /** The owner's Browse the web switch. */
-  web: boolean().notNull().default(false),
+  web: boolean().notNull().default(HIRE_DEFAULTS.staff.web),
   /** Folders outside the office the owner lets it read, or read and change, one entry per real path. */
-  folders: jsonb().$type<GrantedFolder[]>().notNull().default([]),
+  folders: jsonb().$type<GrantedFolder[]>().notNull().default(HIRE_DEFAULTS.staff.folders),
   /** One sentence on what it is for, shown on the card. */
   remit: text().notNull(),
   /** The job description its Claude session runs with. */
@@ -111,21 +111,23 @@ export type AccountRow = typeof accounts.$inferSelect;
  * `bring_back` is the manager's ask to bring back an Odd that left. The owner's
  * yes does it (`removeOdd`, `bringBack`).
  */
-export type AskKind =
-  | 'approval'
-  | 'access'
-  | 'hire'
-  | 'goal'
-  | 'plan'
-  | 'hand_offs'
-  | 'window'
-  | 'reply'
-  | 'filter'
-  | 'folder'
-  | 'switch'
-  | 'call'
-  | 'remove'
-  | 'bring_back';
+export const ASK_KINDS = [
+  'approval',
+  'access',
+  'hire',
+  'goal',
+  'plan',
+  'hand_offs',
+  'window',
+  'reply',
+  'filter',
+  'folder',
+  'switch',
+  'call',
+  'remove',
+  'bring_back'
+] as const;
+export type AskKind = (typeof ASK_KINDS)[number];
 /** `revise` means the owner sent it back to be reworked. */
 export type AskStatus = 'open' | 'approved' | 'denied' | 'revise';
 /**
@@ -238,7 +240,8 @@ export type GoalPlan = {
 
 /** When a goal is for. `date` reads `due`. */
 export type GoalHorizon = 'week' | 'quarter' | 'year' | 'date' | 'ongoing';
-export type GoalStatus = 'active' | 'paused' | 'met' | 'dropped';
+export const GOAL_STATUSES = ['active', 'paused', 'met', 'dropped'] as const;
+export type GoalStatus = (typeof GOAL_STATUSES)[number];
 
 /** A goal as written, before it is one: what the owner or the manager proposes. */
 export type GoalDraft = {
@@ -542,7 +545,8 @@ export const ledger = pgTable(
  * apps/office/src/lib/server/google/). A secret named in `secrets` lives in
  * the system's secret store, never here.
  */
-export type ConnectorKind = 'stdio' | 'http' | 'builtin';
+export const CONNECTOR_KINDS = ['stdio', 'http', 'builtin'] as const;
+export type ConnectorKind = (typeof CONNECTOR_KINDS)[number];
 export type ConnectorConfig = {
   command?: string;
   args?: string[];
@@ -700,18 +704,20 @@ export const threads = pgTable('threads', {
  * the owner's answer when no other run follows it. An `edited` run reads the
  * owner's edit to one of the staffer's files, for a lesson.
  */
-export type FollowUpKind =
-  | 'carry_out'
-  | 'rework'
-  | 'denied'
-  | 'feedback'
-  | 'task_done'
-  | 'goal'
-  | 'first_day'
-  | 'hand_off'
-  | 'handed_back'
-  | 'resume'
-  | 'edited';
+export const FOLLOW_UP_KINDS = [
+  'carry_out',
+  'rework',
+  'denied',
+  'feedback',
+  'task_done',
+  'goal',
+  'first_day',
+  'hand_off',
+  'handed_back',
+  'resume',
+  'edited'
+] as const;
+export type FollowUpKind = (typeof FOLLOW_UP_KINDS)[number];
 /** `waiting` means the staffer put what it needs on the owner's desk. */
 export type Outcome = 'done' | 'failed' | 'waiting';
 

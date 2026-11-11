@@ -23,8 +23,7 @@ function oddFolder(): string {
   writeFileSync(join(root, 'made', 'plan.md'), 'A plan');
   writeFileSync(join(root, 'made', 'drafts', 'one.md'), 'One');
   // The office's own, the instruction files and hidden ones never show.
-  writeFileSync(join(root, 'chat.jsonl'), '{}');
-  writeFileSync(join(root, 'session.json'), '{}');
+  for (const name of L.OFFICE_FILE_NAMES) writeFileSync(join(root, name), '{}');
   writeFileSync(join(root, 'CLAUDE.md'), 'Instructions');
   mkdirSync(join(root, '.claude'));
   writeFileSync(join(root, '.claude', 'settings.json'), '{}');
@@ -37,7 +36,8 @@ function oddFolder(): string {
   return root;
 }
 
-test("Storage lists what an Odd kept in its own folder, folders first, and never the office's own files, hidden ones or a link out", () => {
+test("Storage lists what an Odd kept in its own folder, folders first, and never the office's own files (a persona's session among them), hidden ones or a link out", () => {
+  assert.ok(L.OFFICE_FILE_NAMES.includes('persona-session.json'));
   const root = oddFolder();
   try {
     const { entries, capped } = listStorage(root);

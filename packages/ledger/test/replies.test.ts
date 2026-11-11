@@ -119,6 +119,25 @@ test("a reply carries files from the Odd's own folder only, each under the name 
   }
 });
 
+test("an email never carries one of the office's own files at the top of an Odd's folder, a persona's session among them", async () => {
+  const { home, OFFICE_FILE_NAMES } = await import('../src/home.ts');
+  const { mailAttachment } = await import('../src/mail-attachments.ts');
+  mkdirSync(home('staff', 'paige'), { recursive: true });
+  assert.ok(OFFICE_FILE_NAMES.includes('persona-session.json'));
+  // The same file under another name goes, so only the name turns these down.
+  writeFileSync(home('staff', 'paige', 'kept.json'), '{}');
+  const kept = mailAttachment('paige', 'kept.json');
+  assert.ok(!('problem' in kept), JSON.stringify(kept));
+  for (const name of OFFICE_FILE_NAMES) {
+    writeFileSync(home('staff', 'paige', name), '{}');
+    assert.deepEqual(
+      mailAttachment('paige', name),
+      { problem: `${name} is not a file in your folder.` },
+      name
+    );
+  }
+});
+
 test('each call raises one reply ask with the email, and the owner sees it on the desk', async () => {
   const c = await toolServer('paige', { RUN_KEY: 'k-one' });
   const r = await c.callTool({ name: 'propose_reply', arguments: REPLY });

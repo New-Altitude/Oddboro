@@ -15,26 +15,37 @@ export const AGENT_NAMES: Record<Agent, string> = {
   gemini: 'Gemini'
 };
 /**
- * Per tool, the systems it is offered on (`runs`) and the systems where its
- * Run commands switch follows the owner (`commands`: only where its sandbox
- * held commands to the Odd's folders, probed on a made-up home full of
- * decoys). `commands` lies within `runs`. Where the office carries a tool's
- * files (`FILES_VIA_OFFICE`), the office's own file tools hold its files on
- * every system, so it runs where it starts. Codex's sandbox held commands on
- * a Mac and on Linux (Fedora 45, Codex 0.166.0, once it may read its own
- * install); on Windows it opened every Odd's folder to reads, so its commands
- * stay off there. Gemini's walls are proved against its own policy engine but
- * not yet in a live run, so it is offered nowhere until that run holds on a
- * Mac; then its `runs` gains 'darwin'.
+ * Per tool, the systems it is offered on (`runs`), the systems where its Run
+ * commands switch follows the owner (`commands`: only where its sandbox held
+ * commands to the Odd's folders, probed on a made-up home full of decoys), and
+ * the systems where its commands may reach the internet when Browse the web is
+ * on (`networkWithWeb`: only where its walls were measured holding with the
+ * network open, the office's own ports on this Mac among them). `commands` and
+ * `networkWithWeb` lie within `runs`. Where the office carries a tool's files
+ * (`FILES_VIA_OFFICE`), the office's own file tools hold its files on every
+ * system, so it runs where it starts. Codex's sandbox held commands on a Mac
+ * and on Linux (Fedora 45, Codex 0.166.0, once it may read its own install);
+ * on Windows it opened every Odd's folder to reads, so its commands stay off
+ * there. Gemini's walls are proved against its own policy engine but not yet
+ * in a live run, so it is offered nowhere until that run holds on a Mac; then
+ * its `runs` gains 'darwin'. Claude Code 2.1.318's sandbox refuses the
+ * office's own addresses, so its commands may go online on a Mac. Codex
+ * 0.166's commands, with its network on, reached the office's own API and
+ * database here, and no Codex setting was measured to shut them, so they stay
+ * off. Grok and Gemini run no commands.
  */
 export const AGENT_PLATFORMS: Record<
   Agent,
-  { runs: readonly NodeJS.Platform[]; commands: readonly NodeJS.Platform[] }
+  {
+    runs: readonly NodeJS.Platform[];
+    commands: readonly NodeJS.Platform[];
+    networkWithWeb: readonly NodeJS.Platform[];
+  }
 > = {
-  claude: { runs: ['darwin', 'linux', 'win32'], commands: ['darwin'] },
-  grok: { runs: ['darwin', 'linux', 'win32'], commands: [] },
-  codex: { runs: ['darwin', 'linux', 'win32'], commands: ['darwin', 'linux'] },
-  gemini: { runs: [], commands: [] }
+  claude: { runs: ['darwin', 'linux', 'win32'], commands: ['darwin'], networkWithWeb: ['darwin'] },
+  grok: { runs: ['darwin', 'linux', 'win32'], commands: [], networkWithWeb: [] },
+  codex: { runs: ['darwin', 'linux', 'win32'], commands: ['darwin', 'linux'], networkWithWeb: [] },
+  gemini: { runs: [], commands: [], networkWithWeb: [] }
 };
 /**
  * Per tool, the systems where the office carries its files: its own file
@@ -54,6 +65,41 @@ export const FILES_VIA_OFFICE: Record<Agent, readonly NodeJS.Platform[]> = {
 /** Whether the office carries the files of a run on `agent` on `platform`. */
 export const filesViaOffice = (agent: Agent, platform: NodeJS.Platform): boolean =>
   FILES_VIA_OFFICE[agent].includes(platform);
+/**
+ * Each tool's own files: the instruction files it loads from a run's folder
+ * (`instructions`), and its home folders under the owner's home (`homes`).
+ * The office's lists keep their own order, so they are not built from this:
+ * a test holds every name here in INSTRUCTIONS (the office's files.ts) and
+ * SECRET_STORES (office.ts), so a new tool's files are walled off before it
+ * runs.
+ */
+export const AGENT_FILES: Record<
+  Agent,
+  { instructions: readonly string[]; homes: readonly string[] }
+> = {
+  claude: {
+    instructions: ['CLAUDE.md', 'CLAUDE.local.md', '.claude', '.mcp.json'],
+    homes: ['.claude', '.claude.json']
+  },
+  grok: { instructions: ['.grok'], homes: ['.grok'] },
+  codex: {
+    instructions: ['AGENTS.md', 'AGENTS.override.md', '.codex', '.agents'],
+    homes: ['.codex']
+  },
+  gemini: { instructions: ['GEMINI.md', '.gemini'], homes: ['.gemini'] }
+};
+
+/**
+ * The setting naming the model the office's own runs, and an Odd with none of
+ * its own, use on each tool. Claude Code's holds setup's `opus` or `sonnet`;
+ * the others hold a model id, or nothing for the tool's default.
+ */
+export const OFFICE_MODEL_VAR: Record<Agent, string> = {
+  claude: 'OFFICE_MODEL',
+  codex: 'OFFICE_CODEX_MODEL',
+  grok: 'OFFICE_GROK_MODEL',
+  gemini: 'OFFICE_GEMINI_MODEL'
+};
 
 /** The tools an Odd may be hired on or moved to on `platform`. */
 export const agentsOn = (platform: NodeJS.Platform): Agent[] =>
@@ -132,8 +178,8 @@ const UP_TO_MAX: readonly Effort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 /**
  * The models each tool offers an Odd, the tool's default first where it has
  * one. An Odd with none picked runs the office's: Claude Code's Opus or
- * Sonnet from setup, Codex's and Grok's own default (or `OFFICE_CODEX_MODEL`,
- * `OFFICE_GROK_MODEL`). Codex's list and its levels are the ones its model
+ * Sonnet from setup, else the model `OFFICE_MODEL_VAR` names, else the tool's
+ * own default. Codex's list and its levels are the ones its model
  * list shows (Luna stops at Max); Grok's are the models it lists.
  */
 export const MODELS: Record<Agent, readonly ModelChoice[]> = {
@@ -272,20 +318,9 @@ export function runsCommands(agent: Agent, platform: NodeJS.Platform, stored: bo
   return how.state === 'switch' && stored;
 }
 
-/**
- * Whether a tool's commands may reach the internet when Browse the web is on:
- * only where its walls were measured holding with the network open, the
- * office's own ports on this Mac among them (Claude Code 2.1.318, whose
- * sandbox refuses those addresses). Codex 0.166's commands, with its network
- * on, reached the office's own API and database here, and no Codex setting
- * was measured to shut them, so they stay off. Grok and Gemini run no commands.
- */
-export const NETWORK_WITH_WEB: Record<Agent, boolean> = {
-  claude: true,
-  codex: false,
-  grok: false,
-  gemini: false
-};
+/** Whether `agent`'s commands may reach the internet with Browse the web on, on `platform`. */
+const reachesWeb = (agent: Agent, platform: NodeJS.Platform) =>
+  AGENT_PLATFORMS[agent].networkWithWeb.includes(platform);
 
 /** Whether a run's commands reach the internet: commands, Browse the web, and a tool that holds its walls open. */
 export function commandsOnline(
@@ -293,7 +328,7 @@ export function commandsOnline(
   platform: NodeJS.Platform,
   s: { commands: boolean; web: boolean }
 ): boolean {
-  return runsCommands(agent, platform, s.commands) && s.web && NETWORK_WITH_WEB[agent];
+  return runsCommands(agent, platform, s.commands) && s.web && reachesWeb(agent, platform);
 }
 
 /**
@@ -317,7 +352,7 @@ export function webLine(agent: Agent, platform: NodeJS.Platform, held: boolean):
   const web = FETCHES_PAGES[agent] ? 'Search and read web pages.' : 'Search the web.';
   if (how === 'never') return web;
   if (held) return `${web} This version of Claude Code keeps its commands off the internet.`;
-  if (!NETWORK_WITH_WEB[agent])
+  if (!reachesWeb(agent, platform))
     return `${web} ${AGENT_NAMES[agent]}'s commands stay off the internet.`;
   return `${web} With ${SWITCH_NAMES.commands} on, its commands can reach the internet too.`;
 }

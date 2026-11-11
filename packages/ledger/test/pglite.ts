@@ -3,6 +3,7 @@
 // any module that imports db.ts, and runs with
 // `--experimental-test-module-mocks`, as `npm test -w @oddboro/ledger` does.
 import { after, mock } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { PGlite } from '@electric-sql/pglite';
 import { vector } from '@electric-sql/pglite-pgvector';
 import { drizzle } from 'drizzle-orm/pglite';
@@ -12,7 +13,7 @@ import * as schema from '../src/schema.ts';
 const client = await PGlite.create({ extensions: { vector } });
 await client.exec('create extension if not exists vector');
 export const db = drizzle(client, { schema, casing: 'snake_case' });
-await migrate(db, { migrationsFolder: new URL('../migrations', import.meta.url).pathname });
+await migrate(db, { migrationsFolder: fileURLToPath(new URL('../migrations', import.meta.url)) });
 
 /** A query written as a tagged template, returning its rows, as db.ts's `sql` does. */
 export async function sql<Row = Record<string, unknown>>(

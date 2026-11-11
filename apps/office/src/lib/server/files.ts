@@ -22,14 +22,18 @@ import {
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
+  type GrantedFolder,
   type StaffRow,
+  currentPlatform,
   learnFromEdit,
   openFile,
+  ownTools,
   record,
   staffer,
   home,
   threadFolder,
   threadPart,
+  touchesSecretStore,
   workFile
 } from '@oddboro/ledger';
 import { fixedError, isFixedError } from '@oddboro/ledger/errors';
@@ -83,7 +87,10 @@ export const REPO_RUNS = ['.git/hooks', '.git/config', '.git/modules'];
 export type StaffFile = { staff: string; path: string; content: string; mtime: number };
 export type FileName = { staff: string; path: string };
 
-/** A refusal the owner may read as written: it names the file by its bare name only. */
+/**
+ * A refusal the owner may read as written: it names the file by its bare name
+ * only, and a folder the owner gave by its name only.
+ */
 export class FileError extends Error {}
 
 /**
@@ -198,18 +205,21 @@ type Found = { file: string; path: string; given?: true };
 const isFull = (path: string): boolean => isAbsolute(path) || path.startsWith('~/');
 
 /**
- * A file in a folder the owner gave `who` and that is still on the disk,
- * named by its full path (from `~` or from the top) or by its name in the
- * office (`givenName`). Only a file whose real path stays inside the real path
- * of that folder, so a link never leads out, and only by the one path named:
- * nothing is searched for, since a folder the owner gave can be a whole
- * drive. It goes by the innermost given folder that holds it. A folder with no
- * name of its own (a drive's top) or one that shares its name with another
- * given folder names nothing, since its files' names would not lead back to it.
+ * A file in one of `given`, folders on the disk the owner gave an Odd, named
+ * by its full path (from `~` or from the top) or by its name in the office
+ * (`givenName`), with the name of the folder that holds it. Only a file whose
+ * real path stays inside the real path of that folder, so a link never leads
+ * out, and only by the one path named: nothing is searched for, since a
+ * folder the owner gave can be a whole drive. It goes by the innermost given
+ * folder that holds it. A folder with no name of its own (a drive's top) or
+ * one that shares its name with another given folder names nothing, since
+ * its files' names would not lead back to it.
  */
-function givenFile(who: StaffRow, path: string): Found | undefined {
-  const folders = who.folders
-    .filter((f) => existsSync(f.path))
+function givenFile(
+  given: GrantedFolder[],
+  path: string
+): { file: string; path: string; folder: string } | undefined {
+  const folders = given
     .map((f) => ({ name: basename(f.path), as: resolve(f.path), real: realpathSync(f.path) }))
     .filter((f, _, all) => f.name && all.filter((g) => g.name === f.name).length === 1);
   const inside = (real: string, rel: string): string | undefined => {
@@ -224,7 +234,7 @@ function givenFile(who: StaffRow, path: string): Found | undefined {
   if (named) {
     const f = folders.find((g) => g.name === named.folder);
     const file = f && inside(f.real, named.inside);
-    return file ? { file, path, given: true } : undefined;
+    return file ? { file, path, folder: f.name } : undefined;
   }
   if (!isFull(path)) return undefined;
   const full = path.startsWith('~/') ? join(homedir(), path.slice(2)) : resolve(path);
@@ -234,7 +244,7 @@ function givenFile(who: StaffRow, path: string): Found | undefined {
       const rel = relative(root, full);
       if (!rel || rel.startsWith('..') || isAbsolute(rel)) continue;
       const file = inside(f.real, rel);
-      if (file) return { file, path: givenName(f.name, relative(f.real, file)), given: true };
+      if (file) return { file, path: givenName(f.name, relative(f.real, file)), folder: f.name };
     }
   }
   return undefined;
@@ -252,10 +262,15 @@ function givenFile(who: StaffRow, path: string): Found | undefined {
 async function locate(staff: string, path: string): Promise<Found> {
   const who = /^[a-z0-9-]+$/.test(staff) ? await staffer(staff) : undefined;
   if (!who) throw fixedError('No such Odd');
-  // A full path names only a file in a folder the owner gave the Odd, never anywhere else on the Mac.
-  const given = givenFile(who, path);
-  if (given) return given;
-  if (isFull(path)) throw new FileError(`No file at ${basename(path)}`);
+  // A full path names only a file in a folder the owner gave the Odd that its
+  // runs still get (`ownTools`), never anywhere else on the Mac. A folder its
+  // runs no longer get is no way in either: the owner's hire from a proposal
+  // copies the file an Odd names (`giveIntake`), so a refused folder's file
+  // would reach the new hire's runs.
+  const { granted } = ownTools(who, currentPlatform());
+  const given = givenFile(granted, path);
+  if (given) return { file: given.file, path: given.path, given: true };
+  if (isFull(path)) throw noFile(who, path);
   // The Odd's tools read such a name the same way (`attachable`), so both find one file.
   if (workPath(path)) {
     const file = await workFile(staff, path);
@@ -269,8 +284,28 @@ async function locate(staff: string, path: string): Promise<Found> {
   // matches a file's name, so a path with a folder never reaches a thread.
   const onThread = !own && !filesNamed(root, path).length ? fileInThreads(staff, path) : undefined;
   const found = own ? { file: join(root, own), path: own } : onThread && { file: onThread, path };
-  if (!found) throw new FileError(`No file at ${basename(path)}`);
+  if (!found) throw noFile(who, path);
   return found;
+}
+
+/**
+ * Why `who` has no file at `path`. A file that is there, in a folder the owner
+ * gave it that is in or holds a secret store, says so, or the owner would go
+ * looking for a file they can see. It picks those folders by the same test as
+ * the folder's line on the Settings tab (`touchesSecretStore`), so the words
+ * never name a folder its runs miss for any other reason. The refusal names
+ * the folder by its name alone, never its real path.
+ */
+function noFile(who: StaffRow, path: string): FileError {
+  // `givenFile` takes each folder's real path, which a folder gone from the
+  // disk has none of, and a gone folder holds no file to name.
+  const refused = who.folders.filter((f) => existsSync(f.path) && touchesSecretStore(f.path));
+  const held = givenFile(refused, path);
+  return new FileError(
+    held
+      ? `${basename(path)} is in ${held.folder}, which holds keys or sign-ins, so ${who.name} no longer gets it.`
+      : `No file at ${basename(path)}`
+  );
 }
 
 /** What the viewer opens: the file `locate` finds, read whole, so only text up to `MAX_BYTES`. */
