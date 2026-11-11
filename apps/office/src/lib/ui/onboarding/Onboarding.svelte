@@ -154,9 +154,9 @@
     let resolve!: (v: T) => void;
     return { promise: new Promise<T>((r) => (resolve = r)), resolve };
   };
-  const finished = later<World | null>();
+  let finished = later<World | null>();
   /** Whether the office moved into the drawing. */
-  const moved = later<boolean>();
+  let moved = later<boolean>();
   let drawnArt: { sheet?: ArtSheet; catalog?: SpriteCatalog } | undefined;
   /** The pieces the design is drawing, for the card the reveal waits behind. */
   let pieces = $state({ done: 0, total: 0 });
@@ -195,12 +195,17 @@
       design.failed = true;
       finished.resolve(null);
       moved.resolve(false);
-      strip = 'The design did not come out. You will start on Main Street.';
+      strip = `The design did not come out: ${l.message} Go back to try again, or start on Main Street.`;
     }
   }
 
   async function startDesign() {
-    if (design || mainStreet) return;
+    if ((design && !design.failed) || mainStreet) return;
+    // A design that failed draws again, such as after the owner picks another AI.
+    if (design) {
+      finished = later();
+      moved = later();
+    }
     design = {};
     strip = 'Planning the office.';
     let url: ApiUrl = '/api/office/design';
@@ -467,7 +472,7 @@
             <SpaceCard
               bind:description
               bind:mainStreet
-              drawing={!!design}
+              drawing={!!design && !design.failed}
               {canDraw}
               onback={back}
               onnext={() => {

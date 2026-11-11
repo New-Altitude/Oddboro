@@ -142,6 +142,31 @@ const NEVER_SENT = new Set([
   'UND_ERR_CONNECT_TIMEOUT'
 ]);
 
+/**
+ * Failures where this computer did not trust the certificate it was shown,
+ * so the request was never sent and sending it again changes nothing. A
+ * company network or an antivirus that checks secure connections causes them
+ * when its root is in neither Node's list nor the system's store
+ * (`trustSystemCertificates`).
+ */
+const UNTRUSTED = new Set([
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'UNABLE_TO_GET_ISSUER_CERT',
+  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'CERT_UNTRUSTED'
+]);
+
+/** A host whose certificate this computer did not trust. Its message is for the owner. */
+export class UntrustedCertificate extends Error {
+  constructor(host: string) {
+    super(
+      `This computer did not trust the certificate ${host} showed. A company network or antivirus that checks secure connections can cause this. Ask whoever runs it to add its certificate to this computer, then try again.`
+    );
+  }
+}
+
 /** Where GitHub trades a code or a refresh token for tokens. */
 const GITHUB_TOKEN_URL = 'https://github.com/login/oauth/access_token';
 
@@ -178,7 +203,8 @@ export async function githubRefusal(input: string | URL, res: Response): Promise
  * fetch, retried once when the request was never sent. A request whose answer
  * was lost is not retried within one request; the next request that needs it
  * sends it again. The failure's real cause goes in the error and the service
- * log. GitHub's refusals come back as errors (`githubRefusal`).
+ * log. A certificate this computer did not trust is `UntrustedCertificate`.
+ * GitHub's refusals come back as errors (`githubRefusal`).
  */
 export const steadyFetch: FetchLike = async (input, init) => {
   for (let attempt = 1; ; attempt++) {
@@ -188,6 +214,8 @@ export const steadyFetch: FetchLike = async (input, init) => {
       const cause = (e as { cause?: { code?: string; message?: string } }).cause;
       const why = cause?.code ?? cause?.message ?? (e instanceof Error ? e.message : String(e));
       console.error(`[oauth] ${String(input)} failed (attempt ${attempt}): ${why}`);
+      if (UNTRUSTED.has(cause?.code ?? ''))
+        throw new UntrustedCertificate(new URL(String(input)).host);
       if (attempt >= 2 || !NEVER_SENT.has(cause?.code ?? ''))
         throw new Error(`Could not reach ${new URL(String(input)).host}: ${why}`);
       await new Promise((r) => setTimeout(r, 800));

@@ -24,7 +24,8 @@
     "./work-paths": "./src/work-paths.ts",
     "./desk-answers": "./src/desk-answers.ts",
     "./live-tables": "./src/live-tables.ts",
-    "./filters": "./src/filter-words.ts"
+    "./filters": "./src/filter-words.ts",
+    "./certificates": "./src/certificates.ts"
   },
   "scripts": {
     "generate": "drizzle-kit generate",

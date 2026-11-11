@@ -1146,3 +1146,20 @@ test('an office run stops when its signal does, as a drawing left for parts', as
   assert.deepEqual(run, { ok: false, text: 'Stopped.' });
   assert.deepEqual(existsSync(runs) ? readdirSync(runs) : [], []);
 });
+
+test('an office run on a tool that is not installed says so, not that it is not signed in', async () => {
+  const { runAsOffice } = await import('./office-run.ts');
+  const path = process.env.PATH;
+  process.env.PATH = nodeBin;
+  try {
+    const run = await withEnv({ OFFICE_AGENT: 'codex' }, () =>
+      runAsOffice('Draw a desk.', { system: 'You draw.', kind: 'office', timeoutMs: 60_000 })
+    );
+    assert.deepEqual(run, {
+      ok: false,
+      text: 'Codex is not installed. Install it in Setup, under Your AI.'
+    });
+  } finally {
+    process.env.PATH = path;
+  }
+});

@@ -36,6 +36,8 @@ export async function giveTask(
     run?: string;
     /** The colleague whose handed-back work the lead gave this from (`VIA`). */
     via?: string;
+    /** In a chat, the owner's message (`OWNER_SAID`), which the run that picks it up reads. */
+    ownerSaid?: string;
     /** The office gives it in the Odd's name (a plan's steps, a reconnect), so it may repeat a title. */
     byOffice?: true;
   }
@@ -56,7 +58,8 @@ export async function giveTask(
         steps,
         handOffId: t.handOffId,
         threadId: t.threadId,
-        via: t.via
+        via: t.via,
+        ownerSaid: t.ownerSaid
       })
       .returning();
     if (row.threadId) {
@@ -173,12 +176,14 @@ async function ownRunOf(end: {
   if (!end.ownRuns) return undefined;
   const [own] = end.ownThread
     ? await db
-        .select({ title: threads.title, hubId: threads.hubId })
+        .select({ title: threads.title, hubId: threads.hubId, status: threads.status })
         .from(threads)
         .where(eq(threads.id, end.ownThread))
     : [];
-  // A lead that left the office runs nothing, so parked work must not leave its part to it.
-  if (own && !(await staffer(own.hubId))) return undefined;
+  // Stopped work carries no part of its own, and a lead that left the office
+  // runs nothing, so parked work must not leave its part to either. Its lead
+  // leaving stopped the work, so a lead brought back since still reads as gone.
+  if (own && (own.status === 'stopped' || !(await staffer(own.hubId)))) return undefined;
   return { work: own?.title ?? null };
 }
 

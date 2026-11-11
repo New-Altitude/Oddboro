@@ -514,7 +514,7 @@ export async function withdrawAsk(id: number, line: string): Promise<void> {
 export async function withdrawTask(id: number, line: string): Promise<void> {
   const [t] = await db
     .update(tasks)
-    .set({ status: 'dropped', note: line, doneAt: new Date() })
+    .set({ status: 'dropped', note: line, withdrawn: true, doneAt: new Date() })
     .where(and(eq(tasks.id, id), eq(tasks.status, 'open')))
     .returning();
   if (!t) return;

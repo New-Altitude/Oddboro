@@ -24,6 +24,7 @@ import {
   type DeskLayers,
   type EntranceLayers,
   type GymLayers,
+  type CurbLayers,
   type HallLayers,
   type Persona
 } from './release-art.ts';
@@ -39,8 +40,10 @@ import {
   type Rect
 } from './paint.ts';
 import {
+  composeFrame,
   loadLibrary,
   lookFrame,
+  lookPalette,
   LOOKS_ROOT,
   portraitImage,
   type DrawnPart,
@@ -159,6 +162,10 @@ const bus = sprites.get('street-bus')!;
 const doorDraw = world.draws.find((d) => d.sprite === 'street-front-door')!;
 const openDraws = world.draws.map((d) => (d === doorDraw ? { ...d, frame: 'open' } : d));
 const doorRect = rectOf(doorDraw);
+// The near lane is the first row of road; Odds step off onto the sidewalk above the curb.
+const lane = Math.min(
+  ...world.draws.filter((d) => d.sprite.startsWith('floor-asphalt')).map((d) => d.y / TILE)
+);
 
 /**
  * The hallway in 0.0.5's release art: a plaster wall with a window in every
@@ -359,6 +366,33 @@ const personaLooks = JSON.parse(
   readFileSync(join(ROOT, 'scripts', 'persona-looks.json'), 'utf8')
 ) as Record<Persona, { look: LookSpec; parts: DrawnPart[] }>;
 const personaLib = loadLibrary(Object.values(personaLooks).flatMap((p) => p.parts));
+
+/**
+ * The bug hunters in 0.0.10's release art: yellow coveralls and black boots,
+ * from the library's own parts. Their hands take black gloves here, and
+ * release-art.ts puts on the hood, the mask and the tank.
+ */
+const HUNTER: LookSpec = {
+  hair: 'bald',
+  top: 'long-sleeve',
+  bottom: 'trousers',
+  colours: { hair: 'black', skin: 'light tan', top: 'amber', bottom: 'amber', shoes: 'black' }
+};
+const hunterPalette = lookPalette(personaLib, HUNTER).colors;
+const GLOVE: Record<string, string> = { E: 'K', f: 'K', F: 'k', G: 'k' };
+/** A bug hunter in one frame, gloved: below the neck, skin is glove. */
+function hunterFrame(frame: string): Image {
+  const neck = 15 + (personaLib.anchors[frame]?.torso[1] ?? 0);
+  const img = createImage(16, 32);
+  composeFrame(personaLib, HUNTER, frame).forEach((row, y) =>
+    [...row].forEach((ch, x) => {
+      const key = y >= neck ? (GLOVE[ch] ?? ch) : ch;
+      const c = hunterPalette[key];
+      if (key !== '.' && c) img.data.set(hexToRgba(c.hex), (y * 16 + x) * 4);
+    })
+  );
+  return img;
+}
 
 // The rack with its bar lifted off, and the bar alone, both from the rack's
 // own pixels. UNRACK covers the rack's rows 14 to 21, which hold the bar and
@@ -858,9 +892,24 @@ function renderSet(hour: number, dir: string): Image {
     head: (frame) => personaLib.anchors[frame]?.head ?? [0, 0],
     shade: (img) => shade(img, 1)
   };
+  // The street in front of the door for 0.0.10's van: the door's view, run
+  // on down across the sidewalk and the near lane.
+  const curbAt: Rect = { ...doorAt, h: lane * TILE + 24 - doorAt.y };
+  const curb: CurbLayers = {
+    room: cropTo(lit, curbAt),
+    view: { w: doorAt.w, h: doorAt.h },
+    door: { ...doorRect, x: doorRect.x - curbAt.x, y: doorRect.y - curbAt.y },
+    open: doorOpen,
+    lane: lane * TILE - curbAt.y,
+    odd: (frame) => shade(hunterFrame(frame), 1),
+    head: (frame) => personaLib.anchors[frame]?.head ?? [0, 0],
+    torso: (frame) => personaLib.anchors[frame]?.torso ?? [0, 0],
+    shade: (img) => shade(img, 1)
+  };
   writeReleaseArt(
     {
       desk,
+      curb,
       hall,
       gym,
       entrance,
@@ -922,10 +971,6 @@ const desks = world.spots
   .sort((a, b) => a.tile[0] - b.tile[0]);
 if (desks.length < 4) throw new Error('the hero office needs four desks');
 
-// The near lane is the first row of road; Odds step off onto the sidewalk above the curb.
-const lane = Math.min(
-  ...world.draws.filter((d) => d.sprite.startsWith('floor-asphalt')).map((d) => d.y / TILE)
-);
 const sidewalk = lane - 2;
 const shelter = world.draws.find((d) => d.sprite === 'street-bus-shelter')!;
 const stopX = shelter.x - 8;

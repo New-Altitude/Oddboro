@@ -256,6 +256,13 @@ test("an owner's certificate settings reach the server of an outside tool the ga
     for (const [name, value] of Object.entries(CERTIFICATES)) assert.equal(env[name], value, name);
   }));
 
+test("an owner's certificate settings reach the office's tool server by name, whatever its AI tool passes on", async () => {
+  await eachLaunch((gave, agent, platform) => {
+    for (const name of ['NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR'] as const)
+      assert.equal(gave.env[name], CERTIFICATES[name], `${agent} on ${platform} lost ${name}`);
+  });
+});
+
 test('where the shell keeps the secrets the tool server is told the office has them, and otherwise it is told nothing', () =>
   withEnv({ ODDBORO_SECRETS: 'shell' }, () => {
     assert.equal(toolServerEnv().ODDBORO_SECRETS, 'office');

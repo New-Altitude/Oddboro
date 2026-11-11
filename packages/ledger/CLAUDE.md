@@ -292,7 +292,10 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   tool and does the work that waited on it. Any other task an Odd gave the
   owner, marked done, starts a `task_done` follow-up (`follow_ups.task_id`):
   the Odd reads the answers and attached files, then does what came next,
-  like proposing the hire an intake was for. Other work parked on the task
+  like proposing the hire an intake was for. A task given in a chat keeps
+  the owner's message there (`tasks.owner_said`, from `OWNER_SAID`), and that
+  brief quotes it, so the run hears what they asked to happen once the task
+  ends (`test/task-chat-words.test.ts`). Other work parked on the task
   picks up in its own run at the same moment, so `finishTask` reads it first
   and each `task_done` or `carry_out` row the task's end starts names it in
   `follow_ups.picked_up` (`OWN_RUN` in `src/desk-answers.ts` says which ends
@@ -386,10 +389,14 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   for the colleague, with `follow_ups.hand_off` holding who handed it, the
   title and the brief. `finishFollowUp` hands every outcome back as a
   `handed_back` follow-up for the Odd that handed it, a restart's failure
-  included, but for one: the colleague's run that ends waiting goes back
-  only while something it raised is still open (`answeredAll`). When the
+  included, but for two: the colleague's run that ends waiting goes back
+  only while something it raised is still open (`answeredAll`), and nothing
+  goes back to a lead that left the office (`leadLeft`). When the
   owner answered all of it before the run ended, the answer already went
-  back, or started a run whose result will. Results that land while the hub
+  back, or started a run whose result will. When the lead left, the
+  colleague pokes the owner that it finished and could not hand it back, the
+  Ledger says nothing picks the work up, and nothing goes on the desk
+  (`Unreturned`). Results that land while the hub
   runs on the thread wait, and the next pick-up takes them all
   (`resultsToJoin`, named in its brief); they end with it. Both runs work at
   Draft at most.
@@ -449,9 +456,9 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   on the hub's run and a usage-window hold leave it; when that run ends failed having parked
   nothing again, the park comes back on its task or its time (`follow_ups.unparked_task`,
   `follow_ups.unparked_at`, `finishFollowUp`): had the task ended during the run, it wakes the
-  work as `wakeOnTask` would have, except that a task its Odd took off the desk with `withdraw`
-  reads as dropped (the task's row keeps only done or dropped, and `endedAs` tells a withdrawal
-  apart only by the task's Odd having left by then), and a time that passed is left for the clock's `wakeThread`,
+  work as `wakeOnTask` would have (`endedAs` reads a withdrawal from `tasks.withdrawn`, and
+  `ownRunOf` names no run on stopped work, so an Odd brought back since changes neither),
+  and a time that passed is left for the clock's `wakeThread`,
   which wakes it once), or by the owner answering an ask or task raised on it
   (`asks.thread_id`, `tasks.thread_id`; `answerThread` when no run follows,
   carrying the ask, so an approved goal plan starts the hub leading its work).
@@ -536,7 +543,13 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   stopped one. The lead wakes to read the owner's words, the colleague's own
   reading, labelled as not the owner's, and the last exchange in that chat,
   less the colleague's own line when the lead lacks a tool the colleague holds
-  (`lacking`, `exchangeForLead`), which the note says was left out. The
+  (`lacking`, `exchangeForLead`), which the note says was left out. Every
+  file the owner attached to that message (`OWNER_FILES`) is copied into the
+  colleague's part of the work, by `hand_off`'s checks (`fitToCarry` in
+  `mcp-run.ts`) and copy (`carryEach`), under the owner's name for it (never a
+  hidden or instruction file's name), or the next free name, such as
+  `notes-2.md`, when a different file holds it. The note lists each at its
+  path there, or says which did not come and why; the words go either way. The
   colleague does nothing more, so the lead decides and hands on.
   With a goal's thread among them, `raise_ask`, `give_owner_a_task`,
   `ask_for_access`, `propose_hire` and a `hand_off` that would open a thread
@@ -673,11 +686,15 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   a second wall. The owner's Remove (DELETE on the staff route) and a yes to a
   `remove` ask both call `removeOdd`: in one transaction the Odd leaves, its
   jobs on turn off and are kept in `staff.jobs_off`, its waiting pokes are
-  cancelled and threads it leads stop; then each open ask of it or about it is
+  cancelled and threads it leads stop, with any task, time or usage-window
+  hold they waited on cleared; then each open ask of it or about it is
   withdrawn (`withdrawAsk`: a no by the office, its line going back, no
   `denied` run), each open task dropped (`withdrawTask`), each follow-up it has
   yet to start fails, so a lead that handed it work hears at once, and the
-  office stops any run of it (`whenOddLeaves`). A yes to `bring_back` calls
+  office stops any run of it (`whenOddLeaves`). Nothing wakes it after
+  (`answerThread` skips a lead that left). A follow-up on work it led ends
+  with no report, and a colleague's result waiting there is told to the
+  owner by that colleague (`Unreturned`). A yes to `bring_back` calls
   `bringBack`, which turns on the jobs in `jobs_off` from now. What it had open
   stays closed. An Odd asks to leave with `leave_office` (every Odd's), and the
   Office Manager asks with `remove_odd` and `bring_back_odd`; each is offered

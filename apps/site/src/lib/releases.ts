@@ -26,6 +26,27 @@ export type Release = {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.0.10',
+    date: '2026-11-10',
+    title: 'A round of bug fixes.',
+    summary:
+      'Odds answer again on Windows, drawing works in the app, and installing an AI on a Mac finds npm.',
+    notes: [
+      'On Windows, an Odd no longer fails on its first message when you use Claude Code a lot.',
+      'Drawing works again in the app. A redesign no longer leaves pieces undrawn.',
+      'Installing Codex, Gemini or Claude Code on a Mac finds npm when Node comes from nvm, fnm, Volta, asdf or mise. When npm is missing, Oddboro tells you to install Node.js.',
+      "When your office's AI is not installed, Oddboro says so and points you to Setup. Onboarding draws your office again after a failed try.",
+      'When GitHub stops renewing a sign-in, Settings shows GitHub as needing a new sign-in.'
+    ],
+    builds: ['mac', 'windows-x64', 'windows-arm64', 'linux-x86_64', 'linux-aarch64'],
+    art: {
+      name: 'bug-hunters',
+      alt: 'A white van marked BUG HUNTERS pulls up outside the office and its back door swings open. Two bug hunters in yellow suits, hoods, gas masks and spray tanks hop out, walk up to the front door side by side, and go in. The door slides shut behind them.',
+      shareAlt:
+        'A white van marked BUG HUNTERS parked outside a pixel-art office, with a bug hunter in a yellow suit and gas mask beside it.'
+    }
+  },
+  {
     version: '0.0.9',
     date: '2026-11-10',
     title: 'Your New Altitude personas can join your office.',

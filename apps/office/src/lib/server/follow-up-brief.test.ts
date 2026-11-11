@@ -78,6 +78,25 @@ test("a finished task's run hears only the owner's choice answers", () => {
   assert.ok(!lines.join('\n').includes('not-for-the-odd'), lines.join('\n'));
 });
 
+test("a task given in a chat brings the owner's words there to the run that picks it up, beside their note, and a task given elsewhere is briefed as before", () => {
+  const said = 'Give me a task asking for my favourite colour.\nThen write my answer to colour.md.';
+  const plain = briefOf('task_done');
+  const lines = briefOf('task_done', { t: { row: { ...task.row, ownerSaid: said }, files: [] } });
+  const quoted =
+    '- What {owner} said in chat when you gave it: "Give me a task asking for my favourite colour. Then write my answer to colour.md."';
+  assert.ok(lines.includes(quoted), lines.join('\n'));
+  assert.ok(
+    lines.indexOf(quoted) < lines.indexOf('- Their note: Their words'),
+    'it sits with what the owner gave, before their note'
+  );
+  assert.ok(
+    lines.some((l) => l.startsWith('2. Do what they asked for in chat, or the next step')),
+    lines.join('\n')
+  );
+  assert.ok(!plain.join('\n').includes('in chat'), plain.join('\n'));
+  assert.equal(lines.length, plain.length + 1, 'the quoted line is the only line added');
+});
+
 test('a switch the owner turned on tells the Odd its run has it, names what it asked for, and does the work once for a twin ask', () => {
   const asked = { ...ask, kind: 'switch', switches: ['web'] } as AskRow;
   const twin = { ...ask, id: 8 } as AskRow;

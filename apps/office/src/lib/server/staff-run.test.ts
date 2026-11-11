@@ -1580,6 +1580,33 @@ test("a chat's tool server gets the exchange from before the owner's message, fo
   assert.equal(run.env.CHAT_EXCHANGE, 'Just before, Nell said: "Which colour did you want?".');
 });
 
+test("a chat's tool server gets every file the owner attached to the message, for tell_lead, and a chat with none gets nothing", async () => {
+  const { attachedFiles, keepAttachment } = await import('./chat-files.ts');
+  await L.pg`insert into staff ${L.pg([odd('opal', 'Opal')])}`;
+  const kept = [
+    { tag: 'Image #1', ...keepAttachment('opal', 'roof.png', 'image/png', Buffer.from('png')) },
+    { tag: 'notes.md', ...keepAttachment('opal', 'notes.md', 'text/markdown', Buffer.from('n')) }
+  ];
+  let text = '';
+  await chat(
+    'opal',
+    'The leak is here [Image #1].',
+    (e) => {
+      if (e.type === 'done') text = e.text;
+      if (e.type === 'error') text = e.message;
+    },
+    undefined,
+    attachedFiles('opal', kept)
+  );
+  assert.ok(text.startsWith('{'), `Opal's chat gave no reply: ${text}`);
+  const run = JSON.parse(text.slice(0, text.lastIndexOf('\nOutcome:'))) as Gave;
+  assert.deepEqual(JSON.parse(run.env.OWNER_FILES ?? '[]'), [
+    { tag: 'Image #1', path: `attachments/${kept[0].name}`, name: 'roof.png' },
+    { tag: 'notes.md', path: `attachments/${kept[1].name}`, name: 'notes.md' }
+  ]);
+  assert.equal((await chatOf('opal', 'Thanks.')).env.OWNER_FILES, undefined);
+});
+
 test("a lead's pick-up on a thread is not told the other work it leads, since it hands on only there", async () => {
   // Other work Lena leads, which her runs on no thread are told of.
   await L.pg`insert into threads (title, hub_id, holder_id) values ('Sweep the yard', 'lead', 'lead')`;

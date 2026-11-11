@@ -105,7 +105,6 @@ import {
   type EditShown,
   type FollowUpRow,
   type GoalRow,
-  type FollowUpKind,
   type HandOffStep,
   type JobRow,
   type Level,
@@ -156,7 +155,7 @@ import { askReplaced, stepAnswer } from '@oddboro/ledger/desk-answers';
 import { fixedError } from '@oddboro/ledger/errors';
 import { bus, emit } from './events.ts';
 import { deniedEdits, denyRules, readStaffFile } from './files.ts';
-import { floorTool, type Work } from '../staff/work.ts';
+import { floorTool, followUpDetail, type Work } from '../staff/work.ts';
 import type { ChatEntry, ChatEvent, ChatRef } from '../staff/chat.ts';
 import { closeGateway, openGateway } from './gateway.ts';
 import { awsReady } from './aws.ts';
@@ -175,7 +174,7 @@ import {
   type RetoldEntry,
   type Session
 } from './chat-preface.ts';
-import { filesNow } from './chat-files.ts';
+import { filesNow, keptAt, plainName } from './chat-files.ts';
 import { officeEnv } from './run-env.ts';
 import { runEnv, toolServerEnv } from './run-env-allow.ts';
 import { firstDayOf } from './first-day.ts';
@@ -864,6 +863,8 @@ export type RunOpts = {
   ownerSaid?: string;
   /** That chat as it stood before the owner's message: `tell_lead` passes on its last exchange. */
   chatBefore?: ChatEntry[];
+  /** The files the owner attached to that message, which `tell_lead` takes to the lead. */
+  ownerFiles?: ChatFile[];
   /** What a follow-up was asked, in words a persona can read: its `message` is only a label. */
   asked?: string;
   /** The ask the owner approved that this run carries out: the only one its self-edits may cite. */
@@ -1005,6 +1006,11 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
       key,
       ownerSaid: opts.ownerSaid,
       chatExchange: opts.chatBefore && lastExchange(opts.chatBefore, { owner, odd: who.name }),
+      ownerFiles: opts.ownerFiles?.map((f) => ({
+        tag: f.tag,
+        path: keptAt(f.name),
+        name: plainName(f.name)
+      })),
       approvedAsk: opts.approvedAsk,
       signedOut: caps.outside
         .filter((a) => a.heldBack === 'sign-in ran out')
@@ -1465,6 +1471,7 @@ export async function chat(
         kind: 'chat',
         ownerSaid: message,
         chatBefore: past,
+        ownerFiles: attached,
         images: [...files, ...missed].flatMap((f: KeptFile) =>
           'gone' in f || !isPicture(f.mediaType) ? [] : [{ path: f.path, mediaType: f.mediaType }]
         ),
@@ -1656,20 +1663,7 @@ export async function followThrough(
     f.kind === 'carry_out' && (a?.kind === 'access' || a?.kind === 'folder' || a?.kind === 'switch')
       ? await standsFor(a)
       : [];
-  const details: Record<FollowUpKind, string> = {
-    carry_out: `Carrying out ask #${a?.id}`,
-    rework: `Reworking ask #${a?.id}`,
-    denied: `Reading why you said no to ask #${a?.id}`,
-    task_done: 'Picking up after your task',
-    goal: 'Planning your goal',
-    first_day: 'Getting started',
-    feedback: 'Acting on your feedback',
-    hand_off: `Work ${colleague?.name} handed over`,
-    handed_back: `Picking up after ${colleague?.name}`,
-    resume: 'Picking the work back up',
-    edited: 'Learning from your edit'
-  };
-  const detail = details[f.kind];
+  const detail = followUpDetail(f.kind, { ask: a?.id, colleague: colleague?.name });
   // A colleague handed work on a goal's thread is told the goal in its brief.
   const goalServed =
     handed?.kind === 'hand_off' && thread?.goalId ? await findGoal(thread.goalId) : undefined;

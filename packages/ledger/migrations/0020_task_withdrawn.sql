@@ -1,0 +1,1 @@
+ALTER TABLE "tasks" ADD COLUMN "withdrawn" boolean DEFAULT false NOT NULL;

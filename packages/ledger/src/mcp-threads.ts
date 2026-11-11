@@ -14,10 +14,12 @@ import {
   OWNER,
   ZONE,
   OWNER_SAID,
+  OWNER_FILES,
   THREAD_ID as threadIdOfRun,
   RUN_KEY,
   HANDS_OFF,
   filesForHandOff,
+  attachedForLead,
   tool,
   text,
   notHanded,
@@ -201,7 +203,7 @@ if (workingOn.length)
   tool(
     'tell_lead',
     {
-      description: `Pass what ${OWNER} just told you about work you are on to the Odd who leads it, which picks it back up with their words. Copy the part of their message about that work exactly: it goes as theirs. Then tell ${OWNER} you passed it on. ${PASS_ONLY_WORK} The work you are on:\n${workingOn.map((t) => `- ${t.id}: ${t.title}, led by ${t.lead}`).join('\n')}`,
+      description: `Pass what ${OWNER} just told you about work you are on to the Odd who leads it, which picks it back up with their words. Copy the part of their message about that work exactly: it goes as theirs.${OWNER_FILES.length ? ` Every file they attached to it goes too, into your part of that work's folder.` : ''} Then tell ${OWNER} you passed it on. ${PASS_ONLY_WORK} The work you are on:\n${workingOn.map((t) => `- ${t.id}: ${t.title}, led by ${t.lead}`).join('\n')}`,
       inputSchema: {
         work: z.number().int().describe('The number of the work, from the list.'),
         words: z
@@ -228,12 +230,19 @@ if (workingOn.length)
         said: OWNER_SAID ?? '',
         words,
         reading,
-        exchange: process.env.CHAT_EXCHANGE || undefined
+        exchange: process.env.CHAT_EXCHANGE || undefined,
+        files: await attachedForLead()
       });
+      if ('problem' in r) return text(r.problem);
+      const files = r.files ?? [];
+      const went = files.filter((f) => 'at' in f).length;
+      const left = files.flatMap((f) => ('why' in f ? [`${f.named}, since ${f.why}`] : []));
       return text(
-        'problem' in r
-          ? r.problem
-          : `Passed to ${r.lead}, who picks work ${work} back up with ${OWNER}'s words.`
+        [
+          `Passed to ${r.lead}, who picks work ${work} back up with ${OWNER}'s words.`,
+          ...(went ? [`The ${went === 1 ? 'file' : `${went} files`} they attached went too.`] : []),
+          ...(left.length ? [`Did not go: ${left.join('; ')}. Tell ${OWNER} so.`] : [])
+        ].join(' ')
       );
     }
   );

@@ -1,4 +1,5 @@
-// Once, when the office server starts: the office's own database if .env names
+// Once, when the office server starts: the certificates this computer trusts
+// (`trustSystemCertificates`), the office's own database if .env names
 // no other (copied aside first on a new version's first start), the tables
 // brought up to date, the update row reset, then the job clock, the follow-up
 // watcher, one read of the New Altitude personas, and the office's address in
@@ -14,6 +15,7 @@
 import { sequence, type ServerInit } from '@sveltejs/kit/hooks';
 import { handleErrorWithSentry, sentryHandle } from '@sentry/sveltekit';
 import { LOCAL, whenOddLeaves } from '@oddboro/ledger';
+import { trustSystemCertificates } from '@oddboro/ledger/certificates';
 import { startLocalDatabase } from '@oddboro/ledger/local-db';
 import { useShellSecrets } from '@oddboro/ledger/secrets';
 import { bringUpToDate } from '@oddboro/ledger/upgrade';
@@ -30,6 +32,9 @@ import { loadUpdate } from '#lib/server/update.ts';
 // importing `@sveltejs/kit` to find out.
 export const handle = sequence(guardOffice, sentryHandle({ injectFetchProxyScript: false }));
 export const handleError = handleErrorWithSentry();
+
+// Before anything reaches out: New Altitude, a connector, a model, Sentry.
+trustSystemCertificates();
 
 if (process.env.ODDBORO_APP) {
   process.on('sveltekit:shutdown', () => process.exit(0));

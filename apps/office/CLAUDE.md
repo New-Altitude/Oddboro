@@ -130,7 +130,8 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    it carry on instead, and no Odd reads a no to it. An access ask's Approve reads Connect: once
    approved, the same open card becomes the connect task it made (the decision's answer names
    it, `task`), so the owner goes straight on to Sign in. A task an Odd gave them, marked done, goes back to that Odd to
-   pick up from (an intake becomes the hire it was for). A report has Reply and
+   pick up from (an intake becomes the hire it was for). One given in a chat
+   brings the owner's message there too (`taskDoneBrief` in `src/lib/server/follow-up-brief.ts`). A report has Reply and
    Read: feedback is a reply in its writer's chat, not a form on the desk. Opening
    any item selects it in its sender's chat on the end side. Selecting text in a report offers Chat (`src/lib/ui/SelectToChat.svelte`):
    the owner picks any Odd, and its chat opens with the passage quoted as a
@@ -331,7 +332,8 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    colleague's chat also lists the threads it works on and does not lead,
    those it was handed work on and those of a goal it serves, tells it each
    one's story and what the owner said on it, and `tell_lead` passes what the
-   owner says there about one to its lead, who decides the next step. Raising a goal's work there itself is refused, pointing to
+   owner says there about one to its lead, who decides the next step, with
+   every file they attached to that message (`OWNER_FILES`, from `officeEnv`, each with the owner's name for it, `plainName`). Raising a goal's work there itself is refused, pointing to
    `tell_lead`. Each
    message also tells the session what no run of it wrote (`chatPreface` in
    `src/lib/server/chat-preface.ts`): what the Odd delivered, and the asks
@@ -696,7 +698,12 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    `inProgress` (the `Work` shape in `src/lib/staff/work.ts`) with what it
    is, when it started, and the tool it is using now. The list reaches the
    page with each `working` event; only work starting or ending reloads the
-   card's tabs. Every Claude Code run gets the
+   card's tabs. In progress also lists each follow-up yet to start
+   (`followUpsWaiting` in `follow-ups.ts`, from the ledger's
+   `followUpsToStart`), such as a lead's pick-up after a task the owner
+   finished while the chat that gave it still goes: its title, what it will
+   do, and "Starts once <name>'s current run on this work ends". The page
+   reads those with `/api/office`, again on each change to `follow_ups`. Every Claude Code run gets the
    office's file tools where `FILES_VIA_OFFICE` says, else its own five
    (Read, Glob, Grep, Write, Edit), `Bash` with Run commands and
    `WebSearch` and `WebFetch` with Browse the web, and reads only its own

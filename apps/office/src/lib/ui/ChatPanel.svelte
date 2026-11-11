@@ -197,12 +197,12 @@
 
   /**
    * The clock the chat's times read. It moves when the page re-renders
-   * anyway, and once a minute only while a stamp still counts minutes or work
-   * is in progress, so a still chat redraws nothing.
+   * anyway, and once a minute only while a stamp still counts minutes or a
+   * run is going, so a still chat redraws nothing.
    */
   let clock = $state(Date.now());
   const ticking = $derived(
-    work.length > 0 || lines.some((l) => l.at && counting(l.at, new Date(clock)))
+    work.some((w) => !w.queued) || lines.some((l) => l.at && counting(l.at, new Date(clock)))
   );
   $effect(() => {
     if (!visible || !ticking) return;
@@ -1002,7 +1002,11 @@
           <span class="size-1.5 shrink-0 rounded-full {w.queued ? 'bg-faint' : 'bg-ember'}"></span>
           <span class="min-w-0 truncate text-ink">{w.label}</span>
           <span class="shrink-0 text-faint"
-            >· {w.queued ? 'waiting for a free slot' : runningFor(w.since, clock)}</span
+            >· {w.toStart
+              ? 'waiting to start'
+              : w.queued
+                ? 'waiting for a free slot'
+                : runningFor(w.since, clock)}</span
           >
           {#if !w.queued}
             <span class="min-w-0 truncate"

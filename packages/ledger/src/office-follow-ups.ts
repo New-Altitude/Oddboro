@@ -17,11 +17,12 @@ import {
 } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { db } from './db.ts';
-import { answeredAll, handBack, servesHandOff, servesNoThread } from './hand-offs.ts';
+import { answeredAll, handBack, leadLeft, servesHandOff, servesNoThread } from './hand-offs.ts';
 import { wakeOnTask, type TaskEnded } from './task-parking.ts';
-import { addFollowUp, settleThread, type Tx } from './threads.ts';
+import { addFollowUp, settleThread, type Db, type Tx } from './threads.ts';
 import {
   asks,
+  pokes,
   reports,
   tasks,
   threads,
@@ -30,6 +31,7 @@ import {
   type FollowUpKind,
   type Outcome
 } from './schema.ts';
+import { flat } from './desk-answers.ts';
 import type { AskRow, TaskRow, ReportRow } from './office.ts';
 import { ofWorkingOdd, anyStaffer } from './office-staff.ts';
 import { record } from './office-ledger.ts';
@@ -113,6 +115,23 @@ export async function followUpsToDo(): Promise<
       };
     })
   );
+}
+
+/**
+ * Follow-ups of Odds still in the office that have yet to start, oldest
+ * first. One waits while a run of its Odd on the same work goes
+ * (`waitsOnOwnRun`), such as the chat that gave the owner the task it picks
+ * up after; any other starts at the office's next look. The office lists them
+ * under In progress, so work the owner's answer started shows while it waits.
+ */
+export async function followUpsToStart(): Promise<FollowUpRow[]> {
+  return db
+    .select()
+    .from(followUps)
+    .where(
+      and(isNull(followUps.startedAt), isNull(followUps.outcome), ofWorkingOdd(followUps.staffId))
+    )
+    .orderBy(asc(followUps.createdAt), asc(followUps.id));
 }
 
 /**
@@ -293,18 +312,55 @@ export const OUTCOME_TITLE: Record<FollowUpKind, Record<Outcome, string>> = {
 };
 
 /**
+ * A colleague's result that no lead takes, since the lead that handed it the
+ * work left the office (`leadLeft`): nothing picks the work up. The owner
+ * ruled that nothing goes on the desk for it. The colleague, the last Odd on
+ * the work, pokes the owner now, and the Ledger keeps a line. What the
+ * colleague did stays in the work's folder.
+ */
+export type Unreturned = {
+  colleague: { id: string; name: string };
+  lead: string;
+  title: string;
+  outcome: Exclude<Outcome, 'waiting'>;
+};
+
+/** The poke that tells the owner, sent now, as `poke_owner` would send one. */
+export async function pokeUnreturned(q: Db, u: Unreturned): Promise<void> {
+  const did = u.outcome === 'done' ? 'finished' : 'could not finish';
+  const yet = u.outcome === 'done' ? 'but' : 'and';
+  await q.insert(pokes).values({
+    staffId: u.colleague.id,
+    at: new Date(),
+    message: `${u.colleague.name} ${did} "${u.title}", ${yet} could not hand it back to ${u.lead} because ${u.lead} is no longer here.`
+  });
+}
+
+/** The Ledger's line for it. Outside a transaction: `record` embeds its text first. */
+export async function recordUnreturned(u: Unreturned): Promise<void> {
+  const did = u.outcome === 'done' ? 'finished' : 'could not finish';
+  await record({
+    kind: 'work',
+    actor: u.colleague.id,
+    title: `${u.outcome === 'done' ? 'Finished' : 'Could not finish'}, but ${u.lead} has left: ${u.title}`,
+    body: `${u.colleague.name} ${did} "${u.title}", but ${u.lead} has left the office, so nothing picks the work up. What ${u.colleague.name} did stays in the work's folder.`
+  });
+}
+
+/**
  * Record how a follow-up ended. Every outcome goes in the ledger. The owner's desk
  * gets a failure no lead is woken for, and a success only when the owner asked
  * for one. When the staffer is waiting, what it needs is already on their desk
  * as an ask or task. `joined` are the results this run picked up with its own
- * (`resultsToJoin`): they end with it.
+ * (`resultsToJoin`): they end with it. `stopped` is work its lead's leaving
+ * stopped (`removeOdd`): the owner let the lead go, so no report says it failed.
  */
 export async function finishFollowUp(
   f: FollowUpRow,
   about: string,
   outcome: Outcome,
   result: string,
-  o: { joined?: number[] } = {}
+  o: { joined?: number[]; stopped?: boolean } = {}
 ): Promise<void> {
   const joined = o.joined ?? [];
   const title = `${OUTCOME_TITLE[f.kind][outcome].replace('{owner}', await ownerName())}: ${about}`;
@@ -314,6 +370,10 @@ export async function finishFollowUp(
   // never leaves the desk short or the staffer that handed it waiting.
   const finished = await db.transaction(async (tx) => {
     const now = new Date();
+    // A lead that left runs nothing, so nothing goes back to wait on it.
+    // Looked at first, so this locks the lead's row before its threads, in the
+    // order `removeOdd` does.
+    const left = origin?.handOff ? await leadLeft(tx, origin.handOff.from) : undefined;
     const [row] = await tx
       .update(followUps)
       .set({ outcome, result, doneAt: now })
@@ -352,16 +412,33 @@ export async function finishFollowUp(
       origin && (outcome !== 'waiting' || (f.kind === 'hand_off' && !(await answeredAll(tx, f.id))))
         ? handBack(origin, outcome, result)
         : undefined;
+    // With the lead gone, the colleague tells the owner instead (`Unreturned`).
+    // One left waiting has its ask or task on the desk already, and the run
+    // the owner's answer brings ends here again.
+    const unreturned: Unreturned | undefined =
+      back && left && origin?.handOff && outcome !== 'waiting'
+        ? {
+            colleague: {
+              id: f.staffId,
+              name: (await anyStaffer(f.staffId, tx))?.name ?? f.staffId
+            },
+            lead: left,
+            title: flat(origin.handOff.title),
+            outcome
+          }
+        : undefined;
     // A failure that goes back to a lead goes to the lead only: the lead
     // picks it up at once and decides what comes next, so a desk item would
     // wait on the owner for work already moving. With no one to wake, the
-    // owner hears.
-    const reported = outcome === 'failed' ? !back : outcome === 'done' && f.reportWhenDone;
+    // owner hears, unless the lead left: then the colleague's poke tells them.
+    const reported =
+      !o.stopped && (outcome === 'failed' ? !back : outcome === 'done' && f.reportWhenDone);
     if (reported) await tx.insert(reports).values({ staffId: f.staffId, title, body: result });
+    if (unreturned) await pokeUnreturned(tx, unreturned);
     // The hand-back moves the thread on; with none, the outcome may end it.
-    if (back) await addFollowUp(tx, back);
+    if (back && !left) await addFollowUp(tx, back);
     else if (f.threadId) await settleThread(tx, f.threadId);
-    return { ended };
+    return { ended, unreturned };
   });
   if (finished && finished.ended) {
     const t = finished.ended;
@@ -369,7 +446,7 @@ export async function finishFollowUp(
     // lifted, so it was not told of this work and does not pick up now.
     const own = await ownRunOf(await taskEnd(t));
     await wakeOnTask(t, {
-      ended: await endedAs(t),
+      ended: endedAs(t),
       owner: await ownerName(),
       ownRun: own && { ...own, earlier: true }
     });
@@ -383,6 +460,7 @@ export async function finishFollowUp(
       body: result,
       askId: f.askId ?? undefined
     });
+  if (finished && finished.unreturned) await recordUnreturned(finished.unreturned);
 }
 
 /**
@@ -424,14 +502,13 @@ async function giveWaitBack(
 
 /**
  * How a task that ended during a run reads to the work that run gives the park
- * back to. The row keeps only done or dropped, so a task that ended once its Odd
- * had left was taken off the desk by that leaving (`removeOdd`), not dropped by
- * the owner; one the owner dropped before the Odd left still reads as dropped.
+ * back to. A task the office or its Odd took off the desk (`withdrawTask`), as
+ * its Odd left or through its `withdraw` tool, says so; one the owner dropped
+ * reads as dropped. Read from the row, not from whether the Odd is gone: one
+ * brought back since has no mark of leaving.
  */
-async function endedAs(t: TaskRow): Promise<TaskEnded> {
-  if (t.status === 'done') return 'done';
-  const odd = t.staffId ? await anyStaffer(t.staffId) : undefined;
-  return odd?.leftAt && t.doneAt && t.doneAt >= odd.leftAt ? 'withdrawn' : 'dropped';
+function endedAs(t: TaskRow): TaskEnded {
+  return t.status === 'done' ? 'done' : t.withdrawn ? 'withdrawn' : 'dropped';
 }
 
 /** The result of a run a restart cut off. */

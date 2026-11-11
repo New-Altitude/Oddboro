@@ -10,6 +10,12 @@ export type RunFacts = {
   ownerSaid?: string;
   /** In a chat, the last exchange before the owner's message, which `tell_lead` passes on. */
   chatExchange?: string;
+  /**
+   * In a chat, every file the owner attached to their message: its tag there,
+   * its path in the Odd's folder, and the name it lands under in the work.
+   * `tell_lead` copies each into the work.
+   */
+  ownerFiles?: { tag: string; path: string; name: string }[];
   /** The ask the owner approved that this run carries out. */
   approvedAsk?: number;
   /** The tools whose sign-ins ran out, which only this run knows. */
@@ -53,6 +59,8 @@ export function officeEnv(r: RunFacts): Record<string, string> {
     RUN_KEY: r.key,
     ...(r.ownerSaid ? { OWNER_SAID: words(r.ownerSaid) } : {}),
     ...(r.chatExchange ? { CHAT_EXCHANGE: words(r.chatExchange) } : {}),
+    // Whole, never cut: a list cut short would read as none.
+    ...(r.ownerFiles?.length ? { OWNER_FILES: JSON.stringify(r.ownerFiles) } : {}),
     ...(r.approvedAsk ? { APPROVED_ASK: String(r.approvedAsk) } : {}),
     ...(r.signedOut.length ? { SIGNED_OUT: r.signedOut.join(',') } : {}),
     ...(r.ownerNote ? { OWNER_NOTE: words(r.ownerNote) } : {}),

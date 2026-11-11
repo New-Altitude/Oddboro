@@ -45,8 +45,9 @@ export const LIVE_TABLES: Record<TableName, LiveTable> = {
   grants: { trigger: 'all', page: ['version'] },
   jobs: { trigger: 'all', page: ['version'] },
   threads: { trigger: 'all', page: ['refresh', 'version'] },
-  // The office's own listener starts each new follow-up (follow-ups.ts).
-  follow_ups: { trigger: 'all', page: [] },
+  // The office's own listener starts each new follow-up (follow-ups.ts). The
+  // page reads the office again, for those waiting to start under In progress.
+  follow_ups: { trigger: 'all', page: ['refresh'] },
   runs: { trigger: 'all', page: ['version'] },
   parts: {
     trigger: { none: 'Saved only with a look, by hire() or setLook(), which write staff too.' },

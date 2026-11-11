@@ -16,6 +16,13 @@ const PROXY = ['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY'].flatMap((n)
 ]);
 
 /**
+ * Where Node finds a certificate the owner added, for a proxy that inspects
+ * traffic: Node reads `NODE_EXTRA_CA_CERTS` as it starts, and on Linux
+ * `trustSystemCertificates` reads the system's store through the other two.
+ */
+const NODE_CERTIFICATES = ['NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR'] as const;
+
+/**
  * The office's variables a run may get. `all` on every system, then the
  * system's own, then the run's tool's own. A name is matched exactly, or by
  * its pattern; on Windows, whose variables ignore case, without regard to case.
@@ -35,9 +42,7 @@ export const RUN_ENV_ALLOW: {
     /^LC_/,
     ...PROXY,
     // An owner behind a proxy that inspects traffic trusts its certificate through these.
-    'NODE_EXTRA_CA_CERTS',
-    'SSL_CERT_FILE',
-    'SSL_CERT_DIR',
+    ...NODE_CERTIFICATES,
     'REQUESTS_CA_BUNDLE',
     'CURL_CA_BUNDLE',
     // Where an owner who moved them keeps each tool's own files. Every run
@@ -137,7 +142,9 @@ function allowedEnv(extra: Names): Record<string, string> {
  * Every variable the office's tool server (`mcp.ts` in the ledger, and what
  * it imports) reads as it starts, besides those its entry sets for the run:
  * where the office lives, its ports and database, Ollama, the office's own
- * settings from .env, and the folders the system names. The office passes
+ * settings from .env, the folders the system names, and the certificates the
+ * owner added, since the server reaches the MCP Registry and Google over
+ * HTTPS (`NODE_CERTIFICATES`). The office passes
  * the ones it has on the server's entry, so the server never depends on what
  * the AI tool between them passes on, and never on opening .env, which
  * Grok's sandbox will not. `LOCALAPPDATA` is set on Windows only.
@@ -157,7 +164,8 @@ export const TOOL_SERVER_ENV = [
   'XDG_CONFIG_HOME',
   'PATH',
   'HOME',
-  'LOCALAPPDATA'
+  'LOCALAPPDATA',
+  ...NODE_CERTIFICATES
 ] as const;
 
 /**
