@@ -21,6 +21,7 @@
     saveResponse,
     type SavedResponse
   } from './task-response.svelte.ts';
+  import ChatPersonaRequests from './ChatPersonaRequests.svelte';
   import ChatAccessAsk from './ChatAccessAsk.svelte';
   import ChatSignInCard from './ChatSignInCard.svelte';
   import Markdown from './Markdown.svelte';
@@ -1462,6 +1463,7 @@
         {/each}
       </div>
     {/if}
+    <ChatPersonaRequests from={profile.id} {version} {staff} tasks={desk.tasks} />
     <!-- A poke to come keeps its words until it lands as a message, at the bottom. -->
     {#each upcoming as p (p.id)}
       <div class="me-auto ms-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">

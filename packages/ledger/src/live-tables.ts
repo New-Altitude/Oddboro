@@ -25,6 +25,8 @@ export type LiveTable = {
 };
 
 export const LIVE_TABLES: Record<TableName, LiveTable> = {
+  persona_requests: { trigger: 'all', page: ['version'] },
+  persona_revisions: { trigger: { none: 'Read on request from the connected Odd.' }, page: [] },
   persona_consultations: {
     trigger: {
       none: 'The run keeps this preparation and writes its result to chat, jobs or follow-ups.'

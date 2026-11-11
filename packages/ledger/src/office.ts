@@ -1878,21 +1878,24 @@ export async function withdrawAsk(id: number, line: string): Promise<void> {
  * off the desk with its `withdraw` tool: the office drops it, and it ends as a
  * dropped task does, `line` going back where it came from.
  */
-export async function withdrawTask(id: number, line: string): Promise<void> {
-  const [t] = await db
+export async function withdrawTask(id: number, line: string, q: Db = db): Promise<void> {
+  const [t] = await q
     .update(tasks)
     .set({ status: 'dropped', note: line, doneAt: new Date() })
     .where(and(eq(tasks.id, id), eq(tasks.status, 'open')))
     .returning();
   if (!t) return;
-  await record({
-    kind: 'work',
-    actor: 'office',
-    title: `Withdrawn: ${t.title}`,
-    body: line,
-    taskId: t.id
-  });
-  await taskEnded(t, { ended: 'withdrawn', owner: await ownerName(), said: line });
+  await record(
+    {
+      kind: 'work',
+      actor: 'office',
+      title: `Withdrawn: ${t.title}`,
+      body: line,
+      taskId: t.id
+    },
+    q
+  );
+  await taskEnded(t, { ended: 'withdrawn', owner: await ownerName(q), said: line }, q);
 }
 
 /**

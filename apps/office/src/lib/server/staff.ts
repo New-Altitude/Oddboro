@@ -158,6 +158,7 @@ import { deniedEdits, denyRules, readStaffFile } from './files.ts';
 import { firstDayOf } from './first-day.ts';
 import { followUpBrief, waitEnded } from './follow-up-brief.ts';
 import { closeGateway, openGateway } from './gateway.ts';
+import { currentOfficeCapabilities } from './office-capabilities.ts';
 import { ACT_WRITE, house, managerWork, stillOnDeskSection, whoIsHereSection } from './house.ts';
 import {
   configServers,
@@ -525,7 +526,8 @@ async function prompt(
       : workLedBrief(led.kept)) +
     (chat ? workOnBrief(on) : on.flatMap((story) => threadOnKnown({ story })).join('\n')) +
     (who.role === MANAGER_ROLE
-      ? managerWork(existsSync(join(dir, 'notes', 'pending-judgments.md')), VERSION)
+      ? managerWork(existsSync(join(dir, 'notes', 'pending-judgments.md')), VERSION) +
+        (await currentOfficeCapabilities(who, chat))
       : '') +
     stillOnDeskSection(await stillOnDesk(who.id)) +
     house({

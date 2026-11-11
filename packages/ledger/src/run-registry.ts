@@ -44,11 +44,27 @@ export type LiveRun = {
   enter?: () => void;
 };
 
+const changingStaff = new Set<string>();
+
+/** A persona conversion cannot race an old run or admit a new one halfway through. */
+export async function withIdleStaff<T>(staffId: string, change: () => Promise<T>): Promise<T> {
+  if (changingStaff.has(staffId) || [...runsGoing.values()].some((r) => r.staffId === staffId))
+    throw new Error('Wait for this Odd to finish or stop its work, then try again.');
+  changingStaff.add(staffId);
+  try {
+    return await change();
+  } finally {
+    changingStaff.delete(staffId);
+  }
+}
+
 export const runsGoing = new Map<string, LiveRun>();
 
 export function reserveRun(
   input: Pick<LiveRun, 'staffId' | 'kind' | 'turnId' | 'work'> & { key?: string }
 ): LiveRun {
+  if (changingStaff.has(input.staffId))
+    throw new Error('This Odd is changing to its persona. Try again once it is connected.');
   let resolve: () => void;
   const promise = new Promise<void>((done) => {
     resolve = done;

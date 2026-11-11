@@ -57,6 +57,10 @@ export const TASK_OPS = [
 export type TaskOp = (typeof TASK_OPS)[number];
 
 export const OWNER_ACTIONS = {
+  'POST /api/persona-requests': {
+    mayRecord: ['work'],
+    when: 'The owner maps a waiting request or cancels one that has not resumed.'
+  },
   // The owner's New Altitude account lives in the system's secret store, and
   // the reports switch in the settings file; none of them is a record.
   'POST /api/account': { notAnAction: SETUP },

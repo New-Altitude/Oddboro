@@ -238,7 +238,7 @@ export type ProviderPlace = {
   /** Where the service sends the owner back. */
   redirect: string;
   /** Sign-ins in flight: the state the service sends back, to the id it was for. */
-  pending: Map<string, string>;
+  pending: { set(state: string, id: string): unknown };
 };
 
 /** Sign-ins in flight: the state the service sends back, to the connector it was for. */

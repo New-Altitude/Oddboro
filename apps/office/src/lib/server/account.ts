@@ -4,6 +4,7 @@
 // who signed in as one secret, `new-altitude-account:oauth`, in the system's
 // secret store. Error reports to New Altitude and the personas it offers
 // (`persona.ts`) need it: `accountToken()` is the one way to get its token.
+import { PendingSignIns } from './pending-sign-ins.ts';
 import { auth } from '@modelcontextprotocol/sdk/client/auth.js';
 import { OFFICE_URL } from '@oddboro/ledger';
 import { checkKeyring } from '@oddboro/ledger/checks';
@@ -39,7 +40,7 @@ const ACCOUNT_SCOPE = 'profile personas';
 const ACCOUNT_ID = 'new-altitude-account';
 const ACCOUNT_REDIRECT = `${OFFICE_URL}/account/callback`;
 /** Sign-ins in flight, apart from the connectors' own. */
-const pending = new Map<string, string>();
+const pending = new PendingSignIns();
 /** Where every New Altitude sign-in returns: the account's and each persona's (`persona.ts`). */
 export const ACCOUNT_PLACE: ProviderPlace = { redirect: ACCOUNT_REDIRECT, pending };
 
@@ -243,6 +244,7 @@ export async function accountToken(): Promise<string | undefined> {
  * account sign-in that failed here.
  */
 export async function signOut(): Promise<void> {
+  forgetOlderPages(ACCOUNT_ID);
   await exclusive(ACCOUNT_ID, () => endSignIn(provider(), 'account'));
   settle({ state: 'out' });
 }

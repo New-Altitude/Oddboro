@@ -5,6 +5,11 @@
 // /api/personas and on Check again, never on a timer.
 import { auth } from '@modelcontextprotocol/sdk/client/auth.js';
 import {
+  approvedPersonaRequest,
+  completePersonaRequest,
+  convertPersona,
+  mapPersonaRequest,
+  personaRequestsFrom,
   hirePersona,
   ownerName,
   personaOdd,
@@ -14,6 +19,7 @@ import {
   welcomed,
   type StaffRow
 } from '@oddboro/ledger';
+import { withIdleStaff } from '@oddboro/ledger/run-registry';
 import type { Offer, Offers } from '#lib/persona.ts';
 import {
   ACCOUNT_PLACE,
@@ -174,6 +180,8 @@ async function afterGrant(slug: string): Promise<void> {
   if (odd) {
     const quiet = odd.package?.quiet;
     if (quiet === 'grant' || quiet === 'signed-out') await setQuiet(odd.id, undefined);
+    const request = await approvedPersonaRequest(slug);
+    if (request) await completePersonaRequest(request.id, odd.id);
     return;
   }
   if (await welcomed()) await installPersona(slug);
@@ -181,6 +189,7 @@ async function afterGrant(slug: string): Promise<void> {
 
 /** End a persona's sign-in at New Altitude and remove it here. Its Odd stays. */
 async function forgetPersonaGrant(slug: string): Promise<void> {
+  forgetOlderPages(personaId(slug));
   grantedThisRun.delete(slug);
   await exclusive(personaId(slug), async () => {
     await endSignIn(grant(slug), 'persona');
@@ -320,6 +329,24 @@ export async function syncPersonas(): Promise<Offers> {
   const listing = await readListing();
   if (listing.state !== 'ok') return listing;
   await applyListing(listing.listed);
+  for (const r of await personaRequestsFrom()) {
+    if (
+      r.state !== 'approved' ||
+      !r.slug ||
+      !listing.listed.some((l) => l.slug === r.slug) ||
+      !grant(r.slug).tokens()
+    )
+      continue;
+    const issuer = accountIssuer();
+    if (
+      issuer &&
+      (await freshAccess(grant(r.slug), {
+        serverUrl: () => doorUrl(r.slug!, issuer),
+        scope: PERSONA_SCOPE
+      }))
+    )
+      await afterGrant(r.slug);
+  }
   const kept = keptGrants();
   const offers = await Promise.all(listing.listed.map((l) => toOffer(l, kept)));
   // A sign-in kept from before a restart, with no Odd yet: this run takes it up
@@ -335,6 +362,10 @@ export async function syncPersonas(): Promise<Offers> {
  * and the page hears the problem beside Add.
  */
 export async function installPersona(slug: string): Promise<void> {
+  return exclusive(`install-persona:${slug}`, () => installOfferedPersona(slug));
+}
+
+async function installOfferedPersona(slug: string): Promise<void> {
   const problem = async (why: string) => {
     console.error(`[persona] ${slug} was not added: ${why}`);
     await forgetPersonaGrant(slug);
@@ -345,20 +376,28 @@ export async function installPersona(slug: string): Promise<void> {
   if (listing.state !== 'ok') return problem('New Altitude did not send its list of personas.');
   const offered = listing.listed.find((l) => l.slug === slug);
   if (!offered) return problem(NOT_OFFERED);
-  const problems = await packageProblems(offered);
+  const request = await approvedPersonaRequest(slug);
+  const problems = await packageProblems(offered, request?.staffId ?? undefined);
   if (problems.length) return problem(problems.join('; '));
   let row;
   try {
-    row = await hirePersona({
+    const packageInput = {
       slug,
       pkg: offered.pkg,
       disclosure: offered.disclosure,
       displayName: offered.displayName
-    });
+    };
+    row = request?.staffId
+      ? await withIdleStaff(request.staffId, () =>
+          convertPersona(request.staffId!, { ...packageInput, requestId: request.id })
+        )
+      : await hirePersona(packageInput);
   } catch (e) {
     return problem(reason(e));
   }
-  sayInChat(row.id, offered.pkg.hello.replaceAll('{owner}', await ownerName()));
+  if (!request?.staffId)
+    sayInChat(row.id, offered.pkg.hello.replaceAll('{owner}', await ownerName()));
+  if (request) await completePersonaRequest(request.id, row.id);
   emit({ type: 'persona', slug, joined: 'installed' });
 }
 
@@ -410,4 +449,41 @@ async function dropRefused(slug: string, token: string): Promise<void> {
     kept.invalidateCredentials('tokens');
     console.error(`[persona] ${slug}'s door refused its sign-in, so the office dropped it`);
   });
+}
+
+/** The owner chooses from the actual offers, before the existing consent flow starts. */
+export async function approvePersonaRequest(
+  id: string,
+  slug: string,
+  staffId: string | null,
+  supersededTasks: number[]
+): Promise<void> {
+  const listing = await readListing();
+  if (listing.state !== 'ok') throw new SignInRefused(SIGN_IN_FIRST);
+  const offer = listing.listed.find((l) => l.slug === slug);
+  if (!offer) throw new NotOffered();
+  const existing = await personaOdd(slug);
+  if (staffId && existing)
+    throw new SignInRefused(
+      'This persona already works here. Keep the ordinary Odd and choose the installed persona.'
+    );
+  const problems = await packageProblems(offer, staffId ?? existing?.id);
+  if (problems.length) throw new SignInRefused(problems.join('; '));
+  await mapPersonaRequest(id, slug, staffId, supersededTasks);
+}
+
+/** Only account state and public offer identities enter an Odd's instructions. */
+export async function personaCapabilityState() {
+  const listing = await readListing();
+  return {
+    account: accountStatus().state,
+    offersState: listing.state,
+    offers:
+      listing.state === 'ok'
+        ? listing.listed.map((l) => ({ slug: l.slug, name: l.displayName }))
+        : [],
+    installed: (await roster())
+      .filter((s) => s.package)
+      .map((s) => ({ id: s.id, slug: s.package!.slug, quiet: s.package!.quiet }))
+  };
 }

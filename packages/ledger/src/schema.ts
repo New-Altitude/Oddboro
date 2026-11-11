@@ -1128,3 +1128,37 @@ export const personaConsultations = pgTable('persona_consultations', {
   answer: jsonb().$type<PersonaAnswer>(),
   createdAt: created()
 });
+
+/** Owner-approved mapping of an existing request to an offered persona. */
+export const personaRequests = pgTable('persona_requests', {
+  id: text().primaryKey(),
+  requesterId: text()
+    .notNull()
+    .references(() => staff.id),
+  identity: text().notNull(),
+  continuation: text().notNull(),
+  goalId: integer().references(() => goals.id),
+  threadId: integer().references(() => threads.id),
+  taskId: integer().references(() => tasks.id),
+  slug: text(),
+  staffId: text().references(() => staff.id),
+  installedId: text().references(() => staff.id),
+  state: text()
+    .$type<'pending' | 'approved' | 'connected' | 'cancelled'>()
+    .notNull()
+    .default('pending'),
+  supersededTasks: integer().array().notNull().default([]),
+  resumedAt: at('resumed_at'),
+  createdAt: created()
+});
+
+/** Previous instructions and grants, retained when the owner converts an ordinary Odd. */
+export const personaRevisions = pgTable('persona_revisions', {
+  id: id(),
+  staffId: text()
+    .notNull()
+    .references(() => staff.id),
+  slug: text().notNull(),
+  previous: jsonb().$type<Record<string, unknown>>().notNull(),
+  createdAt: created()
+});

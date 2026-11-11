@@ -148,6 +148,7 @@ import {
 import { home, isOfficeFile, isWhereNamed } from './home.ts';
 import { trustSystemCertificates } from './certificates.ts';
 
+import { requestPersona } from './persona-requests.ts';
 import { projectConnections, projectWork, requestProject } from './project-sessions.ts';
 trustSystemCertificates();
 const ME = process.env.STAFF_ID ?? '';
@@ -2056,6 +2057,37 @@ if (has('poke_owner')) {
       )
   );
 }
+
+tool(
+  'request_persona',
+  {
+    description: `Keep a request that needs an authentic New Altitude persona. ${OWNER} chooses an actual offered identity, and may connect an existing ordinary Odd, in this conversation. It preserves that Odd's history. This does not grant access or prove a consultation happened. Reuse the request_id when retrying.`,
+    inputSchema: {
+      request_id: z.string().min(1).max(100),
+      identity: z.string().min(1).max(200),
+      continuation: z.string().min(1).max(5000),
+      work: z.number().int().positive().optional(),
+      goal: z.number().int().positive().optional(),
+      task: z.number().int().positive().optional()
+    }
+  },
+  async (a) => {
+    const on = await placed(a);
+    if ('problem' in on) return refused(on.problem);
+    const request = await requestPersona({
+      id: `${ME}:${a.request_id}`,
+      requesterId: ME,
+      identity: a.identity,
+      continuation: a.continuation,
+      threadId: on.threadId,
+      goalId: a.goal,
+      taskId: a.task
+    });
+    return text(
+      `Connection request ${request.id}: ${request.state}. The owner can choose the actual offer in this conversation. The original request resumes only after the connection is verified.`
+    );
+  }
+);
 
 if (has('propose_hire'))
   tool(

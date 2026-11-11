@@ -20,3 +20,5 @@ Each line says what to do when its trigger comes.
   someone working there needs.
 
 - `project-sessions.md`. Native Codex and Claude conversations, permissions and recovery.
+
+- `persona-recovery.md`: current review guide for connecting an existing request and explicitly converting an ordinary Odd.

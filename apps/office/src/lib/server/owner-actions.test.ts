@@ -366,6 +366,15 @@ const TRY: Record<Recording, (send: Send) => Promise<void>> = {
   },
   // The list as the office has it changes nothing; then Pat on a newer
   // package, which the sync brings Pat's Odd up to.
+  'POST /api/persona-requests': async (send) => {
+    await L.requestPersona({
+      id: 'cancel-request',
+      requesterId: 'paige',
+      identity: 'Pat',
+      continuation: 'Review the draft.'
+    });
+    await send({ body: { op: 'cancel', id: 'cancel-request' } });
+  },
   'GET /api/personas': async (send) => {
     await send({});
     newAltitude.odds[0] = { ...PAT, odd: { ...(PAT.odd as object), version: 2 } };

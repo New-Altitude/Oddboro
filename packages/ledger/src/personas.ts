@@ -3,13 +3,24 @@
 // in every office, so nothing is drawn for it. Its own coding tool does the
 // work, as its hands, and the persona answers in its own voice. The office
 // app checks a package before it reaches here (persona-package.ts).
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { DrawnPart, LookSpec } from '@oddboro/sprites/look';
 import { db } from './db.ts';
 import { fixedError } from './errors.ts';
 import { HIRE_DEFAULTS } from './grantable.ts';
 import { hire, ownerName, record, roster, staffer, type StaffRow } from './office.ts';
-import { parts, staff } from './schema.ts';
+import {
+  followUps,
+  grants,
+  jobs,
+  parts,
+  personaRequests,
+  personaRevisions,
+  projectRequests,
+  projectSessions,
+  runs,
+  staff
+} from './schema.ts';
 
 /**
  * Why a persona Odd stays quiet: New Altitude stopped offering it (`access`),
@@ -153,3 +164,122 @@ export async function setQuiet(id: string, quiet: Quiet | undefined): Promise<vo
     : { slug, version, disclosure };
   await db.update(staff).set({ package: link }).where(eq(staff.id, id));
 }
+
+/** Convert only the exact ordinary Odd the owner mapped. Its id and files stay. */
+export async function convertPersona(
+  id: string,
+  p: { slug: string; pkg: OddPackage; disclosure: string; displayName: string; requestId: string }
+): Promise<StaffRow> {
+  const owner = await ownerName();
+  return db.transaction(async (tx) => {
+    const [request] = await tx
+      .select()
+      .from(personaRequests)
+      .where(eq(personaRequests.id, p.requestId))
+      .for('update');
+    if (request?.state !== 'approved' || request.staffId !== id || request.slug !== p.slug)
+      throw new Error('This conversion is no longer approved.');
+    const [who] = await tx.select().from(staff).where(eq(staff.id, id)).for('update');
+    if (!who || who.leftAt || who.package)
+      throw new Error('Choose an ordinary Odd still in the office.');
+    const [existing] = await tx
+      .select()
+      .from(staff)
+      .where(sql`${staff.package}->>'slug' = ${p.slug} AND ${staff.leftAt} IS NULL`);
+    if (existing)
+      throw new Error(
+        'This persona already has an Odd. Keep this Odd and use the installed persona.'
+      );
+    const waiting = await tx
+      .select()
+      .from(followUps)
+      .where(and(eq(followUps.staffId, id), isNull(followUps.doneAt)));
+    const working = await tx
+      .select()
+      .from(runs)
+      .innerJoin(jobs, eq(runs.jobId, jobs.id))
+      .where(and(eq(jobs.staffId, id), eq(runs.status, 'running')));
+    if (waiting.length || working.length)
+      throw new Error("Finish or stop this Odd's pending work before changing its instructions.");
+    const activeProjects = await tx
+      .select()
+      .from(projectRequests)
+      .where(
+        and(
+          eq(projectRequests.staffId, id),
+          inArray(projectRequests.state, ['sending', 'working', 'uncertain'])
+        )
+      );
+    if (activeProjects.length)
+      throw new Error(
+        "Resolve this Odd's active or uncertain project work before changing its instructions."
+      );
+    const oldGrants = await tx.select().from(grants).where(eq(grants.staffId, id));
+    const oldSessions = await tx
+      .select()
+      .from(projectSessions)
+      .where(eq(projectSessions.staffId, id));
+    await tx.insert(personaRevisions).values({
+      staffId: id,
+      slug: p.slug,
+      previous: { staff: who, grants: oldGrants, projects: oldSessions }
+    });
+    await tx.delete(grants).where(eq(grants.staffId, id));
+    for (const session of oldSessions) {
+      await tx
+        .update(projectRequests)
+        .set({ state: 'stopped', answer: 'Access ended when this Odd became a persona.' })
+        .where(
+          and(
+            eq(projectRequests.sessionId, session.id),
+            inArray(projectRequests.state, ['proposed', 'queued', 'authorized'])
+          )
+        );
+    }
+    await tx.update(projectSessions).set({ staffId: null }).where(eq(projectSessions.staffId, id));
+    await tx
+      .update(jobs)
+      .set({ enabled: false, changedAt: new Date() })
+      .where(eq(jobs.staffId, id));
+    for (const part of p.pkg.parts)
+      await tx
+        .insert(parts)
+        .values({ ...part, drawnFor: id })
+        .onConflictDoUpdate({ target: [parts.kind, parts.name], set: { px: part.px } });
+    const [updated] = await tx
+      .update(staff)
+      .set({
+        name: p.pkg.name,
+        role: p.pkg.role,
+        remit: p.pkg.remit,
+        desk: personaDesk(p.pkg.name, p.displayName, owner),
+        ...HIRE_DEFAULTS.persona,
+        commands: false,
+        web: false,
+        folders: [],
+        account: null,
+        model: null,
+        effort: null,
+        look: p.pkg.look,
+        portraitPx: p.pkg.portraitPx,
+        variant: 'look',
+        portrait: 'look',
+        package: { slug: p.slug, version: p.pkg.version, disclosure: p.disclosure }
+      })
+      .where(eq(staff.id, id))
+      .returning();
+    await record(
+      {
+        kind: 'work',
+        actor: 'owner',
+        title: `Connected ${p.pkg.name} to its New Altitude persona`,
+        body: 'The same Odd keeps its history and files. Previous instructions and grants are retained in its revision. Jobs are paused and access must be granted again.'
+      },
+      tx
+    );
+    return updated;
+  });
+}
+
+export const personaRevisionsFor = (id: string) =>
+  db.select().from(personaRevisions).where(eq(personaRevisions.staffId, id));

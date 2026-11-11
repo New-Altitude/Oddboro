@@ -1737,3 +1737,12 @@ follow-ups use their existing ID. A new scheduled cycle gets a new key.
 Internal callers may set `RunOpts.persona.required` false only when the
 ordinary work itself is complete and the voice is optional commentary.
 Stop aborts a pending persona call and keeps completed preparation.
+
+`src/lib/server/office-capabilities.ts` gives each manager run current persona
+and tool facts. `ChatPersonaRequests.svelte` reads setup requests in their
+originating conversation and reuses AccountSignIn and persona consent. The
+owner maps one with `POST /api/persona-requests`. `persona.ts` checks the real
+offer and consent, then converts the selected ordinary Odd or uses its offered
+Odd. Callbacks and startup sync complete one saved continuation. Pending sign-in
+states are kept for thirty minutes in the secret store by `pending-sign-ins.ts`.
+See `docs/persona-recovery.md` for the conversion and review checks.

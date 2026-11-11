@@ -149,6 +149,7 @@ export const ROUTE_IDS = {
   '/api/office/move-in': true,
   '/api/onboarding': true,
   '/api/personas': true,
+  '/api/persona-requests': true,
   '/api/personas/[slug]': true,
   '/api/pokes/[id]': true,
   '/api/project-sessions': true,

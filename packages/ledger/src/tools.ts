@@ -174,6 +174,12 @@ const TOOLS = [
     withGmail: true
   },
   {
+    id: 'request_persona',
+    name: 'Request a persona connection',
+    does: 'Keeps the original request and lets you choose a New Altitude offer in this chat.',
+    always: true
+  },
+  {
     id: 'propose_hire',
     name: 'Propose hires',
     does: 'Brings you a hire, ready to open in the hire window.'

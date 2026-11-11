@@ -912,3 +912,10 @@ See `docs/project-sessions.md` for request recovery and native permissions.
 answer separately. The stable request key names the Odd, persona, run kind
 and source request. A retry reuses the saved preparation. A row with no
 preparation after a crash needs inspection before new work starts.
+
+`src/persona-requests.ts` keeps persona setup requests and their one continuation.
+`0025_persona_requests` adds these and instruction/access revisions. Only an
+owner route can map a request to an offered slug and ordinary Odd. Conversion
+in `personas.ts` retains the staff ID and files, pauses jobs and drops carried
+grants. Completion uses the shared transactional task withdrawal and follow-up
+writer. `test/persona-requests.test.ts` holds the preserved and changed records.

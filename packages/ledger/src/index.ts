@@ -49,3 +49,5 @@ export { WEEKDAYS } from './time.ts';
 export * from './project-sessions.ts';
 export * from './leaving.ts';
 export * from './persona-consultations.ts';
+
+export * from './persona-requests.ts';

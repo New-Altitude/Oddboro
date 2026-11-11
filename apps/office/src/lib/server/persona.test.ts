@@ -6,7 +6,7 @@
 // in account.test.ts: the system's own would refuse every grant on a Mac with
 // no Keychain prompt to answer. Run with `npm test -w @oddboro/office`.
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -627,6 +627,70 @@ test('a store that refuses to write the kept list still lets sign-out end every 
   assert.deepEqual(kept(), ['pat', 'quinn']);
   assert.equal((await account('DELETE')).status, 200);
   assert.equal(store.has(KEPT), false);
+});
+
+test('a reviewed mapping converts the exact old Odd, keeps its chat and notes, and resumes once after consent', async () => {
+  await signIn();
+  const offered = JSON.parse(
+    JSON.stringify(QUINN).replaceAll('quinn', 'sera').replaceAll('Quinn', 'Sera')
+  );
+  fake.odds = [PAT, offered];
+  const id = 'old-reviewer';
+  await L.pg`insert into staff (id, name, role, remit, desk, variant, portrait, commands, web, permission)
+    values (${id}, 'Sera', 'Ordinary reviewer', 'Kept remit', 'Kept instructions', 'a', 'a', true, true, 'act')`;
+  const dir = L.home('staff', id);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'original-note.md'), 'The prior decision stays.');
+  const { sayInChat } = await import('./staff.ts');
+  sayInChat(id, 'The earlier answer stays.');
+  const before = history(id);
+  const manager = (await L.roster()).find((o) => o.role === 'Office Manager')!;
+  await L.requestPersona({
+    id: 'connect-sera',
+    requesterId: manager.id,
+    identity: 'Sera',
+    continuation: 'Review the existing plan.'
+  });
+  await L.requestPersona({
+    id: 'not-offered',
+    requesterId: manager.id,
+    identity: 'Unavailable author',
+    continuation: 'Keep waiting for the right offer.'
+  });
+  const { approvePersonaRequest, askPersona, disconnectPersona } = await import('./persona.ts');
+  await assert.rejects(approvePersonaRequest('not-offered', 'missing', null, []), /does not offer/);
+  await approvePersonaRequest('connect-sera', 'sera', id, []);
+  const started = await persona('POST', 'sera');
+  const url = String(started.body.url);
+  const state = new URL(url).searchParams.get('state')!;
+  const { PendingSignIns } = await import('./pending-sign-ins.ts');
+  assert.equal(new PendingSignIns().get(state), 'new-altitude-persona-sera');
+  // A newly loaded pending-state reader sees the same callback after a restart.
+  assert.equal((await finish(url)).title, 'Connected');
+  await syncPersonas();
+  await syncPersonas();
+  const connected = await L.staffer(id);
+  assert.equal(connected?.package?.slug, 'sera');
+  assert.equal(connected?.permission, 'draft');
+  assert.equal(connected?.commands, false);
+  assert.equal(connected?.web, false);
+  assert.deepEqual(history(id), before);
+  assert.equal(readFileSync(join(dir, 'original-note.md'), 'utf8'), 'The prior decision stays.');
+  assert.equal((await L.personaRevisionsFor(id)).length, 1);
+  const resumes =
+    await L.pg`select * from follow_ups where staff_id = ${manager.id} and note like ${'%connect%'} `;
+  assert.equal(resumes.filter((r) => String(r.note).includes('Odd old-reviewer')).length, 1);
+  assert.equal((await L.personaRequest('not-offered'))?.state, 'pending');
+  assert.equal((await askPersona(connected!, 'Review the plan.')).outcome, 'answered');
+  await disconnectPersona('sera');
+  assert.equal((await L.staffer(id))?.package?.quiet, 'grant');
+  assert.equal(
+    (await askPersona((await L.staffer(id))!, 'Try after revocation.')).outcome,
+    'grant'
+  );
+  assert.equal((await L.personaRequest('connect-sera'))?.state, 'connected');
+  const repeated = await callbackPage(`state=${encodeURIComponent(state)}&code=used`);
+  assert.equal(repeated.ok, false);
 });
 
 test('no token, code, state or verifier reaches .env or the logs', async () => {
