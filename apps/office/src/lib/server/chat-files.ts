@@ -1,104 +1,116 @@
-// The office keeps the originals outside the folders an Odd may change. The
-// name is for the owner. Only the hash and a known suffix name a file on disk.
-import { isUtf8 } from 'node:buffer';
-import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+// The files the owner attaches in a chat, kept in the Odd's own `attachments/`
+// folder. Every run already reads that folder, so each tool opens them with
+// the file tools it has. Nothing else on the computer is touched.
+import { lstatSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { replace } from './launch.ts';
-import { home } from '@oddboro/ledger';
-import {
-  CHAT_BYTES,
-  CHAT_FILES,
-  CHAT_ID,
-  type ChatAttachment,
-  type OwnerInput
-} from '../staff/chat-input.ts';
+import { randomBytes } from 'node:crypto';
+import { home } from '@oddboro/ledger/home';
+import { fixedError } from '@oddboro/ledger/errors';
+import { attachableType, extensionFor, type ChatFile } from '#lib/attachments.ts';
+import type { KeptFile } from './chat-preface.ts';
 
-export class ChatInputError extends Error {}
+const FOLDER = 'attachments';
+/** A kept file's name: no folder, no hidden file, nothing a shell or glob reads as special. */
+const KEPT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$/;
 
-const suffix: Record<string, string> = {
-  'text/plain': 'txt',
-  'text/markdown': 'md',
-  'image/png': 'png',
-  'image/jpeg': 'jpg',
-  'image/webp': 'webp'
-};
+const attachmentsOf = (id: string) => join(home('staff'), id, FOLDER);
 
-function media(name: string, data: Buffer): string {
-  if (/\.(txt|md|markdown)$/i.test(name) && !data.includes(0) && isUtf8(data))
-    return /\.txt$/i.test(name) ? 'text/plain' : 'text/markdown';
-  if (/\.png$/i.test(name) && data.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex')))
-    return 'image/png';
-  if (/\.jpe?g$/i.test(name) && data.subarray(0, 3).equals(Buffer.from('ffd8ff', 'hex')))
-    return 'image/jpeg';
-  if (
-    /\.webp$/i.test(name) &&
-    data.toString('ascii', 0, 4) === 'RIFF' &&
-    data.toString('ascii', 8, 12) === 'WEBP'
-  )
-    return 'image/webp';
-  throw new ChatInputError('Choose a Markdown or UTF-8 text file, or a PNG, JPEG or WebP picture.');
+/**
+ * Whether the Odd's attachments folder is a real folder inside its real
+ * folder. An Odd writes its own folder, so it can swap `attachments/` for a
+ * link, then name a file there on a forged line in its chat.jsonl: no file is
+ * kept, read or retold through such a folder (as `learnFromReply` refuses).
+ */
+function ownAttachments(id: string): boolean {
+  try {
+    return realpathSync(attachmentsOf(id)) === join(realpathSync(home('staff', id)), FOLDER);
+  } catch {
+    // No folder yet, or no Odd: nothing is there to read.
+    return false;
+  }
 }
 
-export function checkInput({ turnId, message, source, files = [] }: OwnerInput): ChatAttachment[] {
-  if (!CHAT_ID.test(turnId)) throw new ChatInputError('This message has no valid ID.');
-  if (!message.trim() && !files.length)
-    throw new ChatInputError('Write a message or attach a file.');
-  if (
-    !source.kind ||
-    source.kind.length > 80 ||
-    (source.id?.length ?? 0) > 500 ||
-    (source.revision?.length ?? 0) > 500
-  )
-    throw new ChatInputError('This message has no valid source.');
-  if (
-    files.length > CHAT_FILES ||
-    files.reduce((sum, f) => sum + f.bytes.length, Buffer.byteLength(message)) > CHAT_BYTES
-  )
-    throw new ChatInputError('Use up to 8 files and 8 MiB of text and files per message.');
-  return files.map(({ name, bytes }) => {
-    if (!name.trim() || name.length > 200 || /[\\/\p{Cc}]/u.test(name))
-      throw new ChatInputError('Give the file a short name without a folder.');
-    const data = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+/** The original name cut to safe letters, so a kept name reads like the file it came from. */
+function stem(name: string): string {
+  const base = name.replace(/\.[^.]*$/, '');
+  return (
+    base
+      .normalize('NFKD')
+      .replace(/[^A-Za-z0-9._-]+/g, '-')
+      .replace(/^[-._]+|[-._]+$/g, '')
+      .slice(0, 60) || 'file'
+  );
+}
+
+/** Keep one attached file in the Odd's attachments folder. Throws when the office does not take it. */
+export function keepAttachment(
+  id: string,
+  original: string,
+  type: string,
+  bytes: Uint8Array
+): Omit<ChatFile, 'tag'> {
+  const mediaType = attachableType(original, type);
+  if (!mediaType) throw new Error('Attach a picture, a PDF or a text file.');
+  const dir = attachmentsOf(id);
+  mkdirSync(dir, { recursive: true });
+  if (!ownAttachments(id))
+    throw fixedError("This Odd's attachments folder is not its own, so the file was not kept.");
+  const at = new Date().toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-');
+  const end = `${stem(original)}.${extensionFor(original, mediaType)}`;
+  // A file of the same name in the same second gets other random letters:
+  // `wx` never writes over a file already there, so it tries again.
+  for (let tries = 0; ; tries++) {
+    const name = `${at}-${randomBytes(2).toString('hex')}-${end}`;
+    try {
+      writeFileSync(join(dir, name), bytes, { flag: 'wx', mode: 0o600 });
+      return { name, mediaType, size: bytes.byteLength };
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'EEXIST' || tries >= 9) throw e;
+    }
+  }
+}
+
+/** The full path of a kept file, only when it is a plain file in the Odd's own attachments folder. */
+export function attachmentPath(id: string, name: string): string | undefined {
+  if (!KEPT.test(name) || !ownAttachments(id)) return undefined;
+  const path = join(attachmentsOf(id), name);
+  try {
+    return lstatSync(path).isFile() ? path : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The files an owner line names, as they are now, each through
+ * `attachedFiles`: one deleted since is `gone`, so the rest still reach the run.
+ */
+export function filesNow(id: string, files: ChatFile[]): KeptFile[] {
+  return files.map((f) => {
+    try {
+      return attachedFiles(id, [f])[0];
+    } catch {
+      // Not there any more: the run hears it is gone, never a path to nothing.
+      return { tag: f.tag, gone: true };
+    }
+  });
+}
+
+/** The attachments a message names, checked against the attachments folder; throws on one that is not there. */
+export function attachedFiles(id: string, files: unknown): (ChatFile & { path: string })[] {
+  if (files === undefined) return [];
+  if (!Array.isArray(files)) throw new Error('Those attachments are not a list');
+  return files.map((f: Partial<ChatFile>) => {
+    const path = typeof f?.name === 'string' ? attachmentPath(id, f.name) : undefined;
+    const mediaType = path ? attachableType(f.name!, '') : undefined;
+    if (!path || !mediaType || typeof f.tag !== 'string' || !f.tag.trim())
+      throw new Error('An attachment is missing. Attach it again.');
     return {
-      name,
-      mediaType: media(name, data),
-      size: bytes.length,
-      hash: createHash('sha256').update(data).digest('hex')
+      tag: f.tag.trim().slice(0, 120),
+      name: f.name!,
+      mediaType,
+      size: lstatSync(path).size,
+      path
     };
   });
-}
-
-export function attachmentPath(id: string, file: ChatAttachment): string {
-  if (
-    !/^[a-z0-9-]+$/.test(id) ||
-    !/^[0-9a-f]{64}$/.test(file.hash) ||
-    !Object.hasOwn(suffix, file.mediaType)
-  )
-    throw new ChatInputError('No such attachment.');
-  return join(home('chat-files', id), file.hash + '.' + suffix[file.mediaType]);
-}
-
-export function keepFiles(
-  id: string,
-  refs: ChatAttachment[],
-  files: NonNullable<OwnerInput['files']>
-) {
-  if (!refs.length) return;
-  mkdirSync(home('chat-files', id), { recursive: true, mode: 0o700 });
-  refs.forEach((ref, i) => {
-    const path = attachmentPath(id, ref);
-    if (!existsSync(path)) replace(path, files[i].bytes);
-  });
-}
-
-export function inputFiles(id: string, refs: ChatAttachment[]) {
-  const texts: string[] = [];
-  const images: { path: string; mediaType: string }[] = [];
-  for (const file of refs) {
-    const path = attachmentPath(id, file);
-    if (file.mediaType.startsWith('image/')) images.push({ path, mediaType: file.mediaType });
-    else texts.push(`Attached file: ${file.name}\n${readFileSync(path, 'utf8')}`);
-  }
-  return { texts, images };
 }

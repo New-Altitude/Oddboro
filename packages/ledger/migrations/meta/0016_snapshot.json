@@ -1,6 +1,6 @@
 {
-  "id": "3c060123-fe21-4f77-900e-0031305777ec",
-  "prevId": "1ad80e6c-3bd3-4cd5-a6b4-b135de174b35",
+  "id": "35ce58bb-9c9a-4b82-9b17-4f8801c2347b",
+  "prevId": "75887648-c64b-4315-b52c-0895f44708ff",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -291,15 +291,21 @@
           "primaryKey": false,
           "notNull": false
         },
-        "web": {
-          "name": "web",
+        "call": {
+          "name": "call",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
-        "call": {
-          "name": "call",
+        "switches": {
+          "name": "switches",
           "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "odd": {
+          "name": "odd",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -892,12 +898,6 @@
             "cycle": false
           }
         },
-        "request_id": {
-          "name": "request_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "title": {
           "name": "title",
           "type": "text",
@@ -961,13 +961,7 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "goals_requestId_unique": {
-          "name": "goals_requestId_unique",
-          "nullsNotDistinct": false,
-          "columns": ["request_id"]
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -2171,6 +2165,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "package": {
+          "name": "package",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "hired_at": {
           "name": "hired_at",
           "type": "timestamp with time zone",
@@ -2181,6 +2181,12 @@
         "left_at": {
           "name": "left_at",
           "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "jobs_off": {
+          "name": "jobs_off",
+          "type": "integer[]",
           "primaryKey": false,
           "notNull": false
         }
@@ -2360,19 +2366,6 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true
-        },
-        "response": {
-          "name": "response",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "response_version": {
-          "name": "response_version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
         },
         "status": {
           "name": "status",

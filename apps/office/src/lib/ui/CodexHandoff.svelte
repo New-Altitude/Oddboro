@@ -1,7 +1,7 @@
 <script lang="ts">
   import { call } from './api.ts';
   import type { previewHandoff } from '#lib/server/codex-handoff.ts';
-  import type { ChatEntry } from '#lib/server/staff.ts';
+  import type { ChatEntry } from '#lib/staff/chat.ts';
 
   let {
     handoff,
@@ -20,7 +20,7 @@
     problem = '';
     try {
       const { line, added } = await call<{ line: ChatEntry; added: boolean }>(
-        '/api/staff/' + handoff.staff + '/codex-handoff',
+        `/api/staff/${handoff.staff}/codex-handoff`,
         { ticket: handoff.ticket, revision: handoff.revision, goalId }
       );
       onkeep(line, added);

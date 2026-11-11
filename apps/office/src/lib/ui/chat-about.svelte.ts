@@ -1,3 +1,4 @@
+import type { WorkAbout } from '../staff/work.ts';
 // Starting a chat about something on screen, e.g. a passage in a report. The
 // page opens the staffer's chat; the chat takes the draft and puts it in its
 // message box for the owner to finish and send.
@@ -6,14 +7,14 @@
 // the desk selects it there (`showInChat`), and Reply starts a message about
 // it (`replyAbout`).
 
-import type { WorkAbout } from '../staff/work.ts';
+import type { ChatRef } from '../staff/chat.ts';
 
 /** Something a staffer put on the owner's desk. */
-export type Delivered = { kind: 'ask' | 'task' | 'report'; id: number; title: string };
+export type Delivered = ChatRef;
 
 export const chatRequest = $state<{
   staff?: string;
-  work?: { about: WorkAbout; files: File[] };
+  work?: WorkAbout;
   drafts: Record<string, string>;
   /** The delivery selected in a staffer's chat. */
   focus?: { staff: string; item: Delivered };

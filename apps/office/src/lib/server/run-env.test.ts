@@ -24,6 +24,12 @@ test("the owner's words are cut to 4000 units, never between the two halves of a
   assert.equal(officeEnv({ ...plain, ownerSaid: fits }).OWNER_SAID, 'a'.repeat(3998) + '😀');
 });
 
+test("a chat's last exchange reaches the tool server, cut to fit", () => {
+  assert.equal(officeEnv({ ...plain, chatExchange: 'x' }).CHAT_EXCHANGE, 'x');
+  const long = 'a'.repeat(3999) + '😀' + 'b';
+  assert.equal(officeEnv({ ...plain, chatExchange: long }).CHAT_EXCHANGE, 'a'.repeat(3999));
+});
+
 test("a run below the Odd's level names its level, and the rest only when set", () => {
   assert.deepEqual(officeEnv(plain), { RUN_KEY: 'k1' });
   assert.deepEqual(

@@ -1,13 +1,15 @@
 // Files a staffer wrote, opened in the office's viewer. Only files inside a
-// staffer's own folder or its parts of thread folders, or one it attached
-// from the folder of a thread it is on (`workFile`), only text, and only ones
-// that already exist: the owner reads and edits what the staff made, the
-// owner does not browse the Mac. A page an Odd built opens in the owner's
-// browser instead (`openStaffPage`), found the same way.
+// staffer's own folder or its parts of thread folders, one it attached from
+// the folder of a thread it is on (`workFile`), or one in a folder the owner
+// gave it (`givenFile`), only text, and only ones that already exist: the
+// owner reads and edits what the staff made, the owner does not browse the
+// Mac. A page an Odd built opens in the owner's browser instead
+// (`openStaffPage`), found the same way.
 import {
   closeSync,
   constants,
   type Dirent,
+  existsSync,
   lstatSync,
   mkdirSync,
   openSync,
@@ -17,43 +19,32 @@ import {
   statSync,
   writeFileSync
 } from 'node:fs';
+import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
+  type GrantedFolder,
+  type StaffRow,
+  currentPlatform,
   learnFromEdit,
   openFile,
+  ownTools,
   record,
   staffer,
   home,
   threadFolder,
   threadPart,
+  touchesSecretStore,
   workFile
 } from '@oddboro/ledger';
-import { workPath } from '@oddboro/ledger/work-paths';
+import { fixedError, isFixedError } from '@oddboro/ledger/errors';
+import { givenName, givenPath, INSTRUCTIONS, workName, workPath } from '@oddboro/ledger/work-paths';
 import { PAGE } from '#lib/pages.ts';
 
 const HOMES = home('staff');
 /** The folder every thread's folder sits in. */
 const THREADS = dirname(threadFolder(0));
 const MAX_BYTES = 1_000_000;
-/**
- * Claude Code, Grok, Codex and Gemini load these from a run's folder, so an
- * Odd may not rewrite its own instructions, hooks, skills, settings or MCP
- * servers. Every Odd gets the whole list, whichever tool it runs on: it can be
- * moved to another one, and its folder stays its folder.
- */
-export const INSTRUCTIONS = [
-  'CLAUDE.md',
-  'CLAUDE.local.md',
-  '.claude',
-  '.grok',
-  'AGENTS.md',
-  '.mcp.json',
-  'AGENTS.override.md',
-  '.codex',
-  '.agents',
-  'GEMINI.md',
-  '.gemini'
-];
+export { INSTRUCTIONS };
 
 /**
  * git's usual places for code that runs the next time git runs in a
@@ -78,16 +69,19 @@ export const REPO_RUNS = ['.git/hooks', '.git/config', '.git/modules'];
 export type StaffFile = { staff: string; path: string; content: string; mtime: number };
 export type FileName = { staff: string; path: string };
 
-/** A refusal the owner may read as written: it names the file by its bare name only. */
+/**
+ * A refusal the owner may read as written: it names the file by its bare name
+ * only, and a folder the owner gave by its name only.
+ */
 export class FileError extends Error {}
 
 /**
  * What the owner reads when the file they asked for by `name` did not open or
- * save. A refusal reads as written. Anything else (a file the office may not
+ * save. A refusal, or a message the code fixed (`fixedError`), reads as written. Anything else (a file the office may not
  * read, say) names a path, so the owner gets `fallback` and the log gets the rest.
  */
 export function ownerMessage(e: unknown, name: string, fallback: string): string {
-  if (e instanceof FileError) return e.message;
+  if (e instanceof FileError || isFixedError(e)) return e.message;
   console.error(`${fallback} (${name}):`, e);
   return fallback;
 }
@@ -149,16 +143,9 @@ function readable(dir: string): Dirent[] {
  * searched, and the search never follows a link, so it stays inside those parts.
  */
 function fileInThreads(staff: string, name: string): string | undefined {
-  if (!isFolder(THREADS)) return undefined;
-  const ids = readable(THREADS)
-    .map((d) => d.name)
-    .filter((d) => /^\d+$/.test(d))
-    .map(Number)
-    .sort((a, b) => b - a);
   let newest: { file: string; at: number } | undefined;
-  for (const id of ids) {
+  for (const id of threadsWithPart(staff)) {
     const part = threadPart(id, staff);
-    if (!isFolder(threadFolder(id)) || !isFolder(part)) continue;
     for (const found of filesNamed(part, name)) {
       const file = join(part, found);
       const at = statSync(file).mtimeMs;
@@ -168,21 +155,104 @@ function fileInThreads(staff: string, name: string): string | undefined {
   return newest?.file;
 }
 
+/**
+ * The threads `staff` has a part of on the disk, newest first. A thread's
+ * folder or a part that is a link leads somewhere else, so neither counts, and
+ * a folder no thread could own (a leading zero, a word, a number past what
+ * `workPath` takes) is passed over.
+ */
+export function threadsWithPart(staff: string): number[] {
+  if (!isFolder(THREADS)) return [];
+  return readable(THREADS)
+    .map((d) => d.name)
+    .filter((name) => /^[1-9]\d*$/.test(name))
+    .map(Number)
+    .filter(
+      (id) =>
+        workPath(workName(id, staff)) &&
+        isFolder(threadFolder(id)) &&
+        isFolder(threadPart(id, staff))
+    )
+    .sort((a, b) => b - a);
+}
+
 /** Whether `path` is a folder itself, not a link to one. */
 const isFolder = (path: string): boolean =>
   !!lstatSync(path, { throwIfNoEntry: false })?.isDirectory();
+
+/** A file `locate` found: its real path, the path the viewer opens it by, and whether the owner's folder holds it. */
+type Found = { file: string; path: string; given?: true };
+
+/** Whether `path` is a full path on this computer, from `~` or from the top. */
+const isFull = (path: string): boolean => isAbsolute(path) || path.startsWith('~/');
+
+/**
+ * A file in one of `given`, folders on the disk the owner gave an Odd, named
+ * by its full path (from `~` or from the top) or by its name in the office
+ * (`givenName`), with the name of the folder that holds it. Only a file whose
+ * real path stays inside the real path of that folder, so a link never leads
+ * out, and only by the one path named: nothing is searched for, since a
+ * folder the owner gave can be a whole drive. It goes by the innermost given
+ * folder that holds it. A folder with no name of its own (a drive's top) or
+ * one that shares its name with another given folder names nothing, since
+ * its files' names would not lead back to it.
+ */
+function givenFile(
+  given: GrantedFolder[],
+  path: string
+): { file: string; path: string; folder: string } | undefined {
+  const folders = given
+    .map((f) => ({ name: basename(f.path), as: resolve(f.path), real: realpathSync(f.path) }))
+    .filter((f, _, all) => f.name && all.filter((g) => g.name === f.name).length === 1);
+  const inside = (real: string, rel: string): string | undefined => {
+    try {
+      const file = realpathSync(join(real, rel));
+      return file.startsWith(real + sep) && statSync(file).isFile() ? file : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const named = givenPath(path);
+  if (named) {
+    const f = folders.find((g) => g.name === named.folder);
+    const file = f && inside(f.real, named.inside);
+    return file ? { file, path, folder: f.name } : undefined;
+  }
+  if (!isFull(path)) return undefined;
+  const full = path.startsWith('~/') ? join(homedir(), path.slice(2)) : resolve(path);
+  // The innermost folder first, as the Odd wrote it or by its real path.
+  for (const f of folders.sort((a, b) => b.real.length - a.real.length)) {
+    for (const root of new Set([f.as, f.real])) {
+      const rel = relative(root, full);
+      if (!rel || rel.startsWith('..') || isAbsolute(rel)) continue;
+      const file = inside(f.real, rel);
+      if (file) return { file, path: givenName(f.name, relative(f.real, file)), folder: f.name };
+    }
+  }
+  return undefined;
+}
 
 /**
  * A staffer's file: its real path, and the path the viewer opens it by. A
  * bare name its own folder lacks is the newest one it wrote on a thread, and
  * keeps its bare name, since the owner never sees a thread or its folder. A
  * name in a thread's folder (`workPath`), as the Odd attached it, is that one
- * file while the Odd is on that thread, in whoever's part of it.
+ * file while the Odd is on that thread, in whoever's part of it. A full path,
+ * or a name in a folder the owner gave it, is a file in that folder
+ * (`givenFile`).
  */
-async function locate(staff: string, path: string): Promise<{ file: string; path: string }> {
-  if (!/^[a-z0-9-]+$/.test(staff) || !(await staffer(staff))) throw new FileError('No such Odd');
-  // The page names a file inside the Odd's folders, never by where it sits on the Mac.
-  if (isAbsolute(path)) throw new FileError(`No file at ${basename(path)}`);
+async function locate(staff: string, path: string): Promise<Found> {
+  const who = /^[a-z0-9-]+$/.test(staff) ? await staffer(staff) : undefined;
+  if (!who) throw fixedError('No such Odd');
+  // A full path names only a file in a folder the owner gave the Odd that its
+  // runs still get (`ownTools`), never anywhere else on the Mac. A folder its
+  // runs no longer get is no way in either: the owner's hire from a proposal
+  // copies the file an Odd names (`giveIntake`), so a refused folder's file
+  // would reach the new hire's runs.
+  const { granted } = ownTools(who, currentPlatform());
+  const given = givenFile(granted, path);
+  if (given) return { file: given.file, path: given.path, given: true };
+  if (isFull(path)) throw noFile(who, path);
   // The Odd's tools read such a name the same way (`attachable`), so both find one file.
   if (workPath(path)) {
     const file = await workFile(staff, path);
@@ -196,8 +266,28 @@ async function locate(staff: string, path: string): Promise<{ file: string; path
   // matches a file's name, so a path with a folder never reaches a thread.
   const onThread = !own && !filesNamed(root, path).length ? fileInThreads(staff, path) : undefined;
   const found = own ? { file: join(root, own), path: own } : onThread && { file: onThread, path };
-  if (!found) throw new FileError(`No file at ${basename(path)}`);
+  if (!found) throw noFile(who, path);
   return found;
+}
+
+/**
+ * Why `who` has no file at `path`. A file that is there, in a folder the owner
+ * gave it that is in or holds a secret store, says so, or the owner would go
+ * looking for a file they can see. It picks those folders by the same test as
+ * the folder's line on the Settings tab (`touchesSecretStore`), so the words
+ * never name a folder its runs miss for any other reason. The refusal names
+ * the folder by its name alone, never its real path.
+ */
+function noFile(who: StaffRow, path: string): FileError {
+  // `givenFile` takes each folder's real path, which a folder gone from the
+  // disk has none of, and a gone folder holds no file to name.
+  const refused = who.folders.filter((f) => existsSync(f.path) && touchesSecretStore(f.path));
+  const held = givenFile(refused, path);
+  return new FileError(
+    held
+      ? `${basename(path)} is in ${held.folder}, which holds keys or sign-ins, so ${who.name} no longer gets it.`
+      : `No file at ${basename(path)}`
+  );
 }
 
 /** What the viewer opens: the file `locate` finds, read whole, so only text up to `MAX_BYTES`. */
@@ -205,11 +295,7 @@ export async function readStaffFile(staff: string, path: string): Promise<StaffF
   return readFound(staff, path, await locate(staff, path));
 }
 
-async function readFound(
-  staff: string,
-  path: string,
-  found: { file: string; path: string }
-): Promise<StaffFile> {
+async function readFound(staff: string, path: string, found: Found): Promise<StaffFile> {
   if (statSync(found.file).size > MAX_BYTES)
     throw new FileError(`${basename(path)} is too big to open here`);
   const content = readFileSync(found.file, 'utf8');
@@ -223,7 +309,7 @@ async function readFound(
  * folders, never through a link. Its size does not matter: the browser opens
  * it, and the office never reads it.
  */
-async function findPage(staff: string, path: string): Promise<{ file: string; path: string }> {
+async function findPage(staff: string, path: string): Promise<Found> {
   const found = await locate(staff, path);
   const file = realpathSync(found.file);
   if (!PAGE.test(file)) throw new FileError(`${basename(path)} is not a page`);
@@ -279,9 +365,11 @@ export async function writeStaffFile(
 ): Promise<StaffFile> {
   // The Odd that attached it may not have written it, so its edit would teach the wrong Odd.
   if (workPath(path)) throw new FileError(`${basename(path)} opens here to read only`);
-  const { file } = await locate(staff, path);
+  const { file, given } = await locate(staff, path);
+  // The owner's own folder holds the owner's work as much as the Odd's: the owner edits it in their own tools.
+  if (given) throw new FileError(`${basename(path)} opens here to read only`);
   if (Math.abs(statSync(file).mtimeMs - mtime) > 1)
-    throw new FileError('The Odd changed this file since you opened it. Reopen it to see.');
+    throw fixedError('The Odd changed this file since you opened it. Reopen it to see.');
   // The mtime check makes this the Odd's version, unless the owner saved it before.
   const before = await readStaffFile(staff, path);
   writeFileSync(file, content);

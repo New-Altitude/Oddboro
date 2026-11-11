@@ -24,7 +24,7 @@ type FileCopy = { name: string; data: string };
 type Packet = { id: string; title: string; files: FileCopy[] };
 
 function regularFile(path: string, limit: number): Buffer {
-  if (process.platform === 'win32' && /^[\\/]{2}/.test(path)) throw Error('Choose a local file.');
+  if (/^[\\/]{2}/.test(path)) throw Error('Choose a local file.');
   const stat = lstatSync(path);
   if (!stat.isFile() || stat.nlink !== 1 || stat.size > limit)
     throw Error('Choose one regular file within the handoff size limit.');

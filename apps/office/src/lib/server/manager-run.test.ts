@@ -33,7 +33,8 @@ test('the manager takes a first brief and picks up an older chat with current to
   await L.pg`insert into grants (staff_id, connector_id, level) values (${id}, 'editor', 'read')`;
   const earlier = await chatOf(id);
   assert.match(earlier.system, /Dispatch editor .*held back until/);
-  assert.ok(!earlier.args.includes('mcp__editor__consult'));
+  assert.ok(earlier.claudeSettings);
+  assert.ok(!earlier.claudeSettings.permissions.allow.includes('mcp__editor__consult'));
   const seen = sectionsOf(earlier.system, desk);
   delete seen['## Moving work into the office'];
   const session = L.chatSession(id);
@@ -66,7 +67,8 @@ test('the manager takes a first brief and picks up an older chat with current to
   assert.match(now.message, /One needs a belt/);
   assert.match(now.message, /If work remains, keep the goal open/);
   assert.match(now.message, /Dispatch editor .*1 tool/);
-  assert.ok(now.args.includes('mcp__editor__consult'));
+  assert.ok(now.claudeSettings);
+  assert.ok(now.claudeSettings.permissions.allow.includes('mcp__editor__consult'));
   assert.ok(now.system.startsWith(desk));
   assert.equal((await L.staffer(id))?.desk, desk);
 });

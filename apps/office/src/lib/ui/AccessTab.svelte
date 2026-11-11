@@ -13,29 +13,14 @@
     type GrantLevel,
     type Level
   } from '@oddboro/ledger/access';
-  import {
-    AGENT_NAMES,
-    EFFORT_NAMES,
-    EFFORT_ORDER,
-    effortsOf,
-    MANAGER_EFFORT_FLOOR,
-    MODELS,
-    OFFICE_ACCOUNT,
-    type Agent,
-    type Effort
-  } from '@oddboro/ledger/agents';
-  import { OFFICE_TOOLS } from '@oddboro/ledger/tools';
+  import { AGENT_NAMES, OFFICE_ACCOUNT, type Agent, type Effort } from '@oddboro/ledger/agents';
   import { AgentTools } from './agent-tools.svelte.ts';
   import { call } from './api.ts';
   import FoldersList from './FoldersList.svelte';
-  import RunsOn from './RunsOn.svelte';
+  import ModelPicker from './ModelPicker.svelte';
   import ServiceActions from './ServiceActions.svelte';
-  import ToolTiles from './ToolTiles.svelte';
-  import { toolAction } from './tool-action.ts';
+  import { findsIn, toolGroups } from './tool-groups.ts';
   import type { StaffProfile } from '../staff/roster.ts';
-  import type { AgentTool } from '../../routes/api/agents/+server.ts';
-
-  type SignInState = NonNullable<AgentTool['signIn']>;
 
   type Grant = {
     connector: string;
@@ -198,7 +183,6 @@
   const allowed = (l: GrantLevel) => grantWorks(l, profile.permission);
   const isUrl = $derived(/^https:\/\/\S+$/.test(q.trim()));
 
-  const GRANTABLE = OFFICE_TOOLS.filter((t) => !t.always);
   async function setTool(tool: string, on: boolean) {
     problem = refused = '';
     try {
@@ -224,47 +208,6 @@
   /** The tools, for the Model tab's tiles: the same list setup shows. */
   const agentTools = new AgentTools();
 
-  /**
-   * The accounts its tool signs in with: the Office account, then the ones
-   * the owner added (accounts.ts). Gemini takes one key for the office, so it
-   * has none to pick.
-   */
-  const accountList = $derived(
-    profile.agent === 'gemini'
-      ? []
-      : [
-          {
-            id: OFFICE_ACCOUNT,
-            label: 'Office',
-            signIn: agentTools.tools.find((t) => t.id === profile.agent)?.signIn
-          },
-          ...agentTools.accounts.filter((a) => a.agent === profile.agent)
-        ]
-  );
-  /** The account it uses: one it was moved to that is still there, else Office. */
-  const onAccount = $derived(
-    accountList.some((a) => a.id === profile.account) ? profile.account! : OFFICE_ACCOUNT
-  );
-  const picked = $derived(accountList.find((a) => a.id === onAccount));
-  let addingAccount = $state(false);
-  let naming = $state('');
-  /** The added account being renamed, and the name typed so far. */
-  let renaming = $state<string | undefined>();
-  let newName = $state('');
-
-  async function rename(account: string) {
-    if (await agentTools.renameAccount(profile.agent, account, newName)) renaming = undefined;
-  }
-
-  /** A card's second line: who it is signed in as, or what it waits on. */
-  function aboutAccount(s: SignInState | undefined): string {
-    if (!s) return '';
-    if (s.waiting) return 'Signing in';
-    if (s.signedIn) return s.account ?? 'Signed in';
-    if (s.ownLogin) return `Your own login for now`;
-    return 'Not signed in';
-  }
-
   async function pickAccount(id: string) {
     problem = refused = '';
     try {
@@ -278,15 +221,6 @@
     }
   }
 
-  /** Add an account, move this Odd to it, and open its sign-in. */
-  async function addAccount() {
-    const id = await agentTools.addAccount(profile.agent, naming);
-    if (!id) return;
-    addingAccount = false;
-    naming = '';
-    await pickAccount(id);
-  }
-
   async function pickAgent(agent: Agent) {
     problem = refused = '';
     try {
@@ -296,26 +230,8 @@
     }
   }
 
-  /** A tile's one word for this Odd: Ready when its runs can start on that tool now. */
-  function stateOf(id: Agent): string {
-    const t = agentTools.tools.find((x) => x.id === id);
-    if (!t) return '';
-    if (id === 'claude') return !t.installed ? 'Install' : t.tooOld ? 'Update' : 'Ready';
-    const a = toolAction(t);
-    if (a === 'install') return 'Install';
-    if (a === 'installing') return agentTools.updating[id] ? 'Updating' : 'Installing';
-    if (a === 'update') return 'Update';
-    if (a === 'cancel') return 'Signing in';
-    return t.signIn?.signedIn ? 'Ready' : 'Sign in';
-  }
-
   /** The Office Manager runs the floor, so its levels below Medium are off. */
   const manager = $derived(profile.role === 'Office Manager');
-  const belowFloor = (e: Effort) =>
-    manager && EFFORT_ORDER.indexOf(e) < EFFORT_ORDER.indexOf(MANAGER_EFFORT_FLOOR);
-
-  /** The levels its runs take, on its own model when it has one. */
-  const efforts = $derived(effortsOf(profile.agent, profile.model));
 
   async function setModel(model: string | null) {
     problem = refused = '';
@@ -324,12 +240,6 @@
     } catch (e) {
       problem = e instanceof Error ? e.message : String(e);
     }
-  }
-
-  /** A model's thinking levels, lowest to highest, for its card. */
-  function levelsOf(model: string): string {
-    const l = effortsOf(profile.agent, model);
-    return `Thinks ${EFFORT_NAMES[l[0]]} to ${EFFORT_NAMES[l[l.length - 1]]}`;
   }
 
   async function setEffort(effort: Effort) {
@@ -384,21 +294,19 @@
 
   /** What the owner typed to find an entry in the open list, as each list grows. */
   let find = $state('');
-  const matches = (...texts: string[]) => {
-    const f = find.trim().toLowerCase();
-    return !f || texts.some((t) => t.toLowerCase().includes(f));
-  };
+  const matches = (...texts: string[]) => findsIn(find, ...texts);
   const FIND_IN = {
     office: 'Find an office tool',
     folders: 'Find a folder',
     services: 'Find a service'
   } as const;
-  const officeTools = $derived(GRANTABLE.filter((t) => matches(t.name, t.does)));
+  const tools = $derived(toolGroups(find, profile));
   const shownGrants = $derived(grants.filter((g) => matches(g.name, GRANT_LABEL[g.level])));
   const commandsShown = $derived(
     matches(SWITCH_NAMES.commands, how.state === 'switch' ? '' : how.why)
   );
   const webShown = $derived(matches(SWITCH_NAMES.web, profile.webLine));
+  const switchesShown = $derived(commandsShown || webShown || tools.grantable.length > 0);
 
   async function setPermission(permission: Level) {
     problem = refused = '';
@@ -409,19 +317,6 @@
     }
   }
 </script>
-
-{#snippet check()}
-  <svg
-    class="size-4 shrink-0 text-sea"
-    viewBox="0 0 16 16"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="2"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-    aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" /></svg
-  >
-{/snippet}
 
 <div class="flex h-full min-h-0 flex-col">
   <div
@@ -479,317 +374,136 @@
     {/if}
     {#if tab === 'model'}
       <section aria-label={MODEL_SECTION} class="flex flex-col gap-3">
-        <ToolTiles
+        <ModelPicker
           tools={agentTools}
-          picked={profile.agent}
-          onpick={pickAgent}
-          {stateOf}
-          label="What {profile.name} runs on"
-        />
-        <RunsOn
-          value={profile.agent}
-          actionsOnly
-          installOnly={profile.agent !== 'gemini'}
-          class="text-[11px]"
-        />
-        {#if accountList.length}
+          name={profile.name}
+          agent={profile.agent}
+          account={profile.account}
+          model={profile.model}
+          officeModel={profile.officeModel}
+          effort={profile.effort}
+          {manager}
+          onagent={pickAgent}
+          onaccount={pickAccount}
+          onmodel={setModel}
+          oneffort={setEffort}
+        >
           <div>
-            <h3 class="text-xs font-semibold text-ink">Signed in with</h3>
-            <div class="mt-1 grid grid-cols-2 gap-1.5" role="radiogroup" aria-label="Account">
-              {#each accountList as a (a.id)}
-                {@const on = onAccount === a.id}
+            <h3 class="text-xs font-semibold text-ink">Permission level</h3>
+            <div class="mt-1 flex gap-1" role="group" aria-label="Permission level">
+              {#each LEVELS as l (l)}
                 <button
-                  class="card {on ? 'on' : ''}"
-                  role="radio"
-                  aria-checked={on}
-                  title={a.signIn?.ownLogin
-                    ? `Until you sign the office in, these runs use your own login, ${a.signIn.ownLogin}.`
-                    : undefined}
-                  onclick={() => !on && pickAccount(a.id)}
-                >
-                  <span class="min-w-0 flex-1">
-                    <span class="block truncate text-xs font-medium text-ink">{a.label}</span>
-                    <span
-                      class="block truncate text-[10px] {a.signIn?.signedIn
-                        ? 'text-sea'
-                        : 'text-muted'}">{aboutAccount(a.signIn)}</span
-                    >
-                  </span>
-                  {#if on}{@render check()}{/if}
-                </button>
-              {/each}
-              {#if addingAccount}
-                <form
-                  class="card col-span-2 gap-1.5"
-                  novalidate
-                  onsubmit={(e) => {
-                    e.preventDefault();
-                    if (naming.trim()) void addAccount();
-                  }}
-                >
-                  <!-- svelte-ignore a11y_autofocus -->
-                  <input
-                    class="min-w-0 flex-1 rounded-md bg-night/50 px-2 py-1 text-xs outline-none placeholder:text-faint"
-                    aria-label="Name the account"
-                    placeholder="Name it, like Work or Personal"
-                    maxlength="40"
-                    autocomplete="off"
-                    autofocus
-                    bind:value={naming}
-                  />
-                  <button class="act" disabled={!naming.trim()}>Add and sign in</button>
-                  <button class="act" type="button" onclick={() => (addingAccount = false)}
-                    >Cancel</button
-                  >
-                </form>
-              {:else}
-                <button class="card add" onclick={() => (addingAccount = true)}>
-                  <span class="text-xs text-muted">+ Add a sign-in</span>
-                </button>
-              {/if}
-            </div>
-            {#if picked?.signIn}
-              {@const s = picked.signIn}
-              {@const added = picked.id !== OFFICE_ACCOUNT}
-              {#if s.ownLogin}
-                <p class="mt-1.5 text-[10px] text-muted">
-                  Your office does not have its own {AGENT_NAMES[profile.agent]} sign-in yet, so these
-                  runs use your own login, {s.ownLogin}. Sign the office in to keep the two apart.
-                </p>
-              {/if}
-              <div class="mt-1.5 flex gap-1.5">
-                {#if s.waiting}
-                  {#if s.waiting.url}
-                    <a class="act" href={s.waiting.url} target="_blank" rel="noopener noreferrer"
-                      >Open sign-in page</a
-                    >
-                  {/if}
-                  <button class="act" onclick={() => agentTools.cancel(profile.agent)}
-                    >Cancel</button
-                  >
-                {:else if s.signedIn}
-                  <button
-                    class="act"
-                    onclick={() => agentTools.signIn(profile.agent, added ? picked.id : undefined)}
-                    >Sign in again</button
-                  >
-                  <button
-                    class="act"
-                    disabled={agentTools.busy === profile.agent}
-                    onclick={() => agentTools.signOut(profile.agent, added ? picked.id : undefined)}
-                    >Sign out</button
-                  >
-                {:else}
-                  <button
-                    class="act"
-                    onclick={() => agentTools.signIn(profile.agent, added ? picked.id : undefined)}
-                    >Sign in</button
-                  >
-                {/if}
-                {#if added && !s.waiting}
-                  <button
-                    class="act"
-                    onclick={() => {
-                      renaming = picked.id;
-                      newName = picked.label;
-                    }}>Rename</button
-                  >
-                  <button
-                    class="act"
-                    disabled={agentTools.busy === profile.agent}
-                    onclick={() => agentTools.removeAccount(profile.agent, picked.id)}
-                    >Remove</button
-                  >
-                {/if}
-              </div>
-              {#if added && renaming === picked.id}
-                <form
-                  class="mt-1.5 flex gap-1.5"
-                  novalidate
-                  onsubmit={(e) => {
-                    e.preventDefault();
-                    if (newName.trim()) void rename(picked.id);
-                  }}
-                >
-                  <!-- svelte-ignore a11y_autofocus -->
-                  <input
-                    class="min-w-0 flex-1 rounded-lg bg-raise px-2 py-1 text-xs outline-none placeholder:text-faint"
-                    aria-label="A new name for {picked.label}"
-                    maxlength="40"
-                    autocomplete="off"
-                    autofocus
-                    bind:value={newName}
-                  />
-                  <button class="act" disabled={!newName.trim()}>Save</button>
-                  <button class="act" type="button" onclick={() => (renaming = undefined)}
-                    >Cancel</button
-                  >
-                </form>
-              {/if}
-              {#if agentTools.problems[profile.agent]}
-                <p class="mt-1 text-[11px] text-coral">{agentTools.problems[profile.agent]}</p>
-              {/if}
-            {/if}
-          </div>
-        {/if}
-        {#if MODELS[profile.agent].length}
-          {@const office = MODELS[profile.agent].find((m) => m.id === profile.officeModel)}
-          <div>
-            <h3 class="text-xs font-semibold text-ink">Model</h3>
-            <div class="mt-1 grid grid-cols-2 gap-1.5" role="radiogroup" aria-label="Model">
-              {#each [{ id: '', name: 'Office default', about: office ? `Now ${office.name}` : "The office's" }, ...MODELS[profile.agent].map( (m) => ({ id: m.id, name: m.name, about: levelsOf(m.id) }) )] as m (m.id)}
-                {@const on = (profile.model ?? '') === m.id}
-                <button
-                  class="flex items-center gap-2 rounded-lg px-2.5 py-2 text-start {on
-                    ? 'bg-sea/15 ring-1 ring-sea'
-                    : 'bg-raise hover:bg-night/40'}"
-                  role="radio"
-                  aria-checked={on}
-                  onclick={() => !on && setModel(m.id || null)}
-                >
-                  <span class="min-w-0 flex-1">
-                    <span class="block truncate text-xs font-medium text-ink">{m.name}</span>
-                    <span class="block truncate text-[10px] text-muted">{m.about}</span>
-                  </span>
-                  {#if on}{@render check()}{/if}
-                </button>
-              {/each}
-            </div>
-          </div>
-        {/if}
-        <div>
-          <h3 class="text-xs font-semibold text-ink">Permission level</h3>
-          <div class="mt-1 flex gap-1" role="group" aria-label="Permission level">
-            {#each LEVELS as l (l)}
-              <button
-                class="flex-1 rounded-lg px-1.5 py-2 text-xs {profile.permission === l
-                  ? 'bg-sea/25 text-ink'
-                  : 'bg-raise text-muted'}"
-                aria-pressed={profile.permission === l}
-                onclick={() => setPermission(l)}>{LEVEL_LABEL[l]}</button
-              >
-            {/each}
-          </div>
-        </div>
-        <div>
-          {#if efforts.length}
-            <h3 class="text-xs font-semibold text-ink">Thinking</h3>
-            <div
-              class="mt-1 flex gap-1"
-              role="radiogroup"
-              aria-label="How hard {profile.name} thinks"
-            >
-              {#each efforts as e (e)}
-                <button
-                  class="flex-1 rounded-lg px-1 py-2 text-xs whitespace-nowrap disabled:opacity-40 {profile.effort ===
-                  e
+                  class="flex-1 rounded-lg px-1.5 py-2 text-xs {profile.permission === l
                     ? 'bg-sea/25 text-ink'
-                    : 'bg-raise text-muted hover:text-ink'}"
-                  role="radio"
-                  aria-checked={profile.effort === e}
-                  disabled={belowFloor(e)}
-                  title={belowFloor(e)
-                    ? `The Office Manager thinks at ${EFFORT_NAMES[MANAGER_EFFORT_FLOOR]} or more`
-                    : undefined}
-                  onclick={() => profile.effort !== e && setEffort(e)}>{EFFORT_NAMES[e]}</button
+                    : 'bg-raise text-muted'}"
+                  aria-pressed={profile.permission === l}
+                  onclick={() => setPermission(l)}>{LEVEL_LABEL[l]}</button
                 >
               {/each}
             </div>
-            <p class="mt-1 text-[10px] text-faint">
-              Higher thinks longer and uses more of your plan.{manager
-                ? ` The Office Manager stays at ${EFFORT_NAMES[MANAGER_EFFORT_FLOOR]} or more.`
-                : ''}
-            </p>
-          {/if}
-        </div>
+          </div>
+        </ModelPicker>
       </section>
     {:else if tab === 'folders'}
       <FoldersList {profile} {find} />
     {:else if tab === 'office'}
       <section aria-label="In the office">
-        <h3 class="mb-1.5 text-xs font-semibold text-ink">In the office</h3>
-        <ul class="flex flex-col gap-1 rounded-xl bg-raise p-1.5">
-          <!-- The label wraps only the switch's name, so the offer below it is a button of its own. -->
-          {#if commandsShown}
-            <li
-              class="flex items-start gap-2.5 rounded-lg px-2 py-1.5 {how.state === 'switch'
-                ? 'hover:bg-night/40'
-                : ''}"
-            >
-              <input
-                id="commands-{profile.id}"
-                type="checkbox"
-                class="mt-0.5 {how.state === 'switch' ? 'cursor-pointer' : ''}"
-                checked={profile.reach.commands}
-                disabled={how.state !== 'switch'}
-                onchange={(e) => setOwnTool('commands', e.currentTarget)}
-              />
-              <span class="min-w-0 flex-1">
-                <label
-                  for="commands-{profile.id}"
-                  class="block text-sm {how.state === 'switch' ? 'cursor-pointer' : ''}"
-                  >{SWITCH_NAMES.commands}</label
-                >
-                {#if how.state !== 'switch'}
-                  <span class="block text-xs text-muted">{how.why}</span>
-                {/if}
-                {#if how.state === 'never' && how.offer}
-                  {@const offer = how.offer}
-                  <button
-                    class="mt-0.5 block text-start text-xs text-sea hover:text-ink"
-                    onclick={() => moveFor(offer)}
-                    >Switch {profile.name} to {AGENT_NAMES[offer]}?</button
+        <!-- An empty list would draw an empty box and its heading above Always on; with nothing found at all it holds the line saying so. -->
+        {#if switchesShown || !tools.alwaysOn.length}
+          <h3 class="mb-1.5 text-xs font-semibold text-ink">In the office</h3>
+          <ul class="flex flex-col gap-1 rounded-xl bg-raise p-1.5">
+            <!-- The label wraps only the switch's name, so the offer below it is a button of its own. -->
+            {#if commandsShown}
+              <li
+                class="flex items-start gap-2.5 rounded-lg px-2 py-1.5 {how.state === 'switch'
+                  ? 'hover:bg-night/40'
+                  : ''}"
+              >
+                <input
+                  id="commands-{profile.id}"
+                  type="checkbox"
+                  class="mt-0.5 {how.state === 'switch' ? 'cursor-pointer' : ''}"
+                  checked={profile.reach.commands}
+                  disabled={how.state !== 'switch'}
+                  onchange={(e) => setOwnTool('commands', e.currentTarget)}
+                />
+                <span class="min-w-0 flex-1">
+                  <label
+                    for="commands-{profile.id}"
+                    class="block text-sm {how.state === 'switch' ? 'cursor-pointer' : ''}"
+                    >{SWITCH_NAMES.commands}</label
                   >
-                  {#if refused}
-                    <span class="block text-xs text-muted">{refused}</span>
+                  {#if how.state !== 'switch'}
+                    <span class="block text-xs text-muted">{how.why}</span>
                   {/if}
-                {/if}
-              </span>
-            </li>
-          {/if}
-          {#if webShown}
-            <li>
-              <label
-                class="flex cursor-pointer items-start gap-2.5 rounded-lg px-2 py-1.5 hover:bg-night/40"
-              >
-                <input
-                  type="checkbox"
-                  class="mt-0.5"
-                  checked={profile.web}
-                  onchange={(e) => setOwnTool('web', e.currentTarget)}
-                />
-                <span class="min-w-0 flex-1">
-                  <span class="block text-sm">{SWITCH_NAMES.web}</span>
-                  <span class="block text-xs text-muted">{profile.webLine}</span>
+                  {#if how.state === 'never' && how.offer}
+                    {@const offer = how.offer}
+                    <button
+                      class="mt-0.5 block text-start text-xs text-sea hover:text-ink"
+                      onclick={() => moveFor(offer)}
+                      >Switch {profile.name} to {AGENT_NAMES[offer]}?</button
+                    >
+                    {#if refused}
+                      <span class="block text-xs text-muted">{refused}</span>
+                    {/if}
+                  {/if}
                 </span>
-              </label>
-            </li>
-          {/if}
-          {#each officeTools as t (t.id)}
-            <li>
-              <label
-                class="flex cursor-pointer items-start gap-2.5 rounded-lg px-2 py-1.5 hover:bg-night/40"
-              >
-                <input
-                  type="checkbox"
-                  class="mt-0.5"
-                  checked={profile.tools.includes(t.id)}
-                  onchange={(e) => setTool(t.id, e.currentTarget.checked)}
-                />
-                <span class="min-w-0 flex-1">
-                  <span class="block text-sm">{t.name}</span>
-                  <span class="block text-xs text-muted">{t.does}</span>
-                </span>
-              </label>
-            </li>
-          {/each}
-          {#if !commandsShown && !webShown && !officeTools.length}
-            <li class="px-2 py-1.5 text-sm text-muted">Nothing here matches "{find.trim()}".</li>
-          {/if}
-        </ul>
-        <p class="mt-1.5 text-[11px] text-faint">
-          Every Odd can also raise asks, see how you decided them, and see its own access.
-        </p>
+              </li>
+            {/if}
+            {#if webShown}
+              <li>
+                <label
+                  class="flex cursor-pointer items-start gap-2.5 rounded-lg px-2 py-1.5 hover:bg-night/40"
+                >
+                  <input
+                    type="checkbox"
+                    class="mt-0.5"
+                    checked={profile.web}
+                    onchange={(e) => setOwnTool('web', e.currentTarget)}
+                  />
+                  <span class="min-w-0 flex-1">
+                    <span class="block text-sm">{SWITCH_NAMES.web}</span>
+                    <span class="block text-xs text-muted">{profile.webLine}</span>
+                  </span>
+                </label>
+              </li>
+            {/if}
+            {#each tools.grantable as t (t.id)}
+              <li>
+                <label
+                  class="flex cursor-pointer items-start gap-2.5 rounded-lg px-2 py-1.5 hover:bg-night/40"
+                >
+                  <input
+                    type="checkbox"
+                    class="mt-0.5"
+                    checked={profile.tools.includes(t.id)}
+                    onchange={(e) => setTool(t.id, e.currentTarget.checked)}
+                  />
+                  <span class="min-w-0 flex-1">
+                    <span class="block text-sm">{t.name}</span>
+                    <span class="block text-xs text-muted">{t.does}</span>
+                  </span>
+                </label>
+              </li>
+            {/each}
+            {#if !switchesShown && !tools.alwaysOn.length}
+              <li class="px-2 py-1.5 text-sm text-muted">Nothing here matches "{find.trim()}".</li>
+            {/if}
+          </ul>
+        {/if}
+        {#if tools.alwaysOn.length}
+          <h4 class="{switchesShown ? 'mt-3' : ''} mb-1.5 text-xs font-semibold text-ink">
+            Always on
+          </h4>
+          <ul class="flex flex-col gap-1 rounded-xl bg-raise p-1.5">
+            {#each tools.alwaysOn as t (t.id)}
+              <li class="rounded-lg px-2 py-1.5">
+                <span class="block text-sm">{t.name}</span>
+                <span class="block text-xs text-muted">{t.does}</span>
+              </li>
+            {/each}
+          </ul>
+        {/if}
       </section>
     {:else}
       <div class="mb-1.5 flex items-center justify-between">
@@ -1027,46 +741,6 @@
 </div>
 
 <style>
-  /* An account or model card: one per choice, a check on the one picked. */
-  .card {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    border-radius: 0.5rem;
-    background: var(--color-raise);
-    padding: 0.5rem 0.625rem;
-    text-align: start;
-  }
-  button.card:hover {
-    background: color-mix(in srgb, var(--color-night) 40%, var(--color-raise));
-  }
-  .card.on {
-    background: color-mix(in srgb, var(--color-sea) 15%, transparent);
-    box-shadow: inset 0 0 0 1px var(--color-sea);
-  }
-  .card.add {
-    justify-content: center;
-    border: 1px dashed var(--color-hairline);
-    background: transparent;
-  }
-  /* Every account action one size and one style, sharing the row evenly. */
-  .act {
-    display: inline-block;
-    flex: 1 1 0;
-    border-radius: 0.5rem;
-    background: var(--color-raise);
-    padding-block: 0.375rem;
-    padding-inline: 0.625rem;
-    text-align: center;
-    font-size: 0.75rem;
-    color: var(--color-ink);
-  }
-  .act:hover {
-    background: rgb(255 255 255 / 0.12);
-  }
-  .act:disabled {
-    opacity: 0.4;
-  }
   /* The tab bar is its own container: too narrow for the words, each tab shows its icon alone. */
   .tabs {
     container-type: inline-size;

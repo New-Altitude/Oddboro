@@ -31,8 +31,17 @@ import {
   type CommandsHow,
   type GrantedFolder
 } from './agents.ts';
-import { grantsFor, heldReach, type ConnectorRow, type GrantRow, type StaffRow } from './office.ts';
-import { hasTool, OFFICE_TOOLS } from './tools.ts';
+import { OWNER_GRANTS } from './grantable.ts';
+import {
+  grantsFor,
+  heldReach,
+  touchesSecretStore,
+  type ConnectorRow,
+  type GrantRow,
+  type StaffRow
+} from './office.ts';
+import { GRANTABLE_TOOLS, hasTool, OFFICE_TOOLS } from './tools.ts';
+import { currentPlatform } from './platform.ts';
 
 /**
  * Why a run leaves out a tool the Odd was granted. A run adds
@@ -56,7 +65,7 @@ export type OwnTools = {
   web: boolean;
   /** Whether its commands reach the internet (`commandsOnline`). */
   network: boolean;
-  /** The folders the owner gave it that are still on the disk. */
+  /** The folders the owner gave it that are still on the disk and in no secret store. */
   granted: GrantedFolder[];
 };
 
@@ -70,8 +79,9 @@ export function ownTools(
     commandsHow: commandsHow(who.agent, platform),
     web: who.web,
     network: commandsOnline(who.agent, platform, who),
-    // A folder deleted since the owner gave it reaches no tool.
-    granted: who.folders.filter((f) => existsSync(f.path))
+    // A folder deleted since the owner gave it reaches no tool, nor one in or
+    // holding a secret store, given before its store was listed.
+    granted: who.folders.filter((f) => existsSync(f.path) && !touchesSecretStore(f.path))
   };
 }
 
@@ -93,7 +103,7 @@ export async function capabilities(who: StaffRow): Promise<Capabilities> {
     office: OFFICE_TOOLS.filter((t) => !t.always && who.tools.includes(t.id)).map((t) => t.id),
     outside: (await grantsFor(who.id)).map((g) => accessOf(g, who.permission)),
     agent: who.agent,
-    own: ownTools(who, process.platform)
+    own: ownTools(who, currentPlatform())
   };
 }
 
@@ -174,7 +184,9 @@ export function officeHeldIn(env: Record<string, string | undefined>): boolean {
  * the run knows three things, so the office passes them in its environment:
  * its ceiling (`CEILING`), set when it is below the Odd's own level, the
  * sign-ins that ran out (`SIGNED_OUT`), and whether the office holds the
- * network (`officeHeldIn`).
+ * network (`officeHeldIn`). An Odd lacking an office tool the owner can give
+ * is told where the owner gives one, and one with no folder how to ask for
+ * one (`OWNER_GRANTS`).
  */
 export function accessInRun(
   own: Capabilities,
@@ -202,9 +214,12 @@ export function accessInRun(
     ...ownToolsSaid(caps.agent, caps.own, officeHeldIn(env)).map((l) =>
       l.replaceAll('{owner}', owner)
     ),
+    ...(GRANTABLE_TOOLS.every((t) => caps.office.includes(t))
+      ? []
+      : [OWNER_GRANTS.office_tools.missing({ owner, where: officeSection('your') })]),
     ...(folders.length
       ? [`Folders ${owner} gave you:`, ...folders.map((l) => `- ${l}`)]
-      : [`${owner} has given you no folders.`]),
+      : [`${owner} has given you no folders. ${OWNER_GRANTS.folders.missing()}`]),
     lines.length
       ? lines.map((l, i) => `- (id: ${outside[i].connector.id}) ${l}`).join('\n')
       : `${owner} has connected no outside tools for you yet.`
@@ -232,7 +247,7 @@ export function outsideLines(c: Capabilities, owner: string, about?: string): st
     const what = `${a.connector.name} (${GRANT_LABEL[a.level === 'act' ? 'act' : 'read'].toLowerCase()})`;
     switch (a.heldBack) {
       case 'above its level':
-        return `${what}: held back. It needs the ${LEVEL_NAME[GRANT_NEEDS[a.level === 'act' ? 'act' : 'read']]} level or higher, and the current level is ${LEVEL_NAME[c.level]}. It works again once ${owner} raises it. ${levelRoute(owner, whoseOf(about))}`;
+        return `${what}: held back. It needs the ${LEVEL_NAME[GRANT_NEEDS[a.level === 'act' ? 'act' : 'read']]} level or higher, and the current level is ${LEVEL_NAME[c.level]}. It works again once ${owner} raises it. ${OWNER_GRANTS.level.missing({ owner, whose: whoseOf(about) })}`;
       case 'still connecting':
         return `${what}: held back until ${owner} finishes connecting it.`;
       case 'sign-in ran out':
@@ -269,7 +284,7 @@ export function levelLine(level: Level, owner: string): string {
  * ask never changes a level: the owner changes it on the card.
  */
 export function askAboveLevel(held: Level, asked: 'read' | 'write', owner: string): string {
-  return `You hold ${held}, so you cannot ask for ${asked}. ${levelRoute(owner, 'your')} If this job needs a higher one, say so in your reply.`;
+  return `You hold ${held}, so you cannot ask for ${asked}. ${OWNER_GRANTS.level.missing({ owner, whose: 'your' })} If this job needs a higher one, say so in your reply.`;
 }
 
 /**
@@ -278,8 +293,10 @@ export function askAboveLevel(held: Level, asked: 'read' | 'write', owner: strin
  * folders and {owner}'s developer tools, read only, and to the internet only
  * when `network` says so, and the tool's own web search (and page fetch, where
  * it has one) when the owner switched Browse the web on. Each one it lacks
- * gets a line saying whether {owner} can switch it on, and where (its card's
- * Settings tab, under Office). Gemini's policy allows a write only by its full path.
+ * gets a line saying whether it can be had: the Odd itself asks with
+ * ask_for_switch; another Odd reading the line is told the owner can switch it
+ * on, and where (its card's Settings tab, under Office). Gemini's policy
+ * allows a write only by its full path.
  * `about` names the Odd when another Odd reads the line (`ownToolsSaid`).
  * `{owner}` is left for the caller to fill.
  */
@@ -295,29 +312,19 @@ export function ownToolsLine(
     ...(own.web ? [FETCHES_PAGES[agent] ? 'web search and fetch' : 'web search'] : [])
   ];
   const opens = `${about === undefined ? 'Your' : whose} own tools work on files`;
-  const where = officeSection(whose);
+  const where = about === undefined ? undefined : officeSection(whose);
   const line = [
     plus.length ? `${opens}, plus ${plus.join(', and ')}.` : `${opens} only.`,
-    ...(own.commands ? [] : [noShell(agent, own.commandsHow, where)]),
-    // Browse the web follows the owner on every tool.
-    ...(own.web ? [] : [`No web: {owner} can switch on ${SWITCH_NAMES.web} in ${where}.`])
+    ...(own.commands
+      ? []
+      : [OWNER_GRANTS.commands.missing({ agent, how: own.commandsHow, where })]),
+    ...(own.web ? [] : [OWNER_GRANTS.web.missing({ where })])
   ].join(' ');
   // The full-path sentence tells the Gemini Odd itself how to work; a reader of
   // another Odd's line has its own tool and its own rules.
   return agent === 'gemini' && about === undefined
     ? `${line} Give each file tool the file's full path.`
     : line;
-}
-
-/**
- * What an Odd without a shell hears: the Run commands switch only when it
- * reaches its tool on this system (`commandsHow`), so it is never offered a
- * switch the owner cannot move.
- */
-function noShell(agent: Agent, how: CommandsHow, where: string): string {
-  return how.state === 'switch'
-    ? `No shell: {owner} can switch on ${SWITCH_NAMES.commands} in ${where}.`
-    : `No shell: ${AGENT_NAMES[agent]} can't run commands here.`;
 }
 
 /** One line per folder the owner gave the Odd: its path and what the Odd may do there. */

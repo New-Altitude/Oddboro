@@ -29,8 +29,8 @@ export const GET: RequestHandler = async () => {
   return json({
     staff: staff.map((s) => toProfile(s, guesses[s.id])),
     desk: await desk(),
-    working: { ...working },
-    inProgress: structuredClone(inProgress),
+    working: working(),
+    inProgress: inProgress(),
     roomNames: await roomNamesFor(office),
     switchedOff: await switchedOffIn(office),
     messages: await unreadPokes(),

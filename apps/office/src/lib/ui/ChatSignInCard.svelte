@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { AGENT_NAMES, OFFICE_ACCOUNT } from '@oddboro/ledger/agents';
-  import type { ChatSignIn } from '#lib/server/staff.ts';
+  import type { ChatSignIn } from '#lib/staff/chat.ts';
   import { AgentTools } from './agent-tools.svelte.ts';
   import { call } from './api.ts';
   import { toolAction } from './tool-action.ts';

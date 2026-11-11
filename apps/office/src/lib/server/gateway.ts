@@ -13,35 +13,49 @@
 // its own per-tool allow list too, so either one alone holds.
 import { randomBytes } from 'node:crypto';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import {
   CallToolRequestSchema,
+  ErrorCode,
   ListToolsRequestSchema,
+  McpError,
   type CallToolResult,
   type Tool
 } from '@modelcontextprotocol/sdk/types.js';
 import {
   connector,
+  GRANT_LABEL,
   narrowReadTools,
   OFFICE_URL,
   ownerName,
   raiseCall,
   readsOnly,
+  record,
   type CallPlace,
   type ConnectorRow,
   type HeldCall,
   type Level
 } from '@oddboro/ledger';
-import { upstream } from './access.ts';
+import { heldWordsFor, upstream } from './access.ts';
+import type { McpServer } from './launch.ts';
+import { ODD_META } from './google/http.ts';
 
 export const GATEWAY_PATH = '/api/gateway';
 
 /**
  * One outside tool a run holds, its connection made on first use and kept for
  * the run. `waits`: a write grant at Draft, whose changes wait for the owner.
+ * `toldNoStart`: the Ledger already says it could not start in this run.
  */
-type Held = { level: Level; waits: boolean; client?: Promise<Client>; tools?: Promise<Tool[]> };
+type Held = {
+  level: Level;
+  waits: boolean;
+  client?: Promise<Client>;
+  tools?: Promise<Tool[]>;
+  toldNoStart?: boolean;
+};
 /** `place` is where a held call lands; a run with none (a lesson run) changes nothing. */
 type GatewayRun = { held: Map<string, Held>; until: number; place?: CallPlace };
 
@@ -55,9 +69,6 @@ const runs: Map<string, GatewayRun> = ((
   globalThis as { oddboroGatewayRuns?: Map<string, GatewayRun> }
 ).oddboroGatewayRuns ??= new Map());
 
-/** A server entry as a run's tool takes it: Claude Code's --mcp-config, Codex's and Grok's alike. */
-export type GatewayServer = { type: 'http'; url: string; headers: Record<string, string> };
-
 /**
  * Open the gateway for one run: a token, and one server entry per outside
  * tool, each pointing at the office. `ms` is the run's own time limit, after
@@ -67,7 +78,7 @@ export function openGateway(
   grants: { connector: ConnectorRow; level: Level; waits?: boolean }[],
   ms: number,
   place?: CallPlace
-): { token: string; servers: Record<string, GatewayServer> } {
+): { token: string; servers: Record<string, Extract<McpServer, { type: 'http' }>> } {
   const now = Date.now();
   for (const [t, r] of runs) if (r.until < now) void closeGateway(t);
   const token = randomBytes(32).toString('base64url');
@@ -109,9 +120,52 @@ function runOf(request: Request): GatewayRun | undefined {
 /** Whether a request carries a going run's token: the office's guard lets it through to the gateway. */
 export const fromRun = (request: Request): boolean => !!runOf(request);
 
+/**
+ * Why a connector did not start, in the office's own words. Only the kind of
+ * failure is read, never its text: a server's refusal is its response body,
+ * which can repeat the key it was sent, so nothing it said reaches the Ledger.
+ */
+function whyNoStart(e: unknown): string {
+  if (e instanceof StreamableHTTPError)
+    return e.code === 401 || e.code === 403
+      ? "It turned down the office's key or sign-in."
+      : 'It answered the office with an error.';
+  if (e instanceof McpError && e.code === ErrorCode.ConnectionClosed)
+    return 'It stopped before it answered the office.';
+  if (e instanceof Error) {
+    const { code, syscall } = e as NodeJS.ErrnoException;
+    if (syscall?.startsWith('spawn')) return 'The office could not start the program it runs.';
+    if (code === 'ERR_INVALID_URL' || e.message === 'fetch failed')
+      return 'The office could not reach the address saved for it.';
+  }
+  return 'The office could not tell why.';
+}
+
+/**
+ * One Ledger line, the first time this run finds a connector will not start.
+ * A line that cannot be written is logged and dropped: the run still gets the
+ * connector's own error, as it does with no line at all. Nothing here rejects,
+ * so no caller has to wait for it, and none should: the line waits on Ollama.
+ */
+async function tellNoStart(c: ConnectorRow, h: Held, e: unknown): Promise<void> {
+  if (h.toldNoStart) return;
+  h.toldNoStart = true;
+  try {
+    await record({
+      kind: 'access',
+      actor: 'office',
+      title: `${c.name} could not start during a run`,
+      body: whyNoStart(e)
+    });
+  } catch (failed) {
+    console.error(`No Ledger line for ${c.id} not starting:`, failed);
+  }
+}
+
 function clientOf(c: ConnectorRow, h: Held): Promise<Client> {
   h.client ??= upstream(c).catch((e: unknown) => {
     h.client = undefined;
+    void tellNoStart(c, h, e);
     throw e;
   });
   return h.client;
@@ -167,9 +221,15 @@ async function hold(
       `This run only reads, so it cannot ask to use ${name}. Say what you would change in your reply.`
     );
   const owner = await ownerName();
+  const words = await heldWordsFor(c, name, args);
   const { ask, already } = await raiseCall(
     place,
-    { connector: c.id, tool: name, arguments: args },
+    {
+      connector: c.id,
+      tool: name,
+      arguments: args,
+      ...(words ? { said: words.title, shown: words.items } : {})
+    },
     c.name
   );
   return {
@@ -183,19 +243,33 @@ async function hold(
 }
 
 /**
+ * Which Odd a call is for, told only to the office's own Google servers
+ * (`ODD_META`), never to an outside one. The call is built here, so whatever
+ * `_meta` the run sent never passes.
+ */
+const forOdd = (c: ConnectorRow, staffId: string | undefined) =>
+  c.kind === 'builtin' && staffId ? { _meta: { [ODD_META]: staffId } } : {};
+
+/**
  * The owner said yes to a held call: the office makes that exact call, as
  * the run would have, and returns what came back. A failure to reach the
  * service throws, so the ask stays open to try again; a tool that answers
  * with an error is a result like any other.
  */
-export async function makeCall(call: HeldCall): Promise<NonNullable<HeldCall['result']>> {
+export async function makeCall(
+  call: HeldCall,
+  /** The Odd whose call it was. */
+  staffId: string
+): Promise<NonNullable<HeldCall['result']>> {
   const c = await connector(call.connector);
   if (!c) throw new Error('That service is no longer in the office');
   const client = await upstream(c);
   try {
-    const r = (await client.callTool({ name: call.tool, arguments: call.arguments }, undefined, {
-      timeout: 5 * 60_000
-    })) as CallToolResult;
+    const r = (await client.callTool(
+      { name: call.tool, arguments: call.arguments, ...forOdd(c, staffId) },
+      undefined,
+      { timeout: 5 * 60_000 }
+    )) as CallToolResult;
     const text = r.content
       .map((p) => (p.type === 'text' ? p.text : `[${p.type}]`))
       .join('\n')
@@ -226,15 +300,17 @@ export async function gateway(request: Request, id: string): Promise<Response> {
       return refusal(
         h.level === 'act'
           ? `${c.name} has no tool named ${name}.`
-          : `${name} is not one you may use. Your ${c.name} access is Read only, which reaches only the tools ${c.name} marks as only reading. Ask the owner for Read and write if the work needs it.`
+          : `${name} is not one you may use. Your ${c.name} access is ${GRANT_LABEL.read}, which reaches only the tools ${c.name} marks as only reading. Ask the owner for ${GRANT_LABEL.act} if the work needs it.`
       );
     // At Draft, a change waits for the owner's yes on their desk.
     if (h.waits && !onlyReads(c, tool)) return hold(c, name, req.params.arguments ?? {}, run.place);
     const client = await clientOf(c, h);
     // As long as the run itself may take: the run's own time limit ends it first.
-    return (await client.callTool({ name, arguments: req.params.arguments }, undefined, {
-      timeout: Math.max(60_000, run.until - Date.now())
-    })) as CallToolResult;
+    return (await client.callTool(
+      { name, arguments: req.params.arguments, ...forOdd(c, run.place?.staffId) },
+      undefined,
+      { timeout: Math.max(60_000, run.until - Date.now()) }
+    )) as CallToolResult;
   });
   // A new server and transport per request, with no session: the run's state
   // (its token, connections and tool list) lives here, not in the transport.

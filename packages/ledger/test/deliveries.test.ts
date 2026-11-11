@@ -8,7 +8,7 @@ import { db } from './pglite.ts';
 
 // The ledger rows a decision writes embed nothing: no Ollama answers here.
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
-const { decideAsk, deliveries, raiseAsk } = await import('../src/office.ts');
+const { decideAsk, deliveries, finishTask, giveTask, raiseAsk } = await import('../src/office.ts');
 
 await db.insert(staff).values({
   id: 'cole',
@@ -29,4 +29,14 @@ test('each ask says when the owner decided it, so a resumed chat hears of decisi
   const at = (id: number) => asks.find((d) => d.id === id)?.decidedAt;
   assert.ok(at(decided.ask.id) instanceof Date, 'a decided ask lost when it was decided');
   assert.equal(at(open.ask.id), null);
+});
+
+test('each finished task says when it was finished, so a resumed chat hears of it', async () => {
+  const open = await giveTask('cole', { title: 'Sign the form', why: 'w', steps: ['Sign'] });
+  const done = await giveTask('cole', { title: 'Post the form', why: 'w', steps: ['Post'] });
+  await finishTask(done.id, true, null);
+  const tasks = (await deliveries('cole')).filter((d) => d.kind === 'task');
+  const at = (id: number) => tasks.find((d) => d.id === id)?.decidedAt;
+  assert.ok(at(done.id) instanceof Date, 'a finished task lost when it was finished');
+  assert.equal(at(open.id), null);
 });
