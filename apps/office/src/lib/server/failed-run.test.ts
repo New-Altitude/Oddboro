@@ -26,7 +26,7 @@ await L.pg`insert into staff ${L.pg([
   odd('gil', 'Gil'),
   odd('hal', 'Hal'),
   odd('ivy', 'Ivy'),
-  odd('kim', 'Kim'),
+  odd('quill', 'Quill'),
   odd('lee', 'Lee')
 ])}`;
 
@@ -109,10 +109,10 @@ test("a new session's retry after a failed chat with a file is told where the fi
 });
 
 test('a retry after a failed chat whose file was deleted since is told the file is gone, with no path', async () => {
-  const pdf = attachPdf('kim');
-  await withoutClaude(() => send('kim', 'Summarise [report.pdf]', undefined, [pdf]));
+  const pdf = attachPdf('quill');
+  await withoutClaude(() => send('quill', 'Summarise [report.pdf]', undefined, [pdf]));
   rmSync(pdf.path);
-  const { message } = await chatOf('kim', 'Try again.');
+  const { message } = await chatOf('quill', 'Try again.');
   assert.ok(message.includes('- [report.pdf]: gone, deleted from your folder since'), message);
   assert.ok(!message.includes(pdf.name), 'the retry was given a path to a file that is gone');
 });

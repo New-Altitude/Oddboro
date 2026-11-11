@@ -10,7 +10,8 @@
   type Current = {
     place: { startUrl: string; ssoRegion: string } | null;
     signedIn: boolean;
-    signingIn: boolean;
+    /** AWS's page and code while a sign-in waits, from whichever tab started it. */
+    signingIn: { url: string; code: string } | null;
     aws: { accountId: string; role: string; region: string } | null;
   };
 
@@ -52,7 +53,7 @@
     call<T>(`/api/tasks/${taskId}`, { index, ...body });
 
   // Signed in already, by this tool or another: straight to the roles. A
-  // sign-in still waiting on AWS's page (the desk closed and opened again)
+  // sign-in still waiting on AWS's page (the desk closed and opened again, or opened in another tab)
   // waits here too, and moves on when the owner approves it.
   $effect(() => {
     post<Current>({ op: 'aws-current' })
@@ -61,6 +62,7 @@
         if (r.place) ({ startUrl, ssoRegion } = r.place);
         if (r.signedIn) return loadRoles();
         if (r.signingIn) {
+          ({ url: page, code } = r.signingIn);
           waiting = true;
           return loadRoles().finally(() => (waiting = false));
         }
