@@ -3,6 +3,14 @@
 // server's `handle` in hooks.server.ts) checks every request before a route
 // sees it:
 //
+// - The request must come from this computer (`fromThisComputer`). Through
+//   Caddy, which on a Mac and Linux listens on every address, the connection
+//   is always from 127.0.0.1, so the office reads the address Caddy forwards
+//   for (X-Forwarded-For), which Caddy writes itself. A program on this
+//   computer can write that header too; this check keeps out other machines,
+//   not other programs. Every entry counts, since a Caddy that trusts the
+//   client appends to what it sent, and an entry that is not a plain address
+//   (a port, brackets, a name, empty) counts as another computer.
 // - The Host must be one of the office's own names. A page that points a
 //   name of its own at 127.0.0.1 (DNS rebinding) counts as same-origin to the
 //   browser, so only the name it asked for gives it away.
@@ -17,6 +25,7 @@
 // A plain comparison of Origin with the office's own address would refuse the
 // owner's page through Caddy, which reaches the office over http while the
 // page is https, so `fromOwnerPage` compares what the browser itself says.
+import { isIPv4 } from 'node:net';
 import type { Handle } from '@sveltejs/kit/hooks';
 import { HOSTS } from './hosts.ts';
 import { fromRun, GATEWAY_PATH } from './gateway.ts';
@@ -40,6 +49,16 @@ function toThisOffice(request: Request): boolean {
   return NAMES.has(name.toLowerCase());
 }
 
+/** True when the connection and every X-Forwarded-For entry are loopback (127.0.0.0/8, ::1, ::ffff:127.x). */
+function fromThisComputer(request: Request, peer: string): boolean {
+  const hops = request.headers.get('x-forwarded-for')?.split(',') ?? [];
+  return [peer, ...hops].every((hop) => {
+    const address = hop.trim().toLowerCase();
+    const v4 = address.replace(/^::ffff:/, '');
+    return address === '::1' || (isIPv4(v4) && v4.startsWith('127.'));
+  });
+}
+
 /**
  * True when the browser says the request comes from the same origin
  * (Sec-Fetch-Site, which no page can set). A browser or webview that sends no
@@ -60,11 +79,13 @@ const refuse = (message: string) => new Response(message, { status: 403 });
 /** The server's `handle`: every request passes here before a route sees it. */
 export const guardOffice: Handle = ({ event, resolve }) => {
   const { request } = event;
+  if (!fromThisComputer(request, event.getClientAddress()))
+    return refuse('This office answers only its own computer');
   if (!toThisOffice(request)) return refuse('This office answers only at its own address');
   if (
     READS.has(request.method) ||
     fromOwnerPage(request) ||
-    (event.url.pathname === '/api/update' && fromShell(request, event.getClientAddress())) ||
+    (event.url.pathname === '/api/update' && fromShell(request)) ||
     (event.url.pathname.startsWith(`${GATEWAY_PATH}/`) && fromRun(request))
   )
     return resolve(event);

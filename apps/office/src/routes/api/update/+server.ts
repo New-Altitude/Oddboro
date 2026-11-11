@@ -20,10 +20,9 @@ import type { RequestHandler } from './$types';
 
 const VERSION = /^\d+\.\d+\.\d+$/;
 
-export const GET: RequestHandler = async ({ request, getClientAddress }) =>
-  json(await status(fromShell(request, getClientAddress())));
+export const GET: RequestHandler = async ({ request }) => json(await status(fromShell(request)));
 
-export const POST: RequestHandler = async ({ request, getClientAddress }) => {
+export const POST: RequestHandler = async ({ request }) => {
   const b = (await request.json().catch(() => ({}))) as {
     version?: unknown;
     notes?: unknown;
@@ -31,7 +30,7 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
     failed?: unknown;
     action?: unknown;
   };
-  const shell = fromShell(request, getClientAddress());
+  const shell = fromShell(request);
   if (b.version !== undefined || b.checked !== undefined || b.failed !== undefined) {
     if (!shell) error(403, 'Only the app reports updates');
     if (b.version !== undefined) {

@@ -1140,8 +1140,9 @@ pieces under 3,900 bytes a line, so no value is on a command line.
 
 17. **Updates.** The shell (`apps/desktop`) finds, downloads and checks a
     new version, then tells the server through `/api/update`
-    (`src/lib/server/update.ts`). Only the shell may report one: from
-    127.0.0.1 with the `ODDBORO_UPDATE_TOKEN` it passed in. The office picks
+    (`src/lib/server/update.ts`). Only the shell may report one: from this
+    computer (rule 1 of "Who the office answers") with the
+    `ODDBORO_UPDATE_TOKEN` it passed in. The office picks
     `installAt`: the start of the owner's next window (02:00 to 04:00 office
     time by default, `app_update` in the ledger), or now when the owner presses
     Install now. The rules are in `@oddboro/ledger/update-window`. From 15
@@ -1349,22 +1350,31 @@ In a release, whose port moves, the adapter takes the office's origin to be
 https, so that check refuses the owner's own http page. So the page's `call()`
 (`src/lib/ui/api.ts`) sends every action as JSON, body or not.
 
-1. The Host must be one of the office's names, whatever the port: 127.0.0.1,
+1. The request must come from this computer (`fromThisComputer`): the
+   connection's address and every address in X-Forwarded-For are loopback
+   (127.0.0.0/8, ::1, or ::ffff:127.x), and anything else, an entry that is
+   not a plain address included, gets 403, reads too. Through Caddy the
+   connection is always from 127.0.0.1, and Caddy writes the client it served
+   into that header and drops one the client sent, so this is what keeps
+   another machine on the network out. A program on this computer can write
+   the header too; this rule is not for that. The files built into the page
+   and Vite's dev routes are served before it.
+2. The Host must be one of the office's names, whatever the port: 127.0.0.1,
    [::1], localhost, the addresses through Caddy (`HOSTS` in
    `src/lib/server/hosts.ts`) and the app's `ORIGIN`. A site that points its
    own name at 127.0.0.1 looks same-origin to the browser, so only the name
    gives it away. A route asked by any other name gets 403.
-2. Anything but GET, HEAD and OPTIONS must come from the owner's page
+3. Anything but GET, HEAD and OPTIONS must come from the owner's page
    (`fromOwnerPage`): Sec-Fetch-Site says same-origin, or, with none, the
    Origin names the Host asked, whatever the scheme, since through Caddy the
    page is https and the office http. With neither, 403.
-3. The one other client is the app's shell, which reports updates to
+4. The one other client is the app's shell, which reports updates to
    `/api/update` with the token it passed the server (`fromShell` in
    `src/lib/server/update.ts`).
-4. `/account/callback` and `/connect/callback` arrive as GETs from the
+5. `/account/callback` and `/connect/callback` arrive as GETs from the
    owner's browser, sent back by the service's sign-in page, so they pass
-   rule 2 with no Origin.
-5. Vite's dev server has its own route, `/__open-in-editor`, that opens a file
+   rule 3 with no Origin.
+6. Vite's dev server has its own route, `/__open-in-editor`, that opens a file
    in an editor and runs before the handle. `noEditorLaunch` in
    `vite.config.ts` refuses it with 403, always: nothing in the office uses it.
 

@@ -59,9 +59,9 @@ export function downtime(): { from: Date | null; to: Date | null } {
   return { from: row()?.downAt ?? null, to: row()?.upAt ?? null };
 }
 
-/** True when this request comes from the shell: from this Mac, with the token it passed in. */
-export function fromShell(request: Request, address: string): boolean {
-  if (!MANAGED || !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(address)) return false;
+/** True when this request comes from the shell, with the token it passed in. `guardOffice` has already refused anything not from this computer. */
+export function fromShell(request: Request): boolean {
+  if (!MANAGED) return false;
   const sent = Buffer.from(request.headers.get('x-oddboro-update-token') ?? '');
   const want = Buffer.from(TOKEN);
   return sent.length === want.length && timingSafeEqual(sent, want);
