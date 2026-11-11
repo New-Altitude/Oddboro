@@ -13,12 +13,18 @@ export const findsIn = (find: string, ...texts: string[]) => {
 /**
  * The office tools the search finds: `grantable` with a switch each, `alwaysOn`
  * with none. Always on keeps only the tools some run of this Odd is offered: a
- * chat holding Gmail and a shared project session is the widest run, since the
- * owner can give it both and each of those rows says it needs it, but no run
- * makes the manager not the manager.
+ * chat holding Gmail, a service at Read and write and a shared project session
+ * is the widest run, since the owner can give it all three and each of those
+ * rows says it needs it, but no run makes the manager not the manager.
  */
 export function toolGroups(find: string, odd: { manager?: boolean }) {
-  const widest = { chat: true, gmail: true, project: true, manager: odd.manager === true };
+  const widest = {
+    chat: true,
+    gmail: true,
+    write: true,
+    project: true,
+    manager: odd.manager === true
+  };
   const shown = OFFICE_TOOLS.filter((t) => findsIn(find, t.name, t.does));
   return {
     grantable: shown.filter((t) => isGrantable(t.id)),

@@ -240,7 +240,9 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    Folders tab's line. Plain Approve refuses a folder ask. A `switch` ask (an
    Odd's `ask_for_switch`) takes Turn on, which approves it and turns Run
    commands, Browse the web or both on for that Odd in one step, as the
-   Settings tab does. A `remove` ask (an Odd's `leave_office`, or the
+   Settings tab does. A `standing` ask (an Odd's `ask_for_standing_yes`)
+   takes Allow or Deny and no Iterate, and Allow puts the tools on the grant.
+   A `remove` ask (an Odd's `leave_office`, or the
    manager's `remove_odd`) takes Remove, and a `bring_back` ask (the
    manager's `bring_back_odd`) takes Bring back; both take Deny and no
    Iterate. An item a lead raised from a colleague's
@@ -587,14 +589,15 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    split from `OFFICE_TOOLS` by `toolGroups` in `src/lib/ui/tool-groups.ts`,
    and filtered by the same search); Folders
    (`FoldersList.svelte`) lists each folder with Can read and Can write side
-   by side; Services holds the outside tools, each with Read only and Read and write side by side, changed in place (`setGrantLevel`, PATCH on the access route): the tool stays signed in, and only Revoke forgets it. Choose a folder asks
+   by side; Services holds the outside tools, each with Read only and Read and write side by side, changed in place (`setGrantLevel`, PATCH on the access route): the tool stays signed in, and only Revoke (the trash can) forgets it, after Confirm in place of the row. Refresh beside it reads the service's tools now and says what changed. Actions (n), shut until opened, lists every tool the grant reaches, those that change something first (`tools` from the access route), each with what it does in the service's own words (`connectors.toolNotes`, kept current with the rest of the stored tools, `refreshTools`). Each of those has Ask first and Without asking, with the Odd's level as the default: at Draft, Without asking lets the Odd call it with no desk item (PATCH with `tool` and `standing`, `setStanding` in the ledger); at Act, Ask first puts each call to it on the desk (PATCH with `tool` and `askFirst`, `setAskFirst`, and the gateway's `waitsFor`). A tool that only reads says so. Choose a folder asks
    `/api/folders/pick`, which opens the system's own picker on this computer
    (`src/lib/server/folder-picker.ts`: AppleScript on a Mac, PowerShell's
    Forms dialog on Windows, zenity or kdialog on Linux), one at a time; a
    cancel picks nothing, and where none can open the page says why and keeps
    the typed path. A picked folder starts at Can read and goes through the
-   same PATCH and `checkFolder` as a typed one. Each service there has
-   Rename, and an AWS tool already connected has Change role or Region
+   same PATCH and `checkFolder` as a typed one. Each service's name there
+   has a pencil that edits it in place, Enter or Save to keep and Escape to
+   drop (`ServiceName.svelte`), and an AWS tool already connected has Change role or Region
    (`ServiceActions.svelte`, `/api/services/[id]`), which puts its AWS step
    on the desk again from the office (`changeAwsTask`) and opens it. Under a
    grant the Odd's level does not allow, a line says so, with one click that
@@ -957,8 +960,13 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    `access.ts`, which starts a command's server with only the names a run
    may have, `outsideToolEnv` in `run-env-allow.ts`, and its own secrets),
    lists only the tools the grant reaches, refuses any other
-   call, and takes a tool that no longer passes `readsOnly` off the
-   connector's stored list with a Ledger line (`narrowReadTools`). A connector
+   call, and keeps the connector's stored tools in step with the list it got
+   (`refreshTools` in the ledger): new and dropped tools, Read only's reach
+   both ways, each tool's description, and a dropped tool off each standing
+   yes, each change but a description with a Ledger line. The office does the
+   same for every connected service an Odd holds, but physical mail, as it
+   starts and once a day (`startToolRefresh` in `access.ts`), and on the
+   owner's Refresh (`/api/services/[id]/tools`). A connector
    that cannot start during a run gets one Ledger line naming it, per run, in
    the office's own words for why and never the error's text, which can repeat
    a key (`whyNoStart`); the run still gets the error itself. A write
@@ -973,7 +981,12 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    the call and the desk shows as the ask's title (after the service's name,
    unless the office reads one from the call, as for Gmail) and under Why; a
    call without both is refused and holds nothing. The run hears that
-   nothing changed yet. The desk shows the tool and its exact inputs, with Make this
+   nothing changed yet. A tool the Odd uses without asking (`grants.standing`,
+   the ledger's `standing.ts`) goes straight through in any run with a place,
+   is listed without the two fields, and each such call rides on the run's
+   next held call to that service (`before`), which the desk lists as "Made
+   without asking before this call", so a commit shows what it applies. The
+   desk shows the tool and its exact inputs, with Make this
    call: `/api/asks/[id]/call` makes that call itself (`makeCall`, once per
    ask even on a second click), then `approveCall` keeps the result and
    starts the Odd's `carry_out` run, which carries on with what it returned.

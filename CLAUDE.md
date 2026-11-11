@@ -24,7 +24,9 @@ Each rule's reason is in `docs/hard-rules.md`, under the same heading.
 4. **Nothing leaves the office without the owner's yes.** No Odd sends, posts,
    schedules, accepts or deletes anything outside the office unless the owner
    approved that exact action, or gave that Odd write access to the tool
-   it acts through and the Act level to use it. Drafting is always allowed.
+   it acts through and the Act level to use it (less any tool of it they set
+   to ask first), or let it use that one tool of the service without asking.
+   Drafting is always allowed.
 5. **No commits or pushes without the owner saying so.**
 6. **Logical properties only.** `ms`, `me`, `ps`, `pe`, `start`, `end`, never
    left or right. Enforced by `scripts/check-directions.ts`.

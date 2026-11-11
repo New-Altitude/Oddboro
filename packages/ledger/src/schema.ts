@@ -131,7 +131,8 @@ export const ASK_KINDS = [
   'call',
   'remove',
   'bring_back',
-  'catch_up'
+  'catch_up',
+  'standing'
 ] as const;
 export type AskKind = (typeof ASK_KINDS)[number];
 /** `revise` means the owner sent it back to be reworked. */
@@ -195,11 +196,19 @@ export type HeldCall = {
    * and no Odd's prompt or brief ever carries them.
    */
   shown?: string[];
+  /**
+   * Calls to the same service the run made without asking (its standing yes)
+   * before it made this one, such as the change a commit call applies. Only
+   * the desk shows them.
+   */
+  before?: { tool: string; arguments: Record<string, unknown> }[];
   /** Set once the office made the call: whether the tool took it, and its words. */
   result?: { ok: boolean; text: string; at: string };
 };
 /** What a catch_up ask fills: one job's missed scheduled times, ISO, oldest first. */
 export type CatchUp = { jobId: number; times: string[] };
+/** A standing ask: tools of one service the Odd asks to use without asking. */
+export type StandingRequest = { connector: string; tools: string[] };
 /** A proposed hire. Approving it opens the hire window filled in with this. */
 export type HireProposal = {
   name: string;
@@ -370,6 +379,8 @@ export const asks = pgTable('asks', {
   switches: jsonb().$type<OwnSwitch[]>(),
   /** A remove or bring_back ask's Odd (a staff id). */
   odd: text(),
+  /** A standing ask's tools, to use without asking (`ask_for_standing_yes`). */
+  standing: jsonb().$type<StandingRequest>(),
   /** The ask this one reworks, after the owner sent that one back. */
   revises: integer(),
   /** The hand-off (its `hand_off` follow-up) the staffer raised this while working on. */
@@ -660,6 +671,12 @@ export const connectors = pgTable('connectors', {
   readTools: text().array().notNull().default([]),
   /** Every tool, for a Draft or Act grant. Filled in when the owner connects it. */
   tools: text().array().notNull().default([]),
+  /**
+   * What each tool does, by name, in the service's own words: filled in when
+   * the owner connects it and kept current by each run's tool list
+   * (`noteTools`). Only the owner's page shows them.
+   */
+  toolNotes: jsonb().$type<Record<string, string>>().notNull().default({}),
   /** Set once the owner has finished connecting it. */
   readyAt: at('ready_at'),
   createdAt: created()
@@ -675,6 +692,20 @@ export const grants = pgTable(
       .notNull()
       .references(() => connectors.id),
     level: text().$type<Level>().notNull().default('read'),
+    /**
+     * Tools of this service the Odd uses without asking, its standing yes: at
+     * Draft a call to one of them goes through instead of waiting on the desk.
+     * Only a write grant has any (`setStanding`, `giveStanding`).
+     */
+    standing: text().array().notNull().default([]),
+    /**
+     * Tools of this service the owner approves each call to first, even at
+     * Act: a call to one waits on the desk as every change does at Draft.
+     * Each list is the exception to its level, so both keep their tools as
+     * the level moves. A tool the service drops stays here, so one that comes
+     * back by that name still asks first (`setAskFirst`).
+     */
+    askFirst: text().array().notNull().default([]),
     askId: integer().references(() => asks.id),
     grantedAt: created('granted_at')
   },

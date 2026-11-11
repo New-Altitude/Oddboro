@@ -587,6 +587,25 @@
                 <dt class="text-xs text-muted">The call, exactly as the office makes it</dt>
                 {@render exact()}
               {/if}
+              {#if c.before?.length}
+                <!-- What this call may apply: the run's calls to the same service its standing yes let through. -->
+                <details class="mt-2" open>
+                  <summary class="cursor-pointer text-xs text-muted hover:text-ink"
+                    >Made without asking before this call ({c.before.length})</summary
+                  >
+                  <ul class="mt-1 flex flex-col gap-1">
+                    {#each c.before as b, n (n)}
+                      <li class="rounded-lg bg-raise px-2.5 py-2 text-xs">
+                        <div><span class="text-muted">Tool:</span> {b.tool}</div>
+                        <pre
+                          class="mt-1 max-h-48 overflow-auto rounded-md bg-night/50 px-2 py-1.5 font-mono text-[11px] whitespace-pre-wrap">{inputs(
+                            b.arguments
+                          )}</pre>
+                      </li>
+                    {/each}
+                  </ul>
+                </details>
+              {/if}
               <p class="mt-1.5 text-[11px] text-faint">
                 Nothing has changed yet. Approve, and the office makes this call once, then {who(
                   a.staffId
@@ -704,15 +723,17 @@
                     ? 'Connect'
                     : a.kind === 'switch'
                       ? 'Turn on'
-                      : a.kind === 'remove'
-                        ? 'Remove'
-                        : a.kind === 'bring_back'
-                          ? 'Bring back'
-                          : a.kind === 'window'
-                            ? 'Let it carry on'
-                            : a.plan && picked(a) < a.plan.items.length
-                              ? `Approve ${picked(a)} of ${a.plan.items.length}`
-                              : 'Approve'}</button
+                      : a.kind === 'standing'
+                        ? 'Allow'
+                        : a.kind === 'remove'
+                          ? 'Remove'
+                          : a.kind === 'bring_back'
+                            ? 'Bring back'
+                            : a.kind === 'window'
+                              ? 'Let it carry on'
+                              : a.plan && picked(a) < a.plan.items.length
+                                ? `Approve ${picked(a)} of ${a.plan.items.length}`
+                                : 'Approve'}</button
             >
           {/if}
         </div>

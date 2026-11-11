@@ -15,6 +15,8 @@ export type OfficeTool = {
   withGmail?: boolean;
   /** Offered only when the owner shared a native conversation with this Odd. */
   withProject?: boolean;
+  /** Offered only while the Odd holds a service at Read and write, even by `always`. */
+  withWrite?: boolean;
   /**
    * Offered only in a chat, where the office sets the owner's words
    * (`OWNER_SAID` in mcp-run.ts), even by `always`: the tool acts on what the
@@ -68,6 +70,13 @@ const TOOLS = [
     name: 'Ask for switches',
     does: 'Asks you to turn on Run commands or Browse the web for it. You turn it on with one click.',
     always: true
+  },
+  {
+    id: 'ask_for_standing_yes',
+    name: 'Ask to stop asking',
+    does: 'Asks you to let it use a tool without asking each time, such as one that only stages a change. You say yes or no once.',
+    always: true,
+    withWrite: true
   },
   { id: 'my_jobs', name: 'Its jobs', does: 'Sees its own jobs and schedules.', always: true },
   {
@@ -290,6 +299,8 @@ export type ToolRun = {
   gmail: boolean;
   /** A shared native conversation, outside a lesson-only run. */
   project?: boolean;
+  /** The Odd holds a service at Read and write. */
+  write?: boolean;
   /** A chat, where the office sets the owner's words (`OWNER_SAID`). */
   chat: boolean;
   /** The Odd is the Office Manager. */
@@ -299,7 +310,8 @@ export type ToolRun = {
 /**
  * Whether `run` is offered the office tool `id`: its Odd, holding `granted`,
  * has it (`hasTool`), it is a tool the Odd calls (not `prompt`), and each
- * condition the tool's row sets holds (`withGmail`, `inChat`, `notToManager`).
+ * condition the tool's row sets holds (`withGmail`, `withProject`, `withWrite`,
+ * `inChat`, `notToManager`).
  * The tool server registers by it.
  */
 export const isOffered = (granted: readonly string[], id: string, run: ToolRun): boolean => {
@@ -309,6 +321,7 @@ export const isOffered = (granted: readonly string[], id: string, run: ToolRun):
     !row?.prompt &&
     (!row?.withGmail || run.gmail) &&
     (!row?.withProject || run.project === true) &&
+    (!row?.withWrite || run.write === true) &&
     (!row?.inChat || run.chat) &&
     (!row?.notToManager || !run.manager)
   );
@@ -319,8 +332,9 @@ export const tickable = (s: Step) => !s.action || s.action.kind === 'oauth';
 
 /**
  * Asks the owner answers yes or no, with no Iterate: the office raised it
- * itself, so nobody could rework one sent back, or it lets an Odd go or
- * brings one back, which has nothing to rework.
+ * itself, so nobody could rework one sent back, or it lets an Odd go, brings
+ * one back or lets one use named tools without asking, which has nothing to
+ * rework.
  */
 export const yesOrNo = (kind: AskKind | undefined): boolean =>
   kind !== undefined && OWNER_ANSWERS.ask[kind].iterate === 'refused';

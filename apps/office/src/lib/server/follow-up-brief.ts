@@ -229,7 +229,14 @@ function askLinesOf(a?: AskRow): string[] {
         ...(a.call
           ? [
               `- The call: ${a.call.tool} on ${a.call.connector}, with ${JSON.stringify(a.call.arguments)}`,
-              ...(a.call.result ? [`- What it returned: ${callResultText(a.call.result)}`] : [])
+              ...(a.call.result ? [`- What it returned: ${callResultText(a.call.result)}`] : []),
+              // Where the Odd notices a stage-then-commit service, and offers to stop asking for the
+              // stage. Only once the call was made: a no or a send-back made nothing to apply.
+              ...(a.call.result?.ok
+                ? [
+                    `- If this call only prepared a change (a preview, a staged edit, a draft) and another call makes it real, make that call now: it waits for {owner}'s yes as this one did. Then offer ask_for_standing_yes once for ${a.call.tool}, so {owner} approves only the call that makes a change real.`
+                  ]
+                : [])
             ]
           : [])
       ]

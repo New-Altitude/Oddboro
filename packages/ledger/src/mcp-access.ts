@@ -18,6 +18,7 @@ import {
   staffer
 } from './office.ts';
 import { accessInRun, askAboveLevel, capabilities } from './capabilities.ts';
+import { standingAsked, standingSaid, standingTitle } from './standing.ts';
 import { commandsOnline } from './agents.ts';
 import { currentPlatform } from './platform.ts';
 import {
@@ -38,7 +39,20 @@ import {
   searchRegistry
 } from './registry.ts';
 import type { OwnSwitch as OwnSwitchName } from './access-words.ts';
-import { ME, me, OWNER, has, VIA, revisesArg, tool, text, json, line, refused } from './mcp-run.ts';
+import {
+  ME,
+  me,
+  OWNER,
+  has,
+  offered,
+  VIA,
+  revisesArg,
+  tool,
+  text,
+  json,
+  line,
+  refused
+} from './mcp-run.ts';
 import { raisedNote, placed } from './mcp-desk.ts';
 import './mcp-mail.ts';
 
@@ -286,6 +300,54 @@ tool(
     );
   }
 );
+
+// A standing yes: tools of a service the Odd uses without asking. Offered only
+// with a write grant (`withWrite`), where at Draft each change otherwise waits
+// on the desk. The Odd offers it once, for a tool that only prepares a change
+// another call then makes real; a no stands (`standingAsked`).
+const writeGrants = (await grantsFor(ME)).filter((g) => g.level === 'act');
+if (offered('ask_for_standing_yes'))
+  tool(
+    'ask_for_standing_yes',
+    {
+      description: `Ask ${OWNER} to let you use one or more tools of a service without asking each time. At Draft, each call that changes something waits on ${OWNER}'s desk; with this yes, calls to these tools go straight through from then on, and every other call that changes something still waits. Offer it for a tool that only prepares a change another call then makes real: a preview, a staged edit, a draft. The time to offer it is after ${OWNER} approved such a call and you saw that a second call was needed to apply it. Never ask for a tool that sends, publishes, deletes, pays or makes a change real by itself. Ask once: if ${OWNER} says no, keep asking for each call.${raisedNote}`,
+      inputSchema: {
+        connector: z
+          .enum(writeGrants.map((g) => g.connectorId) as [string, ...string[]])
+          .describe('The service, by the id my_access lists.'),
+        tools: z
+          .array(z.string())
+          .min(1)
+          .max(5)
+          .describe('The tool names, exactly as the service lists them.'),
+        why: z
+          .string()
+          .max(1000)
+          .describe(
+            `What these tools do and why using them without asking is safe, in one or two plain sentences ${OWNER} reads on their desk. Name the call that makes the change real, which still waits for their yes.`
+          )
+      }
+    },
+    async ({ connector: id, tools, why }) => {
+      const on = await placed({});
+      if ('problem' in on) return refused(on.problem);
+      const asked = await standingAsked(ME, { connector: id, tools }, OWNER);
+      if ('problem' in asked) return refused(asked.problem);
+      const service = writeGrants.find((g) => g.connectorId === id)!.connector.name;
+      const { ask } = await raiseAsk(ME, {
+        ...on,
+        kind: 'standing',
+        title: standingTitle(asked.tools, service),
+        why,
+        ifApproved: `${me.name} uses ${standingSaid(asked.tools, service)} without asking from now on: each call to ${asked.tools.length === 1 ? 'it' : 'them'} goes straight through. Every other call that changes something in ${service} still waits for your yes. You can take it back on ${me.name}'s ${SETTINGS_TAB} tab, under Services.`,
+        standing: { connector: id, tools: asked.tools },
+        via: VIA
+      });
+      return text(
+        `Ask ${ask.id} is on ${OWNER}'s desk. If they say yes, your runs use ${asked.tools.join(', ')} without asking from then on. Nothing else changes: carry on with the work as it is.`
+      );
+    }
+  );
 
 tool(
   'reconnect_access',

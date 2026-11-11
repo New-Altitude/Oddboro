@@ -14,6 +14,10 @@ import {
   bindPostalMailbox,
   connector,
   connectorReady,
+  connectorsInUse,
+  notesOf,
+  refreshTools,
+  type ToolChanges,
   readsOnly,
   setConnectorConfig,
   tickKey,
@@ -162,8 +166,44 @@ export async function confirmTools(id: string): Promise<void> {
   await connectorReady(
     id,
     tools.map((t) => t.name),
-    tools.filter((t) => t.readOnly).map((t) => t.name)
+    tools.filter((t) => t.readOnly).map((t) => t.name),
+    notesOf(tools)
   );
+}
+
+/** Ask a service for its tools now and bring the stored ones up to date: the owner's Refresh. */
+export async function refreshService(id: string): Promise<ToolChanges> {
+  const c = await connector(id);
+  // Connecting stores the first list (`confirmTools`); until then there is none to keep.
+  if (!c?.readyAt) throw new Error('Finish connecting it first');
+  return refreshTools(id, await listTools(id));
+}
+
+const DAY_MS = 24 * 60 * 60_000;
+const g = globalThis as unknown as { toolRefresh?: ReturnType<typeof setInterval> };
+
+/**
+ * Every connected service an Odd holds, one at a time, so none goes stale
+ * while no run uses it. One that fails (signed out, offline) keeps what it had.
+ */
+async function refreshServices(): Promise<void> {
+  try {
+    for (const c of await connectorsInUse())
+      await refreshService(c.id).catch((e: unknown) =>
+        console.error(`[tools] ${c.id} not refreshed:`, e instanceof Error ? e.message : e)
+      );
+  } catch (e) {
+    // The database itself failed: never awaited, so a throw here would end the office.
+    console.error('[tools] services not refreshed:', e);
+  }
+}
+
+/** As the office starts, and once a day while it runs. Once per process. */
+export function startToolRefresh(): void {
+  if (g.toolRefresh) return;
+  g.toolRefresh = setInterval(() => void refreshServices(), DAY_MS);
+  g.toolRefresh.unref();
+  void refreshServices();
 }
 
 /**

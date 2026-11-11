@@ -673,8 +673,8 @@ test('every office tool refuses a key it does not take, and says which keys it d
   // tell_lead, and a run on that work offers resume_at.
   await db.insert(staff).values({ ...odd('all', 'Ada'), tools: OFFICE_TOOLS.map((t) => t.id) });
   await db.insert(staffGoals).values({ staffId: 'all', goalId: fair.id, part: 'Everything' });
-  // Gmail at any level offers propose_reply.
-  await db.insert(grants).values({ staffId: 'all', connectorId: 'gmail', level: 'read' });
+  // Gmail at any level offers propose_reply, and at write ask_for_standing_yes.
+  await db.insert(grants).values({ staffId: 'all', connectorId: 'gmail', level: 'act' });
   // A native conversation shared with Ada offers the project tools, in Advanced
   // mode. The owner row keeps the name every other test here reads.
   await db
@@ -734,8 +734,8 @@ test('every tool the server registers is a listed office tool or rides with one'
 for (const [id, holds] of Object.entries(HOLDERS))
   for (const run of ['chat', 'thread'] as const)
     test(`an Odd holding ${holds.length} of the office tools (${id}) in a ${run} has exactly the always tools, the ones it holds and the ones that ride with them, as each row's conditions allow`, async () => {
-      // None of these Odds is the Office Manager, and only Tot holds Gmail.
-      const toolRun = { gmail: id === 'tot', chat: run === 'chat', manager: false };
+      // None of these Odds is the Office Manager, only Tot holds Gmail, and none at Read and write.
+      const toolRun = { gmail: id === 'tot', write: false, chat: run === 'chat', manager: false };
       const offered = new Set<string>(
         OFFICE_TOOLS.filter((t) => isOffered(holds, t.id, toolRun)).map((t) => t.id)
       );
@@ -781,6 +781,8 @@ test('isOffered gives an always tool to every run its row allows, and a held too
   assert.equal(isOffered([], 'tell_lead', chatRun), true);
   assert.equal(isOffered([], 'propose_reply', chatRun), false);
   assert.equal(isOffered([], 'propose_reply', { ...job, gmail: true }), true);
+  assert.equal(isOffered([], 'ask_for_standing_yes', job), false);
+  assert.equal(isOffered([], 'ask_for_standing_yes', { ...job, write: true }), true);
   assert.equal(isOffered([], 'search_ledger', chatRun), false);
   assert.equal(isOffered(['search_ledger'], 'search_ledger', job), true);
 });

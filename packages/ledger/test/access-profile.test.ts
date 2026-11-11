@@ -179,7 +179,9 @@ test('a handed-over run keeps its own commands, web and folders; a write grant w
     outside: [
       {
         connector: { id: 'notion', name: 'Notion', readTools: ['search'] } as ConnectorRow,
-        level: 'act'
+        level: 'act',
+        standing: [],
+        askFirst: []
       }
     ],
     agent: 'claude',

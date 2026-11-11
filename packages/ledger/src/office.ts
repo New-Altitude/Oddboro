@@ -150,11 +150,18 @@ export {
   reconfigureConnector,
   bindPostalMailbox,
   connectorReady,
-  narrowReadTools,
   grantsFor,
   setGrantLevel,
   revoke
 } from './office-access.ts';
+export {
+  notesOf,
+  type ListedTool,
+  type ToolChanges,
+  changesSaid,
+  refreshTools,
+  connectorsInUse
+} from './office-service-tools.ts';
 export {
   giveTask,
   taskFiles,

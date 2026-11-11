@@ -5,6 +5,7 @@
 // those in CHANGES are driven.
 import assert from 'node:assert/strict';
 import { mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { after, test } from 'node:test';
@@ -15,6 +16,7 @@ import { OFFICE_TOOLS } from '@oddboro/ledger/tools';
 import {
   L,
   currentOffice,
+  folder,
   goal,
   odd,
   onPlatform,
@@ -474,6 +476,30 @@ const TRY: Record<Recording, (send: Send) => Promise<void>> = {
       { id: string }[]
     >`select id from connectors where id like 'renamed-example-org%'`;
     await send({ params: { id: c.id }, body: { name: 'Open Brain' } });
+  },
+  // A service that dropped a tool and added one since the office last read it.
+  'POST /api/services/[id]/tools': async (send) => {
+    const sdk = (path: string) =>
+      createRequire(import.meta.url).resolve(`@modelcontextprotocol/sdk/${path}`);
+    const server = join(folder, 'refresh-server.mjs');
+    writeFileSync(
+      server,
+      `import { McpServer } from ${JSON.stringify(sdk('server/mcp.js'))};
+import { StdioServerTransport } from ${JSON.stringify(sdk('server/stdio.js'))};
+const server = new McpServer({ name: 'refresh', version: '1.0.0' });
+server.registerTool('find', { annotations: { readOnlyHint: true } }, async () => ({ content: [] }));
+await server.connect(new StdioServerTransport());
+`
+    );
+    await L.addConnector({
+      id: 'refreshed',
+      name: 'Refreshed',
+      description: 'A stand-in.',
+      kind: 'stdio',
+      config: { command: process.execPath, args: [server] }
+    });
+    await L.connectorReady('refreshed', ['search'], ['search']);
+    await send({ params: { id: 'refreshed' } });
   },
   // Then a task with work parked on it, finished and then dropped: the work
   // wakes, and the task's end is still the one row.
