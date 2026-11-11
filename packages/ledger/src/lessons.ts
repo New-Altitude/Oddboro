@@ -17,7 +17,7 @@ import {
   sql
 } from 'drizzle-orm';
 import { db } from './db.ts';
-import { record, staffer } from './office.ts';
+import { anyStaffer, record } from './office.ts';
 import {
   attachments,
   followUps,
@@ -348,7 +348,7 @@ export async function lesson(id: number): Promise<LessonRow | undefined> {
 }
 
 const forWhom = async (l: Pick<LessonRow, 'staffId'>) =>
-  l.staffId ? ((await staffer(l.staffId))?.name ?? l.staffId) : 'every Odd';
+  l.staffId ? ((await anyStaffer(l.staffId))?.name ?? l.staffId) : 'every Odd';
 
 /** The ledger keeps the owner's words, and how many times they had to give them. */
 const recordTaught = async (l: LessonRow) =>

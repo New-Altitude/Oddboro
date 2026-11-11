@@ -8,10 +8,11 @@
 // there. Server only.
 import { opendirSync, statSync, type Dir } from 'node:fs';
 import { join, relative, sep } from 'node:path';
-import { shownFolder } from '@oddboro/ledger';
-import type { ChatEntry } from './staff.ts';
+import { OFFICE_FILES, shownFolder } from '@oddboro/ledger';
+import type { ChatEntry } from '../staff/chat.ts';
+import { retoldFiles, retoldLine, type RetoldEntry } from './chat-preface.ts';
 
-/** At most this many characters of chat text go into one replay. */
+/** At most this many characters of chat text, and the files retold under it, go into one replay. */
 export const REPLAY_CHARS = 24_000;
 /** At most this many changed files are named; the rest are counted. */
 export const REPLAY_FILES = 30;
@@ -22,29 +23,41 @@ const WALK_ENTRIES = 2_000;
 export type Changed = { files: string[]; granted: boolean };
 
 /**
- * The lines a replay holds, oldest first: the newest lines with text whose
- * text fits the budget together. A newest line over the budget alone keeps
- * its end, after a `…`.
+ * A line a replay may hold: one with text that someone said. A failed run's
+ * error is the office's, so it is never replayed as the Odd's words; the
+ * owner's line before it stays.
  */
-export function replayed(entries: ChatEntry[], budget = REPLAY_CHARS): ChatEntry[] {
-  const said = entries.filter((e) => e.text);
+const said = (e: ChatEntry) => !!e.text && !e.failed;
+
+/** What a line takes of the budget: its text and the files retold under it, which go or stay with it. */
+const cost = (e: RetoldEntry) => e.text.length + retoldFiles(e).length;
+
+/**
+ * The lines a replay holds, oldest first: the newest lines said (`said`)
+ * whose text and retold files fit the budget together. A newest line over
+ * the budget alone keeps its files and the end of its text that fits beside
+ * them, after a `…`.
+ */
+export function replayed<E extends RetoldEntry>(entries: E[], budget = REPLAY_CHARS): E[] {
+  const lines = entries.filter(said);
   let total = 0;
-  let from = said.length;
-  while (from > 0 && total + said[from - 1].text.length <= budget)
-    total += said[--from].text.length;
-  const newest = said.at(-1);
-  if (from === said.length && newest)
-    return [{ ...newest, text: `…${newest.text.slice(-budget)}` }];
-  return said.slice(from);
+  let from = lines.length;
+  while (from > 0 && total + cost(lines[from - 1]) <= budget) total += cost(lines[--from]);
+  const newest = lines.at(-1);
+  if (from === lines.length && newest) {
+    const room = Math.max(0, budget - retoldFiles(newest).length);
+    return [{ ...newest, text: `…${newest.text.slice(newest.text.length - room)}` }];
+  }
+  return lines.slice(from);
 }
 
 /**
  * Where in `entries` the lines `replayed` kept sit: the last `kept.length`
- * lines with text. By position, since a cut newest line is a copy.
+ * lines said. By position, since a cut newest line is a copy.
  */
 export function replayedAt(entries: ChatEntry[], kept: ChatEntry[]): number[] {
   if (!kept.length) return [];
-  return entries.flatMap((e, i) => (e.text ? [i] : [])).slice(-kept.length);
+  return entries.flatMap((e, i) => (said(e) ? [i] : [])).slice(-kept.length);
 }
 
 /**
@@ -60,10 +73,10 @@ export function replaySince(entries: ChatEntry[], kept: ChatEntry[]): string | u
   return oldest.from === 'owner' ? oldest.at : (entries[first - 1]?.at ?? oldest.at);
 }
 
-/** The earlier chat, word for word, for a session that never saw it. Pure. */
-export function replay(entries: ChatEntry[], changed: Changed, budget = REPLAY_CHARS): string {
+/** The earlier chat, word for word, with each owner line's files as they are now, for a session that never saw it. Pure. */
+export function replay(entries: RetoldEntry[], changed: Changed, budget = REPLAY_CHARS): string {
   const kept = replayed(entries, budget);
-  const lines = kept.map((e) => `${e.from === 'owner' ? '{owner}' : 'You'}: ${e.text}`);
+  const lines = kept.map(retoldLine);
   const more = changed.files.length - REPLAY_FILES;
   const files =
     changed.files.slice(0, REPLAY_FILES).join(', ') + (more > 0 ? `, and ${more} more` : '');
@@ -72,13 +85,13 @@ export function replay(entries: ChatEntry[], changed: Changed, budget = REPLAY_C
     ? `(Files that changed during it, in your folder and the folders {owner} gave you, newest first: ${files}.)`
     : `(Files in your folder that changed during it: ${files}.)`;
   // The rest is in the office's own record, which the Odd may read: nothing of the chat is out of reach.
-  const older = kept.length < entries.filter((e) => e.text).length || kept[0]?.text.startsWith('…');
+  const older = kept.length < entries.filter(said).length || kept[0]?.text.startsWith('…');
   return [
     '(This is a new session, so you do not remember your chat with {owner} so far. Here is the latest of it, word for word, oldest first:)',
     lines.join('\n'),
     ...(older
       ? [
-          '(The chat goes back further. All of it is in chat.jsonl in your folder, one line per message, oldest first. Read it when something earlier matters.)'
+          `(The chat goes back further. All of it is in ${OFFICE_FILES.chat} in your folder, one line per message, oldest first. Read it when something earlier matters.)`
         ]
       : []),
     ...(changed.files.length ? [list] : [])

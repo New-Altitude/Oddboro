@@ -5,6 +5,21 @@
 import type { Schedule, Weekday } from './schema.ts';
 
 export const WEEKDAYS: Weekday[] = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+/**
+ * How often and when a job may run. The owner's limits and an Odd's differ on
+ * purpose: the owner sets a job's schedule on the page, and an Odd sets
+ * its own (`edit_my_job`). An Odd's minimum is higher than the owner's and
+ * it has no maximum; its time takes any two digits each side, while the
+ * owner's must be on the clock.
+ */
+export const SCHEDULE_RULE = {
+  ownerMinMinutes: 5,
+  ownerMaxMinutes: 1440,
+  ownerAt: /^([01]\d|2[0-3]):[0-5]\d$/,
+  oddMinMinutes: 15,
+  oddAt: /^\d\d:\d\d$/
+} as const;
 const DAY_NAMES: Record<Weekday, string> = {
   Mon: 'Mondays',
   Tue: 'Tuesdays',
@@ -109,7 +124,8 @@ export function instant(y: number, m: number, d: number, h: number, min: number)
 
 /** The first time after `from` that the schedule says to run. */
 export function nextRun(s: Schedule, from: Date): Date {
-  if (s.every === 'minutes') return new Date(from.getTime() + Math.max(5, s.n) * 60_000);
+  if (s.every === 'minutes')
+    return new Date(from.getTime() + Math.max(SCHEDULE_RULE.ownerMinMinutes, s.n) * 60_000);
   const [h, min] = s.at.split(':').map(Number);
   const today = wallClock(from);
   for (let i = 0; i < 8; i++) {

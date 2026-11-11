@@ -5,8 +5,9 @@
   import { when } from './format.ts';
   import type { StaffProfile } from '../staff/roster.ts';
 
-  type Props = { staff: StaffProfile[] };
-  let { staff }: Props = $props();
+  /** `version` changes when the ledger gets a row, and the search runs again. */
+  type Props = { staff: StaffProfile[]; version: number };
+  let { staff, version }: Props = $props();
 
   let q = $state('');
   let kind = $state<LedgerKind | ''>('');
@@ -26,6 +27,7 @@
   // Search when the words settle, not on every key.
   let timer: ReturnType<typeof setTimeout> | undefined;
   $effect(() => {
+    void version;
     const params = new URLSearchParams({ q, kind, who });
     clearTimeout(timer);
     timer = setTimeout(async () => {

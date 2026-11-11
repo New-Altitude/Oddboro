@@ -16,7 +16,7 @@
 // stopping one halfway can leave Claude Code half installed.
 import { error, json } from '@sveltejs/kit';
 import { OFFICE_ACCOUNT, WINDOWS, claudeCommand } from '@oddboro/ledger';
-import { claudeSignIn, signingIn, SLOTS } from '#lib/server/agent-sign-in.ts';
+import { claudeSignIn, npmMissing, signingIn, SLOTS } from '#lib/server/agent-sign-in.ts';
 import {
   claudeAccount,
   claudeAccountOf,
@@ -96,6 +96,8 @@ export const POST: RequestHandler = async ({ request }) => {
   if (running === 'install' || running === 'update')
     error(409, `Claude Code is still ${running === 'install' ? 'installing' : 'updating'}`);
   const [cmd, args] = COMMANDS[action]();
+  const missing = action === 'install' && cmd === 'npm' ? npmMissing('Claude Code') : undefined;
+  if (missing) error(400, missing);
   if (action === 'sign-in') {
     signingIn.claude = OFFICE_ACCOUNT;
     return slot.start(action, cmd, args, claudeSignIn(OFFICE_ACCOUNT).env);

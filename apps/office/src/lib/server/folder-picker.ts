@@ -9,6 +9,7 @@
 // One picker at a time, closed after five minutes. Server only.
 import { execFile } from 'node:child_process';
 import { homedir } from 'node:os';
+import { currentPlatform } from '@oddboro/ledger/platform';
 import { onPath } from './on-path.ts';
 
 export type Picked = { path: string } | { cancelled: true } | { unavailable: string };
@@ -33,7 +34,7 @@ type Dialog = { cmd: string; args: string[]; env?: NodeJS.ProcessEnv };
 /** The command that opens this system's folder picker, or why there is none. */
 export function pickerCommand(prompt: string): Dialog | { unavailable: string } {
   const home = homedir();
-  if (process.platform === 'darwin') {
+  if (currentPlatform() === 'darwin') {
     const cmd = onPath('osascript');
     if (!cmd) return { unavailable: 'This Mac has no osascript to open a folder picker.' };
     // The prompt is an argument, never part of the script.
@@ -52,7 +53,7 @@ export function pickerCommand(prompt: string): Dialog | { unavailable: string } 
       ]
     };
   }
-  if (process.platform === 'win32') {
+  if (currentPlatform() === 'win32') {
     const cmd = onPath('powershell');
     if (!cmd) return { unavailable: 'This computer has no PowerShell to open a folder picker.' };
     return {

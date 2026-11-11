@@ -5,8 +5,19 @@
 // refuses an action with no content type unless its Origin matches the
 // office's, and in a release the office takes its origin to be https while
 // the page is http (apps/office/CLAUDE.md, "Who the office answers").
+import type { Path } from '$app/types';
+
+/**
+ * An address one of the office's own routes answers, with any search after
+ * it. The type check catches a wrong address only up to its first route
+ * parameter: `Path` writes a parameter as `${string}`, which matches any
+ * rest, so `/api/staff/${id}/attachmentz` still passes.
+ */
+// The slash is added here because SvelteKit 3.1's `Path` names each route without one.
+export type ApiUrl = `/${Path}` | `/${Path}?${string}`;
+
 export async function call<T = { ok: true }>(
-  url: string,
+  url: ApiUrl,
   body?: unknown,
   method = body === undefined ? 'GET' : 'POST',
   /** Drops the call; the office stops work it was doing for it, such as a drawing. */
@@ -17,6 +28,25 @@ export async function call<T = { ok: true }>(
     signal,
     headers: method === 'GET' ? undefined : { 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body)
+  });
+  if (!res.ok) throw await failure(res);
+  return res.json() as Promise<T>;
+}
+
+/**
+ * One file's bytes as a POST, with its name and type in headers. It goes as
+ * application/octet-stream, which SvelteKit's form check never applies to,
+ * whatever the file is.
+ */
+export async function sendFile<T>(url: ApiUrl, file: Blob, name: string, type: string): Promise<T> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/octet-stream',
+      'x-file-name': encodeURIComponent(name),
+      'x-media-type': type
+    },
+    body: file
   });
   if (!res.ok) throw await failure(res);
   return res.json() as Promise<T>;
@@ -34,7 +64,7 @@ export async function failure(res: Response): Promise<Error> {
 }
 
 /** A POST whose answer streams a line of JSON at a time. Each line goes to `on` as it lands. */
-export async function stream<T>(url: string, body: unknown, on: (line: T) => void): Promise<void> {
+export async function stream<T>(url: ApiUrl, body: unknown, on: (line: T) => void): Promise<void> {
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -44,7 +74,7 @@ export async function stream<T>(url: string, body: unknown, on: (line: T) => voi
 }
 
 /** Follow a GET that streams a line of JSON at a time, until it ends. */
-export async function follow<T>(url: string, on: (line: T) => void): Promise<void> {
+export async function follow<T>(url: ApiUrl, on: (line: T) => void): Promise<void> {
   await lines(await fetch(url), on);
 }
 

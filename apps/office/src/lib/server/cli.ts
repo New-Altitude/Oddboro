@@ -5,9 +5,15 @@
 // ended early. Server only.
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { COMMANDS_WHY, type Agent, type Effort } from '@oddboro/ledger';
+import {
+  AGENT_NAMES,
+  COMMANDS_WHY,
+  OFFICE_MODEL_VAR,
+  type Agent,
+  type Effort
+} from '@oddboro/ledger';
 import { deniedEdits } from './files.ts';
-import type { RunEvent, RunImage } from './launch.ts';
+import { configServers, type McpServer, type RunEvent, type RunImage } from './launch.ts';
 import { GROK_PLAN_LIMIT, GROK_SIGN_IN, grokLaunch, grokSignedOut } from './grok.ts';
 import { codexLaunch, codexReader, codexSignedOut } from './codex.ts';
 import { geminiKeyMissing, geminiLaunch, geminiReader } from './gemini.ts';
@@ -59,12 +65,12 @@ export type CliRun = {
   input: string;
   /** The session to resume, else a new one. */
   resume?: string;
-  servers: Record<string, Record<string, unknown>>;
+  servers: Record<string, McpServer>;
   /** The MCP tools the run may call, as access() names them for Claude Code (`mcp__server` or `mcp__server__tool`). */
   allowed: string[];
   /** The longest the run may take before the office cuts it. */
   timeoutMs: number;
-  /** Pictures sent with this message, including when a chat resumes. */
+  /** Pictures sent with the message: an office run's (`runAsOffice`), or those the owner attached in a Codex Odd's chat. */
   images?: RunImage[];
   /** An office run: no tools to read with, and no MCP. */
   bare?: boolean;
@@ -106,7 +112,7 @@ export const LAUNCHES: Record<
         message: r.input,
         resume: r.resume,
         newSession: randomUUID(),
-        servers: r.servers,
+        servers: configServers(r.servers),
         allowed: r.allowed,
         web: r.web,
         images: r.images,
@@ -141,7 +147,7 @@ export const LAUNCHES: Record<
         effort: r.effort,
         model: r.model
       }),
-      read: codexReader(r.model ?? process.env.OFFICE_CODEX_MODEL ?? 'codex'),
+      read: codexReader(r.model ?? process.env[OFFICE_MODEL_VAR.codex] ?? 'codex'),
       // Only a shell leaves processes behind.
       ...(r.commands ? { ownGroup: true as const } : {})
     };
@@ -222,6 +228,49 @@ export function streamTools(agent: Agent, e: Record<string, unknown>): string[] 
  * in its log's turn.terminal_failure), both from the walk on 2026-11-04.
  */
 const GROK_PLAN_SPENT = /reached your .*usage limit|usage-exhausted/i;
+
+/**
+ * Grok's refusal when a container socket its sandbox denies is a link to a
+ * path off its own list (Grok 1.0.77, issue #52). `runHome` in grok.ts clears
+ * it for a Docker socket that leads to a `docker.sock`; this catches the rest.
+ */
+const GROK_SOCKET_LINK = /runtime-socket deny path (\S+): endpoint is a symlink/;
+
+/**
+ * What the owner reads when Grok refuses its sandbox for a socket link: what
+ * is wrong, and the one change that keeps the work going, for an Odd on its
+ * Settings tab, for the office's own runs in Setup.
+ */
+function grokSocketLink(socket: string, office: boolean): string {
+  const steps = office
+    ? ['To keep the office working:', '1. Open Setup.', '2. Under Your AI, pick another tool.']
+    : [
+        'To keep this Odd working:',
+        "1. Open this Odd's Settings tab.",
+        '2. Under Model, pick another tool.'
+      ];
+  return [
+    `Grok can't start on this computer. Its sandbox won't run while ${socket} is a link to a place Grok doesn't know, which some container apps set up. The office never runs Grok without its sandbox.`,
+    steps.join('\n'),
+    'Or wait for a Grok update that fixes this.'
+  ].join('\n\n');
+}
+
+/**
+ * Why a tool stopped before its result: the office's own words for a failure
+ * it knows, else the exit code and the last two lines the tool wrote.
+ * `office`: an office run, which no Odd's Settings tab changes.
+ */
+export function stoppedWhy(
+  agent: Agent,
+  code: number | null,
+  stderr: string,
+  office = false
+): string {
+  const socket = agent === 'grok' ? GROK_SOCKET_LINK.exec(stderr)?.[1] : undefined;
+  if (socket) return grokSocketLink(socket, office);
+  return `${AGENT_NAMES[agent]} stopped (exit ${code}). ${stderr.trim().split('\n').slice(-2).join(' ')}`;
+}
 
 /**
  * Why a run ended without its result, in the tool's own words when it gave

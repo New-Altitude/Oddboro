@@ -91,7 +91,10 @@ test('a selection keeps its source, exact files and goal in one manager turn per
   await answer.text();
   const response = history('robin').find((l) => l.from === 'staff' && l.turnId === line.turnId);
   assert.ok(response);
-  assert.ok(response.text.includes('Check moisture before watering.'));
+  // The current runner opens attachments by path; the downloads above check every byte.
+  for (const file of line.files ?? [])
+    assert.ok(response.text.includes(L.home('staff', 'robin', 'attachments', file.name)));
+  assert.equal(line.files?.length, 3);
 
   const changed = prepare('A revised planting plan.');
   const next = await previewHandoff(changed);
