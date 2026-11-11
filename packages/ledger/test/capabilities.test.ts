@@ -206,8 +206,9 @@ test("my_access says a capped run's level and why, and an uncapped run's own lev
       levelLine('draft', 'Sam'),
       "This run was started by a colleague or by the office, not by Sam's yes, so it works at Draft at most.",
       'Your runs go through Claude Code.',
-      'Your own tools work on files only. No shell: Sam can switch on Run commands in your Settings tab, under Office. No web: Sam can switch on Browse the web in your Settings tab, under Office.',
-      'Sam has given you no folders.',
+      'Your own tools work on files only. No shell: ask Sam to turn on Run commands with ask_for_switch. No web: ask Sam to turn on Browse the web with ask_for_switch.',
+      'Sam grants other office tools in your Settings tab, under Office; when a job needs one, say which and why in your reply.',
+      'Sam has given you no folders. When a job needs a folder outside the office, ask with ask_for_folder.',
       `- (id: notion) Notion (read and write): every tool. Each call that changes something waits for Sam's yes: the office puts that exact call on their desk and makes it once they approve, then you carry on with what it returned. Call it once and move on; never call it again to retry, and never say it is done before you hear.`
     ].join('\n')
   );
@@ -216,8 +217,9 @@ test("my_access says a capped run's level and why, and an uncapped run's own lev
     [
       levelLine('act', 'Sam'),
       'Your runs go through Claude Code.',
-      'Your own tools work on files only. No shell: Sam can switch on Run commands in your Settings tab, under Office. No web: Sam can switch on Browse the web in your Settings tab, under Office.',
-      'Sam has given you no folders.',
+      'Your own tools work on files only. No shell: ask Sam to turn on Run commands with ask_for_switch. No web: ask Sam to turn on Browse the web with ask_for_switch.',
+      'Sam grants other office tools in your Settings tab, under Office; when a job needs one, say which and why in your reply.',
+      'Sam has given you no folders. When a job needs a folder outside the office, ask with ask_for_folder.',
       '- (id: notion) Notion (read and write): every tool.'
     ].join('\n')
   );
@@ -251,6 +253,7 @@ test('my_access says the tool, what its own tools reach and each folder, and a h
     levelLine('draft', 'Sam'),
     'Your runs go through Claude Code.',
     `Your own tools work on files, plus ${shell}, which can reach the internet, and web search and fetch.`,
+    'Sam grants other office tools in your Settings tab, under Office; when a job needs one, say which and why in your reply.',
     'Folders Sam gave you:',
     '- /Users/Shared/p (read only)',
     '- /Users/Shared/q (read and change)',

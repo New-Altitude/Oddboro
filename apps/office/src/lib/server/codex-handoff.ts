@@ -3,8 +3,8 @@
 import { error } from '@sveltejs/kit';
 import { allGoals, home, manager } from '@oddboro/ledger';
 import { readPacket } from '@oddboro/ledger/codex-handoff';
-import { ChatInputError } from './chat-files.ts';
-import { history, keepOwnerTurn, type ChatEntry } from './staff.ts';
+import { ChatInputError, history, keepOwnerTurn } from './chat-turns.ts';
+import type { ChatEntry } from '#lib/staff/chat.ts';
 
 function packetFor(ticket: string) {
   try {

@@ -31,7 +31,7 @@ async function post(id: string, turn: object, files?: File[]) {
     request: new Request('http://office/chat', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ ...turn, files: picks })
+      body: JSON.stringify({ ...turn, ...(picks ? { files: picks } : {}) })
     })
   } as Parameters<typeof POST>[0]);
 }
@@ -72,7 +72,7 @@ test('a failed turn reloads with its exact brief and files, and retry answers th
   assert.equal(line.turnId, turnId);
   assert.deepEqual(line.source, { kind: 'chat' });
   assert.deepEqual(
-    line.attachments.map((f: { name: string }) => f.name),
+    line.files.map((f: { tag: string }) => f.tag),
     ['plan.md', 'diagram.png']
   );
   const file = await download({ params: { id, turnId, index: '1' } } as Parameters<
@@ -83,8 +83,9 @@ test('a failed turn reloads with its exact brief and files, and retry answers th
   const trying = await post(id, { turnId });
   await assert.rejects(async () => post(id, { turnId }), { status: 409 });
   assert.equal(
-    (await (await get()).json()).history.filter((e: { turnId?: string }) => e.turnId === turnId)
-      .length,
+    (await (await get()).json()).history.filter(
+      (e: { turnId?: string; from: string }) => e.turnId === turnId && e.from === 'owner'
+    ).length,
     1
   );
   writeFileSync(wait, '');
@@ -96,7 +97,8 @@ test('a failed turn reloads with its exact brief and files, and retry answers th
     type: 'image',
     source: { type: 'base64', media_type: 'image/png', data: png.toString('base64') }
   });
-  assert.ok(blocks[1].text.endsWith(message + '\n\nAttached file: plan.md\n' + note));
+  assert.ok(blocks[1].text.includes(message));
+  assert.equal(readFileSync(L.home('staff', id, 'attachments', line.files[0].name), 'utf8'), note);
   assert.match(blocks[1].text, /Plot map/);
   const repeated = await last(await post(id, { turnId, message, re }, [markdown, pic()]));
   assert.deepEqual(repeated, result);
@@ -105,6 +107,7 @@ test('a failed turn reloads with its exact brief and files, and retry answers th
     history(id).map((e) => [e.from, e.turnId]),
     [
       ['owner', turnId],
+      ['staff', turnId], // The failed attempt remains part of the history.
       ['staff', turnId]
     ]
   );
@@ -188,5 +191,45 @@ test('a preset answer has one saved reply; files and imports reach the manager e
   const run = gave(
     await last(await post('cleo', { turnId: randomUUID(), message: first.answers[0] }, [file]))
   );
-  assert.ok(run.message.endsWith('Use the north plot.'));
+  assert.match(run.message, /map\.md/);
+  const owner = history('cleo').findLast((e) => e.from === 'owner');
+  assert.equal(
+    readFileSync(L.home('staff', 'cleo', 'attachments', owner!.files![0].name), 'utf8'),
+    'Use the north plot.'
+  );
+});
+
+test('an older chat keeps its files and accepts ten current uploads, including a PDF, without another store', async () => {
+  const { keepAttachment } = await import('./chat-files.ts');
+  const { addToChat } = await import('./chat-turns.ts');
+  const old = {
+    at: '2026-11-01T09:00:00.000Z',
+    from: 'owner' as const,
+    text: 'Keep this earlier choice.'
+  };
+  addToChat('paige', old);
+  const files = Array.from({ length: 10 }, (_, i) => {
+    const name = i === 0 ? 'earlier-plan.pdf' : `note-${i}.md`;
+    const bytes = Buffer.from(i === 0 ? '%PDF-1.7\nKept original' : `Note ${i}`);
+    return { ...keepAttachment('paige', name, '', bytes), tag: name };
+  });
+  const turnId = randomUUID();
+  const input = { turnId, message: 'Read these ten files.', files };
+  assert.equal((await last(await post('paige', input))).type, 'done');
+  assert.deepEqual(history('paige')[0], old);
+  const own = history('paige').find((e) => e.turnId === turnId && e.from === 'owner');
+  assert.deepEqual(
+    own?.files,
+    files.map(({ tag, name, mediaType, size }) => ({ tag, name, mediaType, size }))
+  );
+  assert.equal(
+    readFileSync(L.home('staff', 'paige', 'attachments', files[0].name), 'utf8'),
+    '%PDF-1.7\nKept original'
+  );
+  await last(await post('paige', input));
+  assert.equal(history('paige').filter((e) => e.turnId === turnId && e.from === 'owner').length, 1);
+  await assert.rejects(
+    async () => post('paige', { ...input, turnId: randomUUID(), files: [...files, files[0]] }),
+    { status: 400 }
+  );
 });

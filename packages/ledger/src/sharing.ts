@@ -12,6 +12,7 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import { accessOf, ownTools } from './capabilities.ts';
 import { db } from './db.ts';
+import { currentPlatform } from './platform.ts';
 import { shownFolder, within } from './office.ts';
 import { connectors, followUps, grants, staff, type HandOff, type HeldHandOff } from './schema.ts';
 import type { Db } from './threads.ts';
@@ -49,7 +50,7 @@ export async function heldTools(staffIds: string[], q: Db = db): Promise<Held[]>
       inForce: !accessOf({ ...grant, connector }, permission).heldBack
     })),
     ...odds.flatMap((o) => {
-      const own = ownTools(o, process.platform);
+      const own = ownTools(o, currentPlatform());
       return [
         ...(o.web ? [{ staffId: o.id, id: WEB, name: 'the web', inForce: own.web }] : []),
         ...o.folders.map((f) => ({
@@ -112,6 +113,7 @@ export async function sharing(q: Db, h: HeldHandOff & { threadId: number }): Pro
     from: h.from,
     title: h.title,
     brief: h.brief,
+    ...(h.files?.length ? { files: h.files } : {}),
     ...(withheld.length ? { withheld } : {}),
     ...(kept.size ? { kept: [...kept.values()] } : {})
   };

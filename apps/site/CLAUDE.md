@@ -5,6 +5,9 @@ Tailwind 4, TypeScript, and `@sveltejs/adapter-static`: every page prerenders
 to plain files in `build/`, so any static host serves it. Port 4501 for `dev`
 and `preview`, fixed.
 
+Where a new kind of thing starts, the shared function for each job, and the
+check that catches a missed place: `docs/architecture.md`.
+
 ## The name and the words
 
 - The product is **Oddboro**. Its AI workers are **Odds** (one Odd, many
@@ -26,6 +29,15 @@ and `preview`, fixed.
 - The legal pages and the FAQ quote the product's own paths (`~/.oddboro/`,
   the `oddboro` secret store service, `local.oddboro.com`). Keep them in step
   with the app.
+
+## Info pages
+
+`/info/<name>/` explains a safety limit the office links to, rendered from
+`src/content/info/<name>.md` through `LegalDoc.svelte` with "Safety" over the
+title (`info` in `src/lib/server/legal.ts`). `/info/folder-sharing/` is the
+office's folder warning's More info (`FolderWarning.svelte`): which folders
+the office refuses, which warn, and why. Its words follow `checkFolder` in
+the ledger, and change with it.
 
 ## Connector guides
 
@@ -59,14 +71,13 @@ access its job needs, and every claim rests on the office's real rules:
 | A tool connects read only, or with write from draft                   | `grantAccess` and `grantWorks`; `access()` in `staff.ts`                  |
 | At draft, each change through a write grant waits for the owner's yes | `writesWait`; the gateway's `raiseCall`, and `makeCall` on the yes        |
 | A lowered level makes a grant above it wait                           | `access()` skips it; `setPermission`'s comment                            |
-| At act, a write grant uses that one tool without asking; revocable    | `revoke` in `office.ts`; the Access tab in `apps/office`                  |
+| At act, a write grant uses that one tool without asking; revocable    | `revoke` in `office.ts`; the Odd's Settings › Services in `apps/office`   |
 | An Odd pokes the owner in chat at a time it sets                      | `poke_owner` in `packages/ledger/src/mcp.ts`                              |
 | Every Odd reads the people list, which stays on the owner's computer  | `readable` in `staff.ts`; hard rule 9                                     |
 
 An Odd has web search only when the owner turns on Browse the web for it,
 through its tool's own search and fetch; otherwise it has file tools only.
-Copy that searches the web says it uses a search tool the owner connects from
-the MCP Registry. When any of these rules changes in the office, change the
+Copy that searches the web says the owner turns on Browse the web for that Odd. When any of these rules changes in the office, change the
 site in the same change.
 
 ## The promise
@@ -119,6 +130,7 @@ are: daylight, and night.
 ```sh
 npm run dev -w @oddboro/site        # http://localhost:4501
 npm run build -w @oddboro/site      # prerender to apps/site/build/
+npm run deploy -w @oddboro/site     # build, then put it live at oddboro.com (Cloudflare)
 npm run preview -w @oddboro/site    # serve the build on 4501
 npm run art -w @oddboro/site        # regenerate static/art/, src/lib/hero/scene.json and src/lib/vignettes.json
 npm run office-gif -w @oddboro/site # the README's office, docs/office.gif; add -- --night for docs/office-night.gif
@@ -234,7 +246,7 @@ its own composition; none is a row of identical cards.
 | `hire`         | `Hire`       | "Hire an Odd for ..." as a list you pick from, and the pick as a job card        |
 | `how-it-works` | `HowItWorks` | Six floor states as vignettes cut from a real office, Odd in                     |
 | `managers`     | `Managers`   | Character cards with portraits, a walk on hover, pick one; describe your own     |
-| `access`       | `Access`     | Least access: an Odd's Access tab as a working mock, level and tool grants       |
+| `access`       | `Access`     | Least access: an Odd's Settings as a working mock, level and tool grants         |
 | `goals`        | `Goals`      | A sample goal beside its three-step plan, the line drawing in on scroll          |
 | `on-your-mac`  | `OnYourMac`  | A map of where the data lives: the computer in the middle, edges on dashed lines |
 | `open-source`  | `OpenSource` | The license as a terminal block, the GitHub link, the music note                 |
@@ -294,7 +306,7 @@ changed since the frame before (`encodeGifChanges`).
 ## Layout
 
 ```
-scripts/art.ts               The art generator. hero-office.json, vignette-office.json and manager-looks.json are its specs.
+scripts/art.ts               The art generator. hero-office.json, vignette-office.json, manager-looks.json and persona-looks.json are its specs.
 scripts/paint.ts             Paints and lights the office's sprites for an hour of the day, for art.ts and office-gif.ts.
 scripts/office-gif.ts        The README's office: Main Street by day with eight Odds at work, as docs/office.gif.
 scripts/release-art.ts       The releases page's GIFs, on the desk vignette. gif.ts encodes them.
@@ -314,5 +326,15 @@ src/lib/hero/                Hero.svelte, HeadlineOdd.svelte, choreo.ts, scene.j
 src/lib/server/legal.ts      Renders src/content/legal/*.md with markdown-it at prerender.
 src/content/legal/           privacy.md and terms.md. The legal writer owns these.
 src/routes/                  /, /releases/, /connectors/open-brain/, /connectors/aws-*/, /privacy/, /terms/, /sitemap.xml. +layout.ts prerenders everything.
-static/                      logo.png (the mark: favicon, header, footer; Google's sign-in screen shows the same), robots.txt, art/ (night) and art/day/.
+static/                      logo.png (the mark, drawn by `npm run mark -w @oddboro/sprites`: favicon, header, footer), robots.txt, art/ (night) and art/day/.
 ```
+
+## Hosting
+
+Cloudflare serves the site at oddboro.com: a Worker with static assets, named
+`oddboro-site`, set up in `wrangler.jsonc`. `npm run deploy -w @oddboro/site`
+builds and uploads it; it needs `CLOUDFLARE_API_TOKEN` and
+`CLOUDFLARE_ACCOUNT_ID` in the environment. The other domains (oddboro.ai,
+oddborough.com, oddborro.com, oddsboro.com, and every `www`) redirect to
+https://oddboro.com with a 301 that keeps the path, from a redirect rule on each
+zone. Every zone sends HTTP to HTTPS and needs TLS 1.2 or later.

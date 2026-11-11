@@ -9,6 +9,9 @@ service. On Windows: a per-user installer (NSIS) for x64 or arm64, Windows 10
 or 11, not code-signed yet. No UI framework: the only page of its own is
 `loading/index.html`.
 
+Where a new kind of thing starts, the shared function for each job, and the
+check that catches a missed place: `docs/architecture.md`.
+
 What differs between the systems is in `#[cfg(...)]` branches, one per
 function: the home and log folders and the PATH (`env.rs`), asking Node to
 quit, keeping the computer awake and notifications (`server.rs`), opening
@@ -24,10 +27,11 @@ an update (`update.rs`).
    problem and starts as it is. See "Updates" below.
 2. Checks the port. If anything answers on it, shows "another office is
    already running" and quits. It never attaches to that office.
-3. Reads the owner's login-shell PATH once (`$SHELL -l -c`, 5 second
-   timeout; `/bin/zsh` on a Mac and `/bin/sh` on Linux when `SHELL` is
-   unset), then adds `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin`
-   and `~/.claude/local` if missing. Windows has no login shell: the app's
+3. Reads the owner's login-shell PATH once (`$SHELL -l -i -c`, so
+   `~/.zshrc` and the Node managers it sets up run, then `$SHELL -l -c` if
+   that fails; 5 second timeout each; `/bin/zsh` on a Mac and `/bin/sh` on
+   Linux when `SHELL` is unset), then adds `/opt/homebrew/bin`,
+   `/usr/local/bin`, `~/.local/bin` and `~/.claude/local` if missing. Windows has no login shell: the app's
    own PATH, plus `%USERPROFILE%\.local\bin` (Claude Code's and uv's
    installers), WinGet's `Links` folder and `C:\Program Files\Git\cmd`.
 4. Starts Node, shows the small loading window, and asks `GET /` every half
@@ -74,6 +78,37 @@ an update (`update.rs`).
 10. Keeps links to the office's own origin in the window. Links to any other
     origin, `mailto:` and `tel:`, and every `target="_blank"` or
     `window.open`, open in the default browser.
+11. Reports a panic, giving up on the office (step 4's timeout, step 6's
+    limit, or Node not starting) and a broken install (no Node, no server
+    code), only when it found a report address and the office's `.env`
+    says `OFFICE_DIAGNOSTICS=yes`, read at send time (`diagnostics.rs`). The
+    address is `ODDBORO_DIAGNOSTICS_DSN` from the shell's environment, else
+    the one the release was built with (`build.rs`), else the office's
+    `.env`. A report carries a fixed text and Node's exit code when it has
+    one, or for a panic its place in the code with the message withheld, never the log.
+    It leaves with only the fields an allow list names and the computer's
+    name replaced. Its file paths follow the office's rule (`report_path`):
+    in a release, the shell's own code relative to the repo, which its build
+    maps to `/oddboro` (`PATH_MAPS` in `scripts/release.ts`, most specific
+    folder last, since the compilers apply the last match); any other file
+    under the home folder as its name alone; and files outside it whole. A
+    loaded file (a debug image) is named by its file name alone, and of the
+    device only the chip's architecture is kept. Each report sends on its
+    own thread and holds up the dialog or the panic 2 seconds at most; a run
+    sends one panic report. With no address the shell sets no panic hook and
+    runs no thread for reports. A report to New Altitude's address (or to the
+    account site `ODDBORO_ACCOUNT_SITE` names, from the environment or the
+    office's `.env`) needs the office's New Altitude sign-in, by the office's
+    rule (`needs_sign_in`, tested against the office's
+    `needs-sign-in.cases.json`). On its thread the shell reads the sign-in
+    the office saved: on Linux with the office's own command (`secret-tool`),
+    and on a Mac from its own Keychain items (`secrets.rs`), where the app's
+    office keeps it. It sends with its access token in the
+    `authorization` header. It never refreshes or writes the sign-in, so a
+    token with under a minute left is not sent. The report is dropped while
+    signed out, when the token has run out, and on Windows, whose
+    Credential Manager the shell does not read. The read counts in the same
+    2 seconds.
 
 The page gets no Tauri IPC: there are no capability files, and remote pages
 never get IPC without one.
@@ -96,15 +131,18 @@ never get IPC without one.
 | `ODDBORO_PORT`                 | the same                                                   |
 | `HOST`                         | `127.0.0.1`                                                |
 | `ORIGIN`                       | `http://127.0.0.1:<port>`                                  |
-| `BODY_SIZE_LIMIT`              | `12M` for chat uploads; other routes keep 512 KiB          |
+| `BODY_SIZE_LIMIT`              | `12M` for chat imports; attachments keep their own limit   |
 | `ODDBORO_HOME`                 | `~/.oddboro` (`%USERPROFILE%\.oddboro`), unless set        |
 | `ODDBORO_CODE`                 | `<resources>/server`                                       |
 | `ODDBORO_DB_PORT`              | passed through when the shell's env sets it                |
 | `PATH`                         | the login-shell PATH from step 3                           |
 | `ODDBORO_VERSION`              | the app's version, like `0.0.4`                            |
+| `BODY_SIZE_LIMIT`              | `11M`, so a 10 MB file attached in a chat gets through     |
 | `ODDBORO_UPDATE_TOKEN`         | a fresh secret per run, release builds only                |
 | `ODDBORO_SECRETS`              | `shell` on a Mac: the shell keeps the office's secrets     |
 | `ODDBORO_GOOGLE_CLIENT_SECRET` | the Google sign-in client's secret, when the build had one |
+| `ODDBORO_GITHUB_CLIENT_SECRET` | the GitHub sign-in app's secret, when the build had one    |
+| `ODDBORO_DIAGNOSTICS_DSN`      | the report address from step 11, when the shell found one  |
 
 - `ODDBORO_APP=1`. With it the server quits on SIGTERM once its HTTP server
   closes, and when its stdin closes (`apps/office/src/hooks.server.ts`). It
@@ -183,7 +221,10 @@ Every update is required. `src-tauri/src/update.rs` runs them with
 - `src-tauri/src/main.rs`. Windows, the menu bar item, links, and the
   startup steps.
 - `src-tauri/build.rs`. Tauri's build, and the target triple as
-  `ODDBORO_TARGET`.
+  `ODDBORO_TARGET`. It rebuilds when `ODDBORO_DIAGNOSTICS_DSN` changes.
+- `src-tauri/src/diagnostics.rs`. The shell's error reports: the address,
+  the owner's answer, the New Altitude sign-in, the allow list and the
+  sending.
 - `src-tauri/src/server.rs`. Starting, watching, restarting and stopping Node.
 - `src-tauri/src/env.rs`. Port, home, log path and the login-shell PATH.
 - `src-tauri/src/secrets.rs`. The office's secrets in the Mac's Keychain, and
@@ -212,17 +253,23 @@ Every update is required. `src-tauri/src/update.rs` runs them with
   `~/.claude`.
 - `scripts/stage.ts`. Builds the office and the sprites, then lays out
   `stage/`: the office build, which bundles every third-party package the
-  office itself runs, the production `node_modules` that the ledger, sprites
-  and world load, at the versions installed in the repo, and those three as plain
+  office itself runs but Sentry's, the production `node_modules` that Sentry,
+  the ledger, sprites and world load, at the versions installed in the repo, and those three as plain
   JavaScript (types stripped, `.ts` imports rewritten) in
   `node_modules/@oddboro/`, with their files beside them. Packages' test
-  folders (`__screenshots__`, `__tests__`) stay out, and a staged path
+  folders (`__screenshots__`, `__tests__`) and every source map stay out, and a staged path
   longer than 180 characters fails the stage: the Windows installer's
-  builder stops at 260, and GitHub's runner puts the stage 60 deep. It fetches the Node
+  builder stops at 260, and GitHub's runner puts the stage 60 deep. Sentry's
+  build tools stay out too: peer packages (Vite and SvelteKit, with Rolldown
+  and Lightning CSS), and `BUILD_ONLY` (Sentry's bundler plugins, the oxc
+  parser and the `sentry` CLI). Native code fails the stage unless `NATIVE`
+  names it (the keyring), and on a Mac unless it carries a Developer ID
+  signature with a secure timestamp, since the release signs only the shell
+  and Node and Apple's notary refuses anything else unsigned. It fetches the Node
   binary for this machine's Node version, system and chip, and checks it
   against nodejs.org's sums (Windows's comes as a zip, unpacked with
   Windows's own `tar`). `--smoke` starts the stage on port 4590 with a
-  throwaway home, waits for it to answer, and checks it quits when asked
+  throwaway home and a report address on port 9 (so Sentry starts, with no yes), waits for it to answer, and checks it quits when asked
   (SIGTERM, or a closed stdin on Windows):
   `node apps/desktop/scripts/stage.ts --smoke`.
 - `stage/` must hold no folder symlinks. The bundler walks it without
@@ -283,6 +330,14 @@ lockfile-only update, so run it by hand for one that should ship. Five jobs:
    their next check, and the next build takes the next version. Until then,
    each merge replaces the draft, so it always holds the newest `main`.
 
+Each build job also passes `ODDBORO_DIAGNOSTICS_DSN` and Sentry's
+`SENTRY_AUTH_TOKEN`, with `SENTRY_ORG` and `SENTRY_PROJECT` from the release
+environment's variables. With the token, `release.ts` builds the shell with line
+tables (inside the binary on Linux, a `.dSYM` or `.pdb` beside it on the
+Mac and Windows) and uploads them, and the office's build uploads its source
+maps. Without it the release profile stays stripped and nothing goes to
+Sentry. A `--test` build uploads nothing.
+
 The repo must be public for installed apps to reach the release. While it is
 private, `latest.json` answers 404 to them.
 
@@ -294,17 +349,25 @@ environment, so a workflow run from any other branch, or a pull request, never
 sees the keys. Set one with `gh secret set <NAME> -R New-Altitude/Oddboro --env
 release`. Never commit a value.
 
-| Secret                               | What it is                                                                                                               | How to make it                                                                                                                                         |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `APPLE_CERTIFICATE`                  | The Developer ID Application certificate and key, as base64                                                              | Keychain Access, export "Developer ID Application: New Altitude, Inc." as `cert.p12` with a password, then `base64 -i cert.p12 \| pbcopy`              |
-| `APPLE_CERTIFICATE_PASSWORD`         | The password set on that export                                                                                          | Chosen at export                                                                                                                                       |
-| `APPLE_API_KEY`                      | The App Store Connect API key, the `.p8` file's contents                                                                 | App Store Connect, Users and Access, Integrations, Team Keys, a key with Developer access. Download `AuthKey_<id>.p8`, then `pbcopy < AuthKey_<id>.p8` |
-| `APPLE_API_KEY_ID`                   | That key's ID                                                                                                            | The Key ID column on the same page                                                                                                                     |
-| `APPLE_API_ISSUER`                   | The team's issuer ID                                                                                                     | The Issuer ID above the keys on the same page                                                                                                          |
-| `TAURI_SIGNING_PRIVATE_KEY`          | The updater signing key, for every build                                                                                 | `pbcopy < ~/.tauri/oddboro-updater.key`                                                                                                                |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Its password                                                                                                             | `security find-generic-password -s oddboro-updater-key -a password -w \| pbcopy`                                                                       |
-| `KEYCHAIN_PASSWORD`                  | Any random string, for the runner's temporary keychain                                                                   | `openssl rand -hex 24 \| pbcopy`                                                                                                                       |
-| `GOOGLE_OAUTH_CLIENT_SECRET`         | The Desktop OAuth client's secret for Google sign-in. Google treats it as not confidential, but it stays out of the repo | New Altitude's password manager, "Oddboro Google OAuth client"                                                                                         |
+| Secret                               | What it is                                                                                                                     | How to make it                                                                                                                                         |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `APPLE_CERTIFICATE`                  | The Developer ID Application certificate and key, as base64                                                                    | Keychain Access, export "Developer ID Application: New Altitude, Inc." as `cert.p12` with a password, then `base64 -i cert.p12 \| pbcopy`              |
+| `APPLE_CERTIFICATE_PASSWORD`         | The password set on that export                                                                                                | Chosen at export                                                                                                                                       |
+| `APPLE_API_KEY`                      | The App Store Connect API key, the `.p8` file's contents                                                                       | App Store Connect, Users and Access, Integrations, Team Keys, a key with Developer access. Download `AuthKey_<id>.p8`, then `pbcopy < AuthKey_<id>.p8` |
+| `APPLE_API_KEY_ID`                   | That key's ID                                                                                                                  | The Key ID column on the same page                                                                                                                     |
+| `APPLE_API_ISSUER`                   | The team's issuer ID                                                                                                           | The Issuer ID above the keys on the same page                                                                                                          |
+| `TAURI_SIGNING_PRIVATE_KEY`          | The updater signing key, for every build                                                                                       | `pbcopy < ~/.tauri/oddboro-updater.key`                                                                                                                |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Its password                                                                                                                   | `security find-generic-password -s oddboro-updater-key -a password -w \| pbcopy`                                                                       |
+| `KEYCHAIN_PASSWORD`                  | Any random string, for the runner's temporary keychain                                                                         | `openssl rand -hex 24 \| pbcopy`                                                                                                                       |
+| `GOOGLE_OAUTH_CLIENT_SECRET`         | The Desktop OAuth client's secret for Google sign-in. Google treats it as not confidential, but it stays out of the repo       | New Altitude's password manager, "Oddboro Google OAuth client"                                                                                         |
+| `OAUTH_GITHUB_CLIENT_SECRET`         | The GitHub OAuth App's secret, for servers that sign in through GitHub. It ships in the app, but stays out of the repo         | The "Oddboro" OAuth App in New Altitude's GitHub organization settings, Developer settings. GitHub refuses secret names that start with `GITHUB_`      |
+| `SENTRY_AUTH_TOKEN`                  | A Sentry auth token for the project the release uploads to, which uploads the shell's debug files and the office's source maps | An organization auth token from the organization's settings in Sentry                                                                                  |
+
+Three variables too, none of them secret: `ODDBORO_DIAGNOSTICS_DSN`, the
+relay's address the app sends reports to, and `SENTRY_ORG` and
+`SENTRY_PROJECT`, the Sentry organization and project the uploads go to. Set
+each with `gh variable set <NAME> -R New-Altitude/Oddboro --env release`.
+Without the address a release sends no reports.
 
 ### A test build
 
@@ -321,14 +384,13 @@ ODDBORO_RELEASE_URL=http://127.0.0.1:4598 \
 
 ## Icons and signing
 
-- The icons are Oddboro's mark: a night rounded square with an ember ring.
-  `logo.png` in the site and the office is the same ring on night to the
-  edges. Regenerate with
-  `npm run tauri -w @oddboro/desktop -- icon <1024px png> -o src-tauri/icons`,
-  then delete the `android/`, `ios/`, `Square*`, `StoreLogo.png` and
-  `64x64.png` files it also writes. `icon.ico` stays: Windows builds embed
-  it. `icons/tray.png` is the menu bar ring, a template image macOS tints;
-  Windows shows `icons/32x32.png` in the tray instead.
+- The icons are Oddboro's mark, the glowing pixel O, on a black rounded
+  square. `npm run mark -w @oddboro/sprites` draws every one, on a Mac:
+  `icon.icns`, `icon.ico` (Windows builds embed it), the PNGs, and
+  `icons/tray.png`, the letter alone as a template image macOS tints. Windows
+  shows `icons/32x32.png` in the tray instead. Never edit an icon by hand.
+- `branding/google-oauth-logo.png` is the logo for the Google OAuth client's
+  branding page: 120 by 120, as Google asks. The same script draws it.
 - No `signingIdentity` in the config: `release.ts` passes the Developer ID
   as `APPLE_SIGNING_IDENTITY`.
 
@@ -375,13 +437,27 @@ ODDBORO_PORT=4510 ODDBORO_DB_PORT=54510 ODDBORO_HOME=/tmp/oddboro-test-home \
   src-tauri/target/debug/oddboro
 ```
 
+## Later
+
+Each line says what to do when its trigger comes.
+
+- Building NEW-1673: add a smoke test to the release that starts the built
+  app and makes one call of each HTTP method its office answers. A built
+  app's server can refuse what the dev server allows: in a release,
+  SvelteKit's origin check refuses any action from the owner's own page that
+  is not sent as JSON (`apps/office/CLAUDE.md`, "Who the office answers").
+
 ## Pinned versions
 
-- `@tauri-apps/cli` 2.12.4
+- `@tauri-apps/cli` 2.12.4, and the npm `sentry` CLI 0.45.0, for the
+  release's debug files
 - `tauri` 2.12.5, `tauri-build` 2.7.4
 - `tauri-plugin-autostart` 2.7.0, `tauri-plugin-dialog` 2.8.4
 - `tauri-plugin-updater` 2.14.1, `serde_json` 1.0.154
 - `getrandom` 0.3.4, for the update token
+- `sentry` 0.49.5, and `rustls` 0.23.46 with `ring`, for error reports
+- `reqwest` 0.13.5, the client sentry sends with, named so a report can
+  carry the sign-in's token
 - `libc` 0.2.191 (Mac and Linux)
 - `mac-notification-sys` 0.6.15 (Mac only)
 - `security-framework` 3.7.0 (Mac only), for the Keychain

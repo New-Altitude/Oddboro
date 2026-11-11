@@ -4,10 +4,10 @@ import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import path, { join } from 'node:path';
 import { after, test } from 'node:test';
 import { createServer } from 'vite';
-import config, { noEditorLaunch, siteUrl } from '../vite.config.ts';
+import config, { buildOptions, mapSource, noEditorLaunch, siteUrl } from '../vite.config.ts';
 
 const folder = mkdtempSync(join(tmpdir(), 'oddboro-vite-'));
 const launched = join(folder, 'launched.log');
@@ -42,6 +42,58 @@ after(async () => {
 test("the office's dev config refuses the editor route before any other plugin", () => {
   const { plugins } = config({ command: 'serve', mode: 'development' });
   assert.equal((plugins?.[0] as { name?: string }).name, noEditorLaunch().name);
+});
+
+test('the Sentry build plugin never reports the build and uploads only with a token', () => {
+  const without = buildOptions({});
+  const withToken = buildOptions({ SENTRY_AUTH_TOKEN: 'x' });
+  for (const options of [without, withToken]) {
+    assert.equal(options.telemetry, false);
+    assert.equal(options.release.inject, false);
+    // No release is made, so nothing touches one.
+    assert.equal(options.release.create, false);
+    assert.equal(options.release.finalize, false);
+    assert.equal(options.release.setCommits, false);
+  }
+  assert.equal(without.autoUploadSourceMaps, false);
+  assert.equal(withToken.autoUploadSourceMaps, true);
+});
+
+test('every release job names a source map entry the same way', () => {
+  // The pokes endpoint's map, as each job's build writes it. A Windows map can
+  // hold either separator; a Mac or Linux map, only `/`.
+  const up = '../../../../../../../';
+  const endpoint = 'build/server/entries/endpoints/api/pokes/_id_';
+  const jobs = [
+    { root: '/Users/runner/work/Oddboro/Oddboro', source: up, paths: path.posix },
+    { root: '/home/runner/work/Oddboro/Oddboro', source: up, paths: path.posix },
+    { root: 'D:\\a\\Oddboro\\Oddboro', source: up, paths: path.win32 },
+    { root: 'D:\\a\\Oddboro\\Oddboro', source: up.replaceAll('/', '\\'), paths: path.win32 }
+  ];
+  for (const { root, source, paths } of jobs) {
+    const mapDir = paths.join(root, 'apps/office', endpoint);
+    const file =
+      source + ['src', 'routes', 'api', 'pokes', '[id]', '+server.ts'].join(source.at(-1));
+    assert.equal(
+      mapSource(file, mapDir, root, paths),
+      'apps/office/src/routes/api/pokes/[id]/+server.ts'
+    );
+  }
+  // What the release build passes: the map's own folder, from this repository.
+  const { rewriteSources } = buildOptions({}).sourcemaps;
+  const chunks = join(import.meta.dirname, '../build/server/chunks');
+  assert.equal(
+    rewriteSources(
+      '../../../../../node_modules/@sveltejs/kit/src/index.js',
+      {},
+      { mapDir: chunks }
+    ),
+    'node_modules/@sveltejs/kit/src/index.js'
+  );
+  assert.equal(
+    rewriteSources('../../../src/hooks.server.ts', {}, { mapDir: chunks }),
+    'apps/office/src/hooks.server.ts'
+  );
 });
 
 test("the office links to the site's dev server only under a developer's npm run dev", () => {

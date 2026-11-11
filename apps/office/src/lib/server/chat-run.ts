@@ -1,0 +1,284 @@
+// A saved owner turn, its current attempt and its reply. Closing a page never
+// cancels work; Stop and corrections name one attempt in the live registry.
+import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
+import {
+  staffer,
+  ownerName,
+  deliveries,
+  ownTools,
+  currentPlatform,
+  home,
+  OFFICE_FILE_NAMES,
+  chatSession,
+  replyToReport
+} from '@oddboro/ledger';
+import { reserveRun, releaseRun } from '@oddboro/ledger/run-registry';
+import { firstQuestionIn, nextFirstQuestion } from '@oddboro/ledger/first-questions';
+import type { ChatSource } from '#lib/staff/chat-input.ts';
+import type { ChatEntry, ChatEvent, ChatRef } from '#lib/staff/chat.ts';
+import { isPicture, type ChatFile } from '#lib/attachments.ts';
+import { splitChoices } from '#lib/choices.ts';
+import { run, runHomeOf, type Run } from './staff.ts';
+import { chatRun } from './run-state.ts';
+import { addToChat, history, keepOwnerTurn, ChatInputError } from './chat-turns.ts';
+import { attachedFiles, filesNow } from './chat-files.ts';
+import { replyBrief, savedTaskWords } from './chat-delivery.ts';
+import { sessionIdIn } from './resume.ts';
+import { changedSince, replay, replayed, replayedAt, replaySince } from './replay.ts';
+import {
+  chatPreface,
+  fileLine,
+  missedAt,
+  type KeptFile,
+  type RetoldEntry,
+  type Session
+} from './chat-preface.ts';
+import { bus, emit } from './events.ts';
+
+const CHAT_TIMEOUT_MS = 5 * 60_000;
+
+export function activeReply(id: string) {
+  const r = chatRun(id);
+  return r?.turnId ? { runId: r.key, turnId: r.turnId } : undefined;
+}
+
+export function correctionSource(id: string, runId: string): ChatSource {
+  const active = activeReply(id);
+  const turnId =
+    active?.runId === runId
+      ? active.turnId
+      : history(id).findLast((e) => e.from === 'staff' && e.runId === runId)?.turnId;
+  if (!turnId) throw new ChatInputError('That reply is no longer available.');
+  return { kind: 'correction', id: turnId, revision: runId };
+}
+
+export async function stopReply(id: string, runId: string): Promise<boolean> {
+  const r = chatRun(id);
+  if (!r?.turnId || r.key !== runId) return false;
+  r.stop.abort();
+  await r.end.promise;
+  return true;
+}
+
+export function correctionBrief(owner: ChatEntry, before: ChatEntry[]): string[] {
+  const prior =
+    owner.source?.kind === 'correction'
+      ? before.find((e) => e.from === 'owner' && e.turnId === owner.source?.id)
+      : undefined;
+  return [
+    ...(prior
+      ? [
+          `This corrects your reply to: ${prior.text}`,
+          'Keep completed work and saved files. Do not repeat an outside action already taken. Use the correction below for what remains.'
+        ]
+      : []),
+    ...(owner.about
+      ? [
+          `The owner is speaking to you as lead of this ${owner.about.kind} #${owner.about.id}, "${owner.about.title}".`,
+          'Apply their words to that work. This message does not stop a background job or approve an outside action.'
+        ]
+      : [])
+  ];
+}
+
+function attachedBrief(files: (ChatFile & { path: string })[]): string {
+  return [
+    `({owner} attached ${files.length === 1 ? 'a file' : `${files.length} files`} to this message. Each is kept in your folder, and each tag in brackets in their message names one. Look at each picture and read each file before you answer. A picture already shown with this message needs no opening.`,
+    ...files.map(fileLine),
+    ')'
+  ].join('\n');
+}
+
+export async function chat(
+  id: string,
+  message: string,
+  onEvent: (e: ChatEvent) => void,
+  replyTo?: Pick<ChatRef, 'kind' | 'id'>,
+  files: (ChatFile & { path: string })[] = []
+): Promise<void> {
+  if (chatRun(id)) throw new Error(`${id} is already replying`);
+  const turnId = randomUUID();
+  await keepOwnerTurn(
+    id,
+    { turnId, message, source: { kind: 'chat' }, kept: files.map(({ path: _, ...f }) => f) },
+    replyTo
+  );
+  return replyToOwnerTurn(id, turnId, onEvent);
+}
+
+export async function replyToOwnerTurn(
+  id: string,
+  turnId: string,
+  onEvent: (e: ChatEvent) => void,
+  instead?: string
+): Promise<void> {
+  const log = history(id);
+  const owner = log.find((e) => e.from === 'owner' && e.turnId === turnId);
+  if (!owner) throw new ChatInputError('No saved message with that ID.');
+  const answered = log.findLast(
+    (e) => e.from === 'staff' && e.turnId === turnId && !e.failed && !e.interrupted
+  );
+  if (answered) {
+    onEvent({
+      type: 'done',
+      text: answered.text,
+      ...(answered.choices?.length ? { choices: answered.choices } : {})
+    });
+    return;
+  }
+  const previous = chatRun(id);
+  if (
+    previous &&
+    (!instead || previous.key !== instead || previous.turnId === turnId || !previous.turnId)
+  )
+    throw new Error('Another reply is in progress. Your message is saved.');
+  if (instead && !previous && log.findLast((e) => e.from === 'staff' && e.runId)?.runId !== instead)
+    throw new Error('That reply is no longer active. Your message is saved.');
+  // No await between checking and reserving: a second page sees this attempt.
+  const live = reserveRun({ staffId: id, kind: 'chat', turnId });
+  const started = Date.now();
+  const message = owner.text;
+  try {
+    if (previous) {
+      previous.stop.abort();
+      await previous.end.promise;
+    }
+    const who = await staffer(id);
+    if (!who) throw new ChatInputError('No such Odd');
+    const before = history(id).filter((e) => e.turnId !== turnId);
+    const files = attachedFiles(id, owner.files);
+    const replyTo = owner.re;
+    const last = before.at(-1);
+    const asked = last?.from === 'staff' ? firstQuestionIn(last.text) : -1;
+    const next =
+      !live.stop.signal.aborted &&
+      owner.source?.kind === 'chat' &&
+      !files.length &&
+      !owner.re &&
+      !owner.about
+        ? nextFirstQuestion(asked, message)
+        : undefined;
+    if (next) {
+      addToChat(id, {
+        at: new Date().toISOString(),
+        from: 'staff',
+        text: next,
+        told: true,
+        turnId,
+        runId: live.key
+      });
+      onEvent({ type: 'done', text: next });
+      return;
+    }
+    onEvent({ type: 'reply', runId: live.key, turnId });
+    let re: Awaited<ReturnType<typeof replyBrief>> | undefined;
+    let r: Run;
+    try {
+      // Lines the office wrote in the chat, and work put on the desk, since the
+      // owner last wrote are not in the session: say so, so an answer to the
+      // hello, "How did the call go?" or "What about Thursday?" makes sense to
+      // the staffer.
+      re = replyTo ? await replyBrief(id, replyTo) : undefined;
+      const landed = (await deliveries(id, 20)).filter(
+        (d) => !(d.kind === re?.ref.kind && d.id === re.ref.id)
+      );
+      // Each owner line's files as they are now, for the lines the office retells below.
+      const past: RetoldEntry[] = before.map((e) =>
+        e.files?.length ? { ...e, now: filesNow(id, e.files) } : e
+      );
+      // A new session (the Odd moved to another tool, or its session is gone)
+      // never saw the chat: it gets the latest of it word for word. The preface
+      // leaves out the told, poke and failed run's owner lines the replay holds,
+      // and keeps those the budget cut, so each line since the owner last wrote
+      // is said once.
+      const resumed = !!sessionIdIn(chatSession(id), await runHomeOf(who));
+      const kept = resumed ? [] : replayed(past);
+      const since = replaySince(past, kept);
+      const session: Session = resumed ? 'resumed' : { replayed: new Set(replayedAt(past, kept)) };
+      // A missed line's pictures go to the run as a new message's do. A line the
+      // replay retells names its files by path alone, so a long replay never
+      // sends every picture the chat ever held.
+      const missed = missedAt(past, session).flatMap((i) => past[i].now ?? []);
+      // The Odd writes only its own folder and the given folders it may change, so only those are walked.
+      const writable = ownTools(who, currentPlatform())
+        .granted.filter((f) => f.write)
+        .map((f) => f.path);
+      const prompt = [
+        ...(since
+          ? [
+              replay(
+                past,
+                changedSince(
+                  home('staff', id),
+                  since,
+                  OFFICE_FILE_NAMES.map((f) => join(home('staff', id), f)),
+                  writable
+                )
+              )
+            ]
+          : []),
+        ...chatPreface(past, landed, session),
+        ...(re ? [re.brief] : []),
+        ...correctionBrief(owner, before)
+      ].join('\n\n');
+      r = await run(who, prompt, {
+        kind: 'chat',
+        runId: live.key,
+        ownerSaid: message,
+        literal: [
+          message,
+          ...(files.length ? [attachedBrief(files).replaceAll('{owner}', await ownerName())] : []),
+          ...(re?.taskResponse ? [savedTaskWords(re.taskResponse)] : [])
+        ].join('\n\n'),
+        chatBefore: past,
+        images: [...files, ...missed].flatMap((f: KeptFile) =>
+          'gone' in f || !isPicture(f.mediaType) ? [] : [{ path: f.path, mediaType: f.mediaType }]
+        ),
+        sessionFile: chatSession(id),
+        timeoutMs: CHAT_TIMEOUT_MS,
+        onEvent: (e) => {
+          if (e.type !== 'done') onEvent(e);
+        }
+      });
+    } catch (err) {
+      r = { ok: false, text: err instanceof Error ? err.message : String(err) };
+      onEvent({ type: 'error', message: r.text });
+    }
+    const at = new Date();
+    const common = {
+      at: at.toISOString(),
+      from: 'staff' as const,
+      turnId,
+      runId: live.key,
+      took: at.getTime() - started
+    };
+    if (r.interrupted) {
+      const text = `You stopped the reply to “${message.slice(0, 160)}”. Completed work and saved files remain.`;
+      addToChat(id, {
+        ...common,
+        text,
+        interrupted: true,
+        failed: true,
+        ...(r.saved ? { inSession: true } : {})
+      });
+      onEvent({ type: 'done', text });
+    } else if (r.ok) {
+      const { text, choices } = splitChoices(r.text);
+      addToChat(id, { ...common, text, ...(choices.length ? { choices } : {}) });
+      onEvent({ type: 'done', text, ...(choices.length ? { choices } : {}) });
+    } else {
+      addToChat(id, {
+        ...common,
+        text: r.text,
+        failed: true,
+        ...(r.saved ? { inSession: true } : {})
+      });
+    }
+    if (r.ok && re?.ref.kind === 'report') await replyToReport(re.ref.id, message);
+  } finally {
+    releaseRun(live);
+    bus.emit('run-ended');
+    emit({ type: 'change', table: 'chat' });
+  }
+}

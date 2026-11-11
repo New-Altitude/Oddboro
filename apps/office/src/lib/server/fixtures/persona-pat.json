@@ -1,0 +1,35 @@
+{
+  "slug": "pat",
+  "displayName": "Pat Example",
+  "jobTitle": "Made-up persona for tests",
+  "disclosure": "Pat is an AI persona of a made-up person, for tests.",
+  "odd": {
+    "format": 1,
+    "version": 1,
+    "name": "Pat",
+    "role": "Advisor from New Altitude",
+    "remit": "Gives a view on your work when you or another Odd ask.",
+    "hello": "Hi {owner}, I'm Pat. Ask me what I think of anything.",
+    "look": {
+      "hair": "pat-short-tuft",
+      "top": "blazer",
+      "bottom": "trousers",
+      "colours": {
+        "hair": "dark brown",
+        "skin": "light tan",
+        "top": "cream",
+        "second": "navy",
+        "bottom": "navy",
+        "shoes": "black"
+      }
+    },
+    "portraitPx": "sprite portrait-pat\nsize 48 48\nlayer overlay\n\nframe default\n66666666666666666666666666666666666666k6k6k6k777\n66666666666666666666666666666666666k6k6k6k7k7777\n6666666666666666666666666666666666T6T6T6T7777777\n6666666666666666666nnnnnnnnnn6666T6T6T6T77777777\n66666666666666666NNnnnnnnnnnnin6T6T6T7T777777777\n6666666666666666NNnnnnnnnknnninn6T6T777777777777\n666666666666666NNnnnnnnnnnnnninnn6T77777t7777777\n666666666666666NnnnnnnnnnknnninnnnT7777777777777\n666T6666666666Nnnnnnnnnnnknnninnnnt7777777777777\n66666666666666nnnnnnnnnnnnknninnnnnt777777777777\n66666666666666nnnnnnnnnnnnknninnnnnt777777777777\n66666666666666nnnnnnnnnnnnnnnnnnnnnkk77777777777\n6666666666knnnnnnnnnnnnnffffffffnnnnnnt777777777\n6666666666nnnnnnnnnnnfffffffffffnnnnnnnt777t7777\n6666666666nnnnnnnnnffffffffffffffnnnnnnt77t6t777\n6666666666nnnnnnnnffffffffffffffffnnnnnt777t7777\n6666666666nnnnnnniffffffffffffffffnnnnnt77777777\n666666666knnnnnnnffffnffffnffffnFnnnnnt777777777\n66666666k6nnnnnnffffffffffffffffFnnnnnt777777777\n66666k6k6knnffffkkkkkkffffkkkkkkFFFFnnt777777777\n6666k6k6k6nnffffk==k=kffffk==k=kFFfFnnt777777777\n666k6k6k6knnfFffF=k!=FffffF=k!=FFFfFnnt777777777\nk6k6k6k7kknnfFfffFFFFffffFfFFFFFFFFFnnt77g777777\n6k6k6k777knnfffffffffffffFfffffFFFFFnnt777777777\nk6k6k7777knnFffffffffffffFfffffFFFFFnnt777777777\n6k7k77777knnnnnffffffffffFfffffFFnnnnnt777777777\nk77777777knnnnnffffffffffFffffFFFnnnnnt777777777\n777777777knnnnnkfccffffffFffffccknnnnnt777777777\n777777777knnnnnkffffffFfFFFfffFFknnnnnt777777777\n777777777knnnnnkfffffFfFffFfffFFknnnnnt77777t777\n77777t777knnnnnkfffGPppppppppPFFknnnnnt7777tTt77\n777777777knnnnnkkfffGPPPPPPPPFFkknnnnnt77777t777\n777777777knnnnnkkffffFFFFFFffFFkknnnnnt777777777\n777777777Nnnnnnk7kfffffffffffFt7nnnnnni777777777\n77777777Nnnnnnnk77kFFFFFFFFFFt77nnnnnnii77777777\n7777777Nnnnnnnnk77kFFFFFFFFFFt77nnnnnniii7777777\n777777Nnnnnnnnnk77kfffffffFFFt77nnnnnniiii777777\n7777777iiiiiiiiikkfffffffFFFkkk7iiiiiiiii7777777\n7777777iiii777kkkoofffffffFFFookkk777iii77777777\n777777777k7kkkooooOFFFFFFFFFFOOoookkk77777777777\n77777777kzkooooooOOozzzzzzzzooOOooooOkkk77777777\n77777kkkoooooooooOOoozzzzzzoooOOoooooOOOkkk77777\n77kkkoooooooooooOOoooozzzzoooooOOoooooOOOOOkkk77\n7kooooooooooooooOOoooozzzzoooooOOooooooOOOOOOOT7\n7koooooooooooooOOoooozzzzzzoooooOOooooooOOOOOOT7\n7kooooooooooooOOooooozzzzzzooooooOOooooooOOOOOT7\n7kooooooooooooOOooooozzzzzzooooooOOoooooooOOOOT7\n7koooooooooooOOoooooozzzzzzoooooooOOoooooooOOOT7",
+    "parts": [
+      {
+        "kind": "hair",
+        "name": "pat-short-tuft",
+        "px": "# A short tuft: a made-up persona's hair for the office tests.\nsprite hair-pat-short-tuft\nsize 16 32\nlayer character\ntag hair\n\nframe down\n................\n................\n................\n................\n.....kkkkkk.....\n....kNNnnnnk....\n...kNnnnnnnnk...\n...knnnnnnnnk...\n...knnn....nk...\n...kn......nk...\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n\nframe up\n................\n................\n................\n................\n.....kkkkkk.....\n....kNNnnnnk....\n...kNnnnnnnnk...\n...knnnnnnnnk...\n...knnnnnnnnk...\n....knnnnnnk....\n....knnnnnnk....\n...knnnnnnnnk...\n....knnnnnnk....\n.....k....k.....\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n\nframe side\n................\n................\n................\n................\n.....kkkkkk.....\n....kNNnnnnk....\n...kNnnnnnnnk...\n...knnnnnnnnk...\n...knnnnnn......\n...knnnn........\n...kn.kn........\n...kn.k.........\n....knn.........\n.....kk.........\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n................\n"
+      }
+    ]
+  }
+}

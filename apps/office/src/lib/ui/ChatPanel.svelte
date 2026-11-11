@@ -1,30 +1,13 @@
 <script lang="ts">
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { page } from '$app/state';
   import { replaceState } from '$app/navigation';
   import CodexHandoff from './CodexHandoff.svelte';
   import CodexSource from './CodexSource.svelte';
-  import type { ChatSource } from '../staff/chat-input.ts';
-  import type { ChatEntry } from '#lib/server/staff.ts';
   import { SvelteSet } from 'svelte/reactivity';
-  import type {
-    Desk,
-    AskRow,
-    HandOffLine,
-    HandOffStep,
-    LessonLine,
-    PokeRow,
-    ThreadLine
-  } from '@oddboro/ledger';
+  import type { Desk, AskRow, HandOffLine, PokeRow, ThreadLine } from '@oddboro/ledger';
   import { FIRST_QUESTIONS, firstQuestionIn } from '@oddboro/ledger/first-questions';
   import { clockTime } from '@oddboro/ledger/time';
-  import {
-    newTurnId,
-    CHAT_ACCEPT,
-    CHAT_BYTES,
-    CHAT_FILES,
-    type ChatAttachment
-  } from '../staff/chat-input.ts';
   import TaskResponse from './TaskResponse.svelte';
   import {
     saved,
@@ -43,11 +26,25 @@
   import { wins } from './windows.svelte.ts';
   import { mustDo, stepsToGo } from './task-steps.ts';
   import Lesson from './Lesson.svelte';
-  import { call, failure } from './api.ts';
+  import PersonaQuiet from './PersonaQuiet.svelte';
+  import { newTurnId } from '#lib/staff/chat-input.ts';
+  import { call, sendFile, failure, type ApiUrl } from './api.ts';
+  import ChatFiles from './ChatFiles.svelte';
+  import { hideChoiceLines } from '#lib/choices.ts';
+  import { hasToken, tagFor, withTokens, withoutToken, type Pending } from './chat-attach.ts';
+  import {
+    ACCEPT,
+    attachableType,
+    FILES_MAX,
+    isPicture,
+    refusal,
+    type ChatFile
+  } from '#lib/attachments.ts';
   import { when, workLine } from './format.ts';
-  import { chatAbout, chatRequest, takeDraft, type Delivered } from './chat-about.svelte.ts';
+  import { chatRequest, takeDraft, type Delivered } from './chat-about.svelte.ts';
   import type { StaffProfile } from '../staff/roster.ts';
   import { runningFor, toolWords, type Work, type WorkAbout } from '../staff/work.ts';
+  import type { ChatEntry, ChatEvent } from '../staff/chat.ts';
   import { counting, dayBreaks, fullDate, stamp, took } from './chat-lines.ts';
   import { serviceNames } from './service-names.svelte.ts';
 
@@ -91,32 +88,8 @@
     if (visible) scrollDown();
   });
 
-  type Line = {
-    from: 'owner' | 'staff';
-    text: string;
-    turnId?: string;
-    source?: ChatSource;
-    about?: WorkAbout;
-    attachments?: Pick<ChatAttachment, 'name'>[];
-    pending?: boolean;
-    failed?: boolean;
-    /** Delivered later by the office, at `at`. */
-    poke?: boolean;
-    at?: string;
-    /** Something the staffer put on the desk, shown where it landed. */
-    item?: Delivered & { status: string; note?: string | null; responseVersion?: number };
-    /** What the owner's message replied about. */
-    re?: Delivered;
-    /** A lesson the staffer kept, shown where it kept it. */
-    lesson?: LessonLine;
-    /** One step of work handed to a colleague, or from one. */
-    handOff?: { line: HandOffLine; step: HandOffStep; back?: number };
-    /** A thread the staffer leads, with each hand-off it gave on it. */
-    thread?: { line: ThreadLine; steps: HandOffLine[] };
-    /** How long the run behind a reply took, in milliseconds. */
-    took?: number;
-  };
-  type Entry = Line & { at: string };
+  /** A chat line as the page keeps it: one sent or streaming has no time yet. */
+  type Line = Omit<ChatEntry, 'at'> & { at?: string; pending?: boolean };
 
   /** Where a hand-off stands, in words, and whether the owner has to act. */
   function progress(h: HandOffLine): { text: string; yours: boolean } {
@@ -281,10 +254,9 @@
 
   async function reply(d: Delivered, how: typeof intent = 'reply') {
     if (saving || correction) return;
-    problem = '';
+    refused = '';
     intent = how === 'reply' && proposal(d) ? 'proposal' : how;
     chatRequest.focus = { staff: profile.id, item: d };
-    about = undefined;
     replyTo = d;
     await tick();
     box?.focus();
@@ -310,82 +282,49 @@
   let draft = $state('');
   let sending = $state(false);
   let remoteBusy = $state(false);
-  type Reply = { runId: string; turnId: string };
-  let active = $state<Reply>();
-  let posting = $state(false);
+  let active = $state<{ runId: string; turnId: string }>();
+  let correcting = $state(false);
   let stopping = $state(false);
   let about = $state<WorkAbout>();
   let newest = 0;
 
-  function direct(work: WorkAbout) {
-    if (work.leadId === profile.id) {
-      typed('');
-      intent = 'reply';
-      about = work;
-      replyTo = undefined;
-      box?.focus();
-    } else {
-      chatRequest.work = { about: work, files: [...files] };
-      chatAbout(work.leadId, draft);
-    }
-  }
-  $effect(() => {
-    if (chatRequest.work?.about.leadId !== profile.id || !visible) return;
-    about = chatRequest.work.about;
-    files = chatRequest.work.files;
-    replyTo = undefined;
-    chatRequest.work = undefined;
-  });
-
   async function stop() {
     if (!active || stopping) return;
+    const selected = active.runId;
     stopping = true;
     try {
-      const { stopped } = await call<{ stopped: boolean }>(
-        `/api/staff/${profile.id}/chat`,
-        { runId: active.runId },
-        'DELETE'
-      );
-      if (!stopped) problem = 'That reply already ended.';
-    } catch (e) {
-      problem = e instanceof Error ? e.message : String(e);
+      await call(`/api/staff/${profile.id}/chat`, { runId: selected }, 'DELETE');
+      if (active?.runId === selected) active = undefined;
+      correcting = false;
+      if (!sending) load(profile.id);
+    } catch (err) {
+      refused = err instanceof Error ? err.message : String(err);
     } finally {
       stopping = false;
-      if (!sending) load(profile.id);
     }
   }
-  const cannotSend = $derived(
-    saving || posting || stopping || ((sending || remoteBusy) && (!active || !!about))
-  );
 
-  let files = $state<File[]>([]);
-  const decisionMode = $derived(
-    !correction &&
-      !files.length &&
-      !about &&
-      !active &&
-      !sending &&
-      !remoteBusy &&
-      !posting &&
-      !stopping
-  );
-  let picker: HTMLInputElement;
-  let problem = $state('');
-  let attempt:
-    | {
-        id: string;
-        staff: string;
-        message: string;
-        re?: Delivered;
-        files: File[];
-        about?: string;
-        instead?: string;
-      }
-    | undefined;
-  const answered = $derived(
-    new Set(lines.filter((l) => l.from === 'staff' && !l.failed).map((l) => l.turnId))
-  );
-  let reading = 0;
+  function direct(target: WorkAbout) {
+    chatRequest.work = target;
+    chatRequest.staff = target.leadId;
+  }
+
+  $effect(() => {
+    if (!visible || chatRequest.work?.leadId !== profile.id) return;
+    typed('');
+    intent = 'reply';
+    about = chatRequest.work;
+    chatRequest.work = undefined;
+    void tick().then(() => box?.focus());
+  });
+  /**
+   * What the owner sent while a reply was still coming: it goes once that
+   * reply ends. A second Send while one waits joins it, so the Odd answers
+   * both in one turn.
+   */
+  let waiting = $state<
+    { text: string; re?: Delivered; files: ChatFile[]; about?: WorkAbout } | undefined
+  >();
   let status = $state('');
   let loaded = $state(false);
   let list: HTMLDivElement | undefined = $state();
@@ -421,7 +360,7 @@
   function keptHandoff(line: ChatEntry, added: boolean) {
     if (!lines.some((l) => l.from === 'owner' && l.turnId === line.turnId)) lines.push(line);
     replaceState('/?chat=' + encodeURIComponent(profile.id) + '&turn=' + line.turnId, page.state);
-    if (added) void say('', undefined, undefined, line.turnId);
+    if (added) void say(line.text, undefined, line.files ?? [], line);
   }
 
   async function scrollDown() {
@@ -491,17 +430,19 @@
   let upcoming = $state<PokeRow[]>([]);
 
   function load(id: string) {
-    const read = ++reading;
-    fetch(`/api/staff/${id}/chat`)
+    fetch(`/api/staff/${id}/chat` satisfies ApiUrl)
       .then((r) => r.json())
-      .then((d: { history: Entry[]; busy: boolean; reply?: Reply }) => {
-        if (read !== reading || id !== profile.id || sending) return;
-        remoteBusy = d.busy;
-        active = d.reply;
-        lines = d.history.map((h) => ({ ...h }));
-        loaded = true;
-        scrollDown();
-      })
+      .then(
+        (d: { history: ChatEntry[]; busy: boolean; reply?: { runId: string; turnId: string } }) => {
+          // A message that started meanwhile is streaming into the list: keep it.
+          if (sending) return;
+          remoteBusy = d.busy;
+          active = d.reply;
+          lines = d.history.map((h) => ({ ...h }));
+          loaded = true;
+          scrollDown();
+        }
+      )
       .catch(() => (loaded = true));
     call<PokeRow[]>(`/api/staff/${id}/pokes`)
       .then((p) => (upcoming = p))
@@ -542,7 +483,7 @@
   async function decide(d: Delivered, act: 'approve' | 'change' | 'answer', words = '') {
     if (saving || !decisionMode) return false;
     saving = true;
-    problem = '';
+    refused = '';
     try {
       if (act === 'answer') {
         if (!question(d)) throw new Error('This task is no longer waiting for a written answer.');
@@ -561,7 +502,7 @@
       }
       return true;
     } catch (err) {
-      problem = err instanceof Error ? err.message : String(err);
+      refused = err instanceof Error ? err.message : String(err);
       return false;
     } finally {
       saving = false;
@@ -586,187 +527,187 @@
       }
       return;
     }
-    const message = draft.trim();
-    if ((!message && !files.length) || cannotSend) return;
-    if (!decisionMode) {
-      typed('');
-      intent = 'reply';
-      await say(draft, replyTo, files);
-      return;
-    }
-    const re = replyTo;
-    const explicit = approveWord(message);
-    const approved = approvalTarget(
-      message,
-      writtenDecision,
-      intent === 'proposal' ? re : undefined,
-      approveTo,
-      re ? undefined : onlyProposal
-    );
-    const action =
-      intent === 'change' || intent === 'answer' ? intent : approved ? 'approve' : undefined;
-    const target = re ?? approved;
-    if (target && action) {
-      if (!(await decide(target, action, action === 'approve' ? '' : message))) return;
-      draft = '';
+    if (saving || uploading) return;
+    const words = draft.trim();
+    if (!words && !pending.length) return;
+    if (decisionMode) {
+      const re = replyTo;
+      const explicit = approveWord(words);
+      const approved = approvalTarget(
+        words,
+        writtenDecision,
+        intent === 'proposal' ? re : undefined,
+        approveTo,
+        re ? undefined : onlyProposal
+      );
+      const action =
+        intent === 'change' || intent === 'answer' ? intent : approved ? 'approve' : undefined;
+      const target = re ?? approved;
+      if (target && action) {
+        if (!(await decide(target, action, action === 'approve' ? '' : words))) return;
+        draft = '';
+        writtenDecision = '';
+        approveTo = undefined;
+        replyTo = undefined;
+        intent = 'reply';
+        return;
+      }
+      if (explicit && (re?.kind === 'ask' || (!re && (approveTo || waitingAsks.length)))) {
+        refused = re
+          ? 'Open this ask to see the action it needs.'
+          : 'Choose Reply under the proposal you want to approve.';
+        return;
+      }
       writtenDecision = '';
       approveTo = undefined;
-      replyTo = undefined;
-      intent = 'reply';
-      return;
-    }
-    if (explicit && (re?.kind === 'ask' || (!re && (approveTo || waitingAsks.length)))) {
-      problem = re
-        ? 'Open this ask to see the action it needs.'
-        : 'Choose Reply under the proposal you want to approve.';
-      return;
-    }
-    writtenDecision = '';
-    approveTo = undefined;
-    problem = '';
-    await say(draft, re, files);
-  }
-
-  function attach(selected: FileList | null) {
-    if (!selected) return;
-    const next = [...files, ...selected];
-    if (
-      next.length > CHAT_FILES ||
-      next.reduce((n, f) => n + f.size, new TextEncoder().encode(draft).length) > CHAT_BYTES
-    ) {
-      problem = 'Use up to 8 files and 8 MiB of text and files per message.';
-      return;
     }
     typed('');
     intent = 'reply';
-    files = next;
-    problem = '';
-  }
-
-  function paste(e: ClipboardEvent) {
-    if (!e.clipboardData?.files.length) return;
-    e.preventDefault();
-    attach(e.clipboardData.files);
-    const words = e.clipboardData.getData('text/plain');
-    if (words && box) {
-      box.setRangeText(words, box.selectionStart, box.selectionEnd, 'end');
-      draft = box.value;
+    const message = draft;
+    const instead = correcting ? active?.runId : undefined;
+    const target = about;
+    if ((!message.trim() && !pending.length) || uploading) return;
+    let files: ChatFile[] = [];
+    if (pending.length) {
+      // Each file goes to the Odd's attachments folder first; the message names them.
+      uploading = true;
+      try {
+        files = await toAttachments(pending);
+      } catch (err) {
+        refused = err instanceof Error ? err.message : String(err);
+        return;
+      } finally {
+        uploading = false;
+      }
     }
+    const re = replyTo;
+    draft = '';
+    replyTo = undefined;
+    clearTray();
+    about = undefined;
+    correcting = false;
+    if ((sending || remoteBusy) && !instead) {
+      waiting = waiting
+        ? {
+            text: [waiting.text, message].filter(Boolean).join('\n\n'),
+            re: waiting.re ?? re,
+            files: [...waiting.files, ...files],
+            about: waiting.about ?? target
+          }
+        : { text: message, re, files, about: target };
+      scrollDown();
+      return;
+    }
+    await say(message, re, files, undefined, { instead, about: target });
   }
 
-  function drop(e: DragEvent) {
-    if (!e.dataTransfer?.files.length) return;
-    e.preventDefault();
-    attach(e.dataTransfer.files);
+  // A saved queue also waits for a reply started in another office window.
+  $effect(() => {
+    if (sending || remoteBusy || !waiting) return;
+    const next = waiting;
+    waiting = undefined;
+    void say(next.text, next.re, next.files, undefined, { about: next.about });
+  });
+
+  /** Take back the message waiting to go: it returns to the box. */
+  function unwait() {
+    if (!waiting) return;
+    draft = [waiting.text, draft.trim() && draft].filter(Boolean).join('\n\n');
+    replyTo ??= waiting.re;
+    about ??= waiting.about;
+    // Its files go back in the tray, already kept in the Odd's attachments folder.
+    const text = draft;
+    pending = [
+      ...waiting.files.map((f) => ({
+        key: nextKey++,
+        tag: f.tag,
+        mediaType: f.mediaType,
+        size: f.size,
+        kept: f,
+        url: isPicture(f.mediaType) ? attachmentUrl(f) : undefined,
+        inline: hasToken(text, f.tag)
+      })),
+      ...pending
+    ];
+    waiting = undefined;
+    void tick().then(() => {
+      fit();
+      box?.focus();
+    });
   }
 
   /**
    * The answers to tap under the manager's first questions (`FIRST_QUESTIONS`):
    * only while the question is the chat's last line. Typing an answer works too.
    */
-  const answers = $derived.by(() => {
+  const answers = $derived.by((): { list: readonly string[]; first: boolean } => {
     const last = lines.at(-1);
     if (
       saving ||
-      sending ||
       remoteBusy ||
+      sending ||
       !last ||
       last.from !== 'staff' ||
       last.pending ||
       last.failed
     )
-      return [];
-    return FIRST_QUESTIONS[firstQuestionIn(last.text)]?.answers ?? [];
+      return { list: [], first: false };
+    // Choices the Odd ended its reply with (`splitChoices`), else the manager's first questions.
+    if (last.choices?.length) return { list: last.choices, first: false };
+    return { list: FIRST_QUESTIONS[firstQuestionIn(last.text)]?.answers ?? [], first: true };
   });
 
   /** Send one message and stream the reply into the chat. */
-  async function say(message: string, re?: Delivered, chosen?: File[], retry?: string) {
-    // An import asks for its own saved turn. It never replaces a reply in progress.
-    if (cannotSend || (retry && (sending || remoteBusy))) return;
-    const instead = active?.runId;
-    const target = about;
+  async function say(
+    message: string,
+    re?: Delivered,
+    files: ChatFile[] = [],
+    retry?: Line,
+    context: { instead?: string; about?: WorkAbout } = {}
+  ) {
     const generation = ++newest;
-    const staff = profile.id;
-    const picks = chosen ?? [];
-    // Keep the ID if the office received the POST but the page lost its response.
-    if (
-      !retry &&
-      (!attempt ||
-        attempt.staff !== staff ||
-        attempt.message !== message ||
-        attempt.re !== re ||
-        attempt.about !== target?.key ||
-        picks.length !== attempt.files.length ||
-        picks.some((f, i) => f !== attempt?.files[i]))
-    )
-      attempt = {
-        id: newTurnId(),
-        staff,
-        message,
-        re,
-        files: [...picks],
-        about: target?.key,
-        instead
-      };
-    const turnId = retry ?? attempt!.id;
-    posting = true;
-    active = undefined;
-    if (!sending) onstart();
+    const turnId = retry?.turnId ?? newTurnId();
     sending = true;
-    ++reading;
-    problem = '';
     status = 'Thinking';
-    let reply: Line | undefined;
+    if (!retry)
+      lines.push({
+        from: 'owner',
+        turnId,
+        source:
+          context.instead && active
+            ? { kind: 'correction', id: active.turnId, revision: context.instead }
+            : { kind: 'chat' },
+        about: context.about,
+        // Files alone are a message too: their tags say it, as the server writes it.
+        text: message || files.map((f) => `[${f.tag}]`).join(' '),
+        re,
+        at: new Date().toISOString(),
+        ...(files.length ? { files } : {})
+      });
+    lines.push({ from: 'staff', text: '', pending: true, turnId });
+    const reply = lines[lines.length - 1];
+    scrollDown();
+    onstart();
     try {
-      const turn = retry
-        ? { turnId }
-        : {
-            turnId,
-            message,
-            instead: attempt?.instead,
-            about: target?.key,
-            re: re && { kind: re.kind, id: re.id }
-          };
-      // Like every office action this is JSON. A form POST can be refused by
-      // SvelteKit when the page and the server see different schemes.
-      const attachments = await Promise.all(
-        picks.map(
-          (file) =>
-            new Promise<{ name: string; data: string }>((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
-              reader.onload = () =>
-                resolve({ name: file.name, data: String(reader.result).split(',')[1] });
-              reader.readAsDataURL(file);
-            })
-        )
-      );
-      const res = await fetch(`/api/staff/${staff}/chat`, {
+      const res = await fetch(`/api/staff/${profile.id}/chat` satisfies ApiUrl, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ ...turn, ...(attachments.length ? { files: attachments } : {}) })
+        body: JSON.stringify(
+          retry?.inputHash
+            ? { turnId }
+            : {
+                turnId,
+                message,
+                instead:
+                  context.instead ??
+                  (retry?.source?.kind === 'correction' ? retry.source.revision : undefined),
+                about: context.about?.key ?? retry?.about?.key,
+                re: re && { kind: re.kind, id: re.id },
+                ...(files.length ? { files: files.map(({ tag, name }) => ({ tag, name })) } : {})
+              }
+        )
       });
       if (!res.ok || !res.body) throw await failure(res);
-      if (chosen) {
-        if (draft === message) draft = '';
-        files = files.filter((f) => !picks.includes(f));
-        if (replyTo === re) replyTo = undefined;
-        if (about === target) about = undefined;
-      }
-      if (!retry) attempt = undefined;
-      if (!lines.some((line) => line.from === 'owner' && line.turnId === turnId))
-        lines.push({
-          from: 'owner',
-          text: message,
-          re,
-          turnId,
-          about: target,
-          attachments: picks.map((f) => ({ name: f.name })),
-          at: new Date().toISOString()
-        });
-      lines.push({ from: 'staff', text: '', pending: true, turnId });
-      reply = lines[lines.length - 1];
-      scrollDown();
       const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
       let buffer = '';
       for (;;) {
@@ -778,32 +719,26 @@
           const chunk = buffer.slice(0, cut);
           buffer = buffer.slice(cut + 2);
           if (!chunk.startsWith('data: ')) continue;
-          const ev = JSON.parse(chunk.slice(6)) as
-            | { type: 'reply'; runId: string; turnId: string }
-            | { type: 'delta'; text: string }
-            | { type: 'tool'; name: string }
-            | { type: 'done'; text: string }
-            | { type: 'error'; message: string };
+          const ev = JSON.parse(chunk.slice(6)) as ChatEvent;
           if (generation !== newest) {
             if (ev.type === 'done' || ev.type === 'error') {
-              reply.pending = false;
               reply.text = ev.type === 'done' ? ev.text : ev.message;
+              reply.pending = false;
+              reply.failed = ev.type === 'error' ? true : undefined;
             }
             continue;
           }
-          if (ev.type === 'reply') {
-            active = ev;
-            posting = false;
-          } else if (ev.type === 'delta') {
+          if (ev.type === 'reply') active = ev;
+          else if (ev.type === 'delta') {
             reply.text += ev.text;
             status = '';
           } else if (ev.type === 'tool') status = toolWords(ev.name, serviceNames.byId);
           else if (ev.type === 'done') {
             reply.text = ev.text;
+            if (ev.choices?.length) reply.choices = ev.choices;
             reply.pending = false;
             reply.at = new Date().toISOString();
           } else if (ev.type === 'error') {
-            problem = ev.message;
             reply.text = ev.message;
             reply.pending = false;
             reply.failed = true;
@@ -812,19 +747,17 @@
         }
       }
     } catch (err) {
-      if (generation === newest) problem = err instanceof Error ? err.message : String(err);
+      reply.text = err instanceof Error ? err.message : String(err);
+      reply.failed = true;
     } finally {
+      reply.pending = false;
       if (generation === newest) {
-        if (reply) {
-          if (reply.pending && !problem)
-            problem = 'The reply was interrupted. Check the saved message below.';
-          reply.pending = false;
-        }
         sending = false;
-        status = '';
+        remoteBusy = false;
         active = undefined;
-        posting = false;
+        status = '';
         onend();
+        scrollDown();
         load(profile.id);
       }
     }
@@ -847,7 +780,8 @@
 
   // The input grows with what the owner types, up to most of the panel. Dragging
   // the bar above it sets how tall it is at least, and that height is kept.
-  const MIN_INPUT = 38;
+  // As tall as the paperclip over Send beside it (32 + 6 + 38).
+  const MIN_INPUT = 76;
   let box: HTMLTextAreaElement | undefined = $state();
   let root: HTMLDivElement | undefined = $state();
   let floor = $state(MIN_INPUT);
@@ -863,14 +797,18 @@
     // Measured first: the brief auto height below scrolls the list on its own.
     const pinned = list ? list.scrollHeight - list.scrollTop - list.clientHeight < 8 : false;
     box.style.blockSize = 'auto';
-    box.style.blockSize = `${Math.min(ceiling(), Math.max(floor, box.scrollHeight))}px`;
+    // At least as tall as the column beside it: the files, the paperclip and Send.
+    box.style.blockSize = `${Math.min(ceiling(), Math.max(floor, side, box.scrollHeight))}px`;
     if (pinned && list) list.scrollTop = list.scrollHeight;
   }
+  /** The height of the column at the box's end side, which grows as files are attached. */
+  let side = $state(0);
   $effect(() => {
     void draft;
     void correction?.words;
     void floor;
     void visible;
+    void side;
     fit();
   });
 
@@ -902,6 +840,144 @@
     } catch {
       // Private window: the height lasts this visit only.
     }
+  }
+
+  // Files the owner attaches. Pasting or dropping puts each one's tag, like
+  // [Image #1], at the caret; the paperclip adds them to the tray alone. The
+  // tray over the paperclip shows everything that will go.
+  let pending = $state<Pending[]>([]);
+  let nextKey = 0;
+  let uploading = $state(false);
+  const decisionMode = $derived(
+    !correction &&
+      !pending.length &&
+      !about &&
+      !active &&
+      !sending &&
+      !remoteBusy &&
+      !uploading &&
+      !stopping
+  );
+
+  /** Why the last file was turned away, under the tray. */
+  let refused = $state('');
+  let dragging = $state(false);
+  let picker: HTMLInputElement | undefined = $state();
+
+  const attachmentUrl = (f: ChatFile) =>
+    `/api/staff/${profile.id}/attachments/${encodeURIComponent(f.name)}`;
+
+  function attach(files: File[], how: 'paste' | 'drop' | 'pick') {
+    if (correction) return;
+    const taken = [...pending.map((p) => p.tag), ...(waiting?.files.map((f) => f.tag) ?? [])];
+    const added: Pending[] = [];
+    refused = '';
+    for (const file of files) {
+      const why = refusal(file.name, file.type, file.size);
+      if (why) {
+        refused = why;
+        continue;
+      }
+      if (pending.length + added.length >= FILES_MAX) {
+        refused = `Attach up to ${FILES_MAX} files at a time.`;
+        break;
+      }
+      const mediaType = attachableType(file.name, file.type)!;
+      added.push({
+        key: nextKey++,
+        tag: tagFor(file, how === 'paste', [...taken, ...added.map((a) => a.tag)]),
+        mediaType,
+        size: file.size,
+        file,
+        url: isPicture(mediaType) ? URL.createObjectURL(file) : undefined,
+        inline: how !== 'pick'
+      });
+    }
+    if (!added.length) return;
+    pending = [...pending, ...added];
+    const inline = added.filter((a) => a.inline).map((a) => a.tag);
+    if (inline.length && box) {
+      const put = withTokens(draft, box.selectionStart, box.selectionEnd, inline);
+      draft = put.text;
+      void tick().then(() => {
+        box?.focus();
+        box?.setSelectionRange(put.caret, put.caret);
+      });
+    }
+  }
+
+  /** Let go of a picture's preview made on this page. */
+  function unpreview(p: Pending) {
+    if (p.url && p.file) URL.revokeObjectURL(p.url);
+  }
+  function remove(key: string | number) {
+    const p = pending.find((x) => x.key === key);
+    if (!p) return;
+    unpreview(p);
+    pending = pending.filter((x) => x !== p);
+    if (p.inline) draft = withoutToken(draft, p.tag);
+  }
+  function clearTray() {
+    pending.forEach(unpreview);
+    pending = [];
+    refused = '';
+  }
+  // Deleting a tag from the text drops its file, as in Claude Code.
+  $effect(() => {
+    const text = draft;
+    const gone = untrack(() => pending.filter((p) => p.inline && !hasToken(text, p.tag)));
+    if (!gone.length) return;
+    gone.forEach(unpreview);
+    pending = untrack(() => pending.filter((p) => !gone.includes(p)));
+  });
+
+  /** Keep each file in the Odd's attachments folder, in the tray's order. */
+  function toAttachments(items: Pending[]): Promise<ChatFile[]> {
+    return Promise.all(
+      items.map(async (p) => {
+        if (p.kept) return p.kept;
+        const file = p.file!;
+        const kept = await sendFile<Omit<ChatFile, 'tag'>>(
+          `/api/staff/${profile.id}/attachments`,
+          file,
+          file.name || p.tag,
+          p.mediaType
+        );
+        return { ...kept, tag: p.tag };
+      })
+    );
+  }
+
+  function onpaste(e: ClipboardEvent) {
+    const data = e.clipboardData;
+    const files = [...(data?.files ?? [])];
+    // Copied cells or text often bring a picture of themselves: the text wins.
+    if (!files.length || data?.getData('text/plain')) return;
+    e.preventDefault();
+    attach(files, 'paste');
+  }
+  const carriesFiles = (e: DragEvent) => !!e.dataTransfer?.types.includes('Files');
+  function ondragover(e: DragEvent) {
+    if (!carriesFiles(e)) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    dragging = true;
+  }
+  function ondragleave(e: DragEvent) {
+    const into = e.relatedTarget as Node | null;
+    if (!into || !(e.currentTarget as HTMLElement).contains(into)) dragging = false;
+  }
+  function ondrop(e: DragEvent) {
+    if (!carriesFiles(e)) return;
+    e.preventDefault();
+    dragging = false;
+    attach([...(e.dataTransfer?.files ?? [])], 'drop');
+  }
+  function picked(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    attach([...(input.files ?? [])], 'pick');
+    // The same file can be picked again after it is removed.
+    input.value = '';
   }
 
   function onkeydown(e: KeyboardEvent) {
@@ -1012,6 +1088,18 @@
 {/snippet}
 
 <div class="flex h-full min-h-0 flex-col" bind:this={root}>
+  {#if profile.persona}
+    <div class="flex flex-col gap-2 border-b border-hairline p-3 text-xs">
+      <p class="leading-relaxed text-muted">{profile.persona.disclosure}</p>
+      {#if profile.persona.quiet}
+        <PersonaQuiet
+          slug={profile.persona.slug}
+          name={profile.name}
+          quiet={profile.persona.quiet}
+        />
+      {/if}
+    </div>
+  {/if}
   <div
     bind:this={list}
     {@attach pin}
@@ -1236,13 +1324,20 @@
         {#if line.poke}
           <div class="-mb-1 ms-1 text-[10px] tracking-[0.16em] text-ember uppercase">Poke</div>
         {/if}
+        {#if line.files?.length}
+          <div class="ms-auto max-w-[85%]">
+            <ChatFiles
+              end
+              files={line.files.map((f) => ({ ...f, key: f.name, url: attachmentUrl(f) }))}
+            />
+          </div>
+        {/if}
         <div
           class="max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed break-words
           {line.from === 'owner'
             ? 'ms-auto rounded-ee-md bg-sea/25 whitespace-pre-wrap text-ink'
-            : 'me-auto rounded-es-md bg-raise text-ink'}"
+            : `me-auto rounded-es-md bg-raise ${line.failed ? 'text-coral' : 'text-ink'}`}"
           id={line.from === 'owner' && line.turnId ? 'turn-' + line.turnId : undefined}
-          class:text-coral={line.failed}
         >
           {#if line.pending && !line.text}
             <span class="dots" aria-label="Replying"><span></span><span></span><span></span></span>
@@ -1253,25 +1348,25 @@
                 turn={line.turnId}
                 text={line.text}
                 source={line.source}
-                files={line.attachments ?? []}
+                files={line.files ?? []}
               />
             {/key}
           {:else if line.from === 'staff' && !line.failed}
-            <Markdown text={line.text} staff={profile.id} />
+            <!-- While it streams, its choice lines wait to become buttons. -->
+            <Markdown
+              text={line.pending ? hideChoiceLines(line.text) : line.text}
+              staff={profile.id}
+            />
           {:else}
             {line.text}
-            {#if line.about}<span class="block text-xs text-muted"
-                >About {line.about.kind}: {line.about.title} · {line.about.lead}</span
-              >{/if}
-            {#each line.attachments ?? [] as file, n (n)}
-              <a
-                class="block text-sea underline"
-                href={`/api/staff/${profile.id}/chat/${line.turnId}/${n}`}
-                download={file.name}>{file.name}</a
-              >
-            {/each}
           {/if}
         </div>
+        {#if line.from === 'owner' && line.turnId && !sending && !lines.some((l) => l.from === 'staff' && l.turnId === line.turnId && !l.failed && !l.pending)}
+          <button
+            class="ms-auto text-xs text-sea hover:text-ink"
+            onclick={() => say(line.text, line.re, line.files ?? [], line)}>Retry reply</button
+          >
+        {/if}
         {#if line.pending}
           <!-- What the staffer is doing, under the reply it is working on. -->
           <div class="-mt-1 ms-1 text-xs text-muted" aria-live="polite">
@@ -1279,25 +1374,38 @@
           </div>
         {:else}
           {@render meta(line, i)}
-          {#if line.from === 'owner' && line.turnId && !answered.has(line.turnId) && !sending}
-            <button
-              class="ms-auto text-xs text-sea"
-              disabled={remoteBusy}
-              onclick={() => say('', undefined, undefined, line.turnId)}
-            >
-              {remoteBusy ? 'Waiting for a reply' : 'Get a reply'}
-            </button>
-          {/if}
         {/if}
       {/if}
     {/each}
-    {#if answers.length}
-      <!-- Each answer a full-width choice on the owner's side, the default first and marked. -->
+    {#if waiting}
+      <!-- Sent while the reply above was still coming: it goes when that reply ends. -->
+      <div class="ms-auto flex max-w-[85%] flex-col items-end gap-0.5">
+        {#if waiting.files.length}
+          <ChatFiles
+            end
+            files={waiting.files.map((f) => ({ ...f, key: f.name, url: attachmentUrl(f) }))}
+          />
+        {/if}
+        {#if waiting.text}
+          <div
+            class="rounded-2xl rounded-ee-md border border-dashed border-sea/40 px-3 py-2 text-sm leading-relaxed break-words whitespace-pre-wrap text-ink"
+          >
+            {waiting.text}
+          </div>
+        {/if}
+        <div class="flex gap-3 pe-1 text-[10px] text-faint">
+          <span>Sends when {profile.name} finishes</span>
+          <button class="hover:text-coral" onclick={unwait}>Cancel</button>
+        </div>
+      </div>
+    {/if}
+    {#if answers.list.length}
+      <!-- Each answer a full-width choice on the owner's side; a first question's default is first and marked. -->
       <div class="ms-auto flex w-[85%] flex-col gap-1.5" role="group" aria-label="Answers">
-        {#each answers as a, n (a)}
+        {#each answers.list as a, n (a)}
           <button class="choice" onclick={() => say(a)}>
             <span class="min-w-0 flex-1">{a}</span>
-            {#if n === 0}<span class="default">Default</span>{/if}
+            {#if answers.first && n === 0}<span class="default">Default</span>{/if}
           </button>
         {/each}
       </div>
@@ -1408,77 +1516,67 @@
         onclick={() => {
           replyTo = undefined;
           intent = 'reply';
-          problem = '';
+          refused = '';
         }}>✕</button
       >
     </div>
   {/if}
   {#if about}
     <div class="flex gap-2 px-3 pb-1.5 text-xs text-muted">
-      <span>To {about.lead} about {about.kind}: {about.title}</span><button
-        aria-label="Clear work selection"
-        onclick={() => (about = undefined)}>✕</button
-      >
+      <span>To {about.lead} about {about.kind}: {about.title}</span>
+      <button aria-label="Clear work selection" onclick={() => (about = undefined)}>✕</button>
     </div>
   {/if}
   {#if active && !correction}
     <div class="flex items-center justify-between gap-2 px-3 pb-1.5 text-xs text-muted">
-      <span>Send a correction to stop this reply.</span><button
+      <button
         type="button"
-        class="text-coral"
-        disabled={posting || stopping}
-        onclick={stop}>Stop reply</button
+        class="text-sea"
+        disabled={stopping || !!about}
+        onclick={() => {
+          correcting = !correcting;
+          box?.focus();
+        }}>{correcting ? 'Keep this as a queued message' : 'Correct this reply'}</button
+      >
+      <button type="button" class="text-coral" disabled={stopping} onclick={stop}>Stop reply</button
       >
     </div>
   {/if}
-  {#if problem}<p role="alert" class="px-3 pb-1 text-xs text-coral">{problem}</p>{/if}
-  {#each files as file, i (i)}
-    <div class="flex items-center gap-2 px-3 text-xs text-muted">
-      <span class="truncate">{file.name}</span>
-      <button
-        aria-label={`Remove ${file.name}`}
-        onclick={() => (files = files.filter((_, n) => n !== i))}>Remove</button
-      >
-    </div>
-  {/each}
   {#if handoff && !handoff.saved}
     {#key handoff.ticket}<CodexHandoff {handoff} onkeep={keptHandoff} />{/key}
   {/if}
   {#if profile.role === 'Office Manager' && !replyTo && !correction && decisionMode}
     <ChatGoal managerId={profile.id} onset={() => load(profile.id)} />
   {/if}
-  <form class="flex items-end gap-2 px-3 pb-3" novalidate onsubmit={send}>
+  <form
+    class="flex items-end gap-2 px-3 {refused ? 'pb-2' : 'pb-3'}"
+    novalidate
+    onsubmit={send}
+    {ondragover}
+    {ondragleave}
+    {ondrop}
+  >
     <input
+      bind:this={picker}
       type="file"
       multiple
-      accept={CHAT_ACCEPT}
+      accept={ACCEPT}
       class="hidden"
-      bind:this={picker}
-      onchange={() => {
-        attach(picker.files);
-        picker.value = '';
-      }}
+      onchange={picked}
     />
-    <button
-      type="button"
-      class="py-2 text-sm text-sea"
-      disabled={!!correction}
-      onclick={() => picker.click()}>Attach</button
-    >
     <textarea
-      onpaste={(e) => !correction && paste(e)}
-      ondragover={(e) => {
-        if (e.dataTransfer?.types.includes('Files')) e.preventDefault();
-      }}
-      ondrop={(e) => !correction && drop(e)}
       bind:this={box}
-      class="min-h-[38px] min-w-0 flex-1 resize-none overflow-y-auto rounded-lg bg-raise px-3 py-2 text-sm leading-relaxed text-ink outline-none placeholder:text-faint"
+      class="min-h-[76px] flex-1 resize-none overflow-y-auto rounded-lg bg-raise px-3 py-2 text-sm leading-relaxed text-ink outline-none placeholder:text-faint {dragging
+        ? 'ring-1 ring-sea'
+        : ''}"
       rows="1"
       placeholder={correction
         ? 'Type the words to save'
-        : replyTo
-          ? `Reply to ${profile.name}`
-          : `Message ${profile.name}`}
+        : dragging
+          ? 'Drop to attach'
+          : replyTo
+            ? `Reply to ${profile.name}`
+            : `Message ${profile.name}`}
       oninput={(e) =>
         !correction &&
         typed(
@@ -1497,23 +1595,73 @@
           else draft = value;
         }
       }
+      disabled={correction ? writing[correction.id] : saving}
       {onkeydown}
-      disabled={correction ? writing[correction.id] : saving}></textarea>
-    <button
-      class="rounded-lg bg-sea px-3 py-2 text-sm font-medium text-night disabled:opacity-40"
-      disabled={correction
-        ? writing[correction.id] || !correction.words.trim()
-        : cannotSend || (!draft.trim() && !files.length)}
-      >{correction
-        ? 'Save change'
-        : active
-          ? 'Send correction'
-          : decisionMode && replyTo && intent === 'answer'
-            ? 'Send answer'
-            : decisionMode && replyTo && intent === 'change'
-              ? 'Send changes'
-              : 'Send'}</button
-    >
+      {onpaste}></textarea>
+    <div class="flex shrink-0 flex-col gap-1.5" bind:clientHeight={side}>
+      {#if pending.length}
+        <!-- What goes with the message, over the paperclip: three files tall at most, scrolling past that. -->
+        <div
+          class="tray -me-3 flex justify-center overflow-y-auto overscroll-contain ps-1.5 pe-1.5 pt-1.5"
+          aria-label="Attached files"
+        >
+          <ChatFiles stack files={pending} onremove={remove} />
+        </div>
+      {/if}
+      <button
+        type="button"
+        class="flex h-8 items-center justify-center rounded-lg text-muted hover:bg-raise hover:text-ink"
+        aria-label="Attach files"
+        title="Attach pictures, PDFs or text files"
+        disabled={!!correction}
+        onclick={() => picker?.click()}
+      >
+        <svg
+          class="size-4"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.4"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+          ><path
+            d="M13.5 7.5 8 13a3.5 3.5 0 0 1-5-5l5.8-5.8a2.3 2.3 0 0 1 3.3 3.3L6.3 11.3a1.2 1.2 0 0 1-1.7-1.7L10 4.3"
+          /></svg
+        >
+      </button>
+      <button
+        class="flex h-[38px] items-center justify-center gap-1.5 rounded-lg bg-sea px-3 text-sm font-medium text-night disabled:opacity-40"
+        disabled={correction
+          ? writing[correction.id] || !correction.words.trim()
+          : saving || (!draft.trim() && !pending.length) || uploading}
+      >
+        <!-- A paper plane: its wings, and the fold down its middle. -->
+        <svg
+          class="size-4 shrink-0"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.4"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+          ><path d="M14.5 1.5 1.5 6.6l5.2 2.2 2.2 5.7z" /><path d="M14.5 1.5 6.7 8.8" /><path
+            d="m6.7 8.8.2 3.7 2-1.9"
+          /></svg
+        >{correction
+          ? 'Save change'
+          : uploading
+            ? 'Attaching'
+            : correcting && active
+              ? 'Send correction'
+              : decisionMode && intent === 'answer'
+                ? 'Send answer'
+                : decisionMode && intent === 'change'
+                  ? 'Send changes'
+                  : 'Send'}
+      </button>
+    </div>
     {#if correction}
       {@const task = taskHere(correction.id)}
       {#if task ? !stepsToGo(task.steps) : alreadySaved({ version: correction.version, text: correction.before + correction.words + correction.after }, saved[correction.id])}
@@ -1527,9 +1675,17 @@
       {/if}
     {/if}
   </form>
+  {#if refused}
+    <p class="px-3 pb-3 text-xs text-coral" role="alert">{refused}</p>
+  {/if}
 </div>
 
 <style>
+  /* Three attached files at most (each 48px square, 2px and a 15px name under
+     it, 8px apart, 6px over the first for its ✕); the rest scroll. */
+  .tray {
+    max-block-size: calc(3 * 65px + 2 * 8px + 6px);
+  }
   .grip {
     position: relative;
     block-size: 12px;

@@ -4,8 +4,15 @@
 // for good, only moved to the trash, and gmail.settings.basic for filters,
 // which only the office creates, on the owner's click (filters.ts).
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { linkFooter, withFooter } from '@oddboro/ledger';
+import {
+  linkFooter,
+  mailAttachmentPath,
+  mailAttachments,
+  withFooter,
+  type MailAttachment
+} from '@oddboro/ledger';
 import { z } from 'zod';
 import {
   doesWords,
@@ -14,6 +21,7 @@ import {
   type FilterAction,
   type FilterCriteria
 } from '@oddboro/ledger/filters';
+import { zone } from '@oddboro/ledger/time';
 import {
   accountServer,
   base64url,
@@ -30,6 +38,8 @@ import {
 } from './http.ts';
 
 const GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me';
+/** Gmail's upload address, which takes a whole email with its files as MIME. */
+const GMAIL_UPLOAD = 'https://gmail.googleapis.com/upload/gmail/v1/users/me';
 
 type Header = { name: string; value: string };
 type Part = {
@@ -97,7 +107,27 @@ export type Outgoing = {
   threadId?: string;
   /** The Gmail message id it answers, else the thread's latest. */
   inReplyTo?: string;
+  /** Files that go with it, read from the Odd's folder (`filesOf`). */
+  attachments?: OutgoingFile[];
 };
+export type OutgoingFile = { name: string; mediaType: string; data: Buffer };
+
+/**
+ * The files an Odd named, from its own folder, checked (`mailAttachments`
+ * in the ledger) and read now. Throws the words that turn them down.
+ */
+export function filesOf(staffId: string, named: (string | MailAttachment)[]): OutgoingFile[] {
+  const checked = mailAttachments(
+    staffId,
+    named.map((n) => (typeof n === 'string' ? n : n.path))
+  );
+  if ('problem' in checked) throw new Error(checked.problem);
+  return checked.map((a) => ({
+    name: a.name,
+    mediaType: a.mediaType,
+    data: readFileSync(mailAttachmentPath(staffId, a))
+  }));
+}
 
 /** A Markdown link to an https address, the only kind an email's HTML part makes a link. */
 const LINK = /\[([^\]\n]+)\]\((https:\/\/[^\s()<>"]+)\)/g;
@@ -164,6 +194,39 @@ export async function message(
   token: Token,
   m: Outgoing
 ): Promise<{ raw: string; threadId?: string }> {
+  const { text, threadId } = await mime(token, m);
+  return { raw: base64url(text), ...(threadId ? { threadId } : {}) };
+}
+
+/** One file as a MIME part: its name in plain letters, and in full when it has others (RFC 2231). */
+function filePart(f: OutgoingFile): string[] {
+  const plain = f.name.replace(/[^\x20-\x7e]|["\\]/g, '_');
+  const full = plain === f.name ? '' : `; filename*=UTF-8''${encodeURIComponent(f.name)}`;
+  return [
+    `Content-Type: ${f.mediaType}; name="${plain}"`,
+    `Content-Disposition: attachment; filename="${plain}"${full}`,
+    'Content-Transfer-Encoding: base64',
+    '',
+    ...(f.data.toString('base64').match(/.{1,76}/g) ?? [])
+  ];
+}
+
+/** The body, and with files, the body then each file in one multipart/mixed. */
+function contentParts(m: Outgoing): string[] {
+  if (!m.attachments?.length) return bodyParts(m.body);
+  const boundary = `oddboro-${randomUUID()}`;
+  return [
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    '',
+    `--${boundary}`,
+    ...bodyParts(m.body),
+    ...m.attachments.flatMap((f) => [`--${boundary}`, ...filePart(f)]),
+    `--${boundary}--`
+  ];
+}
+
+/** The email as MIME text, and the thread it goes in. */
+async function mime(token: Token, m: Outgoing): Promise<{ text: string; threadId?: string }> {
   const headers: Record<string, string> = { To: m.to };
   if (m.cc) headers.Cc = m.cc;
   if (m.bcc) headers.Bcc = m.bcc;
@@ -182,16 +245,129 @@ export async function message(
     }
   }
   headers.Subject = encoded(oneLine(subject ?? ''));
-  const raw = [
+  const text = [
     ...Object.entries(headers).map(([k, v]) => `${k}: ${oneLine(v)}`),
     'MIME-Version: 1.0',
-    ...bodyParts(m.body)
+    ...contentParts(m)
   ].join('\r\n');
-  return { raw: base64url(raw), ...(m.threadId ? { threadId: m.threadId } : {}) };
+  return { text, ...(m.threadId ? { threadId: m.threadId } : {}) };
+}
+
+/**
+ * An email with files goes to Gmail's upload address as MIME, beside its
+ * thread in JSON (`uploadType=multipart`), which takes up to 35 MB where the
+ * plain address takes far less. `meta` places the thread as the call wants it.
+ */
+async function upload<T>(token: Token, path: string, mail: string, meta: object): Promise<T> {
+  const boundary = `oddboro-${randomUUID()}`;
+  const body = [
+    `--${boundary}`,
+    'Content-Type: application/json; charset=UTF-8',
+    '',
+    JSON.stringify(meta),
+    `--${boundary}`,
+    'Content-Type: message/rfc822',
+    '',
+    mail,
+    `--${boundary}--`
+  ].join('\r\n');
+  return google<T>(token, `${GMAIL_UPLOAD}/${path}?uploadType=multipart`, {
+    method: 'POST',
+    headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+    body
+  });
+}
+
+/** What adding or taking off one of Gmail's own labels does, in the owner's words. */
+const LABEL_WORDS: Record<string, { add: string; remove: string }> = {
+  INBOX: { add: 'Move back to the inbox', remove: 'Archive' },
+  UNREAD: { add: 'Mark unread', remove: 'Mark read' },
+  STARRED: { add: 'Star', remove: 'Unstar' },
+  IMPORTANT: { add: 'Mark important', remove: 'Mark not important' },
+  SPAM: { add: 'Report as spam', remove: 'Take out of spam' },
+  TRASH: { add: 'Move to Trash', remove: 'Take out of Trash' }
+};
+/** What each tool that acts on one thread does. */
+const THREAD_WORDS: Record<string, string> = {
+  trash_thread: 'Move to Trash',
+  untrash_thread: 'Take out of Trash',
+  mark_thread_spam: 'Report as spam',
+  unmark_thread_spam: 'Take out of spam'
+};
+
+/**
+ * A held Gmail call in the owner's words. `title` says what it does and to
+ * how many emails, from the call alone, since it reaches the Odd's prompt.
+ * `items` names each email by subject, sender and date, read from Gmail now;
+ * those come from strangers, so they show on the page and nowhere else.
+ */
+export type HeldWords = { title: string; items: string[] };
+
+export async function heldWords(
+  token: Token,
+  tool: string,
+  args: Record<string, unknown>
+): Promise<HeldWords | undefined> {
+  const list = (v: unknown) =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  const said = (label: string, way: 'add' | 'remove') =>
+    LABEL_WORDS[label.toUpperCase()]?.[way] ??
+    (way === 'add' ? `Label as "${label}"` : `Take the label "${label}" off`);
+  const verbs =
+    tool === 'update_labels'
+      ? [
+          ...list(args.remove).map((l) => said(l, 'remove')),
+          ...list(args.add).map((l) => said(l, 'add'))
+        ]
+      : THREAD_WORDS[tool]
+        ? [THREAD_WORDS[tool]]
+        : [];
+  const threads = [
+    ...new Set([
+      ...list(args.thread_ids),
+      ...(typeof args.thread_id === 'string' ? [args.thread_id] : [])
+    ])
+  ];
+  if (!verbs.length || !threads.length) return undefined;
+  const lower = verbs.map((v, i) => (i ? v[0].toLowerCase() + v.slice(1) : v));
+  const action =
+    lower.length === 1 ? lower[0] : `${lower.slice(0, -1).join(', ')} and ${lower.at(-1)}`;
+  const day = new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: zone()
+  });
+  const items = await Promise.all(
+    threads.map(async (t) => {
+      try {
+        const th = await google<Thread>(
+          token,
+          `${GMAIL}/threads/${t}?${metadata(['Subject', 'From', 'Date'])}`
+        );
+        const first = th.messages?.[0];
+        const subject = oneLine(header(first, 'Subject')) || '(no subject)';
+        const from = header(th.messages?.at(-1), 'From');
+        const who = oneLine(/^\s*"?([^"<]+?)"?\s*</.exec(from)?.[1] ?? from) || 'an unknown sender';
+        const date = Date.parse(header(th.messages?.at(-1), 'Date'));
+        return `"${subject}" from ${who}${Number.isNaN(date) ? '' : `, ${day.format(date)}`}`;
+      } catch {
+        return `An email Gmail would not show (thread ${t})`;
+      }
+    })
+  );
+  return {
+    title: `${action}: ${threads.length === 1 ? '1 email' : `${threads.length} emails`}`,
+    items
+  };
 }
 
 /** Save an email as a Gmail draft. Nothing is sent. Gives the draft's id. */
 export async function saveDraft(token: Token, m: Outgoing): Promise<string> {
+  if (m.attachments?.length) {
+    const { text, threadId } = await mime(token, m);
+    const thread = threadId ? { threadId } : {};
+    return (await upload<{ id: string }>(token, 'drafts', text, { message: thread })).id;
+  }
   const draft = await google<{ id: string }>(
     token,
     `${GMAIL}/drafts`,
@@ -202,6 +378,10 @@ export async function saveDraft(token: Token, m: Outgoing): Promise<string> {
 
 /** Send an email. Only the office calls this, on the owner's click. Gives the sent message's id. */
 export async function sendMail(token: Token, m: Outgoing): Promise<string> {
+  if (m.attachments?.length) {
+    const { text, threadId } = await mime(token, m);
+    return (await upload<Message>(token, 'messages/send', text, threadId ? { threadId } : {})).id;
+  }
   const sent = await google<Message>(
     token,
     `${GMAIL}/messages/send`,
@@ -547,17 +727,29 @@ export function gmailServer(token: Token, account?: string): McpServer {
     'update_labels',
     {
       description:
-        'Add and remove labels on every message in a thread, by label id or name. This is how mail is marked read (remove UNREAD), marked unread (add UNREAD), archived (remove INBOX), moved back to the inbox (add INBOX) and starred (add STARRED).',
+        'Add and remove labels on every message in one or more threads, by label id or name. This is how mail is marked read (remove UNREAD), marked unread (add UNREAD), archived (remove INBOX), moved back to the inbox (add INBOX) and starred (add STARRED). Change every thread that gets the same labels in one call, with thread_ids: never one call per thread. Mail a filter you propose already matches is tidied by that filter, so leave it to the filter.',
       inputSchema: {
-        ...thread,
+        thread_ids: z
+          .array(id)
+          .min(1)
+          .max(100)
+          .optional()
+          .describe('Every thread to change, from search_threads.'),
+        thread_id: id.optional().describe('One thread, when there is only one.'),
         add: z.array(z.string()).optional().describe('Label ids or names to add.'),
         remove: z.array(z.string()).optional().describe('Label ids or names to take off.')
       },
       annotations: WRITE
     },
-    run(async ({ thread_id, add = [], remove = [] }) => {
-      await modify(thread_id, await labelIds(add), await labelIds(remove));
-      return `Thread ${thread_id}: added ${add.join(', ') || 'nothing'}, removed ${remove.join(', ') || 'nothing'}.`;
+    run(async ({ thread_ids = [], thread_id, add = [], remove = [] }) => {
+      const threads = [...new Set([...thread_ids, ...(thread_id ? [thread_id] : [])])];
+      if (!threads.length) throw new Error('name the threads to change, in thread_ids.');
+      const [adds, removes] = [await labelIds(add), await labelIds(remove)];
+      for (const t of threads) await modify(t, adds, removes);
+      const did = `added ${add.join(', ') || 'nothing'}, removed ${remove.join(', ') || 'nothing'}`;
+      return threads.length === 1
+        ? `Thread ${threads[0]}: ${did}.`
+        : `${threads.length} threads: ${did}.`;
     })
   );
 
@@ -572,11 +764,21 @@ export function gmailServer(token: Token, account?: string): McpServer {
         bcc: z.string().optional(),
         subject: z.string().optional(),
         body: z.string().describe('The message, as plain text.'),
-        thread_id: id.optional().describe('The thread this replies to.')
+        thread_id: id.optional().describe('The thread this replies to.'),
+        attachments: z
+          .array(z.string())
+          .max(10)
+          .optional()
+          .describe(
+            'Files from your own folder to attach, by their path inside it or their full path, like "attachments/20261110-081108-35bc-image.png". Files the owner attached in chat are in attachments/. Up to 10, 18 MB together.'
+          )
       },
       annotations: WRITE
     },
-    run(async ({ to, cc, bcc, subject, body, thread_id }) => {
+    run(async ({ to, cc, bcc, subject, body, thread_id, attachments = [] }, odd) => {
+      // Only the office says whose call this is (`ODD_META`), so only that Odd's files go.
+      if (attachments.length && !odd) throw new Error('Files can be attached only from a run.');
+      const files = attachments.length ? filesOf(odd!, attachments) : undefined;
       // The footer goes in now, where the owner sees it in Drafts and may delete it.
       const draft = await saveDraft(token, {
         to,
@@ -584,9 +786,11 @@ export function gmailServer(token: Token, account?: string): McpServer {
         bcc,
         subject,
         body: withFooter(body),
-        threadId: thread_id
+        threadId: thread_id,
+        attachments: files
       });
-      return `Draft ${draft} is saved in Drafts. Nothing was sent.`;
+      const said = files ? ` with ${files.map((f) => f.name).join(', ')} attached` : '';
+      return `Draft ${draft} is saved in Drafts${said}. Nothing was sent.`;
     })
   );
 

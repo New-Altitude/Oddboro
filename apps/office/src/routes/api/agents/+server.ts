@@ -10,11 +10,13 @@
 // Odd's look; when it does not, the hire offers building one from parts. Each installed tool says its version, a newer one when its maker has
 // one out, and the oldest the office runs when it is older (versions.ts).
 // Each tool says how it takes Run commands on this system (`commandsHow`), so
-// the hire drawer names that switch only where the owner can move it.
+// the hire drawer names that switch only where the owner can move it, and the
+// model an Odd with none of its own runs on it (`shownOfficeModel`).
 // PUT picks the office's tool. Installs and sign-ins themselves go to
 // /api/agents/[tool].
 import { error, json } from '@sveltejs/kit';
 import {
+  currentPlatform,
   AGENT_NAMES,
   AGENTS,
   agentsOn,
@@ -35,7 +37,7 @@ import {
   type SignInState
 } from '#lib/server/agent-sign-in.ts';
 import { claudeAccount, claudeSettings } from '#lib/server/claude.ts';
-import { officeDrawsLooks } from '#lib/server/claude.ts';
+import { officeDrawsLooks, shownOfficeModel } from '#lib/server/claude.ts';
 import { versionState, type VersionState } from '#lib/server/versions.ts';
 import type { RequestHandler } from './$types';
 
@@ -46,6 +48,8 @@ export type AgentTool = {
   installed: boolean;
   signIn?: SignInState;
   commandsHow: CommandsHow;
+  /** The model an Odd with none of its own runs on this tool, for the Office default card. */
+  officeModel?: string;
 } & VersionState;
 /** A tool this system does not offer yet, with why, for setup's greyed row. */
 export type LaterTool = { id: Agent; name: string; why: string };
@@ -63,7 +67,7 @@ const stateOf = (tool: Agent, account?: string): Promise<SignInState> | SignInSt
     : signInState(tool, account);
 
 export const GET: RequestHandler = async () => {
-  const platform = process.platform;
+  const platform = currentPlatform();
   return json({
     // The picker's word for this computer.
     computer: computerWord(),
@@ -78,6 +82,7 @@ export const GET: RequestHandler = async () => {
           installed,
           signIn: await stateOf(id),
           commandsHow: commandsHow(id, platform),
+          officeModel: shownOfficeModel(id),
           ...(installed ? await versionState(id) : {})
         };
       })
@@ -102,8 +107,8 @@ export const GET: RequestHandler = async () => {
 /** Pick the tool the office runs on. It applies to the next office run and the next hire. */
 export const PUT: RequestHandler = async ({ request }) => {
   const b = (await request.json().catch(() => ({}))) as { office?: unknown };
-  const agent = offeredAgent(b.office, process.platform);
-  if (!agent) error(400, `Pick ${agentsOn(process.platform).join(' or ')}`);
+  const agent = offeredAgent(b.office, currentPlatform());
+  if (!agent) error(400, `Pick ${agentsOn(currentPlatform()).join(' or ')}`);
   writeEnv({ OFFICE_AGENT: agent });
   process.env.OFFICE_AGENT = agent;
   return json({ office: agent });

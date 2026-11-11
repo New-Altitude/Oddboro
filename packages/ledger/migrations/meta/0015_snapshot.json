@@ -1,6 +1,6 @@
 {
-  "id": "1ad80e6c-3bd3-4cd5-a6b4-b135de174b35",
-  "prevId": "515f56e8-9cbf-47c2-871a-d9c3968e0f3b",
+  "id": "75887648-c64b-4315-b52c-0895f44708ff",
+  "prevId": "d716beff-a5d5-4326-aeb7-b985fda547a2",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -293,6 +293,12 @@
         },
         "call": {
           "name": "call",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "switches": {
+          "name": "switches",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
@@ -886,12 +892,6 @@
             "cycle": false
           }
         },
-        "request_id": {
-          "name": "request_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "title": {
           "name": "title",
           "type": "text",
@@ -955,13 +955,7 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "goals_requestId_unique": {
-          "name": "goals_requestId_unique",
-          "nullsNotDistinct": false,
-          "columns": ["request_id"]
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -2165,6 +2159,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "package": {
+          "name": "package",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "hired_at": {
           "name": "hired_at",
           "type": "timestamp with time zone",
@@ -2354,19 +2354,6 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true
-        },
-        "response": {
-          "name": "response",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "response_version": {
-          "name": "response_version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
         },
         "status": {
           "name": "status",

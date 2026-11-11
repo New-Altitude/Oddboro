@@ -107,23 +107,33 @@ fn read_login_path() -> Option<String> {
     None
 }
 
-/// Runs `$SHELL -l -c 'printf %s "$PATH"'` with a timeout. A profile that
-/// prints its own text first is fine: the PATH is the last line.
+/// The PATH from `$SHELL -l -i`, so `~/.zshrc` runs: nvm, fnm, Volta, asdf
+/// and mise set Node up there, and the app brings Node but not npm. A shell
+/// that fails or hangs as interactive falls back to `$SHELL -l`.
 #[cfg(unix)]
 fn read_login_path() -> Option<String> {
-    use std::io::Read;
-    use std::process::{Command, Stdio};
-    use std::thread::sleep;
-    use std::time::Instant;
-
     let fallback = if cfg!(target_os = "macos") {
         "/bin/zsh"
     } else {
         "/bin/sh"
     };
     let shell = env::var("SHELL").unwrap_or_else(|_| fallback.to_string());
+    ask_shell(&shell, &["-l", "-i"]).or_else(|| ask_shell(&shell, &["-l"]))
+}
+
+/// Runs the shell with `flags` and a timeout, and reads the PATH it prints
+/// after a marker, so a profile's own text before or after it is ignored.
+#[cfg(unix)]
+fn ask_shell(shell: &str, flags: &[&str]) -> Option<String> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    use std::thread::sleep;
+    use std::time::Instant;
+
+    const MARK: &str = "ODDBORO_PATH=";
     let mut child = Command::new(shell)
-        .args(["-l", "-c", "printf %s \"$PATH\""])
+        .args(flags)
+        .args(["-c", "printf '\\n%s%s\\n' ODDBORO_PATH= \"$PATH\""])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -144,6 +154,6 @@ fn read_login_path() -> Option<String> {
     }
     let mut out = String::new();
     child.stdout.take()?.read_to_string(&mut out).ok()?;
-    let path = out.lines().last()?.trim().to_string();
-    (!path.is_empty()).then_some(path)
+    let path = out.lines().rev().find_map(|l| l.strip_prefix(MARK))?.trim();
+    (!path.is_empty()).then(|| path.to_string())
 }

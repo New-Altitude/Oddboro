@@ -5,6 +5,18 @@
 // polls. Every hand-off is a step in a thread (threads.ts): the colleague's run
 // cannot hand off (mcp.ts), the hub's pick-up may hand on in the same thread,
 // and both work at Draft at most (staff.ts in the office app).
+import {
+  closeSync,
+  constants,
+  copyFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  realpathSync
+} from 'node:fs';
+import { join } from 'node:path';
 import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import { db } from './db.ts';
 import {
@@ -28,8 +40,70 @@ import {
   type Db,
   type ThreadFor
 } from './threads.ts';
+import { workName } from './work-paths.ts';
 
 type FollowUpRow = typeof followUps.$inferSelect;
+
+/** A file a hand-off copies into the sender's part of its work. */
+export type CarriedFile = {
+  /** Its real path, which the copy reads. */
+  real: string;
+  /** The name it lands under in the sender's part. */
+  name: string;
+  /**
+   * The name the Odd gave it on `hand_off`, which a refusal uses: the Odd can
+   * pass that back, never a path from the office's folder.
+   */
+  named: string;
+};
+
+/** Why a hand-off's files cannot land in its work: the hand-off is taken back with it. */
+class NotCarried extends Error {}
+
+/** Whether the office can open `path` to read it. */
+function opens(path: string): boolean {
+  try {
+    closeSync(openSync(path, 'r'));
+    return true;
+  } catch {
+    // Unreadable or gone: the caller refuses the file by the name the Odd gave
+    // it, since the error's own text holds real paths.
+    return false;
+  }
+}
+
+/**
+ * Copy the files a hand-off carries into the sender's part of its thread.
+ * Every check comes before the first copy, so a refused hand-off leaves the
+ * work's folder as it was. A file already in the work is never changed: one
+ * with the same bytes was carried before, and any other refuses the hand-off.
+ */
+function carryFiles(thread: number, from: string, carry: CarriedFile[]): void {
+  const unread = carry.find((c) => !opens(c.real));
+  if (unread)
+    throw new NotCarried(
+      `The office cannot open ${unread.named} to copy it. Make it readable, or leave it out, and call hand_off again.`
+    );
+  const part = threadPart(thread, from);
+  mkdirSync(part, { recursive: true });
+  // The sender's runs write in its part, and the tool server copying here is
+  // outside their walls: a link left in the part must not take the copy elsewhere.
+  if (realpathSync(part) !== join(realpathSync(threadFolder(thread)), from))
+    throw new NotCarried('Your part of this work is a link, so files cannot land in it.');
+  const copies = carry.filter(({ real, name, named }) => {
+    const to = join(part, name);
+    const there = lstatSync(to, { throwIfNoEntry: false });
+    if (!there) return true;
+    // A link is never read through, so it counts as a different file.
+    if (there.isFile() && readFileSync(to).equals(readFileSync(real))) return false;
+    throw new NotCarried(
+      `${named} would land on ${workName(thread, `${from}/${name}`)}, a different file already in this work. Rename your file, or name the work's file instead, and call hand_off again.`
+    );
+  });
+  // Never over a file that landed after the check.
+  for (const { real, name } of copies)
+    copyFileSync(real, join(part, name), constants.COPYFILE_EXCL);
+}
 
 /**
  * Hand `to` a piece of work from `from`, opening a thread or going on in one
@@ -39,10 +113,12 @@ type FollowUpRow = typeof followUps.$inferSelect;
 export async function handOff(h: {
   from: string;
   to: string;
-  work: { title: string; brief: string };
+  work: { title: string; brief: string; files?: string[] };
   thread: ThreadFor;
   /** The key of the run handing it off (`runsGoing`). */
   run?: string;
+  /** Files from outside this work to copy into the sender's part of it, under `name`. */
+  carry?: CarriedFile[];
 }): Promise<
   | { id: number; thread: number; left: number }
   | { problem: string }
@@ -58,19 +134,31 @@ export async function handOff(h: {
     .where(and(eq(staff.id, h.to), isNull(staff.leftAt)));
   if (!colleague)
     return { problem: `Nobody called "${h.to}" works here. Use a colleague's id from the list.` };
-  return db.transaction(async (tx) => {
-    // Past the round's limit, the ask holds this hand-off and the owner's yes starts it.
-    const t = await takeHandOff(tx, h);
-    if ('problem' in t || 'asked' in t) return t;
-    const id = await addFollowUp(tx, {
-      staffId: h.to,
-      kind: 'hand_off',
-      note: null,
-      handOff: await sharing(tx, { from: h.from, to: h.to, ...h.work, threadId: t.id }),
-      threadId: t.id
+  const carry = h.carry ?? [];
+  // On the work before takeHandOff, which writes a held hand-off from it.
+  const files = [...(h.work.files ?? []), ...carry.map((c) => `${h.from}/${c.name}`)];
+  const work = files.length ? { ...h.work, files } : h.work;
+  try {
+    return await db.transaction(async (tx) => {
+      // Past the round's limit, the ask holds this hand-off and the owner's yes starts it.
+      const t = await takeHandOff(tx, { ...h, work });
+      if ('problem' in t) return t;
+      // In the transaction, so a copy refused or failing takes the hand-off back with it.
+      if (carry.length) carryFiles('asked' in t ? t.thread : t.id, h.from, carry);
+      if ('asked' in t) return t;
+      const id = await addFollowUp(tx, {
+        staffId: h.to,
+        kind: 'hand_off',
+        note: null,
+        handOff: await sharing(tx, { from: h.from, to: h.to, ...work, threadId: t.id }),
+        threadId: t.id
+      });
+      return { id, thread: t.id, left: HAND_OFF_LIMIT - t.handOffsUsed };
     });
-    return { id, thread: t.id, left: HAND_OFF_LIMIT - t.handOffsUsed };
-  });
+  } catch (e) {
+    if (e instanceof NotCarried) return { problem: e.message };
+    throw e;
+  }
 }
 
 /**
@@ -104,16 +192,40 @@ export function handBack(
  * office tells its tool server so (`LESSON_RUN`), which then offers no
  * `hand_off`.
  */
-export const servesNoThread = (kind: FollowUpKind): boolean =>
-  kind === 'denied' || kind === 'edited';
+export const SERVES_NO_THREAD: Record<FollowUpKind, boolean> = {
+  carry_out: false,
+  rework: false,
+  denied: true,
+  feedback: false,
+  task_done: false,
+  goal: false,
+  first_day: false,
+  hand_off: false,
+  handed_back: false,
+  resume: false,
+  edited: true
+};
+export const servesNoThread = (kind: FollowUpKind): boolean => SERVES_NO_THREAD[kind];
 
 /**
  * Whether a follow-up's run works at Draft at most: both sides of a hand-off,
  * the hub picking its thread back up, and a run that only reads the owner's
- * reason or edit for a lesson (`servesNoThread`).
+ * reason or edit for a lesson (every kind `SERVES_NO_THREAD` marks).
  */
-export const atDraft = (kind: FollowUpKind): boolean =>
-  kind === 'hand_off' || kind === 'handed_back' || kind === 'resume' || servesNoThread(kind);
+export const AT_DRAFT: Record<FollowUpKind, boolean> = {
+  carry_out: false,
+  rework: false,
+  denied: true,
+  feedback: false,
+  task_done: false,
+  goal: false,
+  first_day: false,
+  hand_off: true,
+  handed_back: true,
+  resume: true,
+  edited: true
+};
+export const atDraft = (kind: FollowUpKind): boolean => AT_DRAFT[kind];
 
 /**
  * The hand-off a follow-up's work serves: its own, or the one the ask or task it
@@ -193,15 +305,16 @@ export async function resultsToJoin(f: FollowUpRow): Promise<FollowUpRow[]> {
 export async function handBackLater(
   handOffId: number,
   outcome: Outcome,
-  answer: string
+  answer: string,
+  q: Db = db
 ): Promise<void> {
-  const [origin] = await db
+  const [origin] = await q
     .select()
     .from(followUps)
     .where(and(eq(followUps.id, handOffId), eq(followUps.kind, 'hand_off')));
   const back = origin && handBack(origin, outcome, answer);
   if (back?.handOff)
-    await addFollowUp(db, { ...back, handOff: { ...back.handOff, answered: true } });
+    await addFollowUp(q, { ...back, handOff: { ...back.handOff, answered: true } });
 }
 
 /** Where a hand-off stands: not started yet, being worked on, or how it ended. */
@@ -422,6 +535,12 @@ export function handOffBrief(b: {
 }): string[] {
   const { h, colleague, goal } = b;
   const folder = threadFolder(b.thread);
+  // A hand-off a v0.0.9 office stored names paths in the giver's own folder,
+  // never copied here, and a file can be deleted after the copy: the brief
+  // names either as gone rather than point at nothing.
+  const files = h.files ?? [];
+  const present = files.filter((f) => existsSync(join(folder, f)));
+  const gone = files.filter((f) => !present.includes(f));
   if (b.kind === 'hand_off')
     return [
       `${colleague.name} handed you a piece of work. Do it now. Your reply goes back to them.`,
@@ -431,6 +550,18 @@ export function handOffBrief(b: {
       '',
       h.brief,
       '',
+      ...(present.length
+        ? [
+            `- Files for this work, in reach: ${present.map((f) => join(folder, f)).join(', ')}.`,
+            ''
+          ]
+        : []),
+      ...(gone.length
+        ? [
+            `- Files ${colleague.name} named for this work that are no longer there: ${gone.join(', ')}. Say so in your reply if the work needs them.`,
+            ''
+          ]
+        : []),
       ...(goal
         ? [
             `It is for {owner}'s goal "${goal.title}".`,

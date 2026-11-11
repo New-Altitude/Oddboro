@@ -5,6 +5,7 @@
 // A release on Windows is a windowed app, with no console window of its own.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod diagnostics;
 mod env;
 mod secrets;
 mod server;
@@ -12,6 +13,7 @@ mod update;
 
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::thread;
 
 use tauri::image::Image;
@@ -22,14 +24,23 @@ use tauri::{AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder,
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
+use diagnostics::Diagnostics;
 use server::Server;
 
 const MAIN: &str = "main";
 const LOADING: &str = "loading";
+/// What the owner is shown, and what an error report says, when the install
+/// is broken.
+const NO_NODE: &str = "Oddboro cannot find its copy of Node. Reinstall Oddboro.";
+const NO_SERVER: &str = "Oddboro cannot find the office server. Reinstall Oddboro.";
 
 fn main() {
     // A version the updater just installed waits for the one it replaced.
     update::wait_for_old();
+    let diagnostics = Diagnostics::find().map(Arc::new);
+    if let Some(d) = &diagnostics {
+        Arc::clone(d).watch_panics();
+    }
     let builder = tauri::Builder::default();
     // Linux and Windows have no Dock to bring a hidden window back, so
     // opening Oddboro again shows the one that runs. It goes first, before
@@ -52,7 +63,7 @@ fn main() {
             if let Err(e) = tray(&handle) {
                 server::note(&env::log_file(), &format!("no menu bar item: {e}"));
             }
-            thread::spawn(move || start(&handle));
+            thread::spawn(move || start(&handle, diagnostics.as_deref()));
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -96,7 +107,7 @@ fn main() {
 }
 
 /// Runs on its own thread: picks the server, starts it, and opens the office.
-fn start(app: &AppHandle) {
+fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
     // The dev escape hatch: open a server that already runs, such as vite dev.
     if let Ok(url) = std::env::var("ODDBORO_SERVER_URL") {
         match Url::parse(&url) {
@@ -124,16 +135,10 @@ fn start(app: &AppHandle) {
         return;
     }
     let Some(node) = node_binary() else {
-        return fail(
-            app,
-            "Oddboro cannot find its copy of Node. Reinstall Oddboro.",
-        );
+        return broken_install(app, diagnostics, NO_NODE);
     };
     let Some(code) = server_code(app) else {
-        return fail(
-            app,
-            "Oddboro cannot find the office server. Reinstall Oddboro.",
-        );
+        return broken_install(app, diagnostics, NO_SERVER);
     };
 
     show_loading(app);
@@ -151,6 +156,7 @@ fn start(app: &AppHandle) {
         log: env::log_file(),
         version: app.package_info().version.to_string(),
         update_token: update_token.clone(),
+        diagnostics_dsn: diagnostics.map(|d| d.dsn().to_string()),
     };
     let Ok(url) = Url::parse(&server.url()) else {
         return fail(app, "Oddboro built a bad URL for its server.");
@@ -162,9 +168,21 @@ fn start(app: &AppHandle) {
         log: server.log.clone(),
         show: show_updating,
     });
-    if let Err(message) = server.supervise(|| open_main(app, &url)) {
-        fail(app, &message);
+    if let Err(why) = server.supervise(|| open_main(app, &url)) {
+        if let Some(d) = diagnostics {
+            d.gave_up(&why);
+        }
+        fail(app, &why.message(&server.log_tail()));
     }
+}
+
+/// A release that lacks a part of itself: reported, since a broken release
+/// is what reports are for, then shown to the owner.
+fn broken_install(app: &AppHandle, diagnostics: Option<&Diagnostics>, text: &'static str) {
+    if let Some(d) = diagnostics {
+        d.failed(text);
+    }
+    fail(app, text);
 }
 
 /// Node sits beside the shell: in `Contents/MacOS` on a Mac, in `usr/bin`

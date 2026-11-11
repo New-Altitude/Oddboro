@@ -7,6 +7,7 @@ import { existsSync, readdirSync, realpathSync } from 'node:fs';
 import { homedir, hostname, networkInterfaces } from 'node:os';
 import { dirname, join, sep } from 'node:path';
 import { CODE, GLOB, home, SECRET_STORES, within } from '@oddboro/ledger';
+import { sandboxPaths } from './sandbox-paths.ts';
 import { gitEnv } from './launch.ts';
 
 /** Every host, for commands when Run commands and Browse the web are both on (measured on Claude Code 2.1.318). */
@@ -81,16 +82,17 @@ const OFFICE_GIT = new Set(Object.keys(gitEnv('')));
 /**
  * The variables of a run's environment (`env`) that its sandboxed commands
  * never see: the API key, the database's address, and every name that says
- * it may hold a secret. Claude Code itself and its MCP servers keep them: the
- * office's tool server needs `DATABASE_URL`, and a key sign-in the key.
- * `CLAUDE_CODE_MESSAGING_TOKEN` is named too: Claude Code sets it itself, so
+ * it may hold a secret. Claude Code itself keeps them: a key sign-in needs
+ * the key. A second wall behind the allow list (`runEnv`), which lets none of
+ * the office's own secrets into `env`; the tool server gets `DATABASE_URL` on
+ * its own entry. `CLAUDE_CODE_MESSAGING_TOKEN` is named too: Claude Code sets it itself, so
  * it is never in `env`, and a walk saw it in Bash's `env`. The office's own
  * git settings pass by exact name (`OFFICE_GIT`): `GIT_CONFIG_KEY_0` and
  * `_1` say key, and git with one of them hidden or empty stops every command
  * with exit 128. The office's own `GIT_` variables never reach `env`
- * (`cleanEnv` drops them), so today the exact names act as a `GIT_` prefix
+ * (`runEnv` lists none), so today the exact names act as a `GIT_` prefix
  * would, and no test can tell the two apart. Still by exact name, so a
- * `GIT_..._TOKEN` a later change puts in `env` after `cleanEnv` stays hidden
+ * `GIT_..._TOKEN` a later change puts in `env` after `runEnv` stays hidden
  * like every other name that looks like a secret.
  */
 export function hiddenFromCommands(env: NodeJS.ProcessEnv): string[] {
@@ -124,16 +126,7 @@ export function claudeSandbox(o: {
     allowUnsandboxedCommands: false,
     filesystem: {
       // Every home folder and every other disk, not only the owner's home.
-      denyRead: [
-        '~/',
-        '/Users',
-        '/Volumes',
-        '/private/tmp',
-        '/tmp',
-        '/private/var/folders',
-        ...dev.denies,
-        ...dev.globDenies
-      ],
+      denyRead: ['~/', ...sandboxPaths().denyReadRoots, ...dev.denies, ...dev.globDenies],
       allowRead: [
         ...o.reads,
         o.tmp,

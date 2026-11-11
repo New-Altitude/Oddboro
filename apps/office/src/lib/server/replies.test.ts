@@ -6,9 +6,10 @@
 // does. A lead's pick-up of a colleague's result tells its tool server whose
 // work it was (`VIA`). Google is a stand-in `fetch`. Run with `npm test -w @oddboro/office`.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, test } from 'node:test';
+import type { MailAttachment } from '@oddboro/ledger';
 import { chatOf, gave, L, runOf, secrets } from './office-under-test.ts';
 
 process.env.ODDBORO_GOOGLE_CLIENT_SECRET = 'a-client-secret-for-tests';
@@ -30,6 +31,7 @@ await L.connectorReady('gmail', ['get_thread'], ['get_thread']);
 await L.pg`insert into grants ${L.pg({ staff_id: 'paige', connector_id: 'gmail', level: 'read' })}`;
 
 const GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me';
+const UPLOAD = 'https://gmail.googleapis.com/upload/gmail/v1/users/me';
 /**
  * The email this test's reply answers. Each test answers its own, since the
  * ledger refuses a second reply to one email.
@@ -44,7 +46,7 @@ let fails: Response | undefined;
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
   const url = String(input instanceof Request ? input.url : input);
-  if (!url.startsWith(GMAIL)) return realFetch(input, init);
+  if (!url.startsWith(GMAIL) && !url.startsWith(UPLOAD)) return realFetch(input, init);
   const method = init.method ?? 'GET';
   google.push({
     url,
@@ -53,9 +55,10 @@ globalThis.fetch = (async (input: RequestInfo | URL, init: RequestInit = {}) => 
     auth: new Headers(init.headers).get('Authorization')
   });
   if (method === 'POST' && fails) return fails;
-  if (url.endsWith('/messages/send'))
+  const path = url.split('?')[0];
+  if (path.endsWith('/messages/send'))
     return Response.json({ id: 'm-sent', threadId: email.thread });
-  if (url.endsWith('/drafts')) return Response.json({ id: 'd-1' });
+  if (path.endsWith('/drafts')) return Response.json({ id: 'd-1' });
   if (url.includes(`/messages/${email.message}?`))
     return Response.json({
       id: email.message,
@@ -174,6 +177,50 @@ test('Send sends it in the thread as a reply to the message, then approves the a
   assert.equal((await edits(id)).length, 0);
   // No run carries a reply out: the office already did.
   assert.equal((await L.pg`select 1 from follow_ups where ask_id = ${id}`).length, 0);
+});
+
+test("the Odd's files go with it, less any the owner took off, through Gmail's upload address; the owner cannot add one", async () => {
+  const dir = L.home('staff', 'paige');
+  mkdirSync(join(dir, 'attachments'), { recursive: true });
+  writeFileSync(join(dir, 'attachments', '20261110-081108-35bc-image.png'), 'one');
+  writeFileSync(join(dir, 'notes.pdf'), 'two');
+  const files = [
+    L.mailAttachment('paige', 'attachments/20261110-081108-35bc-image.png'),
+    L.mailAttachment('paige', 'notes.pdf')
+  ] as MailAttachment[];
+  const { ask } = await L.raiseAsk('paige', {
+    kind: 'reply',
+    title: 'Reply to Ada: Re: Lunch on Friday?',
+    why: 'Ada asked about lunch.',
+    ifApproved: 'You send it.',
+    reply: {
+      ...PROPOSED,
+      gmailThreadId: email.thread,
+      inReplyTo: email.message,
+      attachments: files
+    }
+  });
+  // The owner took notes.pdf off, and named a file the Odd never attached.
+  await post(ask.id, {
+    action: 'send',
+    ...PROPOSED,
+    attachments: ['attachments/20261110-081108-35bc-image.png', 'secret.md']
+  });
+  const sent = google.find((g) => g.url === `${UPLOAD}/messages/send?uploadType=multipart`);
+  assert.ok(sent, 'Gmail was given it at its upload address');
+  assert.ok(!google.some((g) => g.url === `${GMAIL}/messages/send`));
+  assert.ok(sent.body.includes(`{"threadId":"${email.thread}"}`));
+  assert.ok(sent.body.includes('Content-Type: message/rfc822'));
+  assert.ok(sent.body.includes('filename="image.png"'));
+  assert.ok(sent.body.includes(Buffer.from('one').toString('base64')));
+  assert.ok(!sent.body.includes('notes.pdf'), 'a file the owner took off went');
+  assert.ok(!sent.body.includes('secret.md'), 'a file the Odd never attached went');
+  const a = (await L.ask(ask.id))!;
+  assert.equal(a.status, 'approved');
+  assert.deepEqual(
+    a.reply?.attachments?.map((f) => f.name),
+    ['image.png']
+  );
 });
 
 test('Save to Gmail drafts leaves a draft in the thread and sends nothing', async () => {

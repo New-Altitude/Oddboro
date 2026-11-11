@@ -1,5 +1,5 @@
 {
-  "id": "515f56e8-9cbf-47c2-871a-d9c3968e0f3b",
+  "id": "d716beff-a5d5-4326-aeb7-b985fda547a2",
   "prevId": "f9bd2252-a4ef-4b5b-9b38-c5153737cfa6",
   "version": "7",
   "dialect": "postgresql",
@@ -293,6 +293,12 @@
         },
         "call": {
           "name": "call",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "switches": {
+          "name": "switches",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
@@ -886,12 +892,6 @@
             "cycle": false
           }
         },
-        "request_id": {
-          "name": "request_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "title": {
           "name": "title",
           "type": "text",
@@ -955,13 +955,7 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "goals_requestId_unique": {
-          "name": "goals_requestId_unique",
-          "nullsNotDistinct": false,
-          "columns": ["request_id"]
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

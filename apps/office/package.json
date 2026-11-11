@@ -14,14 +14,16 @@
     "prepare": "svelte-kit sync || echo ''",
     "check-types": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
     "lint": "prettier --check . --ignore-path ../../.prettierignore",
-    "test": "node --test --experimental-test-module-mocks \"src/**/*.test.ts\"",
+    "test": "node --test --test-timeout=60000 --experimental-test-module-mocks \"src/**/*.test.ts\"",
     "service:install": "node scripts/office-service.ts",
     "service:uninstall": "node scripts/office-service.ts uninstall"
   },
   "dependencies": {
     "@oddboro/ledger": "*",
     "@oddboro/sprites": "*",
-    "@oddboro/world": "*"
+    "@oddboro/world": "*",
+    "@sentry/core": "^11.10.0",
+    "@sentry/sveltekit": "^11.10.0"
   },
   "devDependencies": {
     "@aws-sdk/client-secrets-manager": "~3.1156.0",
