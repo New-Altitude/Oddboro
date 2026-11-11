@@ -823,6 +823,11 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   - To read which system the office runs on, call `currentPlatform()` in
     `src/platform.ts`, never `process.platform`, so a test's `onPlatform`
     reaches it. `scripts/check-platform.ts` fails any other read.
+  - To change what Odds are told (a line in `src/capabilities.ts`, or a brief
+    built in this package), accept the change with
+    `npm run prompts:accept -w @oddboro/office`: the office's
+    `prompts.test.ts` holds each kind of run's prompt, and
+    `apps/office/src/lib/server/CLAUDE.md` says how.
 - The owner's name lives in the `owner` table, one row, set per install with
   `setOwnerName()` and read with `ownerName()` ("the owner" until one is set).
   Odd prompts use it, so each install's Odds call the owner by name. Never
@@ -865,9 +870,6 @@ Each line says what to do when its trigger comes.
 - Building NEW-1651 or NEW-1654, whichever comes first: give each run one
   row of its own, with `runs.jobId` optional, usage pointing at the run, and
   one reader per tool of that tool's stream.
-- Before any change to what Odds are told (the lines in `capabilities.ts`,
-  the office's `house.ts` or a run's brief): add snapshot tests of each kind
-  of run's prompt, so the change shows as a diff in review.
 - Building NEW-1644, or adding an office tool or an AI tool: first write a
   threat model for prompt injection: what a page, file or message an Odd
   reads could make it do, and which wall stops each.

@@ -696,8 +696,11 @@ export async function chatOf(id: string, message = 'Hello.'): Promise<Gave & { t
     if (e.type === 'error') text = e.message;
   });
   assert.ok(text.startsWith('{'), `${id}'s chat gave no reply: ${text}`);
-  return { ...(JSON.parse(text.slice(0, text.lastIndexOf('\nOutcome:'))) as Gave), tools };
+  return { ...gaveIn(text), tools };
 }
+/** What a run's stand-in said it was given, from the run's text, which ends with its outcome line. */
+export const gaveIn = (text: string): Gave =>
+  JSON.parse(text.slice(0, text.lastIndexOf('\nOutcome:'))) as Gave;
 /** `fn`, run as if the office ran on `platform`. */
 export async function onPlatform<T>(
   platform: NodeJS.Platform,

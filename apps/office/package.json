@@ -15,6 +15,7 @@
     "check-types": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
     "lint": "prettier --check . --ignore-path ../../.prettierignore",
     "test": "node --test --test-timeout=60000 --experimental-test-module-mocks \"src/**/*.test.ts\"",
+    "prompts:accept": "node --test --test-update-snapshots --experimental-test-module-mocks src/lib/server/prompts.test.ts",
     "service:install": "node scripts/office-service.ts",
     "service:uninstall": "node scripts/office-service.ts uninstall"
   },
