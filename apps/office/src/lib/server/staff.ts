@@ -1675,6 +1675,14 @@ export async function followThrough(
   const goalServed =
     handed?.kind === 'hand_off' && thread?.goalId ? await findGoal(thread.goalId) : undefined;
   const work = { kind: 'follow-up' as const, label, detail, askId: a?.id };
+  // Work for a colleague's hand-off runs at Draft at most whatever its kind,
+  // so a colleague's words never stand in for the owner's yes, even after a
+  // yes that raised this Odd's own level or tools. The carry-out of an
+  // approval ask is the owner's yes to that exact action, so it keeps the
+  // Odd's level and one yes stays one yes.
+  const draftOnly =
+    atDraft(f.kind) ||
+    (serves !== undefined && !(f.kind === 'carry_out' && a?.kind === 'approval'));
   const res = await slot(who.id, work, (onEvent) =>
     run(who, label, {
       kind: 'follow-up',
@@ -1686,14 +1694,7 @@ export async function followThrough(
       approvedAsk: f.kind === 'carry_out' ? a?.id : undefined,
       ownerNote: ownerNoteOf(f),
       ownerEdit: edit && { path: edit.path, text: edit.shown.now },
-      // Work for a colleague's hand-off runs at Draft at most whatever its kind,
-      // so a colleague's words never stand in for the owner's yes, even after a
-      // yes that raised this Odd's own level or tools. The carry-out of an
-      // approval ask is the owner's yes to that exact action, so it keeps the
-      // Odd's level and one yes stays one yes.
-      draftOnly:
-        atDraft(f.kind) ||
-        (serves !== undefined && !(f.kind === 'carry_out' && a?.kind === 'approval')),
+      draftOnly,
       lessonRun: servesNoThread(f.kind),
       handOffId: serves?.id,
       threadId: thread?.id,
@@ -1722,7 +1723,7 @@ export async function followThrough(
           : edit
             ? editBrief(edit.path, edit.shown)
             : [
-                ...followUpBrief(f, a, r, task, g, also, { servesHandOff: serves !== undefined }),
+                ...followUpBrief(f, a, r, task, g, { also, draftOnly }),
                 ...(serves?.handOff && giver && thread
                   ? handOffContext({
                       h: serves.handOff,

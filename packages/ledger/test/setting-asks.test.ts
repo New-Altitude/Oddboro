@@ -175,6 +175,28 @@ test("a run serving a colleague's hand-off, held to Draft, is told why raising i
   assert.deepEqual(await db.select().from(asks), []);
 });
 
+test("a level ask raised in a colleague's hand-off says the run after the yes works at Draft at most", async () => {
+  const c = await toolServer('sage', { RUN_KEY: 'k-hand-off', HAND_OFF_ID: '7' });
+  const asked = await call(c, 'ask_for_level', { level: 'act', why: 'To send the replies.' });
+  assert.equal(asked.error, false, asked.text);
+  const [a] = await db.select().from(asks).where(eq(asks.kind, 'level'));
+  assert.equal(
+    asked.text,
+    `Ask ${a.id} is on the owner's desk. When they say yes, your level is Act, and a new run of yours picks up the work; it serves a colleague's hand-off, so it works at Draft at most. Check my_asks later for their decision.`
+  );
+});
+
+test('a level ask raised in its own work says the run after the yes works at the new level', async () => {
+  const c = await toolServer('sage', { RUN_KEY: 'k-own' });
+  const asked = await call(c, 'ask_for_level', { level: 'act', why: 'To send the replies.' });
+  assert.equal(asked.error, false, asked.text);
+  const [a] = await db.select().from(asks).where(eq(asks.kind, 'level'));
+  assert.equal(
+    asked.text,
+    `Ask ${a.id} is on the owner's desk. When they say yes, a new run of yours picks up the work at Act. Check my_asks later for their decision.`
+  );
+});
+
 test('an Odd asks for any office tool the Settings tab grants, and only the ones it lacks reach the desk', async () => {
   assert.ok(GRANTABLE_TOOLS.length > 0);
   await db

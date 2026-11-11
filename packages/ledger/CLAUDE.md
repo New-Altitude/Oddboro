@@ -694,7 +694,11 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   ledger words. A yes never lowers a level set higher since, and starts
   one `carry_out` per place (`carryOutTogether`); after a raise to Act, a
   colleague's hand-off and a thread picked back up still run at Draft at
-  most. `test/setting-asks.test.ts` holds it, the tools included.
+  most, and so does every run that serves a colleague's hand-off, such as the
+  carry-out of a level, office tool or outside tool ask raised in one. The one
+  exception is the carry-out of an approval ask, the owner's yes to that exact
+  action, which runs at the Odd's level so one yes stays one yes.
+  `test/setting-asks.test.ts` holds it, the tools included.
 - A `call` ask carries one held call in `asks.call` (`HeldCall`: the
   connector, the tool and its exact arguments), raised by the office's gateway
   (`raiseCall`) when an Odd at Draft calls a tool that changes something

@@ -1311,8 +1311,12 @@ tool(
       revises,
       via: VIA
     });
+    // The run that carries out a yes raised in a colleague's hand-off serves
+    // that hand-off, so it stays at Draft whatever level the yes gives.
     return text(
-      `Ask ${ask.id} is on ${OWNER}'s desk. When they say yes, a new run of yours picks up the work at ${LEVEL_NAME[level]}. Check my_asks later for their decision.`
+      HAND_OFF_ID !== undefined
+        ? `Ask ${ask.id} is on ${OWNER}'s desk. When they say yes, your level is ${LEVEL_NAME[level]}, and a new run of yours picks up the work; it serves a colleague's hand-off, so it works at Draft at most. Check my_asks later for their decision.`
+        : `Ask ${ask.id} is on ${OWNER}'s desk. When they say yes, a new run of yours picks up the work at ${LEVEL_NAME[level]}. Check my_asks later for their decision.`
     );
   }
 );

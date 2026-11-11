@@ -84,9 +84,9 @@ test("a finished task's run hears only the owner's choice answers", () => {
 test('a switch the owner turned on tells the Odd its run has it, names what it asked for, and does the work once for a twin ask', () => {
   const asked = { ...ask, kind: 'switch', switches: ['web'] } as AskRow;
   const twin = { ...ask, id: 8 } as AskRow;
-  const lines = followUpBrief(followUp('carry_out'), asked, undefined, undefined, undefined, [
-    twin
-  ]);
+  const lines = followUpBrief(followUp('carry_out'), asked, undefined, undefined, undefined, {
+    also: [twin]
+  });
   assert.equal(
     lines[0],
     '{owner} approved your ask #7 and turned on Browse the web for you. This run has it.'
@@ -112,8 +112,7 @@ test("a level raised to Act, carried out for a colleague's hand-off, tells the O
     undefined,
     undefined,
     undefined,
-    [],
-    { servesHandOff: true }
+    { draftOnly: true }
   );
   assert.equal(
     lines[0],
@@ -129,8 +128,7 @@ test("a level raised to Draft, carried out for a colleague's hand-off, tells the
     undefined,
     undefined,
     undefined,
-    [],
-    { servesHandOff: true }
+    { draftOnly: true }
   );
   assert.equal(lines[0], '{owner} approved your ask #7 for the Draft level, and this run has it.');
   assert.equal(lines[1], '');

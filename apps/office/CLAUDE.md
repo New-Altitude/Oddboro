@@ -895,8 +895,11 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    `my_access` in one line (`runsOnLine`). A hosted sign-in that ran out
    shows only to the run, which passes it to its own `my_access` as
    `SIGNED_OUT`; `office_report` and the Settings tab still show that tool as
-   working. A run below the Odd's own level (a hand-off's, either side, or a
-   hub's pick-up) passes its ceiling as `CEILING` the same way, so `my_access`
+   working. A run below the Odd's own level (a hand-off's, either side, a
+   hub's pick-up, or any run that serves a colleague's hand-off, such as the
+   carry-out of a level, office tool or outside tool ask raised in one; the
+   carry-out of an approval ask, the owner's yes to that exact action, runs
+   at the Odd's level) passes its ceiling as `CEILING` the same way, so `my_access`
    says Draft and why, with a write grant read only, as the prompt does
    (`capped`, `accessInRun`). Hosted servers sign in with
    OAuth (`src/lib/server/oauth.ts`): the task's Sign in opens the service, it

@@ -47,10 +47,15 @@ export function followUpBrief(
   r?: ReportRow,
   t?: { row: TaskRow; files: string[] },
   g?: GoalRow,
-  /** Twins answered with `a` whose work this carry-out does too (`standsFor`). */
-  also: AskRow[] = [],
-  /** The run serves a colleague's hand-off, so it works at Draft at most (staff.ts). */
-  run: { servesHandOff?: boolean } = {}
+  {
+    also = [],
+    draftOnly = false
+  }: {
+    /** Twins answered with `a` whose work this carry-out does too (`standsFor`). */
+    also?: AskRow[];
+    /** This run works at Draft at most, whatever the Odd's level (`draftOnly` in staff.ts). */
+    draftOnly?: boolean;
+  } = {}
 ): string[] {
   switch (f.kind) {
     case 'resume':
@@ -62,7 +67,7 @@ export function followUpBrief(
     case 'task_done':
       return taskDoneBrief(f, r, t);
     case 'carry_out':
-      return carryOutBrief(f, a, also, !!run.servesHandOff);
+      return carryOutBrief(f, a, also, draftOnly);
     case 'denied':
       return deniedBrief(f, a);
     case 'rework':
@@ -270,7 +275,7 @@ function carryOutBrief(
   f: FollowUpRow,
   a: AskRow | undefined,
   also: AskRow[],
-  servesHandOff: boolean
+  draftOnly: boolean
 ): string[] {
   // A connect task's end starts this run and wakes the work parked on that task at once.
   const askLines = [...askLinesOf(a), ...(f.pickedUp ?? []).map((t) => `- ${pickedUpLine(t)}`)];
@@ -325,12 +330,13 @@ function carryOutBrief(
       if (!a.level) return approved();
       const said = `{owner} approved your ask #${a.id} for the ${LEVEL_NAME[a.level]} level`;
       return [
-        // A colleague's hand-off and a thread's pick-up run at Draft at most,
-        // whatever the Odd's level. A yes to Draft reaches such a run anyway, so
-        // only a yes to Act, carried out for a colleague's hand-off, says it does not.
+        // A yes to Draft reaches a run held to Draft anyway, so only a yes to Act
+        // carried out in one says the run does not have it. A level carry-out is
+        // held to Draft only when it serves a colleague's hand-off (staff.ts), as
+        // the line says.
         ...(a.level !== 'act'
           ? [`${said}, and this run has it.`]
-          : servesHandOff
+          : draftOnly
             ? [
                 `${said}. Your own work runs at ${LEVEL_NAME[a.level]} from now on; this run serves a colleague's hand-off, so it works at Draft at most.`
               ]
