@@ -6,20 +6,23 @@
 //   stage/node_modules/             what the workspace packages load, at the versions installed here
 //   stage/node_modules/@oddboro/*   ledger, sprites and world, as JavaScript, with their files
 //
-// Packages' test folders stay out, and no path may run long enough to stop
-// the Windows installer's builder (see LONGEST).
+// Packages' test folders and every source map stay out, and no path may run
+// long enough to stop the Windows installer's builder (see LONGEST).
 //
 // It also fetches the Node binary the app carries, checked against nodejs.org's
 // published sums. `--smoke` then starts the staged office on a spare port and
 // home, and stops it once it answers.
-import { execFileSync, execSync, spawn } from 'node:child_process';
+import { execFileSync, execSync, spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
+  closeSync,
   cpSync,
   existsSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
   readdirSync,
   rmSync,
   statSync,
@@ -51,8 +54,13 @@ const NODE_BIN = join(
   `node-${MACHINE.triple}${WINDOWS ? '.exe' : ''}`
 );
 const PACKAGES = ['ledger', 'sprites', 'world'];
-/** What a package needs at runtime. Everything else in it stays behind. */
+/**
+ * What a package does not need at runtime. Its own CLAUDE.md stays behind;
+ * every other document in it ships, since the office reads the sprites'
+ * FORMAT.md and ART.md when it draws.
+ */
 const LEAVE_OUT = new Set([
+  'CLAUDE.md',
   'node_modules',
   'out',
   'scripts',
@@ -119,7 +127,7 @@ function stagePackage(name: string): void {
     recursive: true,
     filter: (src) => {
       const rel = src.slice(from.length + 1).split(sep)[0];
-      return !LEAVE_OUT.has(rel) && !(rel.endsWith('.md') && !src.includes(`${sep}src${sep}`));
+      return !LEAVE_OUT.has(rel);
     }
   });
   compileAll(join(to, 'src'));
@@ -136,6 +144,51 @@ function stagePackage(name: string): void {
   );
 }
 
+/**
+ * Sentry's build plugins, the source parser and the `sentry` CLI they bring.
+ * `@sentry/sveltekit` and `@sentry/node` depend on them for `vite build`; the
+ * running office never loads them. The parser is native code nobody signed,
+ * which Apple's notary refuses. Vite and its native tools stay out by
+ * `--omit=peer`.
+ */
+const BUILD_ONLY = [
+  '@sentry/bundler-plugins',
+  'oxc-parser',
+  '@oxc-parser',
+  '@oxc-project',
+  'sentry'
+];
+/**
+ * The only native code the app may carry beside the shell and Node, which the
+ * release signs. Each arrives signed by its publisher's Developer ID.
+ */
+const NATIVE = ['node_modules/@napi-rs/keyring-'];
+
+/** Mach-O, ELF or Windows (MZ) code, by the file's first bytes. */
+function isNative(path: string): boolean {
+  const head = Buffer.alloc(4);
+  const fd = openSync(path, 'r');
+  readSync(fd, head, 0, 4, 0);
+  closeSync(fd);
+  const magic = head.readUInt32BE(0);
+  return (
+    [0xcffaedfe, 0xcefaedfe, 0xcafebabe, 0x7f454c46].includes(magic) || magic >>> 16 === 0x4d5a
+  );
+}
+
+/**
+ * Fails on native code outside NATIVE, and on a Mac on any without a
+ * Developer ID signature and a secure timestamp: Apple's notary refuses both.
+ */
+function checkNative(path: string, rel: string): void {
+  if (!NATIVE.some((p) => rel.startsWith(p)))
+    throw new Error(`stage/${rel} is native code the app does not sign. Leave it out of the stage`);
+  if (process.platform !== 'darwin') return;
+  const sig = spawnSync('codesign', ['-dv', '--verbose=2', path], { encoding: 'utf8' }).stderr;
+  if (!sig.includes('Authority=Developer ID Application') || !sig.includes('Timestamp='))
+    throw new Error(`stage/${rel} has no Developer ID signature with a timestamp`);
+}
+
 /** Folders a package keeps for its own tests, which the app never loads. */
 const TEST_DIRS = new Set(['__screenshots__', '__tests__']);
 /**
@@ -147,8 +200,11 @@ const LONGEST = 180;
 
 /**
  * Takes out every test folder, where the longest names live (layerchart's
- * screenshots run past 200 characters), then fails on any path still too
- * long, here rather than in the installer.
+ * screenshots run past 200 characters), and every source map: nothing in the
+ * app loads one, and the office's own would ship its source (Sentry's build
+ * plugin keeps them when it has no token to upload them). Then fails on any
+ * path still too long, here rather than in the installer, and on native code
+ * the release cannot ship (checkNative).
  */
 function prune(dir: string, rel = ''): void {
   for (const name of readdirSync(dir)) {
@@ -157,8 +213,10 @@ function prune(dir: string, rel = ''): void {
     if (statSync(path).isDirectory()) {
       if (TEST_DIRS.has(name)) rmSync(path, { recursive: true, force: true });
       else prune(path, r);
-    } else if (r.length > LONGEST)
+    } else if (name.endsWith('.map')) rmSync(path);
+    else if (r.length > LONGEST)
       throw new Error(`stage/${r} is ${r.length} characters, too long for the Windows installer`);
+    else if (isNative(path)) checkNative(path, r);
   }
 }
 
@@ -226,7 +284,10 @@ async function smoke(): Promise<void> {
       // As in the app: the server quits when asked, and a versioned first
       // start in an empty home makes its folder and records the version.
       ODDBORO_APP: '1',
-      ODDBORO_VERSION: '0.0.0-smoke'
+      ODDBORO_VERSION: '0.0.0-smoke',
+      // So Sentry starts in the staged server. The home is new, so the owner
+      // has not said yes and nothing is sent; port 9 would take nothing anyway.
+      ODDBORO_DIAGNOSTICS_DSN: 'http://oddboro@127.0.0.1:9/oddboro/0'
     },
     // A held stdin, as the app gives it: the server quits when it closes.
     stdio: ['pipe', 'inherit', 'inherit']
@@ -271,7 +332,11 @@ writeFileSync(
     2
   ) + '\n'
 );
-npm(['install', '--omit=dev', '--no-audit', '--no-fund', '--loglevel=error'], STAGE);
+// --omit=peer leaves out Vite and SvelteKit, which Sentry's SvelteKit SDK
+// names as peers for the build. The office bundles its own.
+npm(['install', '--omit=dev', '--omit=peer', '--no-audit', '--no-fund', '--loglevel=error'], STAGE);
+for (const p of [...BUILD_ONLY, '.bin/sentry'])
+  rmSync(join(STAGE, 'node_modules', p), { recursive: true, force: true });
 for (const p of PACKAGES) stagePackage(p);
 stageOffice();
 prune(STAGE);

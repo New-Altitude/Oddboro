@@ -24,7 +24,8 @@
 // profile that cannot apply stops Grok from starting, so a run is never left
 // unconfined. The profile holds the whole grok process, its own sign-in
 // renewal included, so the office renews the sign-in before a run that could
-// outlast it (`grokSignedOut`).
+// outlast it (`grokSignedOut`). Where the Mac's Docker socket is a link, the
+// run gets a home of its own so Grok's sandbox can start (`runHome`).
 // Windows has no Grok sandbox, so there the office's tools are the wall.
 import { execFile, spawn } from 'node:child_process';
 import {
@@ -32,35 +33,44 @@ import {
   chmodSync,
   constants,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
-  rmSync
+  renameSync,
+  rmSync,
+  symlinkSync
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import {
   accountsHome,
   CODE,
   home,
   OFFICE_ACCOUNT,
+  OFFICE_MODEL_VAR,
   runsGoing,
   toolHome,
+  currentPlatform,
   type Effort
 } from '@oddboro/ledger';
 import { andBelow, denyRules, instructionPaths } from './files.ts';
 import { mcpGrant, NOT_SIGNED_IN, replace, sweep, vendorEnv, type RunImage } from './launch.ts';
+import { runEnv } from './run-env-allow.ts';
 import { onPath } from './on-path.ts';
+import { sandboxPaths } from './sandbox-paths.ts';
 
 /**
  * One account's Grok home (`toolHome`) and what Grok keeps in it: its
  * sandbox profiles, its config, each run's agent file (Grok has no
  * --mcp-config), its own temp folder (so it needs none of the temp folders
- * every app shares, `SHUT`), the sign-in (per xAI account, its tokens, its
+ * every app shares, `shut`), the sign-in (per xAI account, its tokens, its
  * `email` and when they run out, `expires_at`; Sign out from the page
- * removes it), and the leader socket every grok outside a run talks to
+ * removes it), the leader socket every grok outside a run talks to
  * (Grok's default is ~/.grok/leader.sock, the owner's own Grok, whatever
- * GROK_HOME says).
+ * GROK_HOME says), and the home folder a run gets when the Mac's Docker
+ * socket is a link (`runHome`).
  */
 export function grokHome(account: string = OFFICE_ACCOUNT) {
   const dir = toolHome('grok', account);
@@ -71,7 +81,8 @@ export function grokHome(account: string = OFFICE_ACCOUNT) {
     runs: join(dir, 'runs'),
     temp: join(dir, 'tmp'),
     auth: join(dir, 'auth.json'),
-    leader: join(dir, 'leader.sock')
+    leader: join(dir, 'leader.sock'),
+    home: join(dir, 'home')
   };
 }
 type GrokHome = ReturnType<typeof grokHome>;
@@ -125,9 +136,9 @@ const SERVER_CODE = [
  * deny path that cannot be bound stops Grok from starting. /etc stays: Grok
  * refuses to start without it.
  */
-const SHUT = [
+const shut = () => [
   ...new Set(
-    [join(homedir(), 'Library'), '/Library', '/tmp', '/var']
+    [join(homedir(), 'Library'), ...sandboxPaths().grokShut]
       .filter((p) => existsSync(p))
       .map((p) => realpathSync(p))
   )
@@ -136,12 +147,9 @@ const SHUT = [
 /**
  * What `strict` reads besides the run's cwd and Grok's home, as Grok 1.0.46
  * on macOS logged it (ProfileApplied in its sessions' sandbox-events.jsonl).
- * Grok and node need what `SHUT` leaves of it to start.
+ * Grok and node need what `shut` leaves of it to start.
  */
-const STRICT_READS = [
-  ...['/usr', '/bin', '/sbin', '/etc', '/dev', '/System', '/Library', '/private', '/tmp', '/var'],
-  join(homedir(), 'Library')
-];
+const strictReads = () => [...sandboxPaths().strictReads, join(homedir(), 'Library')];
 
 /**
  * Everything the kernel may let a Grok run read besides the Odd's own
@@ -151,7 +159,7 @@ const STRICT_READS = [
  * on each folder and everything in it, are a further wall should Grok ever
  * give it one.
  */
-const UNREADABLE = () => [...GROK_HOMES(), ...SERVER_CODE, ...STRICT_READS];
+const UNREADABLE = () => [...GROK_HOMES(), ...SERVER_CODE, ...strictReads()];
 
 /**
  * Every compatibility cell Grok has an environment variable for, switched
@@ -312,6 +320,65 @@ function agentFile(h: GrokHome, key: string, servers: Record<string, unknown>): 
   return file;
 }
 
+/** The Docker socket every Grok sandbox denies, which OrbStack, Colima and Rancher Desktop make a link. */
+const DOCKER_SOCKET = '/var/run/docker.sock';
+
+/**
+ * The home folder (HOME) a sandboxed Grok run gets, or none to keep the
+ * owner's. Grok denies a fixed list of container sockets in every sandbox,
+ * and refuses to start when one is a link to a path not on that list: on a
+ * Mac with OrbStack, `/var/run/docker.sock` leads to
+ * `~/.orbstack/run/docker.sock`, so every Grok run failed (issue #52, Grok
+ * 1.0.77). The list's `~/.docker/run/docker.sock` follows HOME (measured). So
+ * when the socket is a link, the run's home is a folder in Grok's home whose
+ * `.docker/run` leads to the folder the link leads to: the link's target is
+ * then on Grok's list, Grok starts, and its sandbox still denies the socket.
+ * The owner's own `~/.docker` is never touched. A target not named
+ * `docker.sock` cannot go on the list this way, so that run keeps the owner's
+ * home and Grok's own refusal.
+ */
+export function runHome(h: GrokHome, socket = DOCKER_SOCKET): string | undefined {
+  let target: string;
+  try {
+    if (!lstatSync(socket).isSymbolicLink()) return undefined;
+    target = resolve(dirname(socket), readlinkSync(socket));
+  } catch {
+    // No socket: nothing for Grok to refuse.
+    return undefined;
+  }
+  if (basename(target) !== 'docker.sock') return undefined;
+  const link = join(h.home, '.docker', 'run');
+  mkdirSync(dirname(link), { recursive: true, mode: 0o700 });
+  let now: string | undefined;
+  try {
+    now = readlinkSync(link);
+  } catch {
+    // No link yet.
+  }
+  if (now !== dirname(target)) {
+    // Made beside it and renamed over it, so a run starting meanwhile never finds it missing.
+    const next = `${link}.${process.pid}`;
+    rmSync(next, { force: true });
+    symlinkSync(dirname(target), next);
+    renameSync(next, link);
+  }
+  return h.home;
+}
+
+/**
+ * The run's servers, each the office starts with the owner's home, since a
+ * tool server finds the office's own folders and the keychain through HOME,
+ * which a Grok run may move (`runHome`).
+ */
+function ownersHome(servers: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(servers).map(([name, s]) => {
+      const server = s as { command?: unknown; env?: Record<string, string> };
+      return [name, server.command ? { ...server, env: { ...server.env, HOME: homedir() } } : s];
+    })
+  );
+}
+
 /**
  * Get a Grok run ready: its home, its sandbox profile and agent file, and the
  * arguments and environment to start `grok` with. `done` removes what only
@@ -322,17 +389,17 @@ export function grokLaunch(r: GrokRun): GrokLaunch {
   grokHomeReady(h);
   const sandbox = r.part ? `run-${r.key}` : `odd-${r.staffId}`;
   // Grok has no sandbox on Windows: the office's file tools are the wall there.
-  const kernel = process.platform !== 'win32';
+  const kernel = currentPlatform() !== 'win32';
   if (kernel)
     setProfile(h, sandbox, {
       // The office's file server runs inside the sandbox, so the kernel reads and writes what it may.
       readOnly: [...SERVER_CODE, ...r.reads],
       // `strict` already writes the cwd, the Odd's own folder.
       readWrite: [h.temp, ...r.writes.filter((w) => w !== r.dir)],
-      deny: [...instructionPaths(r.writes), ...SHUT].flatMap(andBelow)
+      deny: [...instructionPaths(r.writes), ...shut()].flatMap(andBelow)
     });
-  const agent = agentFile(h, r.key, r.servers);
-  const model = r.model ?? process.env.OFFICE_GROK_MODEL;
+  const agent = agentFile(h, r.key, ownersHome(r.servers));
+  const model = r.model ?? process.env[OFFICE_MODEL_VAR.grok];
   const args = [
     messageArg(r.message, r.images),
     '--output-format',
@@ -371,7 +438,10 @@ export function grokLaunch(r: GrokRun): GrokLaunch {
     ...(r.resume ? ['-r', r.resume] : ['-s', r.newSession])
   ];
   // web_fetch is off in every other grok the office starts (`grokEnv`).
-  const env = r.web ? { ...grokEnv(h), GROK_WEB_FETCH: '1' } : grokEnv(h);
+  const env = grokEnv(h, runEnv('grok'));
+  if (r.web) env.GROK_WEB_FETCH = '1';
+  const runsIn = kernel ? runHome(h) : undefined;
+  if (runsIn) env.HOME = runsIn;
   return { args, env, done: () => rmSync(agent, { force: true }) };
 }
 
@@ -425,7 +495,7 @@ export function grokCommand(): string | undefined {
     homedir(),
     '.grok',
     'bin',
-    process.platform === 'win32' ? 'grok.exe' : 'grok'
+    currentPlatform() === 'win32' ? 'grok.exe' : 'grok'
   );
   try {
     accessSync(installed, constants.X_OK);
@@ -461,10 +531,14 @@ export function grokSignIn(account: string = OFFICE_ACCOUNT): {
   return { args: ['login', '--oauth', '--leader-socket', h.leader], env: grokEnv(h) };
 }
 
-/** The environment every `grok` the office starts gets: the office's Grok home, and no key or setup of the office's own. */
-function grokEnv(h: GrokHome): NodeJS.ProcessEnv {
-  const env = vendorEnv(['GROK_', 'XAI_']);
-  return Object.assign(env, COMPAT_OFF, {
+/**
+ * The environment every `grok` the office starts gets: the office's Grok
+ * home, and no key or setup of the office's own. A run starts from `base`,
+ * its `runEnv`; the sign-in, its renewal and the version check from the
+ * owner-side `vendorEnv`.
+ */
+function grokEnv(h: GrokHome, base = vendorEnv(['GROK_', 'XAI_'])): NodeJS.ProcessEnv {
+  return Object.assign(base, COMPAT_OFF, {
     GROK_HOME: h.dir,
     TMPDIR: h.temp,
     GROK_MEMORY: '0',

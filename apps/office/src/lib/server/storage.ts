@@ -1,20 +1,22 @@
-// What an Odd has kept in its own folder, for the Storage tab: every file and
-// folder in it, with sizes and when each changed. Never the office's own files
-// there (the chat log and the run session), never an instruction file or a
-// hidden one (`.claude`, `.grok`, `.git` and the rest), and never through a
-// link, so the list stays inside the folder. It stops at `STORAGE_CAP`
-// entries and says so. Read when the tab opens; nothing watches the folder.
+// What an Odd has kept, for the Storage tab: every file and folder in its own
+// folder and in its part of each thread it is on, with sizes and when each
+// changed. Never the office's own files there (`OFFICE_FILES` in the
+// ledger's home.ts), never an instruction file or a hidden one (`.claude`, `.grok`,
+// `.git` and the rest), and never through a link, so the list stays inside
+// those folders. It stops at `STORAGE_CAP` entries in all and says so, shared
+// work counted first, so a full folder of its own never hides what it built
+// with others. Read when the tab opens; nothing watches the folders.
 import { type Dirent, lstatSync, readdirSync, realpathSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { INSTRUCTIONS } from './files.ts';
+import { home, OFFICE_FILE_NAMES, threadPart, workTitles } from '@oddboro/ledger';
+import { workName } from '@oddboro/ledger/work-paths';
+import { INSTRUCTIONS, threadsWithPart } from './files.ts';
 
 /** The most entries the tab lists. */
 export const STORAGE_CAP = 5000;
-/** The office's own files at the top of an Odd's folder: its chat log and its run session. */
-const OFFICE_FILES = ['chat.jsonl', 'session.json'];
 
 export type StoredEntry = {
-  /** From the Odd's folder, with `/` between folders. */
+  /** From the Odd's folder, or for a thread's file its name in the office (`workName`), with `/` between folders. */
   path: string;
   dir: boolean;
   /** Bytes; 0 for a folder. */
@@ -23,11 +25,15 @@ export type StoredEntry = {
   mtime: number;
 };
 
+/** An Odd's part of one thread: the owner reads it by `title`, and `root` is the `workName` its entries start with. */
+export type StoredWork = { title: string; root: string; entries: StoredEntry[] };
+
 /** Whether the tab shows `name`, at `depth` (0 is the top of the folder). */
 const shown = (name: string, depth: number): boolean =>
   !name.startsWith('.') &&
   !INSTRUCTIONS.includes(name) &&
-  !(depth === 0 && OFFICE_FILES.includes(name));
+  // The office's own files are hidden at the top of an Odd's folder, and at the top of a thread part.
+  !(depth === 0 && OFFICE_FILE_NAMES.includes(name));
 
 /** Every entry under `root`, folders before files, by name; `capped` when it stopped at `cap`. */
 export function listStorage(
@@ -76,4 +82,50 @@ export function listStorage(
   };
   walk(real, 0);
   return { entries, capped };
+}
+
+/**
+ * `staff`'s part of each thread it is on now, newest first, by the names the
+ * viewer opens them by, up to `cap` entries. The titles come first, so a part
+ * of a thread it has left uses none of the cap. A part with nothing shown in
+ * it is left out.
+ */
+async function listWork(
+  staff: string,
+  cap: number
+): Promise<{ work: StoredWork[]; capped: boolean }> {
+  const ids = threadsWithPart(staff);
+  const titles = await workTitles(staff, ids);
+  const work: StoredWork[] = [];
+  let room = cap;
+  for (const id of ids) {
+    const title = titles.get(id);
+    if (title === undefined) continue;
+    const root = workName(id, staff);
+    const part = listStorage(threadPart(id, staff), room);
+    if (part.entries.length)
+      work.push({
+        title,
+        root,
+        entries: part.entries.map((e) => ({ ...e, path: `${root}/${e.path}` }))
+      });
+    room -= part.entries.length;
+    if (part.capped) return { work, capped: true };
+  }
+  return { work, capped: false };
+}
+
+/**
+ * Everything an Odd has kept, under one cap: its parts of threads first, then
+ * its own folder with what is left, since the page's reason for shared work is
+ * finding what was built.
+ */
+export async function oddStorage(
+  staff: string,
+  cap = STORAGE_CAP
+): Promise<{ entries: StoredEntry[]; work: StoredWork[]; capped: boolean }> {
+  const { work, capped } = await listWork(staff, cap);
+  const used = work.reduce((sum, w) => sum + w.entries.length, 0);
+  const own = listStorage(home('staff', staff), cap - used);
+  return { entries: own.entries, work, capped: own.capped || capped };
 }

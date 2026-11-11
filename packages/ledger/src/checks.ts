@@ -6,7 +6,14 @@ import { execFile } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { release } from 'node:os';
 import postgres from 'postgres';
-import { LINUX, MAC, WINDOWS, claudeCommand, serviceInstalled } from './platform.ts';
+import {
+  LINUX,
+  MAC,
+  WINDOWS,
+  claudeCommand,
+  currentPlatform,
+  serviceInstalled
+} from './platform.ts';
 import { secretStore } from './secrets.ts';
 
 export type Check = {
@@ -57,7 +64,7 @@ export async function checkMac(): Promise<Check> {
     id: 'mac',
     name: 'System',
     state: 'missing',
-    found: `This is ${process.platform}`,
+    found: `This is ${currentPlatform()}`,
     fix: 'Oddboro runs on a Mac, Linux or Windows.'
   };
 }

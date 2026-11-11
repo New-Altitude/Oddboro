@@ -23,7 +23,9 @@ import {
   replaySince,
   replayed
 } from './replay.ts';
-import type { ChatEntry } from './staff.ts';
+import { OFFICE_FILES } from '@oddboro/ledger/home';
+import type { ChatEntry } from '../staff/chat.ts';
+import type { KeptFile } from './chat-preface.ts';
 
 const owner = (text: string): ChatEntry => ({
   at: '2026-11-04T09:00:00.000Z',
@@ -41,8 +43,7 @@ const poke = (text: string): ChatEntry => ({ ...reply(text), poke: true });
 const item: ChatEntry = { ...reply(''), item: { kind: 'ask', id: 1, title: 'A', status: 'open' } };
 /** No files changed. */
 const none = { files: [], granted: false };
-const OLDER =
-  '(The chat goes back further. All of it is in chat.jsonl in your folder, one line per message, oldest first. Read it when something earlier matters.)';
+const OLDER = `(The chat goes back further. All of it is in ${OFFICE_FILES.chat} in your folder, one line per message, oldest first. Read it when something earlier matters.)`;
 const HEAD =
   '(This is a new session, so you do not remember your chat with {owner} so far. Here is the latest of it, word for word, oldest first:)';
 
@@ -71,6 +72,45 @@ test('replay keeps the newest whole lines within the budget, and says where the 
     replay([reply(long)], none),
     `${HEAD}\n\nYou: …${'w'.repeat(REPLAY_CHARS)}\n\n${OLDER}`
   );
+});
+
+test('retold files count inside the budget, and an older line goes with its files', () => {
+  // The review's probe: 200 short owner lines with 10 pictures each.
+  const pictures = (line: number): KeptFile[] =>
+    Array.from({ length: 10 }, (_, n) => ({
+      tag: `Image #${n + 1}`,
+      name: `20261104-090000-ab${line}-picture.png`,
+      mediaType: 'image/png',
+      size: 1,
+      path: `/office/staff/odd/attachments/20261104-090000-ab${line}-${n}-picture.png`
+    }));
+  const chat = Array.from({ length: 200 }, (_, i) => ({
+    ...owner(`Look at these, ${i}.`),
+    now: pictures(i)
+  }));
+  const said = replay(chat, none);
+  const kept = said.split('{owner}: Look at these').length - 1;
+  // Past the budget, all a replay adds is its two framing sentences with their
+  // blank lines, and each kept line's "{owner}: " and line break.
+  assert.ok(
+    said.length <= REPLAY_CHARS + HEAD.length + OLDER.length + 4 + kept * '{owner}: \n'.length,
+    `${said.length} characters for ${kept} lines`
+  );
+  assert.ok(kept > 0 && kept < 200, `${kept} lines kept`);
+  // Every kept line keeps all ten of its pictures, and the newest line is kept.
+  assert.equal(said.split('\n- [Image #').length - 1, kept * 10);
+  assert.ok(said.includes('Look at these, 199.'));
+  assert.ok(!said.includes('Look at these, 0.'));
+  // A newest line over the budget alone keeps its pictures and the end of its text that fits beside them.
+  const alone = replay([{ ...owner('w'.repeat(REPLAY_CHARS)), now: pictures(0) }], none);
+  assert.ok(alone.length <= REPLAY_CHARS + HEAD.length + OLDER.length + 4 + '{owner}: …'.length);
+  assert.equal(alone.split('\n- [Image #').length - 1, 10);
+  assert.ok(alone.includes('{owner}: …w'));
+});
+
+test('a cut replay sends the session to the chat log by the name the office keeps it under', () => {
+  const said = replay([owner('older'), reply('newest')], none, 6);
+  assert.equal(said.match(/All of it is in (\S+) in your folder/)?.[1], OFFICE_FILES.chat);
 });
 
 /** A file under `dir`, last changed at `at`. */

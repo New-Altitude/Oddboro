@@ -80,13 +80,27 @@ export const send = (method: string, body: unknown): RequestInit => ({
 });
 
 /**
+ * The Odd a call to one of the office's own Google servers is for, in the
+ * call's `_meta`. Only the office sets it (the gateway, for a run, and
+ * `makeCall`, for a call the owner approved), on a call it builds itself, so
+ * an Odd never names it. A tool that reads the Odd's files, such as
+ * `create_draft` with attachments, takes only that Odd's.
+ */
+export const ODD_META = 'oddboro/odd';
+
+/**
  * A tool's work as a tool result. Whatever goes wrong comes back as an
  * error the Odd reads, never a throw that would drop the connection.
  */
-export function run<A>(work: (args: A) => Promise<string>) {
-  return async (args: A): Promise<CallToolResult> => {
+export function run<A>(work: (args: A, odd?: string) => Promise<string>) {
+  return async (args: A, extra?: { _meta?: Record<string, unknown> }): Promise<CallToolResult> => {
     try {
-      return { content: [{ type: 'text', text: await work(args) }] };
+      const odd = extra?._meta?.[ODD_META];
+      return {
+        content: [
+          { type: 'text', text: await work(args, typeof odd === 'string' ? odd : undefined) }
+        ]
+      };
     } catch (e) {
       return { content: [{ type: 'text', text: failure(e) }], isError: true };
     }

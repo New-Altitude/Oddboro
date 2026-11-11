@@ -2,8 +2,8 @@
 // hand_off opens one with that Odd as the hub, and so does work it starts on
 // its own for a goal, or a plan it raises for one (`goalThread`). Only the hub's runs hand off
 // again, so it stays hub and spoke and never nests. The hub picks how it moves
-// on: a colleague finishing, a time it sets (the office clock wakes it), or the
-// owner answering something raised on it, or telling a colleague in its chat
+// on: a colleague finishing, a time it sets (the office clock wakes it), a task
+// on the owner's desk it parks on (task-parking.ts), or the owner answering something raised on it, or telling a colleague in its chat
 // something about the thread (`tellLead`). The server holds the limit. From a
 // chat or a job, the hub may continue a thread it leads instead of opening
 // one, even a finished one, which reopens for a new round of work. A round
@@ -43,7 +43,8 @@ import {
   type Outcome,
   type ThreadStatus
 } from './schema.ts';
-import { sharing } from './sharing.ts';
+import { flat, type DeskItem } from './desk-answers.ts';
+import { heldTools, lacking, sharing, toolNames, type Tool } from './sharing.ts';
 import { holdForWindow, WINDOW_RESET, windowWoke } from './usage-window.ts';
 import { THREADS_DIR, workPath } from './work-paths.ts';
 
@@ -97,7 +98,7 @@ export async function addFollowUp(q: Db, values: typeof followUps.$inferInsert):
 
 /**
  * Where a thread stands, from its runs: open while one has yet to end, the
- * hub parked it until a time, or an ask or task raised on it is still open,
+ * hub parked it until a time or a task's end, or an ask or task raised on it is still open,
  * else as its latest run ended, and open before any has. Its holder is
  * whoever has the newest run still to end, else the hub. An ended thread
  * stays as it ended. The one place a thread's status is worked out.
@@ -123,6 +124,7 @@ export async function settleThread(q: Db, id: number): Promise<void> {
   const status: ThreadStatus =
     pending ||
     t.resumeAt ||
+    t.resumeOnTask ||
     !last?.outcome ||
     last.outcome === 'waiting' ||
     (await waitingOn(q, [id])).length
@@ -284,7 +286,7 @@ export async function takeHandOff(
     to: string;
     thread: ThreadFor;
     run?: string;
-    work: { title: string; brief: string };
+    work: { title: string; brief: string; files?: string[] };
   }
 ): Promise<Taken> {
   const held: HeldHandOff = { from: h.from, to: h.to, ...h.work };
@@ -378,13 +380,13 @@ export async function startHeld(
   if (!a.held || !a.threadId) return;
   // Only what the lead chose: an ask held by an earlier build also stored
   // what it carried then, which access may have changed since.
-  const { from, to, title, brief } = a.held;
+  const { from, to, title, brief, files } = a.held;
   await tx.update(threads).set({ handOffsUsed: 1 }).where(eq(threads.id, a.threadId));
   await addFollowUp(tx, {
     staffId: to,
     kind: 'hand_off',
     note: null,
-    handOff: await sharing(tx, { from, to, title, brief, threadId: a.threadId }),
+    handOff: await sharing(tx, { from, to, title, brief, files, threadId: a.threadId }),
     threadId: a.threadId
   });
 }
@@ -403,7 +405,9 @@ export async function answerHandOffs(
   if (!approved) {
     await db
       .update(threads)
-      .set({ status: 'stopped', endedAt: new Date() })
+      // The park goes with the round the owner stopped: a later plan reopens
+      // this work afresh, and must not find it still waiting on that task.
+      .set({ status: 'stopped', endedAt: new Date(), resumeOnTask: null })
       .where(eq(threads.id, a.threadId));
     return answerThread(
       a.threadId,
@@ -429,12 +433,13 @@ export async function answerHandOffs(
 
 /**
  * The hub sets when it picks the thread back up. Undefined when it is not the
- * hub's or has ended. The hub's own time replaces a hold for the usage window.
+ * hub's or has ended. The hub's own time replaces a hold for the usage window
+ * and a park on a task.
  */
 export async function parkThread(hubId: string, id: number, at: Date): Promise<Date | undefined> {
   const [row] = await db
     .update(threads)
-    .set({ resumeAt: at, heldBy: null })
+    .set({ resumeAt: at, heldBy: null, resumeOnTask: null })
     .where(and(eq(threads.id, id), eq(threads.hubId, hubId), isNull(threads.endedAt)))
     .returning({ at: threads.resumeAt });
   return row?.at ?? undefined;
@@ -528,6 +533,9 @@ export async function thread(id: number): Promise<ThreadRow | undefined> {
   return row;
 }
 
+/** How many of an Odd's latest threads its list shows, and how many with no goal a chat tells the story of. */
+export const LATEST_WORK = 5;
+
 /** A thread among a hub's latest, as its instructions list it off a thread. */
 export type RecentThread = { id: number; title: string; stage: ThreadStage; goal?: string };
 
@@ -548,7 +556,7 @@ export async function recentThreads(
       and(eq(threads.hubId, hubId), o.told?.length ? notInArray(threads.id, o.told) : undefined)
     )
     .orderBy(desc(threads.id))
-    .limit(o.limit ?? 5);
+    .limit(o.limit ?? LATEST_WORK);
   if (!rows.length) return [];
   const waiting = await waitingOn(
     db,
@@ -607,7 +615,7 @@ export type ThreadOn = {
  * goal it serves, since a goal's one thread is where all its work goes, even
  * before the lead hands that Odd a piece. Never one it leads.
  */
-const worksOn = (staffId: string) =>
+export const worksOn = (staffId: string) =>
   and(
     ne(threads.hubId, staffId),
     or(
@@ -625,13 +633,29 @@ const worksOn = (staffId: string) =>
     )
   );
 
-/** Whether `staffId` leads thread `id` or works on it (`worksOn`), so reads all of its folder. */
+/** A thread `staffId` leads or works on (`worksOn`), so reads all of its folder. */
+const onThread = (staffId: string) => or(eq(threads.hubId, staffId), worksOn(staffId));
+
+/** Whether `staffId` leads thread `id` or works on it. */
 export async function isOnThread(staffId: string, id: number): Promise<boolean> {
   const [row] = await db
     .select({ id: threads.id })
     .from(threads)
-    .where(and(eq(threads.id, id), or(eq(threads.hubId, staffId), worksOn(staffId))));
+    .where(and(eq(threads.id, id), onThread(staffId)));
   return !!row;
+}
+
+/**
+ * The titles, by id, of those of `ids` that `staffId` leads or works on now,
+ * by the test `workFile` uses, so a file Storage lists is one that opens.
+ */
+export async function workTitles(staffId: string, ids: number[]): Promise<Map<number, string>> {
+  if (!ids.length) return new Map();
+  const rows = await db
+    .select({ id: threads.id, title: threads.title })
+    .from(threads)
+    .where(and(inArray(threads.id, ids), onThread(staffId)));
+  return new Map(rows.map((r) => [r.id, r.title]));
 }
 
 /**
@@ -660,7 +684,7 @@ export async function workFile(staffId: string, path: string): Promise<string | 
  * since its chat's tell_lead and the goal work backstop (`goalWork`) read
  * this list, however many errands it was handed since.
  */
-export async function threadsOn(staffId: string, limit = 5): Promise<ThreadOn[]> {
+export async function threadsOn(staffId: string, limit = LATEST_WORK): Promise<ThreadOn[]> {
   const on = (kind: SQL) =>
     db
       .select({
@@ -698,6 +722,14 @@ export const nextIsLeads = (lead: string): string =>
   `Say what you did. Do not say what happens next or who does it: ${lead} decides.`;
 
 /**
+ * What a colleague passes to a lead and what it keeps in chat. A lead once
+ * read an answer to a colleague's own question as the owner's ruling on the
+ * work, so the tool and the chat's instructions say this in the same words.
+ */
+export const PASS_ONLY_WORK =
+  'Only pass on what asks for work or changes it. When they are only clarifying something you asked, such as which file they mean, work it out in chat and pass nothing on.';
+
+/**
  * The section of a colleague's chat instructions that lists the threads it
  * works on and does not lead, so what {owner} says there about one reaches
  * its lead (`tellLead`). Empty when it is on none.
@@ -712,9 +744,39 @@ export function threadsOnBrief(rows: ThreadOn[]): string {
     '',
     ...rows.map((t) => `- Work ${t.id}: ${t.title}, led by ${t.lead} (${LISTED[t.stage]}).`),
     '',
-    `You may answer {owner}'s questions about this work and talk it through. When they ask for work on one of these, such as a fix, a change or a next step, pass their words to its lead with tell_lead, then tell {owner} you passed it to the lead, who decides the next step. Never do that work here, and never raise an ask or give {owner} a task about it: its lead hands each piece on. ${nextIsLeads('its lead')}`,
+    `You may answer {owner}'s questions about this work and talk it through. ${PASS_ONLY_WORK} When they ask for work on one of these, such as a fix, a change or a next step, pass their words to its lead with tell_lead, then tell {owner} you passed it to the lead, who decides the next step. Never do that work here, and never raise an ask or give {owner} a task about it: its lead hands each piece on. ${nextIsLeads('its lead')}`,
     ''
   ].join('\n');
+}
+
+/**
+ * What a lead reads of the colleague's own line in a chat's last exchange
+ * when the lead lacks a tool the colleague holds: `left out`, since that line
+ * may quote the tool's contents, as a hand-off's `kept` warns (`sharing.ts`),
+ * or `quoted` in full. The owner ruled `left out` on 2026-11-09, and this one
+ * value is where another answer goes. Remove it, keeping the `left out` path,
+ * once the pull request that added it merges with that ruling unchanged.
+ */
+const REPLY_A_LEAD_LACKS: 'left out' | 'quoted' = 'left out';
+
+/**
+ * The chat's last exchange as the lead reads it, on one line. The office puts
+ * each chat line on a line of its own, the colleague's last (`lastExchange` in
+ * the office's `chat-preface.ts`), so that line alone is the colleague's
+ * words. With `lacks` (tools the colleague holds and the lead lacks) and
+ * `left out`, the note says that line was left out and why, in its place.
+ */
+export function exchangeForLead(
+  exchange: string,
+  name: string,
+  lacks: Tool[],
+  reply: typeof REPLY_A_LEAD_LACKS
+): string {
+  const lines = exchange.split('\n').map(flat).filter(Boolean);
+  const own = lines.pop();
+  if (!own) return '';
+  const left = `One line ${name} said in that chat is left out, since ${name} has ${toolNames(lacks.map((t) => t.name))} and you do not.`;
+  return [...lines, lacks.length && reply === 'left out' ? left : own].join(' ');
 }
 
 /**
@@ -722,7 +784,10 @@ export function threadsOnBrief(rows: ThreadOn[]): string {
  * does not lead: their words go to the thread's lead, which picks the thread
  * back up with them (`answerThread`). `said` is the owner's whole message, set
  * by the office, and `words` the part about this thread, which must be in it,
- * so only the owner's own words reach the lead this way.
+ * so only the owner's own words reach the lead as theirs. `reading` is what the
+ * colleague understood them to mean, which goes labelled as the colleague's,
+ * since a lead cannot judge a clarifying "no" from the bare word. `exchange` is
+ * the last two lines of that chat, as the office set them (`exchangeForLead`).
  */
 export async function tellLead(t: {
   staffId: string;
@@ -730,12 +795,19 @@ export async function tellLead(t: {
   owner: string;
   said: string;
   words: string;
+  reading: string;
+  exchange?: string;
 }): Promise<{ lead: string } | { problem: string }> {
-  const flat = (s: string) => s.replace(/\s+/g, ' ').trim();
   const words = flat(t.words);
   if (!words || !flat(t.said).includes(words))
     return {
       problem: `Pass ${t.owner}'s own words in words, copied exactly from their message. Your own go in your reply to them.`
+    };
+  // The whole note stays on one line: `answers` reads each line as its own word.
+  const reading = flat(t.reading);
+  if (!reading)
+    return {
+      problem: `Say in reading what you understood ${t.owner} to mean, in your own words. Nothing was passed on.`
     };
   const [row] = await db
     .select({ hubId: threads.hubId, status: threads.status, lead: staff.name })
@@ -761,16 +833,20 @@ export async function tellLead(t: {
     };
   const [me] = await db.select({ name: staff.name }).from(staff).where(eq(staff.id, t.staffId));
   const name = me?.name ?? t.staffId;
+  const lacks = t.exchange
+    ? lacking(await heldTools([row.hubId, t.staffId]), row.hubId, [t.staffId])
+    : [];
+  const exchange = exchangeForLead(t.exchange ?? '', name, lacks, REPLY_A_LEAD_LACKS);
   // A lead once read this as the colleague taking it on, and sent no work.
   await answerThread(
     t.threadId,
-    `${name} passed you what ${t.owner} told them in chat about this work. You decide what comes of it and hand on any work it needs; ${name} does nothing more with it. ${t.owner}'s words: ${words}`
+    `${name} passed you what ${t.owner} told them in chat about this work. You decide what comes of it and hand on any work it needs; ${name} does nothing more with it. ${t.owner}'s words: ${words} ${name}'s own reading, which is not ${t.owner}'s words: ${reading}${exchange ? ` ${exchange}` : ''}`
   );
   return { lead: row.lead };
 }
 
 /** Something a thread put on the owner's desk that is still open. */
-export type ThreadWaiting = { kind: 'ask' | 'task'; id: number; title: string };
+export type ThreadWaiting = { kind: Exclude<DeskItem, 'report'>; id: number; title: string };
 
 /** A hub's run on its thread that was not a pick-up: woken at a time, or by the owner's answer. */
 export type ThreadRun = { at: Date; outcome?: Outcome; text?: string };
@@ -786,6 +862,8 @@ export type ThreadLine = {
   resumeAt?: Date;
   /** Parked until the usage window resets, not at a time the hub set. */
   held: boolean;
+  /** The title of the task whose end wakes it. */
+  parkedOn?: string;
   waiting: ThreadWaiting[];
   runs: ThreadRun[];
 };
@@ -890,8 +968,22 @@ const STAGE: Record<ThreadStatus, ThreadStage> = {
  * says. The one place "waiting on the owner" is worked out: it is read from
  * the desk, never stored, so it cannot fall behind an answer.
  */
-const stageOf = (status: ThreadStatus, waiting: ThreadWaiting[]): ThreadStage =>
+export const stageOf = (status: ThreadStatus, waiting: ThreadWaiting[]): ThreadStage =>
   waiting.length ? 'waiting_on_you' : STAGE[status];
+
+/** The title of the task each of these threads is parked on, by thread. */
+export async function parkedTitles(
+  rows: Pick<ThreadRow, 'id' | 'resumeOnTask'>[]
+): Promise<Map<number, string>> {
+  const parked = rows.filter((t) => t.resumeOnTask !== null).map((t) => t.id);
+  if (!parked.length) return new Map();
+  const found = await db
+    .select({ id: threads.id, title: tasks.title })
+    .from(threads)
+    .innerJoin(tasks, eq(threads.resumeOnTask, tasks.id))
+    .where(inArray(threads.id, parked));
+  return new Map(found.map((f) => [f.id, f.title]));
+}
 
 /**
  * A thread as the Goals window lists it, under its goal or in other work.
@@ -908,6 +1000,8 @@ export type GoalThread = {
   resumeAt?: Date;
   /** Parked until the usage window resets, not at a time the hub set. */
   held: boolean;
+  /** The title of the task whose end wakes it. */
+  parkedOn?: string;
   waiting: ThreadWaiting[];
 };
 
@@ -922,6 +1016,7 @@ export async function goalThreads(): Promise<GoalThread[]> {
   if (!rows.length) return [];
   const ids = rows.map((t) => t.id);
   const waiting = await waitingOn(db, ids);
+  const titles = await parkedTitles(rows);
   return rows.map((t) => {
     const its = waitingFor(waiting, t.id);
     return {
@@ -933,6 +1028,7 @@ export async function goalThreads(): Promise<GoalThread[]> {
       stage: stageOf(t.status, its),
       resumeAt: t.resumeAt ?? undefined,
       held: t.heldBy !== null,
+      parkedOn: titles.get(t.id),
       waiting: its
     };
   });
@@ -951,6 +1047,7 @@ export async function threadsFor(hubId: string, limit = 50): Promise<ThreadLine[
   const people = await db.select({ id: staff.id, name: staff.name }).from(staff);
   const name = (id: string) => people.find((p) => p.id === id)?.name ?? id;
   const waiting = await waitingOn(db, ids);
+  const titles = await parkedTitles(rows);
   const runs = await db
     .select()
     .from(followUps)
@@ -971,6 +1068,7 @@ export async function threadsFor(hubId: string, limit = 50): Promise<ThreadLine[
     stage: stageOf(t.status, waitingFor(waiting, t.id)),
     resumeAt: t.resumeAt ?? undefined,
     held: t.heldBy !== null,
+    parkedOn: titles.get(t.id),
     waiting: waitingFor(waiting, t.id),
     runs: runs
       .filter((f) => f.threadId === t.id)

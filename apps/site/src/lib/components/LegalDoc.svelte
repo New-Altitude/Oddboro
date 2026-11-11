@@ -4,12 +4,13 @@
   import type { LegalDoc } from '#lib/server/legal.ts';
   import { SITE } from '#lib/site.ts';
 
-  let { doc }: { doc: LegalDoc } = $props();
+  /** `eyebrow` is the small label over the title. */
+  let { doc, eyebrow = 'Legal' }: { doc: LegalDoc; eyebrow?: string } = $props();
 </script>
 
 <article class="mx-auto max-w-7xl px-4 pt-14 pb-24 sm:px-6 lg:px-8">
   <header class="border-hairline max-w-3xl border-b pb-8">
-    <p class="text-sea mb-3 text-sm font-semibold tracking-wide uppercase">Legal</p>
+    <p class="text-sea mb-3 text-sm font-semibold tracking-wide uppercase">{eyebrow}</p>
     <h1 class="font-pixel text-ink text-4xl leading-[1.05] sm:text-5xl">
       {doc.title}
     </h1>

@@ -1,16 +1,6 @@
 <script lang="ts">
   import type { ArtKind, ArtRequest, DrawnArt } from '@oddboro/sprites/art';
-  import {
-    drawnIn,
-    EXTRAS,
-    libraryPieces,
-    LIMITS,
-    type Area,
-    type OfficeSpec,
-    type RoomEdit,
-    type SpriteCatalog,
-    type World
-  } from '@oddboro/world';
+  import { LIMITS, type OfficeSpec, type SpriteCatalog, type World } from '@oddboro/world';
   import { untrack } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
   import { addArt, type ArtSheet } from '../floor/art.ts';
@@ -22,9 +12,7 @@
   // spec first, then each piece the library lacks, then a preview to pan
   // around. Redraw with a note until it is right, then move in. The office
   // the owner is in changes the same way: a note redraws it from its spec.
-  // In the large view the owner can also arrange a room by hand: pick a thing
-  // to move or remove, or add one. Each change is an edit on its room in the
-  // spec, built at once with no Claude run. Earlier layouts stay, to move back to.
+  // Earlier layouts stay, to move back to.
   type Props = { id: string; catalog: SpriteCatalog; staffCount: number; current: string };
   let { id, catalog, staffCount, current }: Props = $props();
 
@@ -77,21 +65,6 @@
   let sample = $state<{ name: string; active: boolean } | undefined>();
   let big = $state<HTMLDialogElement>();
   let bigOpen = $state(false);
-  /** Arranging by hand: what is picked, and what the next tap does. */
-  let arranging = $state(false);
-  /**
-   * Where a thing stands: one of the office's rooms, or the halls, the street
-   * or the grounds. `x` and `y` are its top-left on the floor, which an edit's
-   * tiles count from.
-   */
-  type Place = { name: string; area?: Area; x: number; y: number };
-  let picked = $state<{ obj: string; item: string; place: Place } | undefined>();
-  let next = $state<{ move: string; place: Place } | { add: string } | undefined>();
-  let building = $state(false);
-  /** The spec before each change made by hand, to undo it. */
-  let undo = $state<OfficeSpec[]>([]);
-  /** The large view's floor, for picking and outlining. */
-  let bigFloor: Floor | undefined;
 
   const KIND: Record<string, string> = {
     office: 'your office',
@@ -160,286 +133,6 @@
           f.swap(w, { fit: w.width !== f.world.width || w.height !== f.world.height });
     });
   });
-
-  const bigReady = (f: Floor | undefined) => {
-    bigFloor = f;
-    if (!f) return;
-    f.onPick = arranging ? (hit) => void pick(hit) : undefined;
-    f.onMove = arranging ? (hit, tile) => void carry(hit, tile) : undefined;
-    f.highlight(picked?.obj);
-  };
-  $effect(() => {
-    const on = arranging;
-    if (!bigFloor) return;
-    bigFloor.onPick = on ? (hit) => void pick(hit) : undefined;
-    bigFloor.onMove = on ? (hit, tile) => void carry(hit, tile) : undefined;
-  });
-  $effect(() => {
-    bigFloor?.highlight(picked?.obj);
-  });
-
-  /**
-   * Everything that can be added, in groups: what the office drew for itself
-   * (kept, or drawn for this drawing), then every library piece by the room
-   * kind or hall the office uses it in.
-   */
-  const addable = $derived.by(() => {
-    const words = (n: string) => EXTRAS[n] ?? n.replaceAll('-', ' ');
-    const own = [
-      ...new Set([
-        ...drawnIn(catalog).extras,
-        // Floors and wall styles are not things to place.
-        ...(drawn?.art ?? [])
-          .filter((a) => a.kind !== 'floor' && a.kind !== 'wall')
-          .map((a) => a.name)
-      ])
-    ];
-    const groups: [string, [string, string][]][] = [];
-    if (own.length) groups.push(['Drawn for this office', own.map((n) => [n, words(n)])]);
-    // Floors are not things to place, so the ground materials are not offered.
-    const label: Record<string, string> = {
-      ...KIND,
-      office: 'Your office',
-      halls: 'Halls',
-      street: 'Street',
-      grounds: 'Grounds'
-    };
-    for (const [part, names] of Object.entries(libraryPieces()))
-      if (part in label)
-        groups.push([
-          label[part][0].toUpperCase() + label[part].slice(1),
-          names.map((n) => [n, words(n)] as [string, string])
-        ]);
-    return groups;
-  });
-  const thing = (item: string) => item.split('#')[0].replaceAll('-', ' ');
-
-  /** A place in words: a room by its name, an area as "the street". */
-  const inWords = (p: Place) => (p.area ? `the ${p.area}` : p.name);
-  const inside = ([x, y]: [number, number], b: { x: number; y: number; w: number; h: number }) =>
-    x >= b.x && y >= b.y && x < b.x + b.w && y < b.y + b.h;
-
-  /** The place a tile is in: a room, the street, the halls, or else the grounds. */
-  function placeAt(tile: [number, number]): Place | undefined {
-    if (!drawn) return undefined;
-    const w = drawn.world;
-    const room = w.rooms.find(
-      (r) => inside(tile, r) && drawn!.spec.rooms.some((s) => s.name.trim() === r.name)
-    );
-    if (room) return { name: room.name, x: room.x, y: room.y };
-    const street = w.rooms.find((r) => r.id.startsWith('street') && inside(tile, r));
-    if (street) return { name: 'Street', area: 'street', x: street.x, y: street.y };
-    if (w.halls.some((h) => inside(tile, h)))
-      return { name: 'Halls', area: 'halls', x: w.site.x, y: w.site.y };
-    if (inside(tile, { x: 0, y: 0, w: w.width, h: w.height }))
-      return { name: 'Grounds', area: 'grounds', x: 0, y: 0 };
-    return undefined;
-  }
-
-  /** The place a placed thing belongs to, from its id: its room, or the area it stands in. */
-  function placeOf(obj: string): Place | undefined {
-    if (!drawn) return undefined;
-    const w = drawn.world;
-    const at = obj.split('/')[0];
-    if (at === 'plan') return { name: 'Halls', area: 'halls', x: w.site.x, y: w.site.y };
-    if (at === 'grounds') return { name: 'Grounds', area: 'grounds', x: 0, y: 0 };
-    const room = w.rooms.find((r) => r.id === at);
-    if (!room) return undefined;
-    if (room.id.startsWith('street'))
-      return { name: 'Street', area: 'street', x: room.x, y: room.y };
-    return drawn.spec.rooms.some((s) => s.name.trim() === room.name)
-      ? { name: room.name, x: room.x, y: room.y }
-      : undefined;
-  }
-
-  const same = (a: Place, b: Place) => a.name === b.name && a.area === b.area;
-  const from = (p: Place, tile: [number, number]): [number, number] => [
-    tile[0] - p.x,
-    tile[1] - p.y
-  ];
-
-  /** A tap while arranging: the second half of a move or an add, or a pick. */
-  async function pick(hit: { obj?: string; item?: string; tile: [number, number] }) {
-    if (!drawn || building) return;
-    const place = placeAt(hit.tile);
-    if (next) {
-      if (!place) return void (problem = 'Pick a tile on the office.');
-      if ('move' in next) {
-        if (!same(place, next.place))
-          return void (problem = `It moves within ${inWords(next.place)}.`);
-        return change(place, { move: next.move, to: from(place, hit.tile), hand: true });
-      }
-      return change(place, { add: next.add, at: from(place, hit.tile), hand: true });
-    }
-    const own = hit.obj ? placeOf(hit.obj) : undefined;
-    picked = hit.obj && hit.item && own ? { obj: hit.obj, item: hit.item, place: own } : undefined;
-    problem = '';
-  }
-
-  /** A placed thing dragged to a new tile: it moves there, within its own room or area. */
-  function carry(hit: { obj: string; item: string }, tile: [number, number]) {
-    if (!drawn || building) return;
-    const own = placeOf(hit.obj);
-    const place = placeAt(tile);
-    if (!own) return;
-    if (!place || !same(place, own))
-      return void (problem = `The ${thing(hit.item)} moves within ${inWords(own)}.`);
-    return change(own, { move: hit.item, to: from(own, tile), hand: true });
-  }
-
-  /** Something dragged out of the library and let go over the floor. */
-  const PIECE = 'text/x-oddboro-piece';
-  let carried = $state<string | undefined>();
-  function dropPiece(e: DragEvent) {
-    e.preventDefault();
-    bigFloor?.showDrop(undefined);
-    const piece = carried ?? e.dataTransfer?.getData(PIECE);
-    carried = undefined;
-    if (!piece || !bigFloor) return;
-    const tile = bigFloor.tileAt(e.clientX, e.clientY);
-    const place = placeAt(tile);
-    if (!place) return void (problem = 'Let go over the office.');
-    return change(place, { add: piece, at: from(place, tile), hand: true });
-  }
-  function overFloor(e: DragEvent) {
-    if (!carried || !bigFloor) return;
-    e.preventDefault();
-    const size = catalog[carried]?.footprint ?? [1, 1];
-    bigFloor.showDrop(bigFloor.tileAt(e.clientX, e.clientY), size);
-  }
-
-  /**
-   * A library piece's picture, from the floor's own atlas, which holds the
-   * office's drawn art as well as the house's.
-   */
-  const thumb =
-    (name: string): Attachment<HTMLCanvasElement> =>
-    (c) => {
-      void sharedAtlas(catalog).then((atlas) => {
-        const meta = atlas.catalog[name];
-        const frame = meta?.frames.includes('default') ? 'default' : meta?.frames[0];
-        const tex = frame ? atlas.sheet.textures[`${name}/${frame}`] : undefined;
-        const g = c.getContext('2d');
-        if (!tex || !g) return;
-        const { x, y, width, height } = tex.frame;
-        c.width = width;
-        c.height = height;
-        g.imageSmoothingEnabled = false;
-        g.drawImage(
-          tex.source.resource as CanvasImageSource,
-          x,
-          y,
-          width,
-          height,
-          0,
-          0,
-          width,
-          height
-        );
-      });
-    };
-
-  /**
-   * Delete or Backspace removes the thing picked while arranging. It listens
-   * on the window: a tap on the floor's canvas focuses nothing, so the key
-   * would never reach the large view itself.
-   */
-  function arrangeKey(e: KeyboardEvent) {
-    if (!bigOpen || !arranging || !picked || building) return;
-    if (e.key !== 'Delete' && e.key !== 'Backspace') return;
-    const t = e.target as HTMLElement | null;
-    if (t?.closest('input, textarea, select')) return;
-    e.preventDefault();
-    void change(picked.place, { remove: picked.item });
-  }
-
-  /** The library, searched by name or by the room kind it belongs to. */
-  let find = $state('');
-  const shelves = $derived.by(() => {
-    const q = find.trim().toLowerCase();
-    if (!q) return addable;
-    return addable
-      .map(([group, items]) => {
-        const hit = group.toLowerCase().includes(q);
-        return [
-          group,
-          items.filter(([k, about]) => hit || k.includes(q) || about.toLowerCase().includes(q))
-        ] as [string, [string, string][]];
-      })
-      .filter(([, items]) => items.length);
-  });
-
-  /** Add an edit to a room or an area and build the office again. */
-  async function change(place: Place, e: RoomEdit) {
-    if (!drawn) return;
-    const before = $state.snapshot(drawn.spec) as OfficeSpec;
-    const spec = structuredClone(before);
-    const room = place.name;
-    // Every change stays, in the order it was made: the office replays them as
-    // they happened, so each lands where it did on the floor the owner saw.
-    if (place.area) {
-      const areas = (spec.areas ??= {});
-      areas[place.area] = [...(areas[place.area] ?? []), e];
-    } else {
-      const r = spec.rooms.find((s) => s.name.trim() === room);
-      if (!r) return;
-      r.edits = [...(r.edits ?? []), e];
-    }
-    picked = undefined;
-    next = undefined;
-    const had = drawn.notes;
-    const done = await build(spec);
-    if (!done) return;
-    // A change the room refuses is not kept: the floor stays as it was, and says why.
-    const refused = done.notes.find((n) => !had.includes(n) && n.startsWith(`${room}:`));
-    if (refused) {
-      const why = refused.slice(room.length + 2);
-      return void (problem = why[0].toUpperCase() + why.slice(1));
-    }
-    drawn = done;
-    undo = [...undo, before];
-  }
-
-  /** Build a spec as it stands, with no Claude run. */
-  async function build(spec: OfficeSpec): Promise<Drawn | undefined> {
-    building = true;
-    problem = '';
-    try {
-      const done = await call<Drawn>('/api/office/build', { spec, art: drawn?.art ?? [] });
-      await addArt(await sharedAtlas(catalog), done.artSheet, done.artCatalog);
-      return done;
-    } catch (e) {
-      problem = e instanceof Error ? e.message : String(e);
-      return undefined;
-    } finally {
-      building = false;
-    }
-  }
-
-  /** Build a spec as it stands, and show it. */
-  async function rebuild(spec: OfficeSpec): Promise<boolean> {
-    const done = await build(spec);
-    if (done) drawn = done;
-    return !!done;
-  }
-
-  async function undoLast() {
-    const spec = undo.at(-1);
-    if (spec && (await rebuild(spec))) undo = undo.slice(0, -1);
-  }
-
-  /** Furnish the office the owner is in again, by the latest rules, to look at or arrange. */
-  async function refurnish(arrange: boolean) {
-    if (!here) return;
-    basis = here.description || here.spec.name;
-    changes = [];
-    undo = [];
-    if (!(await rebuild(here.spec))) return;
-    if (arrange) {
-      arranging = true;
-      openBig();
-    }
-  }
 
   function openBig() {
     bigOpen = true;
@@ -554,8 +247,6 @@
   const field = 'w-full rounded-lg bg-raise px-3 py-2 text-sm outline-none placeholder:text-faint';
 </script>
 
-<svelte:window onkeydown={arrangeKey} />
-
 <section class="flex h-full min-h-0 flex-col" aria-label="Design the office">
   <header class="border-b border-hairline p-3">
     <div class="font-pixel text-lg leading-none">Office</div>
@@ -597,18 +288,6 @@
               class="shrink-0 rounded-lg bg-sea px-3 py-2 text-xs font-medium text-night disabled:opacity-40"
               disabled={!note.trim() || drawing || moving}
               onclick={() => draw('change')}>Change it</button
-            >
-          </div>
-          <div class="flex flex-wrap gap-x-3 text-xs">
-            <button
-              class="text-sea underline underline-offset-2 disabled:opacity-40"
-              disabled={drawing || moving || building}
-              onclick={() => refurnish(true)}>Arrange by hand</button
-            >
-            <button
-              class="text-sea underline underline-offset-2 disabled:opacity-40"
-              disabled={drawing || moving || building}
-              onclick={() => refurnish(false)}>Refurnish by the latest rules</button
             >
           </div>
           <details class="text-xs text-muted">
@@ -743,8 +422,6 @@
           disabled={drawing || moving}
           onclick={() => {
             drawn = undefined;
-            undo = [];
-            arranging = false;
           }}>Start over</button
         >
       </p>
@@ -761,18 +438,8 @@
             >{drawn.spec.rooms.map((r) => r.name).join(' · ')}</span
           >
           <button
-            class="shrink-0 rounded-lg px-2.5 py-1 text-xs {arranging
-              ? 'bg-ember/25 text-ink'
-              : 'bg-raise hover:bg-sea/20'}"
-            onclick={() => {
-              arranging = !arranging;
-              picked = undefined;
-              next = undefined;
-            }}>{arranging ? 'Done arranging' : 'Arrange by hand'}</button
-          >
-          <button
             class="shrink-0 rounded-lg bg-sea px-2.5 py-1 text-xs font-medium text-night disabled:opacity-40"
-            disabled={moving || building}
+            disabled={moving}
             onclick={moveIn}>{moving ? 'Saving' : 'Save to the office'}</button
           >
           <button
@@ -784,168 +451,28 @@
           {#if bigOpen}
             <div class="relative min-h-0 min-w-0 flex-1">
               <div
-                {@attach preview(() => drawn!.world, bigReady)}
+                {@attach preview(() => drawn!.world)}
                 class="absolute inset-0 overflow-hidden bg-night"
                 role="application"
-                aria-label={arranging
-                  ? 'The office, larger. Drag a thing to move it, or drag empty floor to look around; scroll to zoom.'
-                  : 'The office, larger. Drag to look around; scroll to zoom.'}
-                ondragover={overFloor}
-                ondragleave={() => bigFloor?.showDrop(undefined)}
-                ondrop={dropPiece}
+                aria-label="The office, larger. Drag to look around; scroll to zoom."
               ></div>
-              {#if arranging && problem}
-                <p
-                  class="pointer-events-none absolute inset-x-0 top-3 mx-auto w-fit max-w-[90%] rounded-full bg-panel-solid/95 px-4 py-2 text-xs text-coral shadow-lg"
-                  role="alert"
-                >
-                  {problem}
-                </p>
-              {/if}
             </div>
-          {/if}
-          {#if arranging}
-            <aside
-              class="flex w-72 shrink-0 flex-col border-s border-hairline max-sm:hidden"
-              aria-label="Library"
-            >
-              <div class="border-b border-hairline p-3">
-                <div class="font-pixel text-sm">Library</div>
-                <p class="mt-0.5 text-xs text-muted">
-                  Drag a thing onto a room, or pick one and tap where it goes.
-                </p>
-                <label class="sr-only" for="library-find">Search the library</label>
-                <input
-                  id="library-find"
-                  class="mt-2 w-full rounded-lg bg-raise px-3 py-1.5 text-sm outline-none placeholder:text-faint"
-                  placeholder="Search: desk, lamp, kitchen"
-                  autocomplete="off"
-                  bind:value={find}
-                />
-              </div>
-              <div class="min-h-0 flex-1 overflow-y-auto p-2">
-                {#each shelves as [group, items] (group)}
-                  <div class="px-1 pt-2 pb-1 text-[10px] tracking-[0.14em] text-muted uppercase">
-                    {group}
-                  </div>
-                  <div class="grid gap-0.5">
-                    {#each items as [k, about] (k)}
-                      <button
-                        class="flex items-center gap-2 rounded-lg px-1.5 py-1 text-start text-xs hover:bg-raise {next &&
-                        'add' in next &&
-                        next.add === k
-                          ? 'bg-sea/20'
-                          : ''}"
-                        draggable="true"
-                        ondragstart={(e) => {
-                          carried = k;
-                          e.dataTransfer?.setData(PIECE, k);
-                          if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copy';
-                        }}
-                        ondragend={() => {
-                          carried = undefined;
-                          bigFloor?.showDrop(undefined);
-                        }}
-                        onclick={() => (next = { add: k })}
-                      >
-                        <span class="grid size-9 shrink-0 place-items-center overflow-hidden">
-                          <canvas
-                            {@attach thumb(k)}
-                            class="max-h-9 max-w-9 [image-rendering:pixelated]"
-                            aria-hidden="true"
-                          ></canvas>
-                        </span>
-                        <span class="min-w-0 flex-1 truncate">{about}</span>
-                      </button>
-                    {/each}
-                  </div>
-                {:else}
-                  <p class="p-2 text-xs text-muted">Nothing called that.</p>
-                {/each}
-              </div>
-            </aside>
           {/if}
         </div>
-        {#if arranging}
-          <div class="flex flex-wrap items-center gap-2 border-t border-hairline p-3 text-xs">
-            <!-- One height whatever it says, so the floor above never jumps while a change builds. -->
-            <div class="flex min-h-8 basis-full items-center gap-2">
-              {#if building}
-                <span class="busy"></span><span class="flex-1 text-muted">Building it again.</span>
-              {:else if next}
-                <span class="flex-1 text-ink"
-                  >{'move' in next
-                    ? `Tap where the ${thing(next.move)} goes in ${inWords(next.place)}.`
-                    : `Tap where the ${thing(next.add)} goes.`}</span
-                >
-                <button class="rounded-lg bg-raise px-2.5 py-1" onclick={() => (next = undefined)}
-                  >Cancel</button
-                >
-              {:else if picked}
-                {@const p = picked}
-                <span class="flex-1 text-ink">The {thing(p.item)} in {inWords(p.place)}.</span>
-                <button
-                  class="rounded-lg bg-raise px-2.5 py-1 hover:bg-sea/20"
-                  onclick={() => (next = { move: p.item, place: p.place })}>Move</button
-                >
-                <button
-                  class="rounded-lg bg-raise px-2.5 py-1 hover:bg-coral/25"
-                  onclick={() => change(p.place, { remove: p.item })}>Remove</button
-                >
-                <button
-                  class="rounded-lg px-2.5 py-1 text-muted"
-                  onclick={() => (picked = undefined)}>Cancel</button
-                >
-              {:else}
-                <span class="flex-1 text-muted"
-                  >Drag a thing to move it. Tap one to move or remove it.</span
-                >
-                <select
-                  class="rounded-lg bg-raise px-2.5 py-1 text-ink"
-                  aria-label="Add something"
-                  value=""
-                  onchange={(e) => {
-                    const v = e.currentTarget.value;
-                    e.currentTarget.value = '';
-                    if (v) next = { add: v };
-                  }}
-                >
-                  <option value="">Add something</option>
-                  {#each addable as [group, items] (group)}
-                    <optgroup label={group}>
-                      {#each items as [k, about] (k)}
-                        <option value={k}>{about}</option>
-                      {/each}
-                    </optgroup>
-                  {/each}
-                </select>
-                <button
-                  class="rounded-lg bg-raise px-2.5 py-1 disabled:opacity-40"
-                  disabled={!undo.length}
-                  onclick={undoLast}>Undo</button
-                >
-              {/if}
-            </div>
-            {#each drawn.notes as n (n)}
-              <p class="basis-full text-muted">{n}</p>
-            {/each}
-          </div>
-        {:else}
-          <div class="flex gap-2 border-t border-hairline p-3">
-            <input
-              class={field}
-              placeholder="What to change, e.g. a bigger gym, no break room"
-              bind:value={note}
-              disabled={drawing || moving}
-              onkeydown={(e) => e.key === 'Enter' && !drawing && draw('again')}
-            />
-            <button
-              class="shrink-0 rounded-lg bg-sea px-3 py-2 text-xs font-medium text-night disabled:opacity-40"
-              disabled={drawing || moving}
-              onclick={() => draw('again')}>Redraw</button
-            >
-          </div>
-        {/if}
+        <div class="flex gap-2 border-t border-hairline p-3">
+          <input
+            class={field}
+            placeholder="What to change, e.g. a bigger gym, no break room"
+            bind:value={note}
+            disabled={drawing || moving}
+            onkeydown={(e) => e.key === 'Enter' && !drawing && draw('again')}
+          />
+          <button
+            class="shrink-0 rounded-lg bg-sea px-3 py-2 text-xs font-medium text-night disabled:opacity-40"
+            disabled={drawing || moving}
+            onclick={() => draw('again')}>Redraw</button
+          >
+        </div>
       </dialog>
     {/if}
 

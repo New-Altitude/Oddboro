@@ -12,7 +12,7 @@ export const GET: RequestHandler = ({ request }) => {
       const encoder = new TextEncoder();
       const send = (e: OfficeEvent) =>
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(e)}\n\n`));
-      send({ type: 'working', working: { ...working }, inProgress: structuredClone(inProgress) });
+      send({ type: 'working', working: working(), inProgress: inProgress() });
       bus.on('event', send);
       stop = () => bus.off('event', send);
       request.signal.addEventListener('abort', () => {

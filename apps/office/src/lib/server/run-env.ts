@@ -8,6 +8,8 @@ export type RunFacts = {
   key: string;
   /** The owner's own message, when this is a chat. */
   ownerSaid?: string;
+  /** In a chat, the last exchange before the owner's message, which `tell_lead` passes on. */
+  chatExchange?: string;
   /** The ask the owner approved that this run carries out. */
   approvedAsk?: number;
   /** The tools whose sign-ins ran out, which only this run knows. */
@@ -34,20 +36,23 @@ export type RunFacts = {
 const WORDS_MAX = 4000;
 
 /**
- * The owner's words cut to `WORDS_MAX`, never between the two halves of a
- * character outside the BMP (an emoji): a half alone is no character, and
- * Codex's `-c`, which carries these, refuses the TOML.
+ * Text cut to `max` UTF-16 units, never between the two halves of a character
+ * outside the BMP (an emoji): a half alone is no character, and Codex's `-c`,
+ * which carries a run's environment, refuses the TOML.
  */
-function words(s: string): string {
-  const cut = s.slice(0, WORDS_MAX);
-  return s.length > WORDS_MAX && /[\ud800-\udbff]$/.test(cut) ? cut.slice(0, -1) : cut;
+export function cut(s: string, max: number): string {
+  const kept = s.slice(0, max);
+  return s.length > max && /[\ud800-\udbff]$/.test(kept) ? kept.slice(0, -1) : kept;
 }
+
+const words = (s: string): string => cut(s, WORDS_MAX);
 
 /** The environment the run's office tool server starts with, beyond what every run shares. */
 export function officeEnv(r: RunFacts): Record<string, string> {
   return {
     RUN_KEY: r.key,
     ...(r.ownerSaid ? { OWNER_SAID: words(r.ownerSaid) } : {}),
+    ...(r.chatExchange ? { CHAT_EXCHANGE: words(r.chatExchange) } : {}),
     ...(r.approvedAsk ? { APPROVED_ASK: String(r.approvedAsk) } : {}),
     ...(r.signedOut.length ? { SIGNED_OUT: r.signedOut.join(',') } : {}),
     ...(r.ownerNote ? { OWNER_NOTE: words(r.ownerNote) } : {}),

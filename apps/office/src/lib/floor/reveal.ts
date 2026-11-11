@@ -2,8 +2,8 @@
 // every piece drawn for it is in. The floor shows the building with every part
 // hidden, then lays it in a beat at a time: chalk lines, the floors row by row
 // from the front, the walls rising from their base, the furniture dropping into
-// each room with its lamps coming on. A bus pulls up along the street. Under
-// reduced motion every beat is a cut.
+// each room with its lamps coming on. A bus pulls up along the street, as one
+// does for every hire after. Under reduced motion every beat is a cut.
 import { Graphics, Sprite, type Container } from 'pixi.js';
 import type { DrawCmd, World } from '@oddboro/world';
 import type { Floor } from './engine.ts';
@@ -202,7 +202,7 @@ function drop(floor: Floor, p: Part): Promise<void> {
   );
 }
 
-/** The bus that brings the first staffer: drives up the street and stops at the shelter. */
+/** The bus that brings each new hire: drives up the street and stops at the shelter. */
 export function bus(floor: Floor): {
   arrive(): Promise<void>;
   open(): void;

@@ -95,11 +95,12 @@
       line: 'Keeps you current on what you follow, without the scroll.',
       portrait: 'theo',
       does: [
-        'Searches the topics you follow, once you connect a search tool from the MCP Registry.',
+        'Searches the web for the topics you follow, once you turn on Browse the web for it.',
         'Leaves you a short brief each morning, with links.'
       ],
       level: 'read',
-      tools: [{ name: 'Search tool', can: ['read'] }],
+      tools: [],
+      note: 'No outside tools. It searches with its own.',
       you: 'You read one brief. Nothing goes out.'
     },
     {
