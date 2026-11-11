@@ -1,5 +1,5 @@
 {
-  "id": "40c4cf93-b30e-4b46-b47b-03d6881ade05",
+  "id": "75887648-c64b-4315-b52c-0895f44708ff",
   "prevId": "d716beff-a5d5-4326-aeb7-b985fda547a2",
   "version": "7",
   "dialect": "postgresql",
@@ -1812,207 +1812,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.project_requests": {
-      "name": "project_requests",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "session_id": {
-          "name": "session_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "staff_id": {
-          "name": "staff_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "thread_id": {
-          "name": "thread_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "prompt": {
-          "name": "prompt",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "file": {
-          "name": "file",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "state": {
-          "name": "state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "turn": {
-          "name": "turn",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "answer": {
-          "name": "answer",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "project_requests_session": {
-          "name": "project_requests_session",
-          "columns": [
-            {
-              "expression": "session_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "project_requests_session_id_fkey": {
-          "name": "project_requests_session_id_fkey",
-          "tableFrom": "project_requests",
-          "tableTo": "project_sessions",
-          "columnsFrom": ["session_id"],
-          "columnsTo": ["id"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "project_requests_staff_id_fkey": {
-          "name": "project_requests_staff_id_fkey",
-          "tableFrom": "project_requests",
-          "tableTo": "staff",
-          "columnsFrom": ["staff_id"],
-          "columnsTo": ["id"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "project_requests_thread_id_fkey": {
-          "name": "project_requests_thread_id_fkey",
-          "tableFrom": "project_requests",
-          "tableTo": "threads",
-          "columnsFrom": ["thread_id"],
-          "columnsTo": ["id"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.project_sessions": {
-      "name": "project_sessions",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "agent": {
-          "name": "agent",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "native_id": {
-          "name": "native_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "folder": {
-          "name": "folder",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "title": {
-          "name": "title",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "staff_id": {
-          "name": "staff_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "project_sessions_staff_id_fkey": {
-          "name": "project_sessions_staff_id_fkey",
-          "tableFrom": "project_sessions",
-          "tableTo": "staff",
-          "columnsFrom": ["staff_id"],
-          "columnsTo": ["id"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "project_sessions_agent_native_id_key": {
-          "name": "project_sessions_agent_native_id_key",
-          "nullsNotDistinct": false,
-          "columns": ["agent", "native_id"]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "project_sessions_agent_check": {
-          "name": "project_sessions_agent_check",
-          "value": "\"project_sessions\".\"agent\" IN ('claude', 'codex')"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.reports": {
       "name": "reports",
       "schema": "",
@@ -2357,6 +2156,12 @@
         "portrait_px": {
           "name": "portrait_px",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "package": {
+          "name": "package",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },

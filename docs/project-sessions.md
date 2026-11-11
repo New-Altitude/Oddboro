@@ -51,7 +51,7 @@ To run the two-provider read and resume check yourself, open the disposable offi
 node apps/office/scripts/check-live-projects.ts http://127.0.0.1:4951 /absolute/path/to/test-project
 ```
 
-## What the live review exercised
+## Earlier native checks, November 9, 2026
 
 On Apple silicon, the staged desktop server ran Codex CLI 0.167.0 and Claude Code 2.1.319 with their native sign-ins. Both read a fresh project file, returned its contents through the office and resumed the same native ID. A project-only skill supplied information used in each provider's answer.
 
@@ -60,3 +60,18 @@ On Apple silicon, the staged desktop server ran Codex CLI 0.167.0 and Claude Cod
 - An Odd used its office MCP tools to submit work, got the file reference back and received one Desk report. Revoking the grant blocked a second instruction from the same MCP client. Two browser tabs transferred native terminal control explicitly.
 
 The platform workflow builds and starts the staged office and checks terminal input and resizing on the Mac, Linux and Windows release architectures. It uses local fixtures. An authenticated provider run on another OS, a managed organization's plugin policy and signed installer distribution require their own release checks.
+
+## Current queue integration
+
+The repaired branch follows scheduled file exchange. Migration 0023 creates
+its tables after the accepted office migrations; the earlier preview table
+names still work. Session and request changes use `LIVE_TABLES`. Project
+tools are declared in `OFFICE_TOOLS` and appear only for a shared conversation.
+A run uses the shared `CEILING` to remain at Draft or Read. `nativeProjectEnv`
+in `run-env-allow.ts` keeps native provider settings separate from office
+credentials. Terminal input and output stay outside diagnostics.
+
+Database and tool-server tests cover duplicate assignments and callbacks,
+revocation, a run at Draft or Read, unchanged native IDs, and a result arriving
+after its office work ended. The earlier authenticated checks above predate
+this integration; the release checks still apply to the merged build.

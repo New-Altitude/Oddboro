@@ -1,3 +1,5 @@
+import { FILE_MAX } from '#lib/attachments.ts';
+import { CHAT_REQUEST_BYTES } from '../staff/chat-input.ts';
 // Which requests the office answers. It runs on the owner's computer, where
 // any web page the owner opens can send it requests, so `guardOffice` (the
 // server's `handle` in hooks.server.ts) checks every request before a route
@@ -57,8 +59,26 @@ const READS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 const refuse = (message: string) => new Response(message, { status: 403 });
 
+/** For a chunked request, count as it arrives and leave the body for the route. */
+async function fits(request: Request, limit: number): Promise<boolean> {
+  const length = request.headers.get('content-length');
+  if (length !== null) return Number(length) <= limit;
+  const reader = request.clone().body!.getReader();
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return true;
+      size += value.length;
+      if (size > limit) return false;
+    }
+  } finally {
+    void reader.cancel().catch(() => {});
+  }
+}
+
 /** The server's `handle`: every request passes here before a route sees it. */
-export const guardOffice: Handle = ({ event, resolve }) => {
+export const guardOffice: Handle = async ({ event, resolve }) => {
   const { request } = event;
   if (!toThisOffice(request)) return refuse('This office answers only at its own address');
   if (
@@ -66,7 +86,22 @@ export const guardOffice: Handle = ({ event, resolve }) => {
     fromOwnerPage(request) ||
     (event.url.pathname === '/api/update' && fromShell(request, event.getClientAddress())) ||
     (event.url.pathname.startsWith(`${GATEWAY_PATH}/`) && fromRun(request))
-  )
+  ) {
+    const chat =
+      request.method === 'POST' && /^\/api\/staff\/[a-z0-9-]+\/chat\/?$/.test(event.url.pathname);
+    // Uploads use their existing per-file limit. The larger chat limit
+    // includes JSON encoding for inline imports, and never widens other actions.
+    const upload =
+      request.method === 'POST' &&
+      /^\/api\/staff\/[a-z0-9-]+\/attachments\/?$/.test(event.url.pathname);
+    const limit = chat ? CHAT_REQUEST_BYTES : upload ? FILE_MAX : 512 * 1024;
+    if (
+      request.body &&
+      (chat || upload || process.env.ODDBORO_APP) &&
+      !(await fits(request, limit))
+    )
+      return new Response('That request is too large', { status: 413 });
     return resolve(event);
+  }
   return refuse("Only the office's own page can do that");
 };

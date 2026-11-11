@@ -26,6 +26,58 @@ export type Release = {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.0.10',
+    date: '2026-11-10',
+    title: 'A round of bug fixes.',
+    summary:
+      'Odds answer again on Windows, drawing works in the app, and installing an AI on a Mac finds npm.',
+    notes: [
+      'On Windows, an Odd no longer fails on its first message when you use Claude Code a lot.',
+      'Drawing works again in the app. A redesign no longer leaves pieces undrawn.',
+      'Installing Codex, Gemini or Claude Code on a Mac finds npm when Node comes from nvm, fnm, Volta, asdf or mise. When npm is missing, Oddboro tells you to install Node.js.',
+      "When your office's AI is not installed, Oddboro says so and points you to Setup. Onboarding draws your office again after a failed try.",
+      'When GitHub stops renewing a sign-in, Settings shows GitHub as needing a new sign-in.'
+    ],
+    builds: ['mac', 'windows-x64', 'windows-arm64', 'linux-x86_64', 'linux-aarch64'],
+    art: {
+      name: 'bug-hunters',
+      alt: 'A white van marked BUG HUNTERS pulls up outside the office and its back door swings open. Two bug hunters in yellow suits, hoods, gas masks and spray tanks hop out, walk up to the front door side by side, and go in. The door slides shut behind them.',
+      shareAlt:
+        'A white van marked BUG HUNTERS parked outside a pixel-art office, with a bug hunter in a yellow suit and gas mask beside it.'
+    }
+  },
+  {
+    version: '0.0.9',
+    date: '2026-11-10',
+    title: 'Your New Altitude personas can join your office.',
+    summary:
+      'Sign in to your New Altitude account from the office, and you can hire your personas as Odds. They work beside the Odds you already have.',
+    notes: [
+      'Give an Odd a screenshot, a PDF or a text file in chat. Paste it, drop it or pick it.',
+      'An Odd can attach its own files to an email reply, or hand them to a colleague.',
+      'Odds know who else works in your office, and ask which one you mean when a name could be someone else. You can turn this off for an Odd in its Settings.',
+      'Remove an Odd you no longer need. Your Office Manager can bring it back, with its history.',
+      'Type to an Odd while it replies. Your message sends when the reply ends.',
+      'When an Odd needs to run commands or browse the web, it asks on your Desk, and one click turns it on.',
+      'Give an Odd a folder anywhere on your computer, like a project on another drive. A whole drive or system folders warn you first.',
+      'Click a file an Odd made with a colleague to open it, and find it later in Storage.',
+      'Connect GitHub with one sign-in. No token to make.',
+      'Odds can run on Fable 5.2.',
+      'Signed in to New Altitude, Oddboro asks once whether it may send error reports. Nothing goes until you say yes, and reports leave out anything personal.',
+      'Grok Odds work on a Mac that runs OrbStack, Colima or Rancher Desktop.',
+      'The office no longer stops answering when Ollama hangs.',
+      'Reconnecting a tool you sign in to no longer asks you for a key.',
+      'Oddboro has a new icon: the glowing pixel O.'
+    ],
+    builds: ['mac', 'windows-x64', 'windows-arm64', 'linux-x86_64', 'linux-aarch64'],
+    art: {
+      name: 'personas',
+      alt: 'Inside the office, the front doors slide open and smoke rolls in. Nate, Michele and Sam Frank walk out of it in gold sunglasses and strike a pose, Michele and Sam with arms up and Nate in the middle with arms down. The view closes in on their faces, they take off their sunglasses together, then Michele walks off one side and Nate and Sam the other.',
+      shareAlt:
+        'Three people in gold sunglasses strike a pose inside the open front doors of a pixel-art office.'
+    }
+  },
+  {
     version: '0.0.8',
     date: '2026-11-07',
     title: 'Odds work in Gmail, Google Drive and AWS.',

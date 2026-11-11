@@ -10,6 +10,7 @@
     "./agents": "./src/agents.ts",
     "./first-questions": "./src/first-questions.ts",
     "./access": "./src/access-words.ts",
+    "./grantable": "./src/grantable.ts",
     "./goals": "./src/goal-words.ts",
     "./checks": "./src/checks.ts",
     "./platform": "./src/platform.ts",
@@ -21,7 +22,12 @@
     "./upgrade": "./src/upgrade.ts",
     "./update-window": "./src/update-window.ts",
     "./work-paths": "./src/work-paths.ts",
+    "./run-registry": "./src/run-registry.ts",
+    "./codex-handoff": "./src/codex-handoff/prepare.ts",
+    "./desk-answers": "./src/desk-answers.ts",
+    "./live-tables": "./src/live-tables.ts",
     "./filters": "./src/filter-words.ts",
+    "./certificates": "./src/certificates.ts",
     "./project-terminal": "./src/project-terminal.ts"
   },
   "scripts": {

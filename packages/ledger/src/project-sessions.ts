@@ -9,6 +9,7 @@ import {
   projectSessions,
   reports,
   staff,
+  threads,
   type ProjectRequestState
 } from './schema.ts';
 
@@ -226,7 +227,14 @@ export async function finishProject(id: string, sessionId: string, answer: strin
         .select()
         .from(projectSessions)
         .where(eq(projectSessions.id, sessionId));
-      if (row.threadId)
+      const [work] = row.threadId
+        ? await tx
+            .select({ endedAt: threads.endedAt })
+            .from(threads)
+            .where(eq(threads.id, row.threadId))
+            .for('update')
+        : [];
+      if (row.threadId && work && !work.endedAt)
         await addFollowUp(tx, {
           kind: 'resume',
           staffId: row.staffId,

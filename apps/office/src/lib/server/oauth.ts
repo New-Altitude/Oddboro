@@ -143,19 +143,79 @@ const NEVER_SENT = new Set([
 ]);
 
 /**
+ * Failures where this computer did not trust the certificate it was shown,
+ * so the request was never sent and sending it again changes nothing. A
+ * company network or an antivirus that checks secure connections causes them
+ * when its root is in neither Node's list nor the system's store
+ * (`trustSystemCertificates`).
+ */
+const UNTRUSTED = new Set([
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'UNABLE_TO_GET_ISSUER_CERT',
+  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'CERT_UNTRUSTED'
+]);
+
+/** A host whose certificate this computer did not trust. Its message is for the owner. */
+export class UntrustedCertificate extends Error {
+  constructor(host: string) {
+    super(
+      `This computer did not trust the certificate ${host} showed. A company network or antivirus that checks secure connections can cause this. Ask whoever runs it to add its certificate to this computer, then try again.`
+    );
+  }
+}
+
+/** Where GitHub trades a code or a refresh token for tokens. */
+const GITHUB_TOKEN_URL = 'https://github.com/login/oauth/access_token';
+
+/**
+ * GitHub answers a refused token request with 200 and the error in the body.
+ * The SDK reads any 200 as tokens, fails to, and drops the failure without a
+ * word, so a refused renewal looked like no sign-in at all. This gives the SDK
+ * the refusal as a 400 it reads, and logs GitHub's own words. A refresh token
+ * GitHub calls bad is `invalid_grant`, so the SDK forgets the dead sign-in;
+ * any other refusal is `invalid_request`, which reaches the caller and keeps
+ * what is stored.
+ */
+export async function githubRefusal(input: string | URL, res: Response): Promise<Response> {
+  if (res.status !== 200 || String(input) !== GITHUB_TOKEN_URL) return res;
+  const body = (await res
+    .clone()
+    .json()
+    .catch(() => undefined)) as { error?: unknown; error_description?: unknown } | undefined;
+  if (typeof body?.error !== 'string') return res;
+  const said = typeof body.error_description === 'string' ? body.error_description : '';
+  console.error(
+    `[oauth] GitHub refused the token request: ${body.error}${said ? `: ${said}` : ''}`
+  );
+  return Response.json(
+    {
+      error: body.error === 'bad_refresh_token' ? 'invalid_grant' : 'invalid_request',
+      error_description: said || body.error
+    },
+    { status: 400 }
+  );
+}
+
+/**
  * fetch, retried once when the request was never sent. A request whose answer
  * was lost is not retried within one request; the next request that needs it
  * sends it again. The failure's real cause goes in the error and the service
- * log.
+ * log. A certificate this computer did not trust is `UntrustedCertificate`.
+ * GitHub's refusals come back as errors (`githubRefusal`).
  */
 export const steadyFetch: FetchLike = async (input, init) => {
   for (let attempt = 1; ; attempt++) {
     try {
-      return await fetch(input, init);
+      return await githubRefusal(input, await fetch(input, init));
     } catch (e) {
       const cause = (e as { cause?: { code?: string; message?: string } }).cause;
       const why = cause?.code ?? cause?.message ?? (e instanceof Error ? e.message : String(e));
       console.error(`[oauth] ${String(input)} failed (attempt ${attempt}): ${why}`);
+      if (UNTRUSTED.has(cause?.code ?? ''))
+        throw new UntrustedCertificate(new URL(String(input)).host);
       if (attempt >= 2 || !NEVER_SENT.has(cause?.code ?? ''))
         throw new Error(`Could not reach ${new URL(String(input)).host}: ${why}`);
       await new Promise((r) => setTimeout(r, 800));
@@ -357,6 +417,7 @@ export async function freshAccess(
   if (!provider.tokens()) return undefined;
   const ends = provider.expiresAt();
   if (ends !== undefined && ends - MARGIN_MS < Date.now()) {
+    const renews = !!provider.tokens()?.refresh_token;
     const result = await once(provider.id, async () =>
       auth(provider, {
         serverUrl: await at.serverUrl(),
@@ -371,7 +432,16 @@ export async function freshAccess(
     );
     // A caller that shared another's refresh holds a copy from before it.
     provider.forget();
-    if (result !== 'AUTHORIZED') return undefined;
+    if (result !== 'AUTHORIZED') {
+      // The SDK starts a new sign-in instead of saying why a renewal failed,
+      // so the log says it here. The reason, when there is one, is logged
+      // just before: a network failure (`steadyFetch`) or GitHub's refusal.
+      if (result !== 'FAILED')
+        console.error(
+          `[oauth] ${provider.id}'s sign-in did not renew${renews ? '' : ': it holds no refresh token'}`
+        );
+      return undefined;
+    }
   }
   return provider.tokens()?.access_token;
 }

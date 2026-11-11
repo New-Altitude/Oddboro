@@ -37,10 +37,13 @@ const port = await new Promise<number>((done) => {
 // call and a result that carries what the office gave the run, the variables
 // Run commands sets among it, and whether the git template folder those name
 // was there and empty as it ran (`done()` removes it after), and npm's
-// settings. A message that says "Hold until <file> exists." keeps the run
-// going until it does. One that says "Refuse the open network", in a run
-// whose sandbox opens every host, gets the words Claude Code's binary refuses
-// that with, on stderr, and exit 1, after any hold.
+// settings. A message whose last line says "Hold until <file> exists." keeps
+// the run going until it does. One whose last line says "Refuse the open
+// network", in a run whose sandbox opens every host, gets the words Claude
+// Code's binary refuses that with, on stderr, and exit 1, after any hold.
+// Only the last line, since a later prompt can quote an earlier message.
+// One that says "Think aloud: <words>." on any line streams <words> as
+// text first.
 // "claude auth status" says signed out at once, and "claude auth login"
 // prints its sign-in page and waits until it is stopped, as Setup's sign-in
 // waits on the owner.
@@ -81,24 +84,30 @@ if (verb === 'auth' && sub === 'login') {
   return;
 }
 let message = '';
+/** The owner's words in a chat, or a job's instructions, which come last. */
+const lastLine = () => message.trimEnd().split('\\n').at(-1);
 process.stdin.on('data', (d) => (message += d));
 process.stdin.on('end', () => {
-  const hold = /Hold until (\\/[^\\s"\\\\]+) exists/.exec(message)?.[1];
+  const hold = /Hold until (\\/[^\\s"\\\\]+) exists/.exec(lastLine())?.[1];
   if (!hold) return answer();
   const wait = setInterval(() => fs.existsSync(hold) && (clearInterval(wait), answer()), 20);
 });
 /** After any hold, so two runs can be refused at once. */
 function answer() {
   // Only a staff run carries --settings, so it is read only for the trigger.
-  const settings = () => JSON.parse(process.argv[process.argv.indexOf('--settings') + 1]);
   if (
-    message.includes('Refuse the open network') &&
+    lastLine().includes('Refuse the open network') &&
     settings().sandbox?.network?.allowedDomains?.includes('*')
   ) {
     process.stderr.write('Overly broad patterns like "*" are not allowed\\n');
     process.exit(1);
   }
   reply();
+}
+/** A staff run's settings, from the file --settings names; the office's own runs pass them inline. */
+function settings() {
+  const v = process.argv[process.argv.indexOf('--settings') + 1];
+  return JSON.parse(v.startsWith('{') ? v : fs.readFileSync(v, 'utf8'));
 }
 function emptyFolder(p) {
   try {
@@ -112,10 +121,13 @@ function reply() {
   const after = (flag) => args[args.indexOf(flag) + 1];
   const gave = {
     args,
+    envNames: Object.keys(process.env).sort(),
     // The office passes the servers as a file, read here while the run goes.
     mcp: JSON.parse(fs.readFileSync(after('--mcp-config'), 'utf8')),
     env: JSON.parse(fs.readFileSync(after('--mcp-config'), 'utf8')).mcpServers.office.env,
-    system: after('--append-system-prompt'),
+    // A staff run's settings and system prompt come in files, read here while the run goes.
+    claudeSettings: settings(),
+    system: fs.readFileSync(after('--append-system-prompt-file'), 'utf8'),
     message,
     claudeMds: process.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS ?? null,
     autoMemory: process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY ?? null,
@@ -132,6 +144,8 @@ function reply() {
   };
   const line = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
   line({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: 'tool_use', name: 'look' } } });
+  const aloud = /Think aloud: ([^.]+)\./.exec(message)?.[1];
+  if (aloud) line({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: aloud } } });
   line({ type: 'result', subtype: 'success', result: JSON.stringify(gave) + '\\nOutcome: done' });
 }
 `
@@ -141,8 +155,9 @@ chmodSync(join(bin, 'claude'), 0o755);
 // Grok, git and key variables it got, its agent file's MCP servers and the tool
 // server's environment from them, and its sandbox profile when it has one (none
 // on Windows). Then one MCP call the way Grok streams it
-// (through use_tool), and a result. A message that says "Replay <file>"
-// gets that recorded stream instead, and its arguments go in replay-args.json.
+// (through use_tool), and a result. A message that ends "Replay <file>"
+// gets that recorded stream instead (only at the end, since a later prompt
+// can quote an earlier message that failed), and its arguments go in replay-args.json.
 // "grok models", which renews the sign-in, adds a dot to models.log in the
 // Grok home, and puts renewed.json there as the sign-in when there is one.
 // With hang.pid in the Grok home, it writes its pid there and never ends,
@@ -202,7 +217,7 @@ if (args.some((a) => a.startsWith('- '))) {
 }
 const after = (flag) => args[args.indexOf(flag) + 1];
 const joined = (flag) => args.find((a) => a.startsWith(flag + '='))?.slice(flag.length + 1);
-const replay = /Replay (\\/\\S+\\.jsonl)/.exec(joined('--single'))?.[1];
+const replay = /Replay (\\/[^\\r\\n]+\\.jsonl)\\s*$/.exec(joined('--single'))?.[1];
 if (replay) {
   fs.writeFileSync(process.env.GROK_HOME + '/replay-args.json', JSON.stringify(args));
   process.stdout.write(fs.readFileSync(replay, 'utf8'));
@@ -218,6 +233,7 @@ const profile = args.includes('--sandbox')
 const servers = Object.assign({}, ...JSON.parse(/^mcpServers: (.*)$/m.exec(agent)[1]));
 const gave = {
   args,
+  envNames: Object.keys(process.env).sort(),
   grokEnv: Object.fromEntries(
     Object.entries(process.env).filter(([k]) => /^(GROK_|XAI_|ANTHROPIC_API_KEY|TMPDIR|NODE_OPTIONS|GIT_)/.test(k))
   ),
@@ -244,7 +260,7 @@ chmodSync(join(bin, 'grok'), 0o755);
 // empty as it ran (`done()` removes it after), in the item
 // shapes `codex exec --json` prints (exec_events.rs): a shell command, an MCP
 // call, a file change, two messages and the turn's tokens. A message that
-// says "Replay <file>" gets that recorded stream instead, and one that says
+// ends "Replay <file>" gets that recorded stream instead, and one that says
 // "Leave a sleeper at <file>" first starts a `sleep` that outlives it, in its
 // process group, and writes its pid there. Every launch's arguments go in
 // launches.jsonl, a line each. "codex login" is no launch: it logs its
@@ -294,7 +310,7 @@ function emptyFolder(p) {
 let message = '';
 process.stdin.on('data', (d) => (message += d));
 process.stdin.on('end', () => {
-  const replay = /Replay (\\/\\S+\\.jsonl)/.exec(message)?.[1];
+  const replay = /Replay (\\/[^\\r\\n]+\\.jsonl)\\s*$/.exec(message)?.[1];
   if (replay) return process.stdout.write(fs.readFileSync(replay, 'utf8'));
   const sleeper = /Leave a sleeper at (\\/\\S+)/.exec(message)?.[1];
   if (sleeper) {
@@ -311,6 +327,7 @@ process.stdin.on('end', () => {
   });
   const gave = {
     args,
+    envNames: Object.keys(process.env).sort(),
     codexEnv: Object.fromEntries(
       Object.entries(process.env).filter(([k]) => /^(CODEX_|OPENAI_|ANTHROPIC_API_KEY|TMPDIR|NODE_OPTIONS|GIT_)/.test(k))
     ),
@@ -351,8 +368,9 @@ chmodSync(join(bin, 'codex'), 0o755);
 // run folder's policy, settings and instructions, and the message, in the
 // event shapes `gemini -o stream-json` prints: the session, an echo of the
 // message, a reply in pieces, a file tool and an MCP call, the reply's last
-// message in two pieces and the result's tokens. A message that says "End in
-// error" gets a failed result instead. Each launch adds a dot to launches.log
+// message in two pieces and the result's tokens. A message that ends "End in
+// error" gets a failed result instead (only at the end, since a later prompt
+// can quote an earlier message that failed). Each launch adds a dot to launches.log
 // in the Gemini home.
 writeFileSync(
   join(bin, 'gemini'),
@@ -374,13 +392,14 @@ process.stdin.on('end', () => {
   line({ type: 'init', session_id: '0a0a0a0a-0000-4000-8000-00000000ce01', model: 'gemini-test' });
   if (message.startsWith('/'))
     return line({ type: 'result', status: 'error', error: { type: 'Error', message: 'Ran a slash command.' } });
-  if (message.includes('End in error'))
+  if (/End in error\\s*$/.test(message))
     return line({ type: 'result', status: 'error', error: { type: 'Error', message: 'Quota used up.' } });
   const settingsPath = process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH;
   const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
   const run = path.dirname(settingsPath);
   const gave = {
     args,
+    envNames: Object.keys(process.env).sort(),
     geminiEnv: Object.fromEntries(
       Object.entries(process.env).filter(([k]) => /^(GEMINI_|GOOGLE_|ANTHROPIC_API_KEY|NODE_OPTIONS|GIT_)/.test(k))
     ),
@@ -523,12 +542,23 @@ mock.module('@oddboro/ledger/secrets', {
     },
     setSecret: (connector: string, name: string, value: string) =>
       void secrets.set(`${connector}:${name}`, value),
-    deleteSecret: (connector: string, name: string) => secrets.delete(`${connector}:${name}`)
+    deleteSecret: (connector: string, name: string) => secrets.delete(`${connector}:${name}`),
+    // The stand-in store always answers, whatever this computer's own does.
+    secretStore: () => ({ ok: true })
   }
 });
 // A Codex run starts only from a signed-in home; the stand-in reads nothing in it.
 mkdirSync(join(folder, 'codex'));
 writeFileSync(join(folder, 'codex', 'auth.json'), '{}');
+// A static import beside this file loads as this file waits on its port above,
+// so home.ts would read no ODDBORO_DB_PORT and every such test file would bind
+// the one fixed port.
+const { DATABASE_PORT } = await import('@oddboro/ledger/home');
+assert.equal(
+  DATABASE_PORT,
+  port,
+  "This test file loaded the office's code before the harness set its port. Import the office's modules with `await import(...)` in the test file."
+);
 const { startLocalDatabase } = await import('@oddboro/ledger/local-db');
 const stopDatabase = await startLocalDatabase();
 const { bringUpToDate } = await import('@oddboro/ledger/upgrade');
@@ -571,8 +601,16 @@ await L.pg`insert into staff ${L.pg([
 /** What the stand-in says the run gave it. */
 export type Gave = {
   args: string[];
+  /** The names of every variable in the environment the tool was started with. */
+  envNames: string[];
   /** The servers a Claude Code run got, read from the file `--mcp-config` names while the run went. */
   mcp?: unknown;
+  /** A Claude Code run's settings, read from the file `--settings` names while the run went. */
+  claudeSettings?: {
+    permissions: { allow: string[]; deny: string[] };
+    enabledPlugins: unknown;
+    sandbox?: unknown;
+  };
   env: Record<string, string>;
   system: string;
   message: string;
@@ -639,7 +677,7 @@ export async function runOf(id: number, ask?: number): Promise<Gave & { going: s
   // The stand-in's tool call comes before its result, so the run still goes.
   const seen = (e: { type: string; inProgress?: Record<string, { doing?: string }[]> }) => {
     if (e.type === 'working' && e.inProgress?.[f.staffId]?.some((w) => w.doing))
-      going = [...L.runsGoing];
+      going = [...L.runsGoing.keys()];
   };
   bus.on('event', seen);
   const r = await followThrough(f, ask ? await L.ask(ask) : undefined).finally(() =>
@@ -833,15 +871,42 @@ export async function setOwn(
     update staff set commands = ${o.commands ?? false}, web = ${o.web ?? false},
       folders = ${JSON.stringify(o.folders ?? [])}::jsonb where id = ${id}`;
 }
+/** What the owner's page sends one route: its params, its query and its JSON body. */
+export type Call = {
+  params?: Record<string, string>;
+  query?: Record<string, string>;
+  body?: unknown;
+};
+/**
+ * The owner's page calling one of the office's routes, answered by the
+ * route's own handler for `method`. `route` is its id, like `/api/staff/[id]`.
+ * A route that refuses throws, as SvelteKit's `error` does.
+ */
+export async function request(route: string, method: string, call: Call = {}): Promise<Response> {
+  const module = (await import(`../../routes${route}/+server.ts`)) as Record<
+    string,
+    ((event: unknown) => Promise<Response>) | undefined
+  >;
+  const handler = module[method];
+  assert.ok(handler, `${route} has no ${method}`);
+  let path = route;
+  for (const [k, v] of Object.entries(call.params ?? {})) path = path.replace(`[${k}]`, v);
+  const url = new URL(`http://office${path}`);
+  url.search = new URLSearchParams(call.query ?? {}).toString();
+  return handler({
+    params: call.params ?? {},
+    url,
+    // A GET or HEAD carries no body: `Request` refuses one.
+    request: new Request(url, {
+      method,
+      body: method === 'GET' || method === 'HEAD' ? undefined : JSON.stringify(call.body ?? {})
+    }),
+    getClientAddress: () => '127.0.0.1'
+  });
+}
 /** The owner's PATCH of an Odd from its card. */
 export const patch = (id: string, body: unknown) =>
-  PATCH({
-    params: { id },
-    request: new Request(`http://office/api/staff/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(body)
-    })
-  } as unknown as Parameters<typeof PATCH>[0]);
+  request('/api/staff/[id]', 'PATCH', { params: { id }, body });
 /** What the route said when it refused a PATCH. */
 export async function refusal(
   body: ReturnType<typeof patch>

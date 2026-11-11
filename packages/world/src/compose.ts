@@ -248,9 +248,12 @@ export function composeWorld(
         walkable[y * width + x] = true;
         if (isFloor(x, y + 1) && has(`${style}-door`)) {
           const def = catalog[`${style}-door`];
+          // Floor beyond the doorway's top: the cap over it gives way, so
+          // the way through shows and no one walks over a wall.
+          const through = isFloor(x, y + 1 - def.height / TILE) && def.frames.includes('through');
           draws.push({
             sprite: `${style}-door`,
-            frame: def.frames.includes('closed') ? 'closed' : def.frames[0],
+            frame: through ? 'through' : def.frames.includes('closed') ? 'closed' : def.frames[0],
             x: x * TILE,
             y: (y + 1) * TILE - def.height,
             z,

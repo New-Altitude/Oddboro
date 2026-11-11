@@ -2,27 +2,15 @@
 // Pass the desktop environment it needs, without the office database or run credentials.
 import { realpath, stat } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep, extname } from 'node:path';
-import { claudeCommand, npmCommand } from '@oddboro/ledger/platform';
+import { claudeCommand, npmCommand, currentPlatform } from '@oddboro/ledger/platform';
 
 export const nativeCommand = (agent: 'claude' | 'codex'): [string, string[]] =>
   agent === 'claude'
     ? claudeCommand()
-    : process.platform === 'win32'
+    : currentPlatform() === 'win32'
       ? (npmCommand('codex', ['@openai', 'codex']) ?? ['codex', []])
       : ['codex', []];
-export function nativeEnv(): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (
-      value !== undefined &&
-      /^(PATH|HOME|USER|LOGNAME|SHELL|LANG|LC_.*|TERM.*|COLORTERM|TMP|TEMP|TMPDIR|USERPROFILE|SYSTEMROOT|WINDIR|PATHEXT|COMSPEC|APPDATA|LOCALAPPDATA|PROGRAMFILES.*|HOMEDRIVE|HOMEPATH|XDG_.*|SSH_AUTH_SOCK|DISPLAY|WAYLAND_DISPLAY|DBUS_SESSION_BUS_ADDRESS|HTTPS?_PROXY|NO_PROXY|SSL_CERT_FILE|NODE_EXTRA_CA_CERTS|CODEX_HOME|CLAUDE_CONFIG_DIR|ANTHROPIC_API_KEY|OPENAI_API_KEY|CLAUDE_CODE_USE_(BEDROCK|VERTEX|FOUNDRY)|AWS_PROFILE|AWS_REGION|GOOGLE_CLOUD_PROJECT)$/i.test(
-        key
-      )
-    )
-      env[key] = value;
-  }
-  return env;
-}
+export { nativeProjectEnv as nativeEnv } from '../run-env-allow.ts';
 export async function projectFolder(path: string) {
   if (!isAbsolute(path)) throw new Error('Choose an absolute project folder.');
   const folder = await realpath(path);

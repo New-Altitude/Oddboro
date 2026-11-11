@@ -8,4 +8,15 @@ backlog. Read a doc's status before acting on it: **proposed** (not agreed),
 - [decisions/CLAUDE.md](decisions/CLAUDE.md). The ledger, one file per decision. How to find, record and supersede one.
 - `office.gif`. The animation at the top of the README. `npm run office-gif -w @oddboro/site` makes it.
 - `hard-rules.md`. **Ratified.** The reason behind each hard rule in the root `CLAUDE.md`, one section per rule, same order.
-- [project-sessions.md](project-sessions.md). **Built.** Connecting native Codex and Claude Code conversations, sharing one with an Odd, and reviewing the implementation.
+- `architecture.md`. **Built.** The picture: the parts, one function per job, and where each new kind of thing starts and which check catches a missed place.
+
+## Later
+
+Each line says what to do when its trigger comes.
+
+- When a `CLAUDE.md` gets long enough to cost its readers, so that someone
+  working in its folder has to read past detail they do not need: move that
+  detail into the code's comments or a doc the file points at, and keep what
+  someone working there needs.
+
+- `project-sessions.md`. Native Codex and Claude conversations, permissions and recovery.

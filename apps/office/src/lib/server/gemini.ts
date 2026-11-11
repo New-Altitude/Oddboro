@@ -21,7 +21,7 @@
 // group that stops whole.
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { home, type ModelUsage } from '@oddboro/ledger';
+import { home, OFFICE_MODEL_VAR, type ModelUsage } from '@oddboro/ledger';
 import { INSTRUCTIONS, REPO_RUNS } from './files.ts';
 import { deleteSecret, getSecret, setSecret } from './keychain.ts';
 import {
@@ -30,10 +30,11 @@ import {
   SIGN_IN_WHERE,
   sweep,
   toml,
-  vendorEnv,
+  type McpServer,
   type RunEvent,
   type Toml
 } from './launch.ts';
+import { runEnv } from './run-env-allow.ts';
 import { GEMINI_FILE_TOOLS } from '../staff/work.ts';
 
 /** The office's Gemini home: Gemini's own folder in it is `.gemini`, with the sessions. */
@@ -113,7 +114,7 @@ type GeminiRun = {
   input: string;
   /** The session to resume, else a new one. */
   resume?: string;
-  servers: Record<string, Record<string, unknown>>;
+  servers: Record<string, McpServer>;
   /** The MCP tools the run may call, as access() names them for Claude Code (`mcp__server` or `mcp__server__tool`). */
   allowed: string[];
   /** The owner's Browse the web switch: Gemini's google_web_search and web_fetch. */
@@ -180,21 +181,23 @@ export function geminiPolicy(r: Parameters<typeof geminiRules>[0]): string {
 }
 
 /** The run's MCP servers in Gemini's shape: `httpUrl` is streamable HTTP. */
-function mcpServers(servers: GeminiRun['servers']): Record<string, Record<string, unknown>> {
+export function mcpServers(servers: GeminiRun['servers']): Record<string, Record<string, unknown>> {
   return Object.fromEntries(
-    Object.entries(servers).map(([name, s]) => [
-      name,
-      s.type === 'http'
-        ? {
-            httpUrl: s.url as string,
-            headers: (s.headers as Record<string, string> | undefined) ?? {}
-          }
-        : {
-            command: s.command as string,
-            args: (s.args as string[] | undefined) ?? [],
-            env: (s.env as Record<string, string> | undefined) ?? {}
-          }
-    ])
+    Object.entries(servers).map(([name, s]) => {
+      switch (s.type) {
+        case 'http':
+          return [name, { httpUrl: s.url, headers: s.headers }];
+        case 'stdio':
+          return [name, { command: s.command, args: s.args, env: s.env }];
+        default: {
+          // A kind with no case here fails the type check; the cast only names it.
+          const missed: never = s;
+          throw new Error(
+            `No way to give Gemini the ${name} server, a ${(missed as McpServer).type} one`
+          );
+        }
+      }
+    })
   );
 }
 
@@ -295,7 +298,7 @@ export function geminiLaunch(r: GeminiRun): GeminiLaunch {
     })
   );
   replace(system, r.system);
-  const model = process.env.OFFICE_GEMINI_MODEL;
+  const model = process.env[OFFICE_MODEL_VAR.gemini];
   const args = [
     '-o',
     'stream-json',
@@ -305,7 +308,7 @@ export function geminiLaunch(r: GeminiRun): GeminiLaunch {
     ...(model ? ['-m', model] : []),
     ...(r.resume ? ['--resume', r.resume] : [])
   ];
-  const env = vendorEnv(['GEMINI_', 'GOOGLE_']);
+  const env = runEnv('gemini');
   Object.assign(env, {
     GEMINI_CLI_HOME: GEMINI_HOME,
     // The run's folder is the Odd's own, so Gemini need not ask whether to trust it.

@@ -34,6 +34,20 @@ test("work paused for the plan's window says when the window resets", () => {
   );
 });
 
+test('work parked on a task says the lead picks it up when the owner finishes or drops it', () => {
+  assert.equal(
+    workLine(work({ stage: 'under_way', holder: 'Marshall', parkedOn: 'Test the build' })).text,
+    'Marshall picks it up when you finish or drop "Test the build"'
+  );
+});
+
+test('parked work a colleague still has says who has it', () => {
+  assert.equal(
+    workLine(work({ stage: 'under_way', parkedOn: 'Test the build' })).text,
+    'With Priya'
+  );
+});
+
 test('work waiting on the owner is theirs to act on', () => {
   assert.deepEqual(workLine(work({ stage: 'waiting_on_you' })), {
     text: 'Waiting on you',
@@ -51,7 +65,10 @@ test('no line the owner reads says thread, hand-off or a number', () => {
   const stages: ThreadStage[] = ['under_way', 'waiting_on_you', 'done', 'failed', 'stopped'];
   for (const stage of stages)
     for (const resumeAt of [undefined, at])
-      for (const held of [false, true]) ownerWords(workLine(work({ stage, resumeAt, held })).text);
+      for (const held of [false, true])
+        for (const parkedOn of [undefined, 'Test the build'])
+          for (const holder of ['Priya', 'Marshall'])
+            ownerWords(workLine(work({ stage, resumeAt, held, parkedOn, holder })).text);
 });
 
 test('a next run says today, tomorrow, or the day, with its time, in the office time zone', () => {

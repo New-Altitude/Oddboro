@@ -7,7 +7,7 @@
 // edits, or one still drawing, waits for the owner to say so.
 import type { HireProposal } from '@oddboro/ledger';
 
-export type FileRef = { staff: string; path: string };
+export type FileRef = { staff: string; path: string; readOnly?: boolean };
 export type ReportRef = { id: number; staff: string; title: string };
 export type HireFrom = { askId: number; staff: string; proposal: HireProposal };
 /** Which lessons the Lessons window shows: those for every Odd, those one Odd follows, or all. */
@@ -30,13 +30,18 @@ export const wins = $state<{
   active?: string;
   /** False when the owner folded the panel away: the windows stay open behind it. */
   shown: boolean;
+  /**
+   * True when the front window should sit above the Odd's panel. Opening a window,
+   * clicking its tab and closing the Odd's panel set it; picking an Odd clears it.
+   */
+  raised: boolean;
   /** A window's own words for its tab, e.g. the name of the person being hired. */
   titles: Record<string, string>;
   dirty: Record<string, boolean>;
   busy: Record<string, boolean>;
   /** A close waiting on the owner's word, because the window has unsaved edits or is drawing. */
   confirm?: { id: string; go: () => void };
-}>({ list: [], shown: false, titles: {}, dirty: {}, busy: {} });
+}>({ list: [], shown: false, raised: false, titles: {}, dirty: {}, busy: {} });
 
 /**
  * An item a window wants opened on the desk, such as the task a service's
@@ -55,6 +60,7 @@ export function open(w: Win): void {
   }
   wins.active = w.id;
   wins.shown = true;
+  wins.raised = true;
 }
 
 /** The one Lessons window, on that filter. Already open, it switches to it. */
@@ -74,7 +80,11 @@ export const openReport = (report: ReportRef) =>
   open({ id: `report:${report.id}`, kind: 'report', report });
 
 export const openFile = (file: FileRef) =>
-  open({ id: `file:${file.staff}:${file.path}`, kind: 'file', file });
+  open({
+    id: `${file.readOnly ? 'reference' : 'file'}:${file.staff}:${file.path}`,
+    kind: 'file',
+    file
+  });
 
 /** A hire window: one per proposal, or a fresh one for a hire from scratch. */
 export function openHire(from?: HireFrom): void {

@@ -31,8 +31,10 @@ Each rule's reason is in `docs/hard-rules.md`, under the same heading.
 7. **Every colour on the floor comes from the palette.** Sprites draw from
    `packages/sprites/src/palette.json`, and the page chrome reads the tokens
    in `apps/office/src/app.css`.
-8. **Spaces are data.** A room is a JSON stamp and an office is a JSON floor
-   plan. Adding a space never needs engine code.
+8. **Rooms and offices are data.** A room is a JSON stamp and an office is a
+   JSON floor plan, so adding a room or an office never needs engine code. A
+   new kind of room does, starting at `ROOM_KINDS` in
+   `packages/world/src/generate.ts`.
 9. **Family data never reaches a tracked file.** People and family data
    live in the gitignored `data/` folder. Which AI tool an Odd runs on is
    the owner's choice per Odd. Enforced by `scripts/check-private.ts`.
@@ -68,6 +70,7 @@ scripts/        The lint guards. Plain Node, no dependencies.
 docs/           Decisions, hard rules, the office design, and the backlog.
 data/           Gitignored. People and family data. Never tracked.
 docker-compose.yml  Postgres 17 with pgvector, on 127.0.0.1 only.
+.github/workflows/ci.yml       Every pull request to main, and every push to it, runs the checks, Mac, Linux and Windows.
 .github/workflows/release.yml  Every merge to main that changes the app redrafts the next release, Mac, Linux and Windows.
 .github/workflows/codeql.yml   Code scanning, for only the languages a change touches.
 ```
@@ -87,6 +90,7 @@ npm run mark -w @oddboro/sprites  # redraw the mark into every icon and logo fil
 npm run render -- main-street  # render the Main Street floor to packages/world/out/
 npm run lint                # guards, prettier, then each workspace
 npm run check-types         # tsc and svelte-check everywhere
+npm test                    # every workspace's tests, sprites first
 npm run format              # prettier write
 npm run bundle -w @oddboro/desktop   # build Oddboro.app and the .dmg from apps/desktop/stage
 npm run shell -w @oddboro/desktop    # the desktop shell against a running office (ODDBORO_SERVER_URL)
@@ -115,3 +119,4 @@ diverge. How to record one is in `docs/decisions/CLAUDE.md`.
 - [packages/CLAUDE.md](packages/CLAUDE.md). One line per package.
 - [scripts/CLAUDE.md](scripts/CLAUDE.md). Every lint guard, one line each.
 - [docs/CLAUDE.md](docs/CLAUDE.md). Every doc with its status, and the ledger.
+- `docs/architecture.md`. The picture: where a new kind of thing starts, the shared function for each job, and the check that catches a missed place.

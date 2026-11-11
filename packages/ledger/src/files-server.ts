@@ -8,6 +8,7 @@
 //   ODDBORO_FILES='{"cwd":…,"reads":[…],"writes":[…],"noWrite":[…]}' node packages/ledger/src/files-server.ts
 import {
   type Dirent,
+  existsSync,
   mkdirSync,
   openSync,
   readdirSync,
@@ -17,10 +18,12 @@ import {
   statSync,
   writeFileSync
 } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { dirname, join, relative, sep } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { findOddboroCheckouts } from './oddboro-source.ts';
 import { resolveIn, wallsFromEnv, type FileWalls } from './file-walls.ts';
 
 /** The most a read shows by default, and the longest line it shows whole. */
@@ -123,7 +126,10 @@ function shown(walls: FileWalls, path: string): string {
   return rel && !rel.startsWith('..') && !rel.includes(`..${sep}`) ? rel : path;
 }
 
-export function fileServer(walls: FileWalls): McpServer {
+/** A job's private record of its assigned file calls, outside the Odd's folders. */
+type Check = { input?: string; output: string; inputHash?: string; record: string };
+
+export function fileServer(walls: FileWalls, check?: Check): McpServer {
   const server = new McpServer({ name: 'files', version: '1.0.0' });
   const tool = <Shape extends z.ZodRawShape>(
     name: string,
@@ -142,6 +148,25 @@ export function fileServer(walls: FileWalls): McpServer {
     }) as never);
   const folder = (path: string | undefined) => resolveIn(walls, path ?? '.', 'read');
 
+  // The record belongs to the office and sits outside the model's file walls.
+  // Hash the bytes this call actually read or wrote, even if a later run
+  // replaces that file before the job finishes.
+  function checkedRead(path: string, bytes: Buffer, result: Text): Text {
+    if (check && path === check.input) {
+      if (createHash('sha256').update(bytes).digest('hex') !== check.inputHash)
+        return no(
+          'The input changed since its writer checked it. Wait for the next scheduled result.'
+        );
+      writeFileSync(check.record + '.read', '');
+    }
+    return result;
+  }
+  function write(path: string, content: string) {
+    writeFileSync(path, content);
+    if (check && path === check.output && (!check.input || existsSync(check.record + '.read')))
+      writeFileSync(check.record, createHash('sha256').update(content).digest('hex'));
+  }
+
   tool(
     'read_file',
     `Read a text file, or see a picture (png, jpg, gif, webp). Lines come numbered, from 1. A long file shows its first ${READ_LINES} lines: pass offset (the first line to show) and limit (how many) for the rest. Paths are relative to your folder, or absolute.`,
@@ -159,15 +184,15 @@ export function fileServer(walls: FileWalls): McpServer {
       if (image) {
         if (st.size > MAX_IMAGE)
           return no(`${path} is a picture of ${st.size} bytes, too big to show.`);
-        return {
-          content: [
-            { type: 'image', data: readFileSync(r.path).toString('base64'), mimeType: image }
-          ]
-        };
+        const bytes = readFileSync(r.path);
+        return checkedRead(r.path, bytes, {
+          content: [{ type: 'image', data: bytes.toString('base64'), mimeType: image }]
+        });
       }
       if (st.size > MAX_READ) return no(`${path} is ${st.size} bytes, too big to read.`);
       if (!isText(r.path)) return no(`${path} is not a text file (${st.size} bytes).`);
-      const lines = readFileSync(r.path, 'utf8').split(/\r?\n/);
+      const bytes = readFileSync(r.path);
+      const lines = bytes.toString('utf8').split(/\r?\n/);
       if (lines.length > 1 && lines.at(-1) === '') lines.pop();
       if (!lines.length || (lines.length === 1 && lines[0] === '')) return ok(`${path} is empty.`);
       const from = offset - 1;
@@ -190,7 +215,7 @@ export function fileServer(walls: FileWalls): McpServer {
         from + slice.length < lines.length
           ? `\n(${lines.length - from - slice.length} more lines: read on with offset ${from + slice.length + 1}.)`
           : '';
-      return ok(body + more);
+      return checkedRead(r.path, bytes, ok(body + more));
     }
   );
 
@@ -208,6 +233,25 @@ export function fileServer(walls: FileWalls): McpServer {
       if (!names.length) return ok(`${path ?? 'Your folder'} is empty.`);
       const cut = names.length > MAX_LIST ? `\n(${names.length - MAX_LIST} more not shown.)` : '';
       return ok(names.slice(0, MAX_LIST).join('\n') + cut);
+    }
+  );
+
+  tool(
+    'find_oddboro_source',
+    'Find local Oddboro source checkouts in a folder you can already read. Defaults to your own folder. A match identifies the source tree, not its Git remote, branch or release.',
+    { path: z.string().optional() },
+    ({ path }) => {
+      const r = folder(path);
+      if ('refused' in r) return no(r.refused);
+      if (!statSync(r.path).isDirectory()) return no('Choose a folder to search.');
+      const { checkouts, partial } = findOddboroCheckouts(r.path);
+      return ok(
+        [
+          ...checkouts,
+          ...(!checkouts.length ? ['No Oddboro checkout found here.'] : []),
+          ...(partial ? ['Some folders were not searched. You can search a narrower folder.'] : [])
+        ].join('\n')
+      );
     }
   );
 
@@ -297,7 +341,7 @@ export function fileServer(walls: FileWalls): McpServer {
       const r = resolveIn(walls, path, 'write');
       if ('refused' in r) return no(r.refused);
       mkdirSync(dirname(r.path), { recursive: true });
-      writeFileSync(r.path, content);
+      write(r.path, content);
       return ok(`Wrote ${shown(walls, r.path)} (${Buffer.byteLength(content)} bytes).`);
     }
   );
@@ -326,7 +370,7 @@ export function fileServer(walls: FileWalls): McpServer {
           `old_string appears ${count} times in ${path}. Give more of it, or set replace_all.`
         );
       const after = replace_all ? before.split(from).join(to) : before.replace(from, () => to);
-      writeFileSync(r.path, after);
+      write(r.path, after);
       return ok(`Changed ${shown(walls, r.path)}${count > 1 ? ` in ${count} places` : ''}.`);
     }
   );
@@ -339,5 +383,8 @@ if (
   process.argv[1] &&
   import.meta.filename === (await import('node:fs')).realpathSync(process.argv[1])
 ) {
-  await fileServer(wallsFromEnv(process.env)).connect(new StdioServerTransport());
+  await fileServer(
+    wallsFromEnv(process.env),
+    JSON.parse(process.env.ODDBORO_FILE_CHECK ?? 'null')
+  ).connect(new StdioServerTransport());
 }

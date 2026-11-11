@@ -13,7 +13,9 @@ import {
 import {
   AGENT_NAMES,
   drawsLooks,
+  MODELS as AGENT_MODELS,
   OFFICE_ACCOUNT,
+  OFFICE_MODEL_VAR,
   officeAgent,
   toolHome,
   type Agent
@@ -41,7 +43,7 @@ export type ClaudeSettings = { auth: 'plan' | 'key'; model: Model };
 export function claudeSettings(): ClaudeSettings {
   return {
     auth: process.env.OFFICE_AUTH === 'key' ? 'key' : 'plan',
-    model: process.env.OFFICE_MODEL === 'sonnet' ? 'sonnet' : 'opus'
+    model: process.env[OFFICE_MODEL_VAR.claude] === 'sonnet' ? 'sonnet' : 'opus'
   };
 }
 
@@ -51,13 +53,24 @@ export const SONNET_CANNOT_DRAW =
 /** Whether the office designs offices: on Grok or Codex always, on Claude Code unless it runs on Sonnet. */
 export const canDraw = () => officeAgent() !== 'claude' || claudeSettings().model !== 'sonnet';
 
-/** The model the office's own runs use, when the office names one. */
-const officeModel = (agent: Agent) =>
-  agent === 'claude'
-    ? claudeSettings().model
-    : agent === 'codex'
-      ? process.env.OFFICE_CODEX_MODEL
-      : undefined;
+/**
+ * The model the office's own runs, and an Odd with none of its own, use on
+ * `agent`, when the office names one: on Claude Code, the id of setup's Opus
+ * or Sonnet; on the others, the model their setting names (`OFFICE_MODEL_VAR`).
+ */
+export function officeModel(agent: Agent): string | undefined {
+  if (agent !== 'claude') return process.env[OFFICE_MODEL_VAR[agent]];
+  const picked = claudeSettings().model;
+  return AGENT_MODELS.claude.find((m) => m.id.includes(picked))?.id;
+}
+
+/**
+ * The model the page names as the office's on `agent`: the office's own
+ * (`officeModel`), else the tool's own default, first in its list. A run
+ * passes no model when the office names none, so this is only for showing.
+ */
+export const shownOfficeModel = (agent: Agent): string | undefined =>
+  officeModel(agent) ?? AGENT_MODELS[agent][0]?.id;
 
 /** Whether the office draws an Odd's look from words or a headshot (`drawsLooks`). */
 export const officeDrawsLooks = () => drawsLooks(officeAgent(), officeModel(officeAgent()));
@@ -67,7 +80,9 @@ export function cannotDrawLook(): string {
   const agent = officeAgent();
   if (agent === 'claude')
     return 'On Sonnet, the office does not draw looks. Build this one from parts, or pick Opus in Setup.';
-  const on = officeModel(agent);
+  // Only Codex's model is named: naming Grok's or Gemini's here would change
+  // what the owner reads.
+  const on = agent === 'codex' ? officeModel(agent) : undefined;
   return `${AGENT_NAMES[agent]}${on ? ` on ${on}` : ''} does not draw looks here. Build this one from parts, or run the office on Claude Code or Codex in Setup.`;
 }
 
@@ -77,7 +92,10 @@ export function modelArgs(): string[] {
 }
 
 /**
- * The environment a `claude` run gets: none of a parent Claude Code session's
+ * The environment an owner-side launch gets (an install, a sign-in, a version
+ * check), since the owner's own setup may need more than an Odd's run, which
+ * starts from `runEnv` (run-env-allow.ts) and sets the same two switches
+ * below. None of a parent Claude Code session's
  * settings, none of the owner's own CLAUDE.md files, and no auto-memory. Under
  * `--setting-sources user`, a run still loaded the owner's ~/.claude/CLAUDE.md,
  * their instructions to their own Claude, which no Odd should read. Auto-memory
@@ -85,10 +103,9 @@ export function modelArgs(): string[] {
  * memory beside the office's lessons that the owner never sees. None of the
  * office process's own git variables either (every `GIT_` name, such as
  * `GIT_DIR` or `GIT_CONFIG_PARAMETERS`), since the owner's git settings never
- * shape an Odd's git: a run with a shell gets the office's own (`gitEnv`)
- * after this. Nor `ODDBORO_SECRETS`: only the office itself holds the pipes
- * to the app's Keychain. Every coding tool's run, install and sign-in starts here. A run's own
- * instructions come in its arguments and its message, which this leaves alone.
+ * shape an Odd's git: a run with a shell gets the office's own (`gitEnv`).
+ * Nor `ODDBORO_SECRETS`: only the office itself holds the pipes to the app's
+ * Keychain.
  */
 export function cleanEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
@@ -236,4 +253,24 @@ function keyWorks(value: string): Promise<boolean> {
       done(code === 0);
     });
   });
+}
+
+/** A message on stdin for Claude Code; pictures go in its stream-json user turn. */
+export function claudeInput(message: string, images?: { mediaType: string; data: string }[]) {
+  if (!images?.length) return message;
+  return (
+    JSON.stringify({
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [
+          ...images.map((i) => ({
+            type: 'image',
+            source: { type: 'base64', media_type: i.mediaType, data: i.data }
+          })),
+          { type: 'text', text: message }
+        ]
+      }
+    }) + '\n'
+  );
 }

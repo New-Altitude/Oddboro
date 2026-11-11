@@ -25,3 +25,27 @@ test('a file reference stays in its worktree and a native image gets a local ima
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('native clients get named provider settings and no office credentials', async () => {
+  const { nativeEnv } = await import('./native.ts');
+  const values = {
+    OPENAI_API_KEY: 'fixture-provider-key',
+    DATABASE_URL: 'fixture-database',
+    GATEWAY_TOKEN: 'fixture-gateway',
+    PROJECT_WORK_LEVEL: 'act',
+    STAFF_ID: 'fixture-odd',
+    ODDBORO_HOME: 'fixture-office'
+  };
+  const before = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]));
+  try {
+    Object.assign(process.env, values);
+    const env = nativeEnv();
+    assert.equal(env.OPENAI_API_KEY, values.OPENAI_API_KEY);
+    for (const key of Object.keys(values).filter((key) => key !== 'OPENAI_API_KEY'))
+      assert.equal(env[key], undefined, key);
+  } finally {
+    for (const [key, value] of Object.entries(before))
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+  }
+});

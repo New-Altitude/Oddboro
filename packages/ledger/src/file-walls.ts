@@ -16,12 +16,15 @@
 // carries its files, so only the owner's own programs could do that.
 import { existsSync, lstatSync, realpathSync, statSync } from 'node:fs';
 import { isAbsolute, join, resolve, sep } from 'node:path';
+import { currentPlatform } from './platform.ts';
 
 export type FileWalls = {
   /** The run's own folder: a relative path starts here. */
   cwd: string;
   /** Folders the run reads, with everything in them. Every folder in `writes` is read too. */
   reads: string[];
+  /** One scheduled input, by the real path checked before the run. Never follow a replacement link. */
+  input?: string;
   /** Folders the run writes, with everything in them. */
   writes: string[];
   /**
@@ -34,7 +37,6 @@ export type FileWalls = {
 
 export type Resolved = { path: string } | { refused: string };
 
-const WIN = process.platform === 'win32';
 /** Windows' device names, which open a device whatever folder they sit in, with any extension. */
 const DEVICES = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³]|conin\$|conout\$)(\..*)?$/i;
 
@@ -42,7 +44,7 @@ const DEVICES = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³]|conin\$|conout\
 function malformed(input: string): string | undefined {
   if (!input) return 'Name a file or folder.';
   if (input.includes('\0')) return 'That path holds a NUL character.';
-  if (!WIN) return undefined;
+  if (currentPlatform() !== 'win32') return undefined;
   // \\?\, \\.\ and \\server\share reach devices and other machines.
   if (/^[\\/]{2}/.test(input)) return 'Network and device paths are not allowed.';
   // A colon past the drive letter names an alternate data stream.
@@ -137,7 +139,7 @@ export function resolveIn(walls: FileWalls, input: string, want: 'read' | 'write
   const roots = (want === 'read' ? [...walls.reads, ...walls.writes] : walls.writes)
     .map(realRoot)
     .filter((r): r is string => !!r);
-  if (!roots.some((r) => within(real, r)))
+  if (!(want === 'read' && real === walls.input) && !roots.some((r) => within(real, r)))
     return {
       refused:
         want === 'read'
@@ -169,7 +171,13 @@ export function wallsFromEnv(env: NodeJS.ProcessEnv): FileWalls {
     const list = (v: unknown) =>
       Array.isArray(v) ? v.filter((p): p is string => typeof p === 'string' && isAbsolute(p)) : [];
     if (typeof w.cwd !== 'string' || !isAbsolute(w.cwd) || !existsSync(w.cwd)) throw new Error();
-    return { cwd: w.cwd, reads: list(w.reads), writes: list(w.writes), noWrite: list(w.noWrite) };
+    return {
+      cwd: w.cwd,
+      ...(typeof w.input === 'string' && isAbsolute(w.input) ? { input: w.input } : {}),
+      reads: list(w.reads),
+      writes: list(w.writes),
+      noWrite: list(w.noWrite)
+    };
   } catch {
     // No walls: nothing is readable or writable.
     return { cwd: resolve('/'), reads: [], writes: [], noWrite: [] };

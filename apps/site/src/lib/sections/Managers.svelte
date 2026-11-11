@@ -15,7 +15,7 @@
 <SectionHeader
   eyebrow="Managers"
   title="Meet your Office Manager."
-  lede="Your first Odd runs the floor, writes your daily report, and helps you hire everyone else. Pick one of these four, or describe your own and the office draws them."
+  lede="Your first Odd runs the floor, writes your daily report, and helps you hire everyone else. Pick one of these four, or describe your own."
 />
 
 <div class="-mx-4 mt-12 sm:mx-0">

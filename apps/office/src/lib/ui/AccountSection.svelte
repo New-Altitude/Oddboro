@@ -2,10 +2,16 @@
   import AccountSignIn from './AccountSignIn.svelte';
   import { signOut } from './account-actions.ts';
   import { account } from './account.svelte.ts';
+  import PersonaOffer from './PersonaOffer.svelte';
+  import { PersonaOffers } from './persona-offers.svelte.ts';
 
   // The Setup window's Account section, the one place the owner signs in to
   // New Altitude: the sign-in block (with its Switch account), and Sign out
-  // while a sign-in is kept, ran out or not.
+  // while a sign-in is kept, ran out or not. Under it, the New Altitude
+  // personas offered while signed in. The offers stay mounted when signed
+  // out, which shows nothing, so Sign in again's page link lasts through the
+  // sign-out it starts with.
+  const personas = new PersonaOffers();
   let busy = $state(false);
   let problem = $state('');
 
@@ -37,4 +43,5 @@
   {#if problem}
     <p class="rounded-lg bg-coral/15 px-3 py-2 text-coral" role="alert">{problem}</p>
   {/if}
+  <PersonaOffer offers={personas} />
 </section>

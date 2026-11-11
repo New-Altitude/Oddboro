@@ -1,7 +1,7 @@
 <script lang="ts">
   // Where the data lives: your computer in the middle with the office on its screen,
   // Anthropic and the tools you connect at the edges on dashed lines you open,
-  // and New Altitude off the map, reached only by the error reports and the sign-in the owner chooses.
+  // and New Altitude off the map, reached only by the error reports, the sign-in and the persona Odds the owner chooses.
   //
   // Each fact lights the part of the map it is about and dims the rest. While
   // the section is on screen the highlight steps through the four facts. The
@@ -21,18 +21,18 @@
     },
     {
       title: 'Nothing comes to us unless you say so.',
-      text: 'New Altitude runs no server for your office. If you sign in to a New Altitude account, your sign-in comes to us. If you also turn on error reports, they go to our relay so we can fix what broke. Nothing else does.',
+      text: 'New Altitude runs no server for your office. If you sign in to a New Altitude account, your sign-in comes to us. If you also turn on error reports, they go to our relay so we can fix what broke, with anything personal left out. A New Altitude persona you hire sends us what you ask it and what its work in your office found. Nothing else does.',
       shows:
-        "Highlights New Altitude, off the map, and the two dashed lines, the only paths your office's data takes. Error reports and a New Altitude sign-in reach us only if you choose them."
+        "Highlights New Altitude, off the map, and the two dashed lines, the only paths your office's data takes. Error reports, a New Altitude sign-in and a New Altitude persona's conversations reach us only if you choose them."
     },
     {
       title: 'Your AI works under your own account.',
-      text: 'Odds think with Claude Code, Codex or Grok, signed in to your own account. We are not in that loop.',
+      text: 'Odds think with Claude Code, Codex or Grok, signed in to your own account. We are not in that loop. The one exception is a New Altitude persona you hire, which answers from New Altitude.',
       shows: 'Highlights your AI, your own account and the line to it.'
     },
     {
       title: 'No account needed.',
-      text: 'Nothing to sign up for and no key to request. If you have a New Altitude account, you can sign in and choose to send error reports; nothing else changes.',
+      text: 'Nothing to sign up for and no key to request. If you have a New Altitude account, you can sign in to hire your personas as Odds and choose whether to send error reports.',
       shows: 'Highlights the two accounts in the diagram, both of them yours.'
     }
   ];
@@ -101,7 +101,7 @@
 <SectionHeader
   eyebrow="On your computer"
   title="Your office lives on your computer."
-  lede="The office is a program on your Mac, Windows or Linux computer with its own database. There is no Oddboro server. Your Odds, your goals, your decisions and the people in your life stay on the machine in front of you."
+  lede="The office is a program on your Mac, Windows or Linux computer with its own database. There is no Oddboro server. Your Odds, your goals, your decisions and the people in your life stay on the machine in front of you. Only a New Altitude persona you hire sends its work to New Altitude."
 />
 
 <div
@@ -186,7 +186,8 @@
       >
       <p class="text-muted text-xs">
         <span class="text-ink font-semibold">New Altitude</span> is off the map. Your office's data never
-        flows here. Error reports and a sign-in do, only if you choose them.
+        flows here unless you add a New Altitude persona. Error reports and a sign-in do, only if you
+        choose them.
       </p>
     </div>
   </figure>

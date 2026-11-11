@@ -18,11 +18,17 @@ import {
   type ConnectorRow,
   type GoogleProduct
 } from '@oddboro/ledger';
-import { secretNamesClient, toolKeys } from './aws.ts';
-import { cleanEnv } from './claude.ts';
+import { awsReady, secretNamesClient, toolKeys } from './aws.ts';
 import { driveServer } from './google/drive.ts';
-import { gmailServer } from './google/gmail.ts';
+import { gmailServer, heldWords, type HeldWords } from './google/gmail.ts';
 import { bearer, BuiltWithout, startSignIn } from './oauth.ts';
+import { outsideToolEnv } from './run-env-allow.ts';
+
+/** Check the sign-in the run will use, including an AWS role that holds another tool's key. */
+export async function sourceReady(c: ConnectorRow): Promise<boolean> {
+  if (c.config.oauth && !(await bearer(c.id).catch(() => undefined))) return false;
+  return awsReady(c);
+}
 
 export type ToolInfo = { name: string; description: string; readOnly: boolean };
 
@@ -35,21 +41,35 @@ export async function upstream(c: ConnectorRow, open = false): Promise<Client> {
   // AWS Secrets Manager's names come from the office itself, never a server.
   if (c.id === AWS_SECRETS_ID) return secretNamesClient();
   const { env, headers } = await toolKeys(c);
-  const transport =
-    c.kind === 'http'
-      ? new StreamableHTTPClientTransport(new URL(c.config.url!), {
-          requestInit: {
-            headers: {
-              ...headers,
-              ...(c.config.oauth && !open ? { Authorization: `Bearer ${await bearer(c.id)}` } : {})
-            }
+  let transport: StdioClientTransport | StreamableHTTPClientTransport;
+  switch (c.kind) {
+    case 'http':
+      // A hosted connector is saved with its address (registry.ts).
+      transport = new StreamableHTTPClientTransport(new URL(c.config.url!), {
+        requestInit: {
+          headers: {
+            ...headers,
+            ...(c.config.oauth && !open ? { Authorization: `Bearer ${await bearer(c.id)}` } : {})
           }
-        })
-      : new StdioClientTransport({
-          ...toolCommand(c.config.command!, c.config.args ?? []),
-          env: { ...(cleanEnv() as Record<string, string>), ...env },
-          stderr: 'ignore'
-        });
+        }
+      });
+      break;
+    case 'stdio':
+      transport = new StdioClientTransport({
+        ...toolCommand(c.config.command!, c.config.args ?? []),
+        // Only what a run may have of the office's environment, as when the
+        // run's own tool started the server, and the connector's own keys. No
+        // `AWS_` setting of the owner's is listed: a tool server runs outside
+        // the sandbox and could sign in as the owner.
+        env: { ...outsideToolEnv(), ...env },
+        stderr: 'ignore'
+      });
+      break;
+    default: {
+      const missed: never = c.kind;
+      throw new Error(`No way to start a ${String(missed)} connector`);
+    }
+  }
   const client = new Client({ name: 'oddboro-office', version: '1.0.0' });
   await client.connect(transport);
   return client;
@@ -70,14 +90,31 @@ const BUILTIN: Record<
  * Each call asks `bearer` for a live token, so the Google sign-in never
  * leaves the office, not even to a process of its own.
  */
+/** A live token for one of the office's own Google connectors, asked of `bearer` each time. */
+const tokenOf = (c: ConnectorRow) => async () => {
+  const t = await bearer(c.id);
+  if (!t) throw new Error(`${c.name} needs signing in again. Call reconnect_access.`);
+  return t;
+};
+
+/**
+ * A held call to the office's own Gmail in the owner's words (`heldWords`):
+ * what it does and to which emails. Undefined for any other call, or when
+ * Gmail cannot be read now, so the desk shows the call as it is.
+ */
+export async function heldWordsFor(
+  c: ConnectorRow,
+  tool: string,
+  args: Record<string, unknown>
+): Promise<HeldWords | undefined> {
+  if (c.kind !== 'builtin' || c.config.google !== 'gmail') return undefined;
+  return heldWords(tokenOf(c), tool, args).catch(() => undefined);
+}
+
 async function builtin(c: ConnectorRow): Promise<Client> {
   const make = c.config.google && BUILTIN[c.config.google];
   if (!make) throw new Error(`The office serves no tool named ${c.id}`);
-  const token = async () => {
-    const t = await bearer(c.id);
-    if (!t) throw new Error(`${c.name} needs signing in again. Call reconnect_access.`);
-    return t;
-  };
+  const token = tokenOf(c);
   const [ours, theirs] = InMemoryTransport.createLinkedPair();
   await make(token, c.config.account).connect(theirs);
   const client = new Client({ name: 'oddboro-office', version: '1.0.0' });

@@ -110,8 +110,64 @@
     {
       "idx": 15,
       "version": "7",
-      "when": 1794262078536,
-      "tag": "0015_project_sessions",
+      "when": 1794261929364,
+      "tag": "0015_persona-package",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1794294461968,
+      "tag": "0016_leaving",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1794300345026,
+      "tag": "0017_see-office",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1794302591484,
+      "tag": "0018_live-ledger-accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1794326824650,
+      "tag": "0019_park_on_task",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1794382017752,
+      "tag": "0020_chat_goals",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1794382423500,
+      "tag": "0021_task_response",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1794383370757,
+      "tag": "0022_scheduled_files",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1794383801750,
+      "tag": "0023_project_sessions",
       "breakpoints": true
     }
   ]

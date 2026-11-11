@@ -83,3 +83,32 @@ test('a repeated provider callback delivers one report and one pickup on the ass
   assert.equal(pickups.length, 1);
   assert.equal(pickups[0].staffId, work.staffId);
 });
+
+test('a result from earlier work stays readable after the owner ends its thread', async () => {
+  const work = await fixture('act');
+  const [thread] = await db
+    .insert(threads)
+    .values({
+      title: 'Ended project',
+      hubId: work.staffId,
+      holderId: work.staffId,
+      status: 'stopped',
+      endedAt: new Date()
+    })
+    .returning();
+  await requestProject({ ...work, threadId: thread.id });
+  await claimProject(work.sessionId);
+  await finishProject(work.id, work.sessionId, 'The saved result.');
+  assert.equal(
+    (await db.select().from(followUps).where(eq(followUps.threadId, thread.id))).length,
+    0
+  );
+  assert.equal(
+    (await db.select().from(reports).where(eq(reports.staffId, work.staffId))).length,
+    1
+  );
+  assert.equal(
+    (await db.select().from(threads).where(eq(threads.id, thread.id)))[0].status,
+    'stopped'
+  );
+});

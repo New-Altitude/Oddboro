@@ -57,6 +57,17 @@ Use [project sessions](docs/project-sessions.md) to open a native Codex or Claud
   ledger by meaning, and `uv` runs the tools that come from PyPI. The office
   says when either is missing.
 
+## Bring work from Codex
+
+Copy the [Codex handoff skill](packages/ledger/src/codex-handoff/) into
+`.agents/skills/oddboro-handoff/` in the project where you use Codex.
+Copy the whole folder. With the office running, ask
+Codex to bring a selected passage and named text files or screenshots into Oddboro. It opens
+a local link to your Office Manager's chat. Review the selection and choose
+**Bring into chat**. Opening the same version again finds its saved message.
+A preview link lasts a day. Preparing the next selection clears expired copies.
+The accepted material stays in chat.
+
 ## Work on it
 
 | Path               | What it holds                                         |

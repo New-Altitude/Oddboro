@@ -194,6 +194,27 @@ test('a link, a junction or a hard link in its own folder leads nowhere', async 
   }
 });
 
+test('source discovery finds a renamed worktree in a grant and ignores lookalikes and links out', async () => {
+  const root = join(proj, 'source-search');
+  const checkout = join(root, 'feature-tree');
+  const decoy = join(root, 'Oddboro');
+  for (const dir of [checkout, decoy]) {
+    mkdirSync(join(dir, 'apps', 'office', 'src', 'lib', 'server'), { recursive: true });
+    writeFileSync(join(dir, 'apps', 'office', 'src', 'lib', 'server', 'staff.ts'), '');
+    writeFileSync(join(dir, 'package.json'), '{"name":"oddboro-platform"}');
+  }
+  writeFileSync(join(checkout, '.git'), 'gitdir: elsewhere');
+  const search = (path: string) => call('find_oddboro_source', { path });
+  assert.equal((await search(root)).text, checkout);
+  assert.equal((await search(checkout)).text, checkout);
+  assert.match((await search(decoy)).text, /No Oddboro checkout/);
+  assert.ok((await search(office)).error);
+  plant('linked-checkout', () =>
+    symlinkSync(checkout, join(ada, 'linked-checkout'), WIN ? 'junction' : 'dir')
+  );
+  assert.match((await search(ada)).text, /No Oddboro checkout/);
+});
+
 test('listing, finding and searching stay inside', async () => {
   assert.ok((await call('list_files', { path: '../theo' })).error);
   assert.ok((await call('list_files', { path: office })).error);

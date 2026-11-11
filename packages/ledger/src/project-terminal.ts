@@ -1,3 +1,4 @@
+import { currentPlatform } from './platform.ts';
 import { spawn, type IBasePtyForkOptions, type IPty } from 'node-pty';
 
 // node-pty 1.1.0 exposes no public release method after a Windows child exits.
@@ -8,7 +9,7 @@ type WindowsPty = IPty & {
 };
 
 export function openProjectTerminal(file: string, args: string[], options: IBasePtyForkOptions) {
-  if (process.platform !== 'win32') return spawn(file, args, options);
+  if (currentPlatform() !== 'win32') return spawn(file, args, options);
   const terminal = spawn(file, args, { ...options, useConptyDll: true }) as WindowsPty;
   terminal.onExit(() => {
     // The child is already gone. Release its input pipe and output worker

@@ -15,15 +15,18 @@ import {
   text,
   timestamp,
   unique,
+  uuid,
   vector
 } from 'drizzle-orm/pg-core';
 import type { ArtKind, Place } from '@oddboro/sprites/art';
 import type { LookSpec, PartKind } from '@oddboro/sprites/look';
 import type { FloorPlan, OfficeSpec, RoomKind, RoomTemplate } from '@oddboro/world';
-import { STARTER_TOOLS } from './tools.ts';
+import { HIRE_DEFAULTS } from './grantable.ts';
 import type { Agent, Effort, GrantedFolder } from './agents.ts';
 import type { FolderAccess, Level, OwnSwitch } from './access-words.ts';
 import type { GmailFilter } from './filter-words.ts';
+import type { MailAttachment } from './mail-attachments.ts';
+import type { PersonaLink } from './personas.ts';
 
 const at = (name: string) => timestamp(name, { withTimezone: true });
 const created = (name = 'created_at') => at(name).notNull().defaultNow();
@@ -39,11 +42,11 @@ export const staff = pgTable('staff', {
   portrait: text().notNull(),
   /** The room template it works in. */
   room: text().notNull().default('workspace'),
-  permission: text().$type<Level>().notNull().default('read'),
+  permission: text().$type<Level>().notNull().default(HIRE_DEFAULTS.staff.permission),
   /** The coding tool its runs go through. The owner picks it at hire and on the Settings tab. */
   agent: text().$type<Agent>().notNull().default('claude'),
   /** The office tools the owner granted, beyond the ones every staffer has. See tools.ts. */
-  tools: text().array().notNull().default(STARTER_TOOLS),
+  tools: text().array().notNull().default(HIRE_DEFAULTS.staff.tools),
   /** The account its runs sign in with on its tool (accounts.ts); null is the tool's Office account. */
   account: text(),
   /** The model its runs use on its tool (`MODELS` in agents.ts); null is the office's. */
@@ -51,11 +54,11 @@ export const staff = pgTable('staff', {
   /** How hard its runs think, as the owner picked it; null is Medium (`effortFor` in agents.ts). */
   effort: text().$type<Effort>(),
   /** The owner's Run commands switch. Whether a run gets a shell also depends on its tool (`commandsHow`). */
-  commands: boolean().notNull().default(false),
+  commands: boolean().notNull().default(HIRE_DEFAULTS.staff.commands),
   /** The owner's Browse the web switch. */
-  web: boolean().notNull().default(false),
+  web: boolean().notNull().default(HIRE_DEFAULTS.staff.web),
   /** Folders outside the office the owner lets it read, or read and change, one entry per real path. */
-  folders: jsonb().$type<GrantedFolder[]>().notNull().default([]),
+  folders: jsonb().$type<GrantedFolder[]>().notNull().default(HIRE_DEFAULTS.staff.folders),
   /** One sentence on what it is for, shown on the card. */
   remit: text().notNull(),
   /** The job description its Claude session runs with. */
@@ -64,9 +67,16 @@ export const staff = pgTable('staff', {
   look: jsonb().$type<LookSpec>(),
   /** The drawn portrait for a generated look, as .px text. */
   portraitPx: text(),
+  /** Set for an Odd installed from a New Altitude persona: which, its version, its disclosure, and why it is quiet. */
+  package: jsonb().$type<PersonaLink>(),
   hiredAt: created('hired_at'),
-  /** Set when the owner lets a staffer go. Its history stays. */
-  leftAt: at('left_at')
+  /**
+   * Set when the Odd left the office (`removeOdd`): it is off the floor and
+   * runs nothing, and its history stays. Bringing it back clears it.
+   */
+  leftAt: at('left_at'),
+  /** The jobs that were on when it left, which bringing it back turns on again. */
+  jobsOff: integer().array()
 });
 
 /**
@@ -99,21 +109,28 @@ export type AccountRow = typeof accounts.$inferSelect;
  * changes something, held by the gateway for an Odd at Draft (`asks.call`):
  * on the owner's yes the office makes that exact call. `switch` asks for the
  * owner's Run commands or Browse the web switch, or both (`asks.switches`):
- * the owner's yes turns them on.
+ * the owner's yes turns them on. `remove` asks to let an Odd go (`asks.odd`):
+ * an Odd asking to leave names itself, and the Office Manager names another.
+ * `bring_back` is the manager's ask to bring back an Odd that left. The owner's
+ * yes does it (`removeOdd`, `bringBack`).
  */
-export type AskKind =
-  | 'approval'
-  | 'access'
-  | 'hire'
-  | 'goal'
-  | 'plan'
-  | 'hand_offs'
-  | 'window'
-  | 'reply'
-  | 'filter'
-  | 'folder'
-  | 'switch'
-  | 'call';
+export const ASK_KINDS = [
+  'approval',
+  'access',
+  'hire',
+  'goal',
+  'plan',
+  'hand_offs',
+  'window',
+  'reply',
+  'filter',
+  'folder',
+  'switch',
+  'call',
+  'remove',
+  'bring_back'
+] as const;
+export type AskKind = (typeof ASK_KINDS)[number];
 /** `revise` means the owner sent it back to be reworked. */
 export type AskStatus = 'open' | 'approved' | 'denied' | 'revise';
 /**
@@ -128,7 +145,8 @@ export type AccessRequest = { connector: string; level: Level; another?: GoogleP
  * the one they picked, which may be narrower than the Odd asked.
  */
 export type FolderRequest = {
-  path: string;
+  /** Null when the owner chooses an existing Oddboro checkout. */
+  path: string | null;
   level: FolderAccess;
   given?: { path: string; level: FolderAccess };
 };
@@ -148,6 +166,8 @@ export type ReplyDraft = {
   body: string;
   /** The Odd's one or two lines on the email it answers. */
   summary: string;
+  /** Files from the Odd's folder that go with it (`mail-attachments.ts`); the owner may drop any. */
+  attachments?: MailAttachment[];
   /** The Gmail connector it goes out through: the account the email came to. */
   connector?: string;
   /** That account's address, as the desk shows it. */
@@ -165,6 +185,14 @@ export type HeldCall = {
   connector: string;
   tool: string;
   arguments: Record<string, unknown>;
+  /** What it does in the owner's words, from the call alone ("Archive: 26 emails"): the ask's title. */
+  said?: string;
+  /**
+   * Each thing it acts on, read from the service as it was held (an email's
+   * subject, sender and date). Words from strangers: the page shows them,
+   * and no Odd's prompt or brief ever carries them.
+   */
+  shown?: string[];
   /** Set once the office made the call: whether the tool took it, and its words. */
   result?: { ok: boolean; text: string; at: string };
 };
@@ -189,8 +217,25 @@ export type HireProposal = {
   goal?: { id: number; part: string };
 };
 
+/** Files a recurring job exchanges on one piece of work. Names start inside the thread. */
+export type JobFiles = {
+  thread: number;
+  input?: string;
+  output: string;
+  /** The source tools whose contents the output shares. */
+  sources?: string[];
+  /** The owner approved putting those sources in this output on this work. */
+  share?: boolean;
+};
+
 /** A new job for a staffer. */
-export type NewJob = { name: string; instructions: string; schedule: Schedule; report?: boolean };
+export type NewJob = {
+  name: string;
+  instructions: string;
+  schedule: Schedule;
+  report?: boolean;
+  files?: Omit<JobFiles, 'thread'>;
+};
 
 /** One piece of a goal plan. The owner ticks the ones to go ahead with. */
 export type GoalPlanItem =
@@ -203,7 +248,13 @@ export type GoalPlanItem =
       /** A new job for it. */
       job?: NewJob;
       /** A change to one of its jobs, by name. */
-      editJob?: { name: string; instructions?: string; schedule?: Schedule };
+      editJob?: {
+        name: string;
+        newName?: string;
+        instructions?: string;
+        schedule?: Schedule;
+        files?: Omit<JobFiles, 'thread'>;
+      };
     };
 
 /** How the office meets one goal. */
@@ -216,7 +267,8 @@ export type GoalPlan = {
 
 /** When a goal is for. `date` reads `due`. */
 export type GoalHorizon = 'week' | 'quarter' | 'year' | 'date' | 'ongoing';
-export type GoalStatus = 'active' | 'paused' | 'met' | 'dropped';
+export const GOAL_STATUSES = ['active', 'paused', 'met', 'dropped'] as const;
+export type GoalStatus = (typeof GOAL_STATUSES)[number];
 
 /** A goal as written, before it is one: what the owner or the manager proposes. */
 export type GoalDraft = {
@@ -232,6 +284,8 @@ export type GoalDraft = {
 /** What the owner wants more of. Staff serve goals; the manager plans them. */
 export const goals = pgTable('goals', {
   id: id(),
+  /** One explicit submission from the manager's chat, kept across retries. */
+  requestId: uuid().unique(),
   title: text().notNull(),
   why: text(),
   doneWhen: text(),
@@ -304,6 +358,8 @@ export const asks = pgTable('asks', {
   call: jsonb().$type<HeldCall>(),
   /** A switch ask's switches, Run commands or Browse the web, to turn on (`ask_for_switch`). */
   switches: jsonb().$type<OwnSwitch[]>(),
+  /** A remove or bring_back ask's Odd (a staff id). */
+  odd: text(),
   /** The ask this one reworks, after the owner sent that one back. */
   revises: integer(),
   /** The hand-off (its `hand_off` follow-up) the staffer raised this while working on. */
@@ -355,6 +411,9 @@ export const tasks = pgTable('tasks', {
   title: text().notNull(),
   why: text().notNull(),
   steps: jsonb().$type<Step[]>().notNull(),
+  /** The task's working text. Version zero is the Odd's starting text until the owner saves it. */
+  response: text(),
+  responseVersion: integer().notNull().default(0),
   status: text().$type<TaskStatus>().notNull().default('open'),
   note: text(),
   createdAt: created(),
@@ -518,7 +577,8 @@ export const ledger = pgTable(
  * apps/office/src/lib/server/google/). A secret named in `secrets` lives in
  * the system's secret store, never here.
  */
-export type ConnectorKind = 'stdio' | 'http' | 'builtin';
+export const CONNECTOR_KINDS = ['stdio', 'http', 'builtin'] as const;
+export type ConnectorKind = (typeof CONNECTOR_KINDS)[number];
 export type ConnectorConfig = {
   command?: string;
   args?: string[];
@@ -613,6 +673,8 @@ export const jobs = pgTable('jobs', {
   name: text().notNull(),
   instructions: text().notNull(),
   schedule: jsonb().$type<Schedule>().notNull(),
+  files: jsonb().$type<JobFiles>(),
+  changedAt: created('changed_at'),
   /** The result goes on the owner's desk as a report. */
   report: boolean().notNull().default(false),
   enabled: boolean().notNull().default(true),
@@ -655,6 +717,8 @@ export const threads = pgTable('threads', {
    * `resumeAt` is then the window's reset, and the owner's yes wakes it sooner.
    */
   heldBy: integer().references(() => asks.id),
+  /** The task whose end wakes this thread (`wakeOnTask`). Never set alongside `resumeAt`. */
+  resumeOnTask: integer().references(() => tasks.id),
   /**
    * The key of each run that put work here from outside the thread: a hand-off,
    * held or not, or a goal's plan (`keepRun` in threads.ts).
@@ -676,18 +740,20 @@ export const threads = pgTable('threads', {
  * the owner's answer when no other run follows it. An `edited` run reads the
  * owner's edit to one of the staffer's files, for a lesson.
  */
-export type FollowUpKind =
-  | 'carry_out'
-  | 'rework'
-  | 'denied'
-  | 'feedback'
-  | 'task_done'
-  | 'goal'
-  | 'first_day'
-  | 'hand_off'
-  | 'handed_back'
-  | 'resume'
-  | 'edited';
+export const FOLLOW_UP_KINDS = [
+  'carry_out',
+  'rework',
+  'denied',
+  'feedback',
+  'task_done',
+  'goal',
+  'first_day',
+  'hand_off',
+  'handed_back',
+  'resume',
+  'edited'
+] as const;
+export type FollowUpKind = (typeof FOLLOW_UP_KINDS)[number];
 /** `waiting` means the staffer put what it needs on the owner's desk. */
 export type Outcome = 'done' | 'failed' | 'waiting';
 
@@ -707,6 +773,12 @@ export type HandOff = {
   withheld?: string[];
   /** The colleague's own tools that someone else on the thread lacks: it must not write their contents there. */
   kept?: string[];
+  /**
+   * The files named for this work, as paths inside the thread's folder. A
+   * hand-off a v0.0.9 office stored holds paths in the giver's own folder
+   * instead; the colleague's brief names those as no longer there.
+   */
+  files?: string[];
   outcome?: Outcome;
   id?: number;
   answered?: boolean;
@@ -717,7 +789,7 @@ export type HandOff = {
  * the colleague it goes to. What it carries is worked out at the yes
  * (`sharing`), since access can change while the ask waits.
  */
-export type HeldHandOff = Pick<HandOff, 'from' | 'title' | 'brief'> & { to: string };
+export type HeldHandOff = Pick<HandOff, 'from' | 'title' | 'brief' | 'files'> & { to: string };
 
 /**
  * The owner saved an edit to a staffer's file: its path inside the staffer's
@@ -745,6 +817,23 @@ export const followUps = pgTable('follow_ups', {
   edit: jsonb().$type<FileEdit>(),
   /** The owner's words: their reason, what to change, their feedback, or their note on a task. */
   note: text(),
+  /**
+   * On a `task_done` or `carry_out` follow-up, the titles of other work parked on the task,
+   * which picked up on its own as the task ended, so this run leaves it alone.
+   * Office text, never the owner's words: it stays out of `note`.
+   */
+  pickedUp: text().array(),
+  /**
+   * The task the thread was parked on when this run's claim ended the park
+   * (`startFollowUp`). Kept so a run that fails can give the wait back
+   * (`finishFollowUp`): only a run that ends without failing, or the wait's own end, ends it.
+   */
+  unparkedTask: integer().references(() => tasks.id),
+  /**
+   * The time the thread was parked until when this run's claim ended the park,
+   * kept for the same give-back. Never a usage-window hold's reset, which the claim leaves.
+   */
+  unparkedAt: at('unparked_at'),
   /** The owner ticked "Report when done": success goes on their desk too. A failure always does. */
   reportWhenDone: boolean().notNull().default(false),
   createdAt: created(),
@@ -770,6 +859,13 @@ export const runs = pgTable('runs', {
   status: text().$type<RunStatus>().notNull().default('running'),
   trigger: text().$type<RunTrigger>().notNull().default('schedule'),
   summary: text(),
+  /** Only the office records this, after its file tools observed the assigned operations. */
+  checkedFiles: jsonb().$type<{
+    input?: string;
+    inputRun?: number;
+    output: string;
+    sha256: string;
+  }>(),
   startedAt: created('started_at'),
   finishedAt: at('finished_at')
 });

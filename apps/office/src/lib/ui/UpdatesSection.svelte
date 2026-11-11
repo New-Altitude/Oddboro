@@ -1,6 +1,6 @@
 <script lang="ts">
   import { clockTime } from '@oddboro/ledger/time';
-  import { call } from './api.ts';
+  import { call, type ApiUrl } from './api.ts';
 
   // The Setup window's Updates section: the version this is, Check now, the
   // window updates install in, and a ready update with Install now and
@@ -34,7 +34,7 @@
 
   $effect(() => {
     void load();
-    const events = new EventSource('/api/events');
+    const events = new EventSource('/api/events' satisfies ApiUrl);
     events.onmessage = (m) => {
       const e = JSON.parse(m.data) as { type: string; table?: string };
       if (e.type === 'change' && e.table === 'app_update') void load();

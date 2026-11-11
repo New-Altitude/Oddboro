@@ -4,11 +4,14 @@
 
   // Signing in to the owner's New Altitude account: the words and the buttons
   // for each state. Setup's Account section shows it and adds Sign out; a
-  // later offer to sign in can show it too. Text sizes follow the parent's.
+  // later offer to sign in can show it too, with its own words for signing in
+  // (`ask`). Text sizes follow the parent's.
   //
   // The state is the server's: the page's `account` object, set from the page
   // data and the live line, so a sign-in finished in another tab shows here
   // with no reload. Only `waiting` is this block's own: the page it opened.
+  type Props = { ask?: { question: string; line: string } };
+  let { ask }: Props = $props();
   let waiting = $state<{ url: string }>();
   let busy = $state(false);
   let problem = $state('');
@@ -59,8 +62,8 @@
     switch (status.state) {
       case 'out':
         return {
-          question: 'Have a New Altitude account?',
-          line: 'Sign in if you have one. Oddboro works the same without it.',
+          question: ask?.question ?? 'Have a New Altitude account?',
+          line: ask?.line ?? 'Sign in if you have one. Oddboro works the same without it.',
           action: { label: 'Sign in', start: signIn, style: primary }
         };
       case 'in':

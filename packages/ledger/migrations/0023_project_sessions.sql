@@ -15,6 +15,6 @@ CREATE TABLE IF NOT EXISTS project_requests (
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS project_requests_session ON project_requests(session_id, created_at);
 --> statement-breakpoint
-CREATE OR REPLACE TRIGGER project_request_notify AFTER INSERT OR UPDATE ON project_requests FOR EACH STATEMENT EXECUTE FUNCTION office_notify();
+CREATE OR REPLACE TRIGGER project_request_notify AFTER INSERT OR UPDATE OR DELETE ON project_requests FOR EACH STATEMENT EXECUTE FUNCTION office_notify();
 --> statement-breakpoint
-CREATE OR REPLACE TRIGGER project_session_notify AFTER INSERT OR UPDATE ON project_sessions FOR EACH STATEMENT EXECUTE FUNCTION office_notify();
+CREATE OR REPLACE TRIGGER project_session_notify AFTER INSERT OR UPDATE OR DELETE ON project_sessions FOR EACH STATEMENT EXECUTE FUNCTION office_notify();

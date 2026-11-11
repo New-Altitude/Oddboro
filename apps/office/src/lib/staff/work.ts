@@ -2,24 +2,7 @@
 // shows it: a job, a follow-up (an approved ask, a rework, feedback) or a
 // draft. Safe to import in the browser.
 
-export type Work = {
-  /** Unique while the office runs. */
-  id: number;
-  kind: 'job' | 'follow-up' | 'draft';
-  /** The job's name or the ask's title. */
-  label: string;
-  /** What kind of work it is, in a few words: "Carrying out ask #20". */
-  detail: string;
-  /** When it started, or joined the line for a slot. */
-  since: string;
-  /** True while it waits for a free slot. */
-  queued: boolean;
-  askId?: number;
-  /** The tool the staffer is using now, as Claude Code names it. */
-  doing?: string;
-  /** Tool calls so far. */
-  steps: number;
-};
+export type { Work, WorkAbout } from '@oddboro/ledger/run-registry';
 
 /**
  * How long a piece of work has run, in whole minutes: "just started",
@@ -79,14 +62,19 @@ export const OFFICE_TOOL_WORDS: Record<string, string> = {
   my_project_sessions: 'Checking project assignments',
   send_project_work: 'Sending a project assignment',
   my_asks: 'Checking its asks',
+  my_tasks: 'Checking its tasks',
   my_goals: 'Checking its goals',
   my_jobs: 'Checking its jobs',
+  leave_office: 'Asking you to let it leave',
+  withdraw: 'Taking things off your desk',
   my_pokes: 'Checking its pokes',
   office_report: 'Reading the office report',
   poke_owner: 'Setting a poke for you',
   propose_goal: 'Proposing a goal',
   propose_goal_plan: 'Proposing a plan for a goal',
   propose_hire: 'Proposing a hire',
+  remove_odd: 'Asking you to let an Odd go',
+  bring_back_odd: 'Asking you to bring an Odd back',
   propose_reply: 'Drafting an email reply for you',
   propose_filter: 'Drafting a Gmail filter for you',
   ask_for_folder: 'Asking you for a folder',

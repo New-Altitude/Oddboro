@@ -2,8 +2,9 @@
 // POST is Go at the end of it: the office keeps the owner's time zone,
 // finishes the welcome under their name, hires the Office Manager they picked
 // (ready-made, or the one they described and the office drew), has the
-// manager say hello in chat and ask for the owner's goals, and moves into the
-// drawn office the moment the drawing is done.
+// manager say hello in chat and ask for the owner's goals, adds each persona
+// signed in to on the New Altitude card, and moves into the drawn office the
+// moment the drawing is done.
 import { error, json } from '@sveltejs/kit';
 import {
   customHello,
@@ -16,6 +17,7 @@ import { isZone, setZone } from '@oddboro/ledger/time';
 import { writeEnv } from '@oddboro/ledger/env';
 import { currentDesign, moveInWhenDone } from '#lib/server/design-job.ts';
 import { drawnFrom, preview, problemsWith } from '#lib/server/looks.ts';
+import { installGrantedPersonas } from '#lib/server/persona.ts';
 import { sayInChat } from '#lib/server/staff.ts';
 import { toProfile } from '#lib/server/profile.ts';
 import type { RequestHandler } from './$types';
@@ -78,6 +80,8 @@ export const POST: RequestHandler = async ({ request }) => {
   }
   const preset = 'preset' in choice ? MANAGERS.find((p) => p.id === choice.preset) : undefined;
   sayInChat(row.id, preset ? preset.hello(name) : customHello(row.name, name));
+  // The welcome never fails for a persona: a problem is logged and told to the page.
+  await installGrantedPersonas().catch((e) => console.error('[persona] after the welcome', e));
   const job = currentDesign();
   if (job) await moveInWhenDone(job);
   return json({ manager: toProfile(row) });

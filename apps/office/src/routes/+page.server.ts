@@ -13,15 +13,19 @@ import {
 } from '@oddboro/ledger';
 import { accountStatus } from '#lib/server/account.ts';
 import { keepAddress } from '#lib/server/address.ts';
+import { previewHandoff } from '#lib/server/codex-handoff.ts';
 import { diagnosticsState } from '#lib/server/diagnostics.ts';
 import { currentOffice } from '#lib/server/space.ts';
 import { toProfile } from '#lib/server/profile.ts';
 import { heldThreads } from '#lib/staff/thread-tags.ts';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async () => {
+export const load: PageServerLoad = async ({ url, setHeaders }) => {
   // The owner's Caddy may have dropped the office's site since: put it back.
   void keepAddress();
+  const ticket = url.searchParams.get('handoff');
+  const handoff = ticket ? await previewHandoff(ticket) : undefined;
+  if (handoff) setHeaders({ 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' });
   const first = !(await welcomed());
   // A new owner arrives at an empty lot; the office goes up on it as they finish.
   const office = await currentOffice({ lot: first });
@@ -29,6 +33,7 @@ export const load: PageServerLoad = async () => {
   const guesses = await guessesWaiting(staff.map((s) => s.id));
   return {
     office,
+    handoff,
     // The sample office, to move into if the owner's own does not come out.
     sample: first ? (await currentOffice()).world : undefined,
     staff: staff.map((s) => toProfile(s, guesses[s.id])),

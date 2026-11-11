@@ -55,8 +55,13 @@ const NODE_BIN = join(
   `node-${MACHINE.triple}${WINDOWS ? '.exe' : ''}`
 );
 const PACKAGES = ['ledger', 'sprites', 'world'];
-/** What a package needs at runtime. Everything else in it stays behind. */
+/**
+ * What a package does not need at runtime. Its own CLAUDE.md stays behind;
+ * every other document in it ships, since the office reads the sprites'
+ * FORMAT.md and ART.md when it draws.
+ */
 const LEAVE_OUT = new Set([
+  'CLAUDE.md',
   'node_modules',
   'out',
   'scripts',
@@ -129,7 +134,7 @@ function stagePackage(name: string): void {
     recursive: true,
     filter: (src) => {
       const rel = src.slice(from.length + 1).split(sep)[0];
-      return !LEAVE_OUT.has(rel) && !(rel.endsWith('.md') && !src.includes(`${sep}src${sep}`));
+      return !LEAVE_OUT.has(rel);
     }
   });
   compileAll(join(to, 'src'));
