@@ -54,11 +54,13 @@ One palette is what makes a hundred sprites by different hands look like one
 place. A colour added for one sprite breaks that. Add it to the palette for
 everyone or reuse what is there.
 
-## 8. Spaces are data.
+## 8. Rooms and offices are data.
 
 The office will grow for years. If a new room needed engine code, every room
 would carry risk. A stamp and a plan in JSON can be added, moved and removed
-without touching the engine.
+without touching the engine. A new kind of room is different: the office
+designer furnishes each kind in code, so a new kind starts at `ROOM_KINDS` and
+its furnishing in the same file.
 
 ## 9. Family data never reaches a tracked file.
 

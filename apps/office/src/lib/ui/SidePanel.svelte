@@ -21,6 +21,8 @@
     rail?: Snippet;
     /** Space kept free at its edge, in px, for something docked there (the Odds rail). */
     inset?: number;
+    /** Paints over the other side panel, where the two overlap. */
+    onTop?: boolean;
   };
   let {
     side,
@@ -32,7 +34,8 @@
     storageKey,
     children,
     rail,
-    inset = 0
+    inset = 0,
+    onTop = false
   }: Props = $props();
 
   onMount(() => {
@@ -96,6 +99,7 @@
   class="panel glass pointer-events-auto absolute top-4 bottom-4 flex rounded-2xl max-sm:top-3 max-sm:bottom-3"
   class:start-4={side === 'start'}
   class:end-4={side === 'end' && !inset}
+  class:z-10={onTop}
   style="inline-size: min({collapsed && rail ? RAIL : width}px, calc(100vw - {24 + inset}px)){inset
     ? `; inset-inline-end: ${16 + inset}px`
     : ''}"

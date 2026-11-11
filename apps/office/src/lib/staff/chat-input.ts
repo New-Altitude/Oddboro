@@ -1,16 +1,17 @@
-/** The desktop allows 12 MiB on the wire for 8 MiB of originals in JSON. */
+import type { ChatFile } from '#lib/attachments.ts';
+
+/** The desktop allows 12 MiB on the wire for an 8 MiB brief or inline import. */
 export const CHAT_BYTES = 8 * 1024 * 1024;
 export const CHAT_REQUEST_BYTES = 12 * 1024 * 1024;
-export const CHAT_FILES = 8;
 export const CHAT_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
-export const CHAT_ACCEPT = '.txt,.md,.markdown,.png,.jpg,.jpeg,.webp';
-export type ChatAttachment = { name: string; mediaType: string; size: number; hash: string };
 export type ChatSource = { kind: string; id?: string; revision?: string };
 export type OwnerInput = {
   turnId: string;
   message: string;
   source: ChatSource;
   files?: { name: string; bytes: Uint8Array }[];
+  /** Files already uploaded through the office's attachment route. */
+  kept?: ChatFile[];
 };
 
 /** getRandomValues also works at the owner's plain HTTP office address. */

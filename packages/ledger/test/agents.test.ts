@@ -3,8 +3,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  agentsOn,
+  AGENT_PLATFORMS,
   AGENTS,
+  agentsOn,
+  commandsHow,
   EFFORTS,
   effortFor,
   filesViaOffice,
@@ -63,4 +65,12 @@ test("an Odd's model is one its tool lists, or the office's, and its levels foll
   for (const [tool, list] of Object.entries(MODELS))
     for (const m of list)
       assert.ok((m.efforts ?? EFFORTS[tool as keyof typeof EFFORTS]).includes('medium'), m.id);
+});
+
+test("a tool's commands reach the internet only on a system where it runs commands and that was measured", () => {
+  for (const agent of AGENTS)
+    for (const platform of AGENT_PLATFORMS[agent].networkWithWeb) {
+      assert.ok(AGENT_PLATFORMS[agent].runs.includes(platform), `${agent} on ${platform}`);
+      assert.notEqual(commandsHow(agent, platform).state, 'never', `${agent} on ${platform}`);
+    }
 });

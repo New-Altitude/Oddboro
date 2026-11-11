@@ -21,6 +21,7 @@ import { createRequire } from 'node:module';
 import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
 import { SYSTEM, type System } from './platform.ts';
+import { fixedError } from './errors.ts';
 
 const SERVICE = 'oddboro';
 
@@ -374,7 +375,7 @@ export async function useShellSecrets(
 }
 
 export function setSecret(connector: string, name: string, value: string): void {
-  if (!store) throw new Error('This system has no secret store the office can use yet.');
+  if (!store) throw fixedError('This system has no secret store the office can use yet.');
   store.set(`${connector}:${name}`, value);
 }
 

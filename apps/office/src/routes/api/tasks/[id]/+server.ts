@@ -18,10 +18,11 @@ import {
   useAwsSecret
 } from '#lib/server/aws.ts';
 import { setSecret } from '#lib/server/keychain.ts';
+import type { TaskOp } from '#lib/server/owner-actions.ts';
 import type { RequestHandler } from './$types';
 
 type Body = {
-  op?: string;
+  op?: TaskOp;
   index?: number;
   answer?: string;
   value?: string;

@@ -669,8 +669,8 @@
         </a>
       </div>
       <p class="text-faint mt-6 text-sm text-pretty">
-        Open source, Apache 2.0. Runs on a Mac, Windows or Linux, with your Claude plan or an API
-        key.
+        Open source, Apache 2.0. Runs on a Mac, Windows or Linux, with Claude Code, Codex or Grok on
+        your own account.
         <a href="/releases/" class="hover:text-ink underline underline-offset-2">All downloads</a>
       </p>
     </div>

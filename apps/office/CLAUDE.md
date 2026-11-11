@@ -4,6 +4,9 @@ The floor the owner watches, and the desk they work from. SvelteKit 3 with Svelt
 runes, PixiJS for the pixel-art floor, Tailwind for the page around it, and
 Postgres through `@oddboro/ledger`. Port 4500 on 127.0.0.1, or `ODDBORO_PORT`.
 
+Where a new kind of thing starts, the shared function for each job, and the
+check that catches a missed place: `docs/architecture.md`.
+
 `vite build` leaves `@oddboro/*` out of the server build (a Rolldown external
 in `vite.config.ts`), so each package finds its own files beside its code and
 the app ships them whole (`apps/desktop/scripts/stage.ts`). In the app
@@ -73,7 +76,13 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    (`tagLift`, read in `onRender`) and settles after. Nothing polls.
 6. Two full-height panels flank the floor (`src/lib/ui/SidePanel.svelte`).
    Each resizes by dragging its inner edge (or the arrow keys on it), and
-   remembers its width per viewer. The start side is the office plate (name,
+   remembers its width per viewer. Where the two overlap, the end one paints
+   over the start one, but the start one's front window can sit on top: the
+   one the owner opened last sits on top, picking an Odd
+   puts that Odd on top, and closing the Odd or clicking the window's tab
+   brings the window back on top (`raised` in `windows.svelte.ts`, passed to
+   `SidePanel.svelte` as `onTop` in `+page.svelte`).
+   The start side is the office plate (name,
    the clock, Setup, and the Desk, Goals, Lessons, Ledger, Services, Hire and Office
    buttons), which opens into a bar of windows
    (`src/lib/ui/windows.svelte.ts`): the Desk, the Goals, the Lessons, the
@@ -82,7 +91,8 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    another. ✕ folds the bar away with its windows still open; closing a
    window with unsaved edits or a drawing in progress asks first.
    The end edge holds the Odds rail (`src/lib/ui/OddsRail.svelte`) once the
-   office has an Odd: a ⌘K button on top, then every Odd's portrait, with its
+   office has an Odd: a ⌘K button on top (Ctrl K off a Mac, set once the
+   page knows), then every Odd's portrait, with its
    count of work in progress and an ember ring when it waits on the owner.
    Hovering the rail, moving into it with the keyboard, the ⌘K button or
    Cmd+K (Ctrl+K) from anywhere widens the rail itself toward the floor
@@ -203,7 +213,13 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    Folders tab does and gives it in the transaction that approves the ask,
    with one Ledger line in the Settings tab's words, and the `carry_out` run
    that answer starts reaches it. A refusal leaves it open and shows the
-   Folders tab's line. Plain Approve refuses a folder ask. An item a lead raised from a colleague's
+   Folders tab's line. Plain Approve refuses a folder ask. A `switch` ask (an
+   Odd's `ask_for_switch`) takes Turn on, which approves it and turns Run
+   commands, Browse the web or both on for that Odd in one step, as the
+   Settings tab does. A `remove` ask (an Odd's `leave_office`, or the
+   manager's `remove_odd`) takes Remove, and a `bring_back` ask (the
+   manager's `bring_back_odd`) takes Bring back; both take Deny and no
+   Iterate. An item a lead raised from a colleague's
    handed-back work says so on its sender line ("Marshall, from Paige's
    work", `via` on the ask or task), and the colleague's name opens their
    chat; the item still belongs to the lead.
@@ -271,12 +287,16 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    **Settings** (its own four tabs, below). A group opens on the tab it was
    last on; the Lessons tab counts its guesses, and the Data group itself
    shows no count. It opens on Chat. Storage
-   (`StorageTab.svelte`) is a tree of everything the Odd kept in its own
-   folder, searchable by path, from `/api/staff/[id]/storage`
-   (`listStorage` in `src/lib/server/storage.ts`): never the office's own
-   `chat.jsonl` and `session.json`, an instruction file, a hidden entry or a
-   link, and at most 5,000 entries, which it says. A file opens in the
-   viewer. It is read when the tab opens and when the office says something
+   (`StorageTab.svelte`, what a row lists and says in `storage-list.ts`) is a tree of everything the Odd kept in its own
+   folder, then, under Shared work, its part of each thread it is on (by the
+   test `workFile` uses, `workTitles` in the ledger), one folder per piece of
+   work by its title, newest first. Search covers both, and a shared file
+   reads as its work's title and its path there, never a thread's number or
+   folder. It comes from `/api/staff/[id]/storage`
+   (`oddStorage` in `src/lib/server/storage.ts`): never the office's own
+   files (`OFFICE_FILES` in the ledger's `home.ts`), an instruction file, a hidden entry or a
+   link, and at most 5,000 entries across both, which it says. A file opens
+   in the viewer. It is read when the tab opens and when the office says something
    changed. The Odd's name in the header, with an info icon beside
    it, opens its info page (`OddInfo.svelte`), which has no tab, so the
    tabs have room: one scrolling page of sections, most useful first. Who it
@@ -284,21 +304,26 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    thinking level); In progress (`WorkSection.svelte`); Jobs
    (`JobsSection.svelte`: click one to edit it in place, "+ Add a job", and
    "Next run today at 3:00 PM" or Paused, from `nextRunAt` and `nextWhen`
-   in format.ts); the job description; stats; and the look, with Redraw look
-   and Send to a place. While it has work in progress, a count in a turning
+   in format.ts); the job description; stats; the look, with Redraw look
+   and Send to a place; and Remove from the office, which says what leaving
+   does and asks once on the page before DELETE on the staff route lets the
+   Odd go (`removeOdd` in the ledger's `leaving.ts`). The Office Manager's page
+   has no Remove (`manager` on the profile). The next office load drops the
+   Odd from the roster, so it leaves the floor and its panel closes; any run
+   of it stops (`stopRuns` in `staff.ts`, registered in `hooks.server.ts`).
+   While it has work in progress, a count in a turning
    ring sits beside the name (CSS only, still under reduced motion, and gone
    with nothing in progress); it opens the info page at In progress, as
    `show: {tab: 'work'}` does. The chat stays mounted
    while the panel is open, so a
    reply survives switching tabs or collapsing. A send first keeps the owner's
    line in `chat.jsonl` with its source and turn ID (`keepOwnerTurn` in
-   `staff.ts`). Markdown, text files and pictures arrive by paste, drop or
-   Attach. The office keeps the originals by hash in `chat-files/<staff>/`,
-   outside the Odd's work folder. Each text file goes in the message; each
-   picture goes to Claude Code, Codex or Grok as an image. Gemini refuses a
-   picture. Get a reply on an unanswered line reuses its saved input, even
-   after a restart. A finished reply carries the same ID. Older lines need
-   none. The chat shows every ask, task
+   `chat-turns.ts`). Imports and uploads share the existing `attachments`
+   folder and `ChatFile` records. Each inline import is checked before any
+   part is saved. The runner opens text and PDF files through its file tools;
+   Claude Code, Codex and Grok also receive picture bytes. Get a reply on an
+   unanswered line reuses its saved input, even after a restart. A finished
+   reply carries the same ID. Older lines need none. The chat shows every ask, task
    and report the Odd put on the desk, where it landed (`chatLog` merges
    `deliveries()` into `chat.jsonl`), with where each stands now, and every
    hand-off it gave or got (`handOffsFor`). A hand-off it gave sits on the card
@@ -316,9 +341,9 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    it: the run gets the item in full, and a reply about a report marks it read
    and goes in the ledger as the owner's feedback (`replyToReport`). A
    colleague's chat also lists the threads it works on and does not lead,
-   those it was handed work on and those of a goal it serves, and `tell_lead`
-   passes what the owner says there about one to its lead, who decides the
-   next step. Raising a goal's work there itself is refused, pointing to
+   those it was handed work on and those of a goal it serves, tells it each
+   one's story and what the owner said on it, and `tell_lead` passes what the
+   owner says there about one to its lead, who decides the next step. Raising a goal's work there itself is refused, pointing to
    `tell_lead`. Each
    message also tells the session what no run of it wrote (`chatPreface` in
    `src/lib/server/chat-preface.ts`): what the Odd delivered, and the asks
@@ -332,7 +357,17 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    the manager at once. Each of the first two suggested choices gets a
    short acknowledgment and the next question from the office (`chat` in
    `staff.ts`, a `told` line, no run); the third runs the manager, whose new
-   session hears all three in its replay. The owner's line is stamped when sent,
+   session hears all three in its replay. Any Odd offers choices the same
+   way: a chat reply that ends with `[choice] ...` lines (every run's
+   "How the office works" says so) loses them from its text
+   (`splitChoices` in `src/lib/choices.ts`, also on the stream's `done`),
+   keeps them as `choices` on its `chat.jsonl` line, and shows them as
+   those buttons, with no Default, while it is the chat's last line.
+   Every Odd holding `see_office` (all, unless the owner takes it off)
+   gets "Who's in the office" in its prompt (`whoIsHereSection` in
+   `house.ts`), and every run is told to ask which one when a name could
+   be an Odd or someone outside, or there is more than one way to do it.
+   The owner's line is stamped when sent,
    so what lands during a reply sits between the two. Under each message is one
    line (`src/lib/ui/chat-lines.ts`): its time ("4 min ago" for an hour, then the
    clock, with the full date on hover or focus), how long a chat run took
@@ -342,7 +377,57 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    shows at the chat's foot, one line each with how long it has run in whole
    minutes and the tool it is using, and a click opens In progress. Its clock
    moves once a minute only while a time still counts minutes or work is in
-   progress. Its input grows with the text
+   progress. The owner can type while the Odd replies; a message sent then
+   shows as waiting under the reply, with Cancel to take it back to the box,
+   and goes when the reply ends. A second Send while one waits joins it, so
+   the Odd answers both in one turn (`waiting` in `ChatPanel.svelte`). A chat
+   whose run fails, or throws on the way to a reply, keeps
+   the owner's line, and the error in place of the reply, marked `failed`
+   (`ChatEntry`), so a reload shows both as the chat showed them live; the
+   next message tells the session what the owner wrote that it never had, and
+   only that the run failed on a message it has: a resumed session has each
+   one up to the last failed run whose tool named a session (`inSession`,
+   `chatPreface`), since that run's message carried the earlier ones. The
+   owner attaches pictures, PDFs and text files (`ATTACHABLE` in
+   `src/lib/attachments.ts`, up to 10 of 10 MB each): pasting or dropping
+   one on the box puts its tag at the caret (`[Image #1]` for a pasted
+   picture, else its name, `chat-attach.ts`), the paperclip adds files to
+   the tray alone. The tray previews each with a ✕, in a column at the
+   end side over the paperclip and Send, three files tall at most
+   (`.tray`), scrolling past that. The box is always as tall as that
+   column (`side` in `fit`), and at least as tall as the paperclip and
+   Send (`MIN_INPUT`, 76 px), so it grows up as files are attached.
+   Deleting a tag drops its file. Copied text that brings a picture of
+   itself pastes as text. On Send each file goes alone to
+   `/api/staff/[id]/attachments` as application/octet-stream, which keeps
+   it in the Odd's own `attachments/` (`src/lib/server/chat-files.ts`)
+   under `<date>-<time>-<4 random hex>-<name>`, never over another file,
+   then the message names them by tag and kept name. The run's message
+   ends with each tag's full path (`attachedBrief` in `staff.ts`), and the
+   run opens them with its own file tools; Codex, whose `view_image` is
+   off, gets the pictures as `--image`. `chat.jsonl` keeps them on the
+   owner's line (`files`), and the chat shows them from
+   `/api/staff/[id]/attachments/[name]`. An Odd sends any file in its own
+   folder on an email: `propose_reply` and Gmail's `create_draft` take
+   `attachments` by path (`mail-attachments.ts` in the ledger checks each
+   is a plain file there, not hidden and not the office's own, and drops
+   the kept name's prefix, so a recipient sees `image.png`). The reply
+   review shows them (`/api/asks/[id]/attachments/[n]`) with a ✕ each;
+   the owner may take any off, never add one, and the office checks and
+   reads them again as it sends. `create_draft` knows whose files to read
+   from the call's `_meta` (`ODD_META` in `google/http.ts`), which only the
+   gateway and `makeCall` set, on the office's own Google servers alone.
+   An email with files goes to Gmail's upload address as MIME
+   (`uploadType=multipart`). `hand_off` takes files from the Odd's own
+   folder too, `attachments/` included, and the ledger copies them into the
+   giver's part of the work's folder as it hands off (`carryFiles`), so the
+   colleague reads the owner's screenshot too. A Gmail
+   call held at Draft says what it does and to how many emails as its
+   title (`heldWords` in `google/gmail.ts`, through `heldWordsFor` in
+   `access.ts`), and lists each email's subject, sender and date on the
+   desk (`call.shown`, never in an Odd's prompt), with the exact call
+   folded under it. `update_labels` takes many `thread_ids` in one call.
+   Its input grows with the text
    up to 60% of the chat, and the bar above it drags it taller; that height is
    remembered per viewer. Every run's system prompt opens with "Who you work
    for" (`whoFor` in `staff.ts`): the owner, `data/people.json` when it
@@ -383,9 +468,10 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    install. `src/lib/server/staff.ts` runs `claude -p` on the owner's login for chats,
    job runs, follow-ups and drafts, or `grok -p` for an Odd that runs on Grok,
    `codex exec` for one on Codex, or `gemini` for one on Gemini (`staff.agent`;
-   each but Claude Code gets ready through `LAUNCHES` in `src/lib/server/cli.ts`). The owner picks under "Runs on" (`RunsOn.svelte`) in the hire
-   drawer, stored with the hire before its hello runs, and on the Settings tab
-   (`AccessTab.svelte`); both list the tools `/api/agents` finds on PATH
+   each but Claude Code gets ready through `LAUNCHES` in `src/lib/server/cli.ts`). The owner picks it in the hire
+   window's Model step, stored with the hire before its hello runs, and on the
+   Settings tab's Model tab (`AccessTab.svelte`), which both show
+   `ModelPicker.svelte`; both list the tools `/api/agents` finds on PATH
    (Grok in xAI's install folder `~/.grok/bin` too, and Claude Code where
    `claudeCommand` finds it on Windows, `agentCommand`),
    with each one's sign-in, which the owner starts beside the picker,
@@ -399,12 +485,13 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    session, and gets a 409 while the Odd is replying. A computer without the
    picked tool fails the run naming it; it never falls back to the other.
    On the Settings tab (named Access before it held the model too), the
-   Model tab picks the tool with the same square tiles as setup
+   Model tab (`ModelPicker.svelte`, the hire window's Model step too) picks
+   the tool with the same tiles as setup, all one height
    (`ToolTiles.svelte`), with the picked tool's install or update below
    them (`RunsOn` with `installOnly`), then the account it signs in with:
    a card for the tool's Office account and each one the owner added
    (accounts.ts in the ledger), "+ Add a sign-in", and one row of the same
-   buttons for the picked account (Sign in, Sign in again, Sign out,
+   buttons for the picked account (Sign in, Switch account, Sign out,
    and for an added one Rename and Remove). Every account is a folder of its own, `~/.oddboro/accounts/
 <tool>/<id>`, and a run points its tool at it (`GROK_HOME`, `CODEX_HOME`,
    `CLAUDE_CONFIG_DIR`); no run reads another account's folder. Claude Code's
@@ -427,7 +514,12 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    22rem (a container query). Office, Folders and Services each have a search
    box over their list, which filters it as the owner types and clears on a
    tab change. Office lists two switches, Run
-   commands and Browse the web, above the office's own tools; Folders
+   commands and Browse the web, above the office tools the owner gives, then
+   under Always on, with no switch, each office tool every Odd has that some
+   run of this one is offered (`isOffered`, so the Office Manager's leaves out
+   Ask to leave; both lists
+   split from `OFFICE_TOOLS` by `toolGroups` in `src/lib/ui/tool-groups.ts`,
+   and filtered by the same search); Folders
    (`FoldersList.svelte`) lists each folder with Can read and Can write side
    by side; Services holds the outside tools, each with Read only and Read and write side by side, changed in place (`setGrantLevel`, PATCH on the access route): the tool stays signed in, and only Revoke forgets it. Choose a folder asks
    `/api/folders/pick`, which opens the system's own picker on this computer
@@ -455,7 +547,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    `heldReach`). The Odds list shows `reach` as chips beside each Odd's
    role: Commands, Web and its folder count. Run commands shows
    `reach.commands` and how the Odd's tool takes it (`commandsHow`): a switch
-   on Claude Code on a Mac, else checked (Codex) or unchecked and locked,
+   on Claude Code on a Mac and Codex on a Mac and Linux, else unchecked and locked,
    with its reason under it, and the PATCH refuses `{commands}` for a locked
    one. Under one locked off, when a tool on this system follows the switch
    (`offer`), one click moves the Odd there with Run commands on ("Switch Sam
@@ -467,26 +559,38 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    commands do with it (`webLine` in the ledger's `agents.ts`), such as
    "Search and read web pages. With Run commands on, its commands can reach
    the internet too." A folder is typed as a path and set to Can
-   read or Can read and change; `checkFolder` refuses the home folder,
-   anything outside it, and one that holds or sits in a secret store, the
-   office's home or Oddboro's code, comparing real paths as the disk spells
+   read or Can read and change, anywhere on the computer; `checkFolder`
+   refuses the home folder and one that holds or sits in a secret store (at the
+   home's top by name, anywhere else by what it holds, in the folder, the folders
+   above it and one level down), the office's
+   home or Oddboro's code, comparing real paths as the disk spells
    them (`realpathSync.native`), and one whose real path holds `*`, `?`, `[`
    or `]`, which Codex cannot take ("That folder's path has a character an
    Odd's tool can't take: [", `FOLDER_REFUSED.glob`; a folder given before
-   that rule is not checked again), and `setFolder` refuses one inside or holding
+   that rule is not checked again). A whole drive or system files
+   (`broadFolder`) comes back as `{ warning }`, given nothing, and
+   `FolderWarning.svelte` shows it with a warning icon, a More info link to
+   the site's `/info/folder-sharing/`, and Accept and Cancel; Accept sends the
+   same change again with `accept`, on this tab and on a folder ask's Give
+   access. `setFolder` refuses one inside or holding
    a folder the Odd already has ("That folder is inside one this Odd already
    has, or holds one."); the line shows under the field. An Odd asks for a
-   folder with `ask_for_folder` (item 7), never with steps for this tab: a
-   rule in `house.ts` says so for folders and both switches. The
+   folder with `ask_for_folder` (item 7), and for Run commands or Browse the
+   web with `ask_for_switch`, never with steps for this tab: a rule in
+   `house.ts` says so. The
    list reads the profile's folders, each with the home folder written `~`
    (`shown`), so it loads nothing of its own and the staff route has no GET;
-   a level change or Remove sends the path as stored. `run()` takes the
+   a level change or Remove sends the path as stored. A folder that holds or
+   sits in a secret store (`touchesStore` on the profile, `touchesSecretStore`
+   on the server) reaches no run, so it says "Holds keys or sign-ins, so this
+   Odd no longer gets it." and can still be removed. One gone from the disk
+   reaches no run either, and gets that line only if its stored path is in a store. `run()` takes the
    switches and folders as its tool takes them from `capabilities()`
    (`caps.own`), less a held network, and passes the given folders still on
-   the disk; the prompt lists them under "Where things are", and "What you
+   the disk and in no secret store (`touchesSecretStore` in the ledger); the prompt lists them under "Where things are", and "What you
    can do" says what the Odd's own tools reach and, for Run commands or
-   Browse the web when it lacks one, whether the owner can switch it on in
-   its Settings tab (`ownToolsSaid` in the ledger's `capabilities.ts`, held
+   Browse the web when it lacks one, whether it can ask for it with
+   `ask_for_switch` (`ownToolsSaid` in the ledger's `capabilities.ts`, held
    network included), the same line `my_access` gives. `office_report` gives
    it too, naming the Odd, since another Odd reads it ("Rowan's own tools",
    "Rowan's Settings tab").
@@ -508,11 +612,17 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    file tools reach it through `search_tool` and `use_tool`. On a Mac and
    Linux a kernel sandbox profile per Odd (per run on a thread) holds the
    whole run, the office's file server included, as a second wall, built on
-   Grok's `strict`, which reads the Odd's folders (a lead's chat also its live
-   goals' folders, in the Odd's own profile), the owner's data folder, the
+   Grok's `strict`, which reads the Odd's folders (a chat also the folders of the
+   work it leads or is on, in the Odd's own profile), the owner's data folder, the
    folders the owner gave it and the tool server's code, writes the given
    folders it may change (`readWrite`), and
-   shuts `~/Library`, `/Library`, `/tmp` and `/var`; Windows has none. Read
+   shuts `~/Library`, `/Library`, `/tmp` and `/var`; Windows has none. Grok
+   refuses every sandbox when `/var/run/docker.sock` is a link to a path off
+   its own list (OrbStack, Colima, Rancher Desktop), so then the run gets a
+   home of its own in Grok's home, whose `.docker/run` leads to the socket's
+   folder (`runHome`), and its tool servers keep the owner's HOME. Any
+   other socket link Grok refuses gets the office's own words, with the way to
+   another tool (`stoppedWhy` in `cli.ts`). Read
    deny rules (`UNREADABLE`) cover what the kernel still lets it read, Grok's
    home among them, and Edit and Write deny rules cover Grok's home, whose
    sessions folder the kernel lets it write, both further walls should Grok
@@ -524,10 +634,11 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    sign-in check, so the sign-in from the office's page (item 18), where a run
    without one points, is kept as a file. Every run
    passes the office's switches as `-c` (`SWITCHES`) under `--strict-config`.
-   A Codex Odd has a shell, held by one kernel permission profile per run
+   With Run commands on (a Mac or Linux), a Codex Odd has a shell, held by
+   one kernel permission profile per run
    (`filesystem` in `codex.ts`): everything shut but the system's own folders
-   and Apple's developer tools (`DEVELOPER_TOOLS`, and the folder `xcode-select -p`
-   names, Xcode.app's on a Mac that uses it, found once: `developerReads`) and node's OpenSSL config (`NODE_OPENSSL`), read, `/tmp` shut, its thread folders, the owner's data folder, the folders the owner gave it
+   and Apple's developer tools (`codexReads` in `SANDBOX_PATHS`, and the folder `xcode-select -p`
+   names, Xcode.app's on a Mac that uses it, found once: `developerReads`) and node's OpenSSL config (`opensslConf`), read, `/tmp` shut, its thread folders, the owner's data folder, the folders the owner gave it
    and the owner's developer tool folders (`devReads` in `sandbox.ts`, as
    Claude Code's commands read them) read, their listed credential files shut
    but not their env files or projects' git configs, its
@@ -535,8 +646,11 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    (`codex-tmp/<run key>`) written, instruction files and the edited file
    never, and no network, Browse the web or not (`network` in the profile,
    from `commandsOnline`: with it on, Codex's commands reached the office's own
-   API and database on this Mac). Codex reads files through that shell, so its Run
-   commands shows on and locked. Its own web search is set per run, `live`
+   API and database on this Mac). The office carries its files
+   (`FILES_VIA_OFFICE`), so with Run commands off it has no shell. On Windows
+   it never has one: Codex's own sandbox opened every Odd's folder to reads,
+   so a run there is in Codex's read-only mode and Run commands stays locked
+   off. Its own web search is set per run, `live`
    with Browse the web and `disabled` without (`web_search`, not one of
    `SWITCHES`). The run is a process group of its
    own; when it ends or times out, that group and each of its commands'
@@ -565,7 +679,8 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    (`gemini-policy.test.ts`); a message starting with `/` goes in after a line
    break, so Gemini never runs it as a command.
    A chat resumes the Odd's session without waiting for a background slot.
-   Stop reply names the run on that saved turn. A
+   Stop reply names the run on that saved turn. Ordinary Send queues while a
+   reply runs; Correct this reply selects interruption explicitly. A
    correction keeps its own text and files before stopping that run, then waits
    for it to close. Closing the window just stops the stream to that window.
    A message about a job or goal in progress goes to its lead.
@@ -575,13 +690,15 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    A chat that starts a new session (after a move to another tool, or with
    `session.json` gone or unreadable: `sessionIdIn`) opens with the latest of
    the chat instead, word for word, oldest first: the newest lines whose text
-   fits in 24,000 characters (`REPLAY_CHARS`), and the files changed since
+   and retold files fit in 24,000 characters (`REPLAY_CHARS`), never a failed run's error, and the files changed since
    the oldest of them (since the owner line before it, when that is the Odd's
    reply: `replaySince`) in the Odd's own folder and the folders the owner
    gave it to change, among the first 2,000 entries of each, 30 named and the
    rest counted (`replay` and `changedSince` in `src/lib/server/replay.ts`).
-   `chatPreface` leaves out the told and poke lines the replay holds and keeps
-   those the budget cut, so each since the owner last wrote is said once.
+   `chatPreface` leaves out the told, poke and failed run's owner lines the
+   replay holds and keeps those the budget cut, so each since the owner last
+   wrote is said once; of a failed run's line the replay holds, it says only
+   that the run failed.
    Nothing on screen shows it.
    The office tells each run's tool server about the run through its
    environment (`officeEnv` in `src/lib/server/run-env.ts`): every run gets a
@@ -592,18 +709,21 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    `give_owner_a_task`, `propose_reply` and `propose_filter` store as `via`. Jobs, follow-ups
    and drafts each start a fresh session and run side by side, up to three
    per Odd (`AT_ONCE`); the next waits for a slot. Each one is listed in
-   `inProgress` (the `Work` shape in `src/lib/staff/work.ts`) with what it
+   `inProgress()` (from `src/lib/server/run-state.ts`, derived from the
+   shared `runsGoing` registry) with what it
    is, when it started, and the tool it is using now. The list reaches the
    page with each `working` event; only work starting or ending reloads the
-   card's tabs. Every Claude Code run gets five file
-   tools (Read, Glob, Grep, Write, Edit), `Bash` with Run commands and
+   card's tabs. Every Claude Code run gets the
+   office's file tools where `FILES_VIA_OFFICE` says, else its own five
+   (Read, Glob, Grep, Write, Edit), `Bash` with Run commands and
    `WebSearch` and `WebFetch` with Browse the web, and reads only its own
    folder, the owner's data folder (as a Grok run does), Claude
    Code's sessions folder for its own folder, where long
    tool results land, on a thread, the thread's folder, and the folders the
    owner gave it. A lead's chat reads
-   the folder of each live (active or paused) goal it leads, and is told where
-   each stands, as its pick-ups there are (`readable` in `staff.ts`; Read rules cover Glob and Grep,
+   the folder of each live (active or paused) goal it leads and of its latest
+   other work, and a colleague's chat the folder of each piece of work it is on;
+   each is told where the work stands, as its pick-ups there are (`readable` in `staff.ts`; Read rules cover Glob and Grep,
    and `dontAsk` turns down every other path). Deny rules beat any allow,
    the owner's own Claude Code settings included, so `unreadable` names what
    stays shut whatever else allows it: the secret stores in `SECRET_STORES`
@@ -611,11 +731,15 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    `~/.aws`, `~/.gnupg`, `~/.config`, `~/Library`, `~/AppData`,
    `~/.claude.json`, `~/.google_workspace_mcp` (where
    that MCP server keeps its sign-ins for other apps on the Mac), `~/.grok`,
-   `~/.codex` and `~/.gemini`, everything
+   `~/.codex`, `~/.gemini`, `~/.docker` and `~/.kube`, everything
    in `~/.oddboro` besides `staff/` and `data/` (and `threads/<id>/` for a
    run on that thread), every other
    Odd's folder, and everything in `~/.claude` besides this run's sessions.
-   With Run commands, `--settings` adds Claude Code's sandbox (`claudeSandbox`
+   The rules, the sandbox and the system prompt reach Claude Code in files
+   beside the run's MCP file (`--settings`, `--append-system-prompt-file`),
+   never on the command line: one deny for each folder in `~/.claude/projects`
+   passed Windows' 32,767 characters for an owner who uses Claude Code a lot.
+   With Run commands, the settings add Claude Code's sandbox (`claudeSandbox`
    in `src/lib/server/sandbox.ts`): commands read what the run reads, plus
    their temp folder, node when it sits in the home folder, the owner's
    developer tool folders, and the system's own folders outside `/Users` and
@@ -734,10 +858,10 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    variables and a second `set` would replace the first. Nor does it write the file a run
    reading the owner's edit is reading. It gets no skills, no
    plugins, none of the owner's own CLAUDE.md files, no Claude Code
-   auto-memory and none of the office process's own `GIT_` variables, which
-   every tool's launch drops (`cleanEnv` in `claude.ts`), nor any `AWS_`
-   variable (a tool server runs outside the sandbox and could sign in as the
-   owner), the office's own MCP server (`packages/ledger/src/mcp.ts`) with
+   auto-memory, and of the office process's own environment only the names
+   `RUN_ENV_ALLOW` lists (`runEnv` in `run-env-allow.ts`; no `GIT_` or `AWS_`
+   variable among them, since a tool server runs outside the sandbox and could
+   sign in as the owner). It gets the office's own MCP server (`packages/ledger/src/mcp.ts`) with
    only the office tools the owner ticked under "In the office" on the Settings tab,
    and whatever outside access the owner granted: servers at read (the tools
    the server marks as only reading, less any whose name says it changes
@@ -748,9 +872,14 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    `/api/gateway/<connector>`): the run gets the office's address and a
    token that lives as long as the run, never the server's address, key or
    sign-in. The gateway connects to the real server (`upstream` in
-   `access.ts`), lists only the tools the grant reaches, refuses any other
+   `access.ts`, which starts a command's server with only the names a run
+   may have, `outsideToolEnv` in `run-env-allow.ts`, and its own secrets),
+   lists only the tools the grant reaches, refuses any other
    call, and takes a tool that no longer passes `readsOnly` off the
-   connector's stored list with a Ledger line (`narrowReadTools`). A write
+   connector's stored list with a Ledger line (`narrowReadTools`). A connector
+   that cannot start during a run gets one Ledger line naming it, per run, in
+   the office's own words for why and never the error's text, which can repeat
+   a key (`whyNoStart`); the run still gets the error itself. A write
    grant at Draft (`writesWait`, either the Odd's own level or a run capped
    there) lists every tool, passes reads on, and holds each call that does
    not pass `readsOnly` (or `readsByRole`) as a `call` ask on the desk
@@ -779,7 +908,15 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    (`capped`, `accessInRun`). Hosted servers sign in with
    OAuth (`src/lib/server/oauth.ts`): the task's Sign in opens the service, it
    returns to `/connect/callback`, the tokens go in the keychain, and each run's
-   gateway connects with a fresh access token as a header. Gmail and Google
+   gateway connects with a fresh access token as a header. A token is refreshed
+   one at a time per sign-in (`once`), since a service may end a sign-in whose
+   refresh token arrives twice. For the same reason `steadyFetch` retries only
+   a request that never left this computer; one whose answer was lost is not
+   retried within one request. GitHub refuses a token request with 200 and its
+   error in the body, which the SDK would drop without a word, so `githubRefusal`
+   hands the SDK a 400 and logs GitHub's reason, and `freshAccess` logs any
+   renewal that did not take. The same provider signs the owner in to New
+   Altitude (see "A New Altitude account"). Gmail and Google
    Drive are `builtin` connectors (migration `0009_google`): the office serves
    their tools itself (`src/lib/server/google/`, connected in-process by
    `builtin` in `access.ts`), and signs each in on its own with New Altitude's
@@ -787,7 +924,12 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    Gmail's `gmail.modify` and `gmail.settings.basic`, for filters; a stored
    sign-in that lacks one signs in afresh, `covers`; the
    secret from `ODDBORO_GOOGLE_CLIENT_SECRET`, which the shell passes from the
-   build, or `.env` in development). Each Google call asks `bearer` for a live
+   build, or `.env` in development). A hosted server that signs in through
+   GitHub, which lets no app register itself, signs in the same way with New
+   Altitude's GitHub OAuth App and `GITHUB_SCOPES` (`ODDBORO_GITHUB_CLIENT_SECRET`):
+   `knowServer` finds its sign-in server first, since the SDK picks scopes
+   before the app. A build without either secret says so on Sign in
+   (`BuiltWithout`). Each Google call asks `bearer` for a live
    token, so it never leaves the office process. One connector is one Google
    account of one product, found by `config.google` (`gmail` or `drive`),
    never by its id: scopes, the server `builtin` makes, and the reply and
@@ -809,8 +951,10 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    `ODDBORO_GATEWAY_TOKEN`, so no token is on a command line. When a tool an Odd holds stops working, it calls
    `reconnect_access` (every Odd has it): the office puts its own connect
    steps on the desk again (`reconnectTask`), after the Odd's steps for
-   getting a new key, with no ask, one open per tool. Odds never write
-   connect steps by hand.
+   getting a new key, with no ask, one open per tool. The key steps go only
+   on a tool that takes a key: a sign-in tool's task has no key box, so the
+   office leaves them out and tells the Odd. Odds never write connect steps
+   by hand.
 10. Every run records its tokens per model and the owner's plan windows (5 hours
     and weekly), read from Claude Code's own stream. A run often reports only
     one window, so each is kept as it last came (`notePlan`). The card's back shows
@@ -828,7 +972,8 @@ pieces under 3,900 bytes a line, so no value is on a command line.
     desk as a report when the job says so. Each run records its trigger:
     `schedule` when the timer started it, `manual` when the owner pressed Run now.
     A thread its hub parked with `resume_at` wakes at that time: the clock
-    starts the hub's `resume` follow-up. So does a thread the usage window
+    starts the hub's `resume` follow-up. One parked on a task (`after_task`)
+    wakes when that task is done or dropped, with no clock. So does a thread the usage window
     held, at the window's reset (`usage-window.ts` in the ledger).
     A manual run leaves the schedule where it was, and the Office Manager's report data
     (office times) tells the two apart. The Jobs tab edits a job in place, and opens the Odd's job description
@@ -846,11 +991,13 @@ pieces under 3,900 bytes a line, so no value is on a command line.
     whose tool draws looks (`drawsLooks`, `/api/agents`) also offer drawing. The onboarding manager card offers the same, as "Build your own".
     Nobody is hired without a kept look; in the hire window a look built from parts is kept as it lands (`autoKeep` on `LookStudio`), so Next is the one click, and name and role share a line. While it draws,
     `src/lib/ui/PixelDrawing.svelte` paints a bust pixel by pixel beside the
-    stage and the time. Step three picks the level and the tool its runs go
-    through ("Runs on", Claude Code unless the owner picks another, item 9).
-    Hiring grants no tools. The Odd tells the owner,
-    in its reply, to switch on Run commands or Browse the web in its Settings tab,
-    under Office; outside tools come through `ask_for_access`. A first job reports to the owner's desk unless they
+    stage and the time. Step three picks the level. Step four, Model, picks
+    what its runs go through the way an Odd's Model tab does: the tool, the
+    account it signs in with, the model and how hard it thinks, each the
+    office's unless the owner picks another (item 9).
+    Hiring grants no tools. The Odd asks for Run commands or Browse the web
+    with `ask_for_switch` when a job needs one, and for outside tools with
+    `ask_for_access`. A first job reports to the owner's desk unless they
     untick it; a proposal can say either way. "Draft it" drafts the job
     description. Both run as the office (`src/lib/server/office-run.ts`),
     never as an Odd, so a new office can hire its first. An office run goes
@@ -860,8 +1007,14 @@ pieces under 3,900 bytes a line, so no value is on a command line.
     web or network, and goes when the run ends, pictures and all. A hire with
     no tool picked starts on the office's tool. Opened from a
     proposed hire, it starts filled in, reading the job description from the
-    proposer's file at that moment. Hiring writes a `staff` row; the Odd
-    walks in live. When the office opens, Odds do not walk in: each starts
+    proposer's file at that moment. Hiring writes a `staff` row, and the
+    hire comes by bus, an Odd or a persona alike: the bus pulls up at the
+    stop, the hire steps off and walks to work, and the bus drives on
+    (`ride` in `src/routes/+page.svelte`). The camera shows the whole office
+    while the bus comes, then steps in on the hire as it gets off and follows
+    it to its spot, as on the first run, unless the owner drags or zooms. Nothing waits on it: it can be
+    tapped from the moment it steps off. Only the first run's manager is
+    waited for. When the office opens, Odds do not walk in: each starts
     already at its spot (`StaffActor.arrive`), outside the owner's door if they owe
     it an answer, in its room if a job is running, anywhere else otherwise.
 13. **Files** an Odd attaches to an ask or a task are rows in the
@@ -882,21 +1035,39 @@ pieces under 3,900 bytes a line, so no value is on a command line.
     says the viewer opens it, or that it is a page the browser opens (a page links
     even when too big or not text for the viewer), and links that file; anything else stays
     text (`src/lib/ui/file-links.ts` asks once per name per page;
-    `src/lib/ui/markdown.ts` renders it). A bare file
+    `src/lib/ui/markdown.ts` renders it). A full path into a thread's folder, in
+    text or a `file:` link, is that file's `threads/<id>/...` name for the Odd
+    whose part holds it, shown by its bare name; a `file:` link that names no
+    office file stays text. Any other full path, from the writer, may be a file
+    in a folder the owner gave it: the office answers with its
+    `folders/<folder's name>/<path>` name (`givenPath` in `work-paths.ts`), shown
+    as `<folder's name>/<path>`, and a `file:` link to one that opens nothing
+    keeps only its words. A bare file
     name opens the one file with that name in the Odd's folder, outside hidden folders.
     When no file there has that name, it opens the newest file of that name in
     the Odd's own parts of thread folders, such as a goal's, and the link, the
     viewer and the Ledger still show only the bare name.
     `src/lib/server/files.ts` serves only text files up to 1 MB that already
-    exist inside that Odd's own folder or its parts of thread folders, never
+    exist inside that Odd's own folder, its parts of thread folders, or a
+    folder the owner gave it that its runs still get (`givenFile`, through the
+    ledger's `ownTools`: never one gone from the disk or in or holding a secret
+    store, so a proposed hire's intake never copies a file from one), never
     through a link to a file or a folder. It takes a bare name, or a path
     inside the Odd's own folder such as `site/index.html`, which opens only
-    when its real path lands inside that folder; never a full path, and a path
-    with a folder never reaches a thread, except an attached file's
-    `threads/<id>/...` name, which opens that one file in any part of the
+    when its real path lands inside that folder; never a full path but one
+    into a folder the owner gave it, which opens that one path, by the
+    innermost such folder, only to read (the owner's folder holds the owner's
+    own work), and nothing in a folder whose name another given folder shares
+    or a drive's top; a path
+    with a folder never reaches a thread, except a `threads/<id>/...` name
+    (an attached file's, a Storage entry's, or the one the page turns a full
+    path into), which opens that one file in any part of the
     folder while the Odd is on that thread (`workFile` in the ledger). A folder
     it may not read hides only what is in it. An error the owner reads names
-    only the file's bare name (`ownerMessage`); the rest goes to the log. It
+    only the file's bare name (`ownerMessage`); the rest goes to the log. A
+    file that is there, in a given folder its runs no longer get, says so by
+    the folder's name alone ("notes.md is in old-mac, which holds keys or
+    sign-ins, so Paige no longer gets it."; `noFile`). It
     refuses a save if the Odd changed the file
     since the owner opened it, and records each save in the ledger. A save
     that changed the file starts an `edited` follow-up (`learnFromEdit`): the
@@ -930,7 +1101,9 @@ pieces under 3,900 bytes a line, so no value is on a command line.
     (`problemsWith`) and retries once with what was wrong; a failed reply from
     words alone is kept in `~/.oddboro/office/last-look.md`. `/api/staff/[id]/look` and
     `/portrait` serve a hired Odd's frames and portrait, cached per
-    version, and PUT on `look` saves a redraw from the card's **Redraw look**.
+    version, and PUT on `look` saves a redraw from the card's **Redraw look**. A
+    persona Odd's card has no Redraw look and `setLook` refuses one: its look
+    is its package's ("A New Altitude persona as an Odd").
     The floor loads each drawn look into the atlas under its own variant
     (`src/lib/floor/looks.ts`), and `Pixel` takes an image `src`.
     The owner can draw someone from a headshot: `LookStudio` shrinks it to
@@ -1044,7 +1217,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
     them. Picking a tile sets the office's tool (`OFFICE_AGENT`, PUT
     `/api/agents`). Each panel offers one action
     (`toolAction` in `src/lib/ui/tool-action.ts`: Install, nothing while
-    installing, Sign in, Cancel, Sign in again over a sign-in that may have
+    installing, Sign in, Cancel, Switch account over a sign-in that may have
     stopped working, or a key), and Sign out beside it when signed in and not
     installing (`offersSignOut`). An install that ends with the tool still not
     found says to restart Oddboro. Each list reads the tools when made, after
@@ -1080,19 +1253,10 @@ its spec as `current`, and a note redraws it from that spec. Each note is
 added to the layout's words as a "Then:" line, so a later change starts from
 everything asked so far. A change in words also shows Claude every room's
 items by id and tile, so it can return room `edits` (remove, move, add) that
-name the very thing. In the large view, **Arrange by hand** turns on arranging: dragging a placed
-thing carries it (the floor's `onMove`, with an outline where it lands) to a
-tile in its own room, or its own area (the halls, the street, the grounds),
-and a tap picks it (`onPick`, `highlight`) to Move or
-Remove. The **Library** panel down the right lists what the office drew for
-itself, then every library piece by the room kind it belongs to
-(`libraryPieces`), the halls, the street and the grounds, searchable; drag one
-onto the floor, or pick one and tap where it goes. Undo steps back. Each change
-is an edit on its room, or under `areas` for one outside the rooms, in the spec,
-kept in the order made; one the office refuses is not kept, and its reason
-shows over the floor. Each is built at once by `POST /api/office/build`
-(`buildOnly`, no Claude run). **Save to the office** in the large view moves in
-at once. For a whole look the library lacks, like a
+name the very thing. The window has no arranging by hand, and no refurnishing
+by the latest rules: both built each change through a route the office never
+had, so they are out until it has one (NEW-1615). **Save to the office** in the
+large view moves in at once. For a whole look the library lacks, like a
 dungeon, Claude makes a theme: it draws stand-ins with `replaces` (drawn over
 the original, keeping its footprint and spots) and maps them in the spec's
 `swaps`, with `windows: false` for a place underground. Once a drawing builds,
@@ -1105,8 +1269,7 @@ round (`drawAll`), and the office keeps everything it asked for if that
 builds, else only the room edits, else the first version. A change keeps to
 what it touched (`scopeOf`): the look-over sees only rooms whose spec changed,
 and the front and street only if the theme did; its edits elsewhere are
-ignored, and with nothing touched it does not run. The office the owner is in can be refurnished by
-the latest rules, or arranged by hand, the same way. Nothing changes until **Move in**:
+ignored, and with nothing touched it does not run. Nothing changes until **Move in**:
 `POST /api/office/move-in` (`moveInto` in `src/lib/server/move-in.ts`) checks
 the art and builds the spec again on the server, keeps the layout and its art (`saveArt`), and `moveIn` makes it the
 office. Kept art joins the library for every later drawing: `officeLibrary()`
@@ -1121,7 +1284,7 @@ sample stay in the window to move back to.
 
 `npm run setup` asks nothing and opens the browser. Until the owner is
 welcomed, the page loads the sample's empty lot (`currentOffice({ lot: true })`,
-`lotOf` from `@oddboro/world`), and `Onboarding.svelte` runs six cards, the same on a Mac, Linux and Windows (hard rule 14), in
+`lotOf` from `@oddboro/world`), and `Onboarding.svelte` runs six cards (`steps.ts`), the same on a Mac, Linux and Windows (hard rule 14), in
 the start panel, titled "{name}'s Lot" until the office stands on it. The
 command center's buttons and tabs appear there once the first run is over, so
 the owner meets the panel first. The cards: Your computer (`MacCard`, the checks
@@ -1130,12 +1293,16 @@ or an API key kept in the keychain; `src/lib/server/claude.ts` passes both to
 every run. Next waits until the picked tool is signed in), the Office Manager (`ManagerCard`: four ready-made ones from
 `GET /api/onboarding`, or one described and drawn by `/api/looks` while the
 owner carries on), the space (`SpaceCard`: Quick is Main Street, the default; Custom (1-2 minutes) is
-a description or a chip, and starts the design job), and
-Open the office. `POST /api/onboarding` keeps the time zone, finishes the
+a description or a chip, and starts the design job), and Open the office.
+No card asks about error reports, a New Altitude sign-in or New Altitude
+personas: the owner finds them in Setup (see "Diagnostics" and "A New Altitude account"), so a new owner
+gets to work sooner. `POST /api/onboarding` keeps the time zone, finishes the
 welcome, hires the manager (`hireManager`), writes their hello into their chat
 (each ready-made manager's `hello` in `managers.ts`, in their own voice; a
 described one gets `customHello`),
-and tells the design job to move in when it is done. The hello asks three questions, each skippable
+adds each persona granted on its card right after the manager
+(`installGrantedPersonas`; one that fails is told to the page and never fails
+the welcome), and tells the design job to move in when it is done. The hello asks three questions, each skippable
 with its default said: what the office should help them get done (the manager
 offers an answer as a goal), how much to do on their own inside the office (the
 question says first that nothing leaves it without the owner's yes; until
@@ -1191,18 +1358,18 @@ address when it answers and is trusted.
 ## Who the office answers
 
 Other pages open in the owner's browser can send requests to the office too,
-so `guardOffice` (`src/lib/server/owner-page.ts`, the server's `handle` in
-`hooks.server.ts`) checks every route and API request before the route sees
-it, in every mode. Files built into the page (scripts, styles, images) are
-served before the check. SvelteKit's own check stays on as well, for form
-posts and any action with no content type. In a release, whose port moves,
-the adapter takes the office's origin to be https, so that check refuses
-the owner's own http page. So the page's `call()` (`src/lib/ui/api.ts`)
-sends every action as JSON, body or not.
+so `guardOffice` (`src/lib/server/owner-page.ts`, the first step of the
+server's `handle` in `hooks.server.ts`, before Sentry's) checks every route
+and API request before the route sees it, in every mode. Files built into the
+page (scripts, styles, images) are served before the check. SvelteKit's own
+check stays on as well, for form posts and any action with no content type.
+In a release, whose port moves, the adapter takes the office's origin to be
+https, so that check refuses the owner's own http page. So the page's `call()`
+(`src/lib/ui/api.ts`) sends every action as JSON, body or not.
 
 1. The Host must be one of the office's names, whatever the port: 127.0.0.1,
    [::1], localhost, the addresses through Caddy (`HOSTS` in
-   `src/lib/server/address.ts`) and the app's `ORIGIN`. A site that points its
+   `src/lib/server/hosts.ts`) and the app's `ORIGIN`. A site that points its
    own name at 127.0.0.1 looks same-origin to the browser, so only the name
    gives it away. A route asked by any other name gets 403.
 2. Anything but GET, HEAD and OPTIONS must come from the owner's page
@@ -1212,9 +1379,203 @@ sends every action as JSON, body or not.
 3. The one other client is the app's shell, which reports updates to
    `/api/update` with the token it passed the server (`fromShell` in
    `src/lib/server/update.ts`).
-4. Vite's dev server has its own route, `/__open-in-editor`, that opens a file
+4. `/account/callback` and `/connect/callback` arrive as GETs from the
+   owner's browser, sent back by the service's sign-in page, so they pass
+   rule 2 with no Origin.
+5. Vite's dev server has its own route, `/__open-in-editor`, that opens a file
    in an editor and runs before the handle. `noEditorLaunch` in
    `vite.config.ts` refuses it with 403, always: nothing in the office uses it.
+
+## Diagnostics
+
+Error and trace reports go to Sentry only after the owner's yes, and those
+through New Altitude only while the office is signed in to a New Altitude
+account.
+
+1. The address is `ODDBORO_DIAGNOSTICS_DSN`, from the environment or `.env`.
+   The app's shell passes its own (`apps/desktop/CLAUDE.md`). With none,
+   `serverOptions` (`src/lib/server/diagnostics.ts`) returns nothing: the SDK
+   never starts, Setup shows no switch, and the relay drops what it gets.
+2. The answer is `OFFICE_DIAGNOSTICS` in `.env`: `yes`, `no`, or unasked for
+   anything else, which sends nothing. `PUT /api/diagnostics` writes it, from
+   the Setup switch (`DiagnosticsSection`), the one place the owner turns
+   reports on; neither the first visit nor the Desk asks. It holds from the
+   next report, with no restart. `npm run reset` clears it.
+3. The gate: `gated` wraps the SDK's transport and asks `diagnosticsOn()` on
+   every send. What leaves has passed the one allow list in
+   `src/lib/diagnostics.ts` (`scrubEvent`, `scrubSpan`):
+   - An error's message only in a shape code writes (`keptMessage`): an
+     engine template with any property key as `[key]`, a system error's code
+     and call (`ENOENT open`), a Postgres error's SQLSTATE with its table,
+     column and constraint names, or a message Oddboro's code wrote
+     (`fixedError` in `@oddboro/ledger/errors`). Every other text leaves as
+     `[withheld]`.
+   - No address the office reaches. Every outgoing request, to the office
+     itself or another service, is named by its method alone, and no span
+     keeps `server.address`. A page frame from the office (the host and port
+     the page reached the relay on, whatever the scheme, or `HOSTS` on its
+     default port) keeps its origin, and its path under `/_app/`; any other
+     URL (another loopback port, a host, a browser extension, `file:`,
+     `blob:`) keeps its file name alone. Not the scheme: the built office
+     sees its own URL as https, since adapter-node reads no `ORIGIN`, while
+     the desktop window loads it over http.
+   - File paths by `reportPath`: relative to Oddboro's own code, from
+     `node_modules/` on inside a package, the file name alone anywhere else
+     under the home folder, and whole outside it. The shell's `report_path`
+     is the same rule.
+   - None of what the SDK collects by default (`DATA_COLLECTION`).
+
+   Every span container tells Sentry never to infer an address
+   (`infer_ip: 'never'`), and `fitDoor` cuts an envelope to the door's size
+   limit.
+
+4. The sign-in: reports to New Altitude's own address over https, or to the
+   account site when `ODDBORO_ACCOUNT_SITE` names one (`needsSignIn` in
+   `src/lib/diagnostics.ts`; the shell's `needs_sign_in` is the same rule,
+   and both are tested against `src/lib/needs-sign-in.cases.json`), go only
+   while the office is signed in, each with the account's access token in
+   its `authorization` header. Signed out, the gate drops them, Setup shows
+   no switch (`shown()`) and the page's traces follow a no (`pageAnswer()`).
+   Any other address never gets the token. The gate gets it from
+   `accountToken()` and reuses it for `TOKEN_REUSE_MS`, under the refresh
+   margin, within one sign-in: a burst of reports reads the secret store
+   once, and a new sign-in never sends the old token. It imports
+   `account.ts` when a report goes, never at the top, because that brings
+   in Postgres (step 7). `flush` waits for every send from its start,
+   including one still waiting on a token refresh, up to the flush's
+   timeout: a refresh slower than that loses its report when a crash ends
+   the office.
+5. The relay: the page's SDK (`hooks.client.ts`) posts to
+   `/api/diagnostics/envelope`, never to Sentry. The route scrubs each event
+   and span again and sends them through the office's own transport, so the
+   gate applies to them too.
+6. Traces: about one in ten (`TRACE_SAMPLE_RATE`). `QUIET_ROUTES` are never
+   traced: `/api/events` stays open as long as the page, `/api/update` is the
+   shell's poll, and the relay would trace itself.
+7. `instrumentation.server.ts` loads before the server, so
+   `src/lib/server/diagnostics.ts` and `src/lib/server/hosts.ts` import
+   nothing that brings in Postgres.
+
+## A New Altitude account
+
+An owner who already has a New Altitude account can sign in to it in Setup
+(`AccountSection`, which shows `AccountSignIn.svelte`). The first visit does
+not offer it. Error reports to New Altitude and the personas New Altitude
+offers need it (see "A New Altitude persona as an Odd"); nothing else does.
+
+1. The site is `ODDBORO_ACCOUNT_SITE`, `https://members.newaltitude.ai` when
+   unset. The issuer comes from that site's protected resource document; the
+   resource sent is always the configured site.
+2. `src/lib/server/account.ts` signs in through the connectors' provider
+   (`oauth.ts`) as its own public client, asks for `profile` and `personas`
+   (the personas New Altitude offers, `persona.ts`), and returns to
+   `/account/callback`. It asks `/api/me` once and keeps only the
+   id, name and email. Everything lives in one secret,
+   `new-altitude-account:oauth`, in the system's secret store, never in the
+   settings file. With no store, Sign in refuses before any request, and a
+   store that cannot write gets the same words. Only the newest Sign in's
+   page can finish, and none while a sign-in holds tokens; the same holds
+   for each persona's sign-in. A persona's sign-in returns to the same
+   callback, and its page stays good when the account's sign-in starts
+   again. An old page says to start again from Oddboro. Any failure after
+   the tokens are kept signs out, so no tokens stay without an account. If
+   the store cannot keep them, nothing is kept here, and the grant lapses at
+   New Altitude on its own.
+3. The states (`AccountStatus` in `src/lib/account.ts`): `in` while the
+   sign-in holds tokens, `expired` once New Altitude refused a refresh (the
+   account is kept, so the page can say whose it was), `out` with none.
+4. Every change goes to every open page on the live line as
+   `{ type: 'account', status }`; the page keeps it in `account.svelte.ts`.
+   `GET /api/account` checks it live, refreshing only a token close to
+   running out. `POST` starts a sign-in. `DELETE` signs out: it ends each persona's
+   sign-in (`endPersonaGrants`), then revokes the
+   refresh token at New Altitude, then removes the secret even when New
+   Altitude cannot be reached. The page makes these requests only through
+   `src/lib/ui/account-actions.ts`. Its Switch account, shown with the
+   signed-in line, signs out and then starts a new sign-in, so a Cancel or a
+   refused start leaves the office signed out.
+5. `accountToken()` is the one way to get the account's token.
+   `npm run reset` leaves the sign-in, as it leaves connector sign-ins.
+
+## A New Altitude persona as an Odd
+
+New Altitude may offer a signed-in account a persona as an Odd. The owner
+adds it from Hire, whose first step asks Hire an Odd or Hire a persona (the
+persona path signs in to New Altitude first, then shows the offers as a grid
+with a Hire button each, and closes once the persona joins), or in Setup's
+Account section (`PersonaOffer.svelte`, with Disconnect). The first visit does
+not offer it. It then works like any Odd, except that it speaks in
+the persona's voice.
+
+1. The package. `GET /api/personas` asks New Altitude's `/api/personas/odds`
+   with the account's token (`syncPersonas` in `src/lib/server/persona.ts`).
+   That read calls New Altitude and writes the ledger, so a browser that
+   says it comes from another site gets 403, as for an action.
+   Each listed persona brings its package: name, role, remit, hello, look,
+   portrait and parts, the same in every office. `persona-package.ts` checks
+   its shape, then the look checks a drawn look passes. Every part is named
+   `<slug>-<name>`, in the package and in its drawing (`checkPart`), and
+   replaces only a part drawn for an Odd of the same persona; a built-in
+   part or one drawn for any other Odd refuses the package. An account
+   signed in with `profile` alone answers
+   `rescope`, read from the kept scope with no request, and the offer shows
+   Sign in again, which signs out and in, since a refresh never widens a
+   grant.
+2. The grant. Add and Reconnect (`POST /api/personas/[slug]`) run the
+   persona's own sign-in for its door, `new-altitude-persona-<slug>:oauth`
+   with scope `stream`, through the account's provider and callback.
+   Add reads New Altitude's list first: a persona it does not offer now
+   gets 404 and no sign-in. A kept sign-in whose refresh New Altitude did
+   not answer gets 502 and no page, since that page could never finish.
+   Disconnect (`DELETE`) ends it and makes the Odd quiet. Signing out ends
+   every persona's sign-in. The secret store cannot list its entries, so
+   each write of a persona's sign-in also names the persona in
+   `new-altitude-personas:granted` there, and ending one takes the name out
+   once its secret is gone. Sign-out ends each sign-in that list or a
+   persona Odd names, whatever New Altitude lists. A door that turns the
+   sign-in's token down drops its tokens, so Reconnect opens New Altitude's
+   page again instead of refreshing a sign-in the door refuses.
+3. The install. `installPersona` hires it with the package's look and
+   portrait (`hirePersona` in `@oddboro/ledger`), saves its parts, and says
+   its hello with `sayInChat`. An install it refuses ends that persona's
+   sign-in, since nothing here would use it. Nothing is drawn.
+   `staff.package` holds the slug, the version, New Altitude's disclosure
+   sentence and `quiet`; it is null for every other Odd. A granted persona
+   in an office not yet welcomed joins right after the manager. The page
+   keeps it off the floor until the manager has walked in, then it walks on
+   (`firstRun` in `+page.svelte`).
+4. Hands, then voice. `run()` in `staff.ts` hands a persona Odd's chat, job
+   or follow-up to `personaRun` (`persona-run.ts`). Its own coding tool runs
+   first, as its hands, with `personaDesk` as its job description, and only
+   its tool steps reach the page. Then the door answers: `persona-door.ts`
+   sends the owner's words and the hands' report, cut to fit 4,000
+   characters, to `<issuer>/<slug>/stream`. A chat sends its earlier answered
+   exchanges and keeps the door's session in the Odd's folder. Any answer but
+   `answered` returns a one-line note and the report, so no work is lost. A
+   follow-up keeps the hands' Outcome line after the voice. Every other
+   run, such as a draft or a follow-up that reads the owner's no or edit
+   for a lesson, stays with the hands. Every word sent to the door is in
+   `persona-run.ts`, and every detail of the door's address and answer in
+   `persona-door.ts`.
+5. Quiet. `quiet` is `access` (New Altitude stopped offering it), `grant`
+   (its sign-in ended) or `signed-out`. A quiet Odd answers its line at once
+   and runs nothing; its chat shows the line and one button
+   (`PersonaQuiet.svelte`): Check again for `access`, Reconnect for the
+   others.
+6. Sync. `syncPersonas` runs when the office starts, on each
+   `GET /api/personas` and on Check again, never on a timer. A newer package
+   version replaces the name, role, remit, look, portrait and the package's
+   own parts; the hello is not said again. A persona no longer listed goes
+   quiet for `access`, and listed again it lifts that quiet only. An
+   unreachable New Altitude changes nothing. A listed persona whose sign-in
+   is kept with no Odd, as after a restart before Open the office, joins
+   this run's sign-ins, so Open the office installs it.
+7. The page. Every change reaches open pages on the live line as
+   `{ type: 'persona', slug, joined, problem? }`. `persona-offers.svelte.ts`
+   keeps one map for the page, so the offer and a quiet Odd's chat show the
+   same wait or problem. The chat prints the disclosure above the messages.
+   `hand_off` tells a colleague that a persona's replies come from New
+   Altitude, so what is handed to it leaves this computer.
 
 ## Running it always
 
@@ -1238,23 +1599,35 @@ sends every action as JSON, body or not.
 
 ## Where things live
 
-| Path                              | What it holds                                                                                                                        |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `src/lib/floor/`                  | The PixiJS floor and the Odds on it                                                                                                  |
-| `src/lib/staff/roster.ts`         | The Odd shape the page gets (`StaffProfile`), hiring looks, and the label for each activity                                          |
-| `src/lib/ui/`                     | The card and its tabs, the Desk, the Ledger, hiring, chat                                                                            |
-| `src/lib/server/`                 | Staff runs, office runs, looks, the job clock, events, keychain                                                                      |
-| `src/lib/server/profile.ts`       | An Odd as the page gets it (`toProfile`): its stored switches and folders, and what its runs reach now                               |
-| `src/lib/server/sandbox.ts`       | What a run's commands reach: the variables hidden from them, Claude Code's sandbox, the developer tool folders, and the refusal line |
-| `src/lib/server/aws.ts`           | AWS: the office's one sign-in, each AWS tool's role and the read check, the names-only Secrets Manager tool, and keys from AWS       |
-| `src/lib/site.ts`                 | Links to the public site's guides (`siteLink`): `localhost:4501` under `npm run dev`, else oddboro.com, or `ODDBORO_SITE_URL`        |
-| `src/routes/api/`                 | One folder per thing the page reads or changes                                                                                       |
-| `src/lib/server/office-design.ts` | Drawing an office from the owner's words, and where Odds move to                                                                     |
-| `src/lib/server/design-job.ts`    | The drawing as a job on the server, which pages follow                                                                               |
-| `src/lib/ui/onboarding/`          | A new owner's first visit: the cards, the reveal's story, the music                                                                  |
-| `src/lib/floor/reveal.ts`         | The office going up beat by beat, and the bus                                                                                        |
-| `scripts/office-service.ts`       | The login service                                                                                                                    |
-| `src/app.css`                     | Tokens. Every colour in the chrome reads these.                                                                                      |
+| Path                                  | What it holds                                                                                                                         |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/lib/floor/`                      | The PixiJS floor and the Odds on it                                                                                                   |
+| `src/lib/staff/roster.ts`             | The Odd shape the page gets (`StaffProfile`), hiring looks, and the label for each activity                                           |
+| `src/lib/ui/`                         | The card and its tabs, the Desk, the Ledger, hiring, chat                                                                             |
+| `src/lib/server/`                     | Staff runs, office runs, looks, the job clock, events, keychain. Where to start a change there: [CLAUDE.md](src/lib/server/CLAUDE.md) |
+| `src/lib/server/profile.ts`           | An Odd as the page gets it (`toProfile`): its stored switches and folders, and what its runs reach now                                |
+| `src/lib/server/sandbox.ts`           | What a run's commands reach: the variables hidden from them, Claude Code's sandbox, the developer tool folders, and the refusal line  |
+| `src/lib/server/aws.ts`               | AWS: the office's one sign-in, each AWS tool's role and the read check, the names-only Secrets Manager tool, and keys from AWS        |
+| `src/lib/site.ts`                     | Links to the public site's guides (`siteLink`): `localhost:4501` under `npm run dev`, else oddboro.com, or `ODDBORO_SITE_URL`         |
+| `src/routes/api/`                     | One folder per thing the page reads or changes                                                                                        |
+| `src/lib/server/office-design.ts`     | Drawing an office from the owner's words, and where Odds move to                                                                      |
+| `src/lib/server/design-job.ts`        | The drawing as a job on the server, which pages follow                                                                                |
+| `src/lib/ui/onboarding/`              | A new owner's first visit: the cards, the reveal's story, the music                                                                   |
+| `src/lib/floor/reveal.ts`             | The office going up beat by beat, and the bus                                                                                         |
+| `src/lib/diagnostics.ts`              | What a report may carry, and when a trace is taken: the server's, the relay's and the page's one rule                                 |
+| `src/lib/server/diagnostics.ts`       | The SDK's options and the gate every report passes, with the owner's answer                                                           |
+| `src/lib/server/account.ts`           | The New Altitude sign-in: start, callback, refresh, sign out                                                                          |
+| `src/lib/account.ts`                  | The account and its states, shared by the server and the page                                                                         |
+| `src/lib/server/persona.ts`           | The personas New Altitude offers: sync, each persona's sign-in, install, Disconnect                                                   |
+| `src/lib/server/persona-package.ts`   | A persona's package checked before the office trusts it                                                                               |
+| `src/lib/server/persona-run.ts`       | A persona Odd's run: its hands, then its voice, and every word sent to its door                                                       |
+| `src/lib/server/persona-door.ts`      | The persona's door on New Altitude: its address, scope, what a turn sends and what comes back                                         |
+| `src/lib/persona.ts`                  | The offers, the quiet reasons and their lines, shared by the server and the page                                                      |
+| `src/lib/ui/persona-offers.svelte.ts` | The page's offers and each persona's wait or problem, with Add, Reconnect, Disconnect and Check again                                 |
+| `src/lib/ui/PersonaQuiet.svelte`      | A quiet persona Odd's line and its one button                                                                                         |
+| `src/lib/server/hosts.ts`             | The office's names through Caddy (`HOSTS`), alone so reporting loads before Postgres                                                  |
+| `scripts/office-service.ts`           | The login service                                                                                                                     |
+| `src/app.css`                         | Tokens. Every colour in the chrome reads these.                                                                                       |
 
 ## Rules for this app
 
@@ -1275,7 +1648,10 @@ sends every action as JSON, body or not.
 - Third-party packages go under `devDependencies` in `package.json`, even
   the ones the office runs: the build bundles those, and the app ships only
   what the workspace packages load (`apps/desktop/scripts/stage.ts`).
-  `dependencies` holds the workspace packages alone.
+  `dependencies` holds the workspace packages, and Sentry's two
+  (`@sentry/sveltekit`, `@sentry/core`) alone: its tracing hooks modules as
+  they load (`instrumentation.server.ts`), so the build leaves it out and the
+  app ships it.
 - The floor draws only when something on screen changed. Pixi's own
   every-frame draw is off. Anything that changes the picture outside the
   camera calls `floor.invalidate()`. Name tags and room signs move in
@@ -1302,7 +1678,7 @@ sends every action as JSON, body or not.
   Odd, a swap to another world) glides through `glideTo` in
   `src/lib/floor/engine.ts`; only the first frame and a resize place it at
   once. A swap keeps the owner's view on the street and glides out only if the
-  new building would not fit. Dragging or zooming takes the camera back. Past the grounds the floor lays a meadow (`MEADOW` tiles a side) with the street carried out to its edges and trees scattered over it (`countryside` in `engine.ts`), so the camera can pull back far enough to fit the whole office between open panels (`viewCover`).
+  new building would not fit. Dragging or zooming takes the camera back. Past the grounds the floor lays a meadow (`MEADOW` tiles a side) with the street and the river carried out to its edges and trees scattered over it (`countryside` in `engine.ts`), so the camera can pull back far enough to fit the whole office between open panels (`viewCover`).
 - No CSS animation loops forever. Play it once, or only while something is
   happening, like the dots while a reply loads.
 - The office keeps the owner's time zone (`zone()` from `@oddboro/ledger/time`),
@@ -1313,8 +1689,9 @@ sends every action as JSON, body or not.
   (`src/lib/ui/Welcome.svelte`) after that.
 - Never show demo numbers as real ones. The card's back shows only measured
   usage.
-- A tool connects at read or write: read gets the tools the owner ticked as
-  read-only, write gets every tool from Draft, and at Draft each change waits for the owner's yes.
+- A tool connects at read or write: read gets the tools its server marks as
+  only reading (`readsOnly`), write gets every tool from Draft, and at Draft
+  each change waits for the owner's yes.
 - A headless Odd cannot reuse Claude Code's own MCP sign-ins (it reports
   `needs-auth`). That is why the office runs OAuth itself.
 - Charts use LayerChart. Its tooltip reads `--color-surface-*`; set them from
@@ -1325,3 +1702,10 @@ sends every action as JSON, body or not.
   renderer in `packages/world` still multiplies, so its night renders differ
   a little from the office.
 - In dev, `window.floor` holds the `Floor` for poking at from the console.
+- When the next new panel comes, or NEW-1665 is built: first give the whole
+  page one pass at phone and desktop width with an accessibility check, one
+  helper for the page's actions, tables for its words, one source for its
+  colours and one shared snapshot of the office. Text that tells the owner
+  how an action went is built from the server's result (NEW-1709). Add a
+  lint that fails on a promise nobody awaits or catches; that brings ESLint,
+  a new dependency, so the change says why.

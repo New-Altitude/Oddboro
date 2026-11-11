@@ -214,7 +214,7 @@
       <button class="wide" onclick={cancelSignIn}>Cancel signing in</button>
     {:else}
       <button class="wide" onclick={switchAccount}
-        >{settings?.account ? 'Sign in again' : 'Sign in with Claude'}</button
+        >{settings?.account ? 'Switch account' : 'Sign in with Claude'}</button
       >
       {#if settings?.account}
         <button class="wide" disabled={saving} onclick={signOut}>Sign out</button>

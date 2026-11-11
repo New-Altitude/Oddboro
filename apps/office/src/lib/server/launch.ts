@@ -9,7 +9,7 @@
 import { execFileSync } from 'node:child_process';
 import { readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { modelSection, runsGoing, type ModelUsage } from '@oddboro/ledger';
+import { currentPlatform, modelSection, runsGoing, type ModelUsage } from '@oddboro/ledger';
 import { cleanEnv } from './claude.ts';
 
 /** Where the owner signs a tool in for the office: beside the Odd's "Runs on" picker. */
@@ -35,6 +35,45 @@ export function toml(v: Toml): string {
   return `{ ${Object.entries(v)
     .map(([k, x]) => `${tomlString(k)} = ${toml(x)}`)
     .join(', ')} }`;
+}
+
+/**
+ * One MCP server a run gets, as `access()` in staff.ts builds it: the
+ * office's tool server, a command the run starts, and each outside tool at
+ * the office's gateway (gateway.ts), with the run's token as its header. A
+ * run never gets an outside server itself, so a new kind of connector
+ * changes `upstream` in access.ts, not this.
+ */
+export type McpServer =
+  | { type: 'stdio'; command: string; args: string[]; env: Record<string, string> }
+  | { type: 'http'; url: string; headers: Record<string, string> };
+
+/**
+ * A run's servers as Claude Code's `--mcp-config` and Grok's agent file take
+ * them. Neither config has ever named a command's kind (each reads a server
+ * with no `type` as one), so the kind stays the office's own word and the
+ * file a run gets does not change.
+ */
+export function configServers(
+  servers: Record<string, McpServer>
+): Record<string, Record<string, unknown>> {
+  return Object.fromEntries(Object.entries(servers).map(([name, s]) => [name, configServer(s)]));
+}
+
+function configServer(s: McpServer): Record<string, unknown> {
+  switch (s.type) {
+    case 'http':
+      return s;
+    case 'stdio': {
+      const { type, ...command } = s;
+      return command;
+    }
+    default: {
+      // A kind with no case here fails the type check; the cast only names it.
+      const missed: never = s;
+      throw new Error(`No way to write a ${(missed as McpServer).type} server into a run's config`);
+    }
+  }
 }
 
 /**
@@ -86,8 +125,9 @@ export function sweep(dir: string, suffix: string, starting: string): void {
 }
 
 /**
- * The office's clean environment (`cleanEnv`) for a tool another company
- * makes: no Anthropic key, no variable of that tool's own (`prefixes`) from
+ * The office's clean environment (`cleanEnv`) for an owner-side launch of a
+ * tool another company makes (an install, a sign-in, an update; a run starts
+ * from `runEnv` instead): no Anthropic key, no variable of that tool's own (`prefixes`) from
  * the office's environment, and no node options, since a preload the office's
  * node was started with sits outside the tool's sandbox and node refuses to
  * start the tool server when it cannot read it.
@@ -159,7 +199,7 @@ export function shellEnv(temp: string): Record<string, string> {
  * is not found here.
  */
 export function stopGroups(pid: number, signal: 'SIGTERM' | 'SIGKILL' = 'SIGTERM'): void {
-  if (process.platform === 'win32') {
+  if (currentPlatform() === 'win32') {
     try {
       execFileSync(
         join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe'),

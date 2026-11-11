@@ -1,3 +1,5 @@
+import { FILE_MAX } from '#lib/attachments.ts';
+import { CHAT_REQUEST_BYTES } from '../staff/chat-input.ts';
 // Which requests the office answers. It runs on the owner's computer, where
 // any web page the owner opens can send it requests, so `guardOffice` (the
 // server's `handle` in hooks.server.ts) checks every request before a route
@@ -18,8 +20,7 @@
 // owner's page through Caddy, which reaches the office over http while the
 // page is https, so `fromOwnerPage` compares what the browser itself says.
 import type { Handle } from '@sveltejs/kit/hooks';
-import { CHAT_REQUEST_BYTES } from '../staff/chat-input.ts';
-import { HOSTS } from './address.ts';
+import { HOSTS } from './hosts.ts';
 import { fromRun, GATEWAY_PATH } from './gateway.ts';
 import { fromShell } from './update.ts';
 
@@ -88,12 +89,16 @@ export const guardOffice: Handle = async ({ event, resolve }) => {
   ) {
     const chat =
       request.method === 'POST' && /^\/api\/staff\/[a-z0-9-]+\/chat\/?$/.test(event.url.pathname);
-    // The app raises adapter-node's limit for screenshots. Keep its former
-    // limit everywhere else. The page sends JSON with Content-Length.
+    // Uploads use their existing per-file limit. The larger chat limit
+    // includes JSON encoding for inline imports, and never widens other actions.
+    const upload =
+      request.method === 'POST' &&
+      /^\/api\/staff\/[a-z0-9-]+\/attachments\/?$/.test(event.url.pathname);
+    const limit = chat ? CHAT_REQUEST_BYTES : upload ? FILE_MAX : 512 * 1024;
     if (
       request.body &&
-      (chat || process.env.ODDBORO_APP) &&
-      !(await fits(request, chat ? CHAT_REQUEST_BYTES : 512 * 1024))
+      (chat || upload || process.env.ODDBORO_APP) &&
+      !(await fits(request, limit))
     )
       return new Response('That request is too large', { status: 413 });
     return resolve(event);

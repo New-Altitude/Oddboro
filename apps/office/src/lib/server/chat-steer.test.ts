@@ -89,7 +89,7 @@ test(
       assert.equal(blocks[0].source.data, bytes.toString('base64'));
       assert.ok(blocks.at(-1).text.includes(correction.message));
       assert.equal((await L.task(task.id))?.status, 'open');
-      assert.equal(inProgress[id]?.[0].about?.id, job.id);
+      assert.equal(inProgress()[id]?.[0].about?.id, job.id);
       assert.deepEqual(await last(await send(id, correction)), answer);
       assert.equal(history(id).filter((e) => e.turnId === turnId).length, 2);
       assert.deepEqual(history(id).find((e) => e.turnId === turnId)?.source, {
@@ -165,8 +165,8 @@ test(
     assert.ok(f);
     const run = followThrough(f);
     try {
-      await t.waitFor(() => assert.ok(inProgress.paige?.[0].about), { timeout: 20_000 });
-      const about = inProgress.paige[0].about!;
+      await t.waitFor(() => assert.ok(inProgress().paige?.[0].about), { timeout: 20_000 });
+      const about = inProgress().paige[0].about!;
       assert.equal(about.leadId, 'lead');
       assert.equal(about.title, 'Plan the fair');
       const correction = {
@@ -184,10 +184,43 @@ test(
         )
       );
       assert.deepEqual(history('lead').find((e) => e.turnId === correction.turnId)?.about, about);
-      assert.equal(inProgress.paige[0].about?.key, about.key);
+      assert.equal(inProgress().paige[0].about?.key, about.key);
     } finally {
       writeFileSync(ready, '');
       await run;
     }
   }
 );
+
+test('a correction tells the lead which saved turn or work it changes, without repeating completed actions', async (t) => {
+  const { correctionBrief } = await import('./chat-run.ts');
+  const old = {
+    from: 'owner' as const,
+    at: '2026-01-01T00:00:00.000Z',
+    text: 'Prepare the room.',
+    turnId: 'earlier'
+  };
+  t.assert.snapshot(
+    correctionBrief(
+      { ...old, text: 'Leave room for the band.', source: { kind: 'correction', id: 'earlier' } },
+      [old]
+    )
+  );
+  t.assert.snapshot(
+    correctionBrief(
+      {
+        ...old,
+        about: {
+          key: 'goal-work',
+          kind: 'goal',
+          id: 7,
+          title: 'Plan the fair',
+          leadId: 'lead',
+          lead: 'Lena'
+        }
+      },
+      []
+    )
+  );
+  assert.deepEqual(correctionBrief(old, []), []);
+});

@@ -17,7 +17,15 @@ import {
   type ReplyDraft
 } from '@oddboro/ledger';
 import { learnFromReply } from './files.ts';
-import { answered, saveDraft, sendMail, type Outgoing, type Received } from './google/gmail.ts';
+import {
+  answered,
+  filesOf,
+  saveDraft,
+  sendMail,
+  type Outgoing,
+  type OutgoingFile,
+  type Received
+} from './google/gmail.ts';
 import { GoogleError, lacksScope, type Token } from './google/http.ts';
 import { bearer } from './oauth.ts';
 
@@ -33,8 +41,14 @@ export class GmailRefusal extends Error {
 /** Gmail's sign-in is gone: the token could not be had or renewed. */
 class SignedOut extends Error {}
 
-/** What the owner changes before it goes. */
-export type ReplyFields = Pick<ReplyDraft, 'to' | 'cc' | 'subject' | 'body'>;
+/**
+ * What the owner changes before it goes. `attachments` names, by path, the
+ * Odd's files that still go: the owner may take any off, never add one.
+ * Left out, every file the Odd attached goes.
+ */
+export type ReplyFields = Pick<ReplyDraft, 'to' | 'cc' | 'subject' | 'body'> & {
+  attachments?: string[];
+};
 export type ReplyAction = 'send' | 'draft';
 
 /** Replies on their way to Gmail, so a second click cannot send one twice. */
@@ -132,6 +146,18 @@ export async function sendReply(
   sending.add(id);
   try {
     const nothing = action === 'send' ? 'Nothing was sent' : 'Nothing was saved';
+    const { attachments: keep, ...edits } = fields;
+    const kept = (a.reply.attachments ?? []).filter((f) => !keep || keep.includes(f.path));
+    // Checked again and read now: a file may have changed or gone since the Odd attached it.
+    let files: OutgoingFile[];
+    try {
+      files = filesOf(a.staffId, kept);
+    } catch (e) {
+      throw new GmailRefusal(
+        409,
+        `${nothing}. ${(e as Error).message} Take it off, or ask for changes.`
+      );
+    }
     const token = await gmailToken(a, nothing);
     const out: Outgoing = {
       to: fields.to.join(', '),
@@ -139,7 +165,8 @@ export async function sendReply(
       subject: fields.subject,
       body: fields.body,
       threadId: a.reply.gmailThreadId,
-      inReplyTo: a.reply.inReplyTo
+      inReplyTo: a.reply.inReplyTo,
+      ...(files.length ? { attachments: files } : {})
     };
     let gmailId: string;
     try {
@@ -149,7 +176,8 @@ export async function sendReply(
     }
     const final: ReplyDraft = {
       ...a.reply,
-      ...fields,
+      ...edits,
+      attachments: kept.length ? kept : undefined,
       sent: { action, at: new Date().toISOString(), gmailId }
     };
     if (!(await approveReply(id, final)))
