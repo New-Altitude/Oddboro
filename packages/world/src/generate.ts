@@ -236,7 +236,7 @@ export const LIMITS = {
   seats: 32,
   seatsPerRoom: 12,
   extras: 6,
-  /** Per room. Room edits come from Claude and from arranging by hand. */
+  /** Per room. Room edits come from Claude, and from a layout saved while the office offered arranging by hand. */
   edits: 200,
   name: 32,
   roomName: 24,

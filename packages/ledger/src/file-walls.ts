@@ -16,6 +16,7 @@
 // carries its files, so only the owner's own programs could do that.
 import { existsSync, lstatSync, realpathSync, statSync } from 'node:fs';
 import { isAbsolute, join, resolve, sep } from 'node:path';
+import { currentPlatform } from './platform.ts';
 
 export type FileWalls = {
   /** The run's own folder: a relative path starts here. */
@@ -36,7 +37,6 @@ export type FileWalls = {
 
 export type Resolved = { path: string } | { refused: string };
 
-const WIN = process.platform === 'win32';
 /** Windows' device names, which open a device whatever folder they sit in, with any extension. */
 const DEVICES = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³]|conin\$|conout\$)(\..*)?$/i;
 
@@ -44,7 +44,7 @@ const DEVICES = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³]|conin\$|conout\
 function malformed(input: string): string | undefined {
   if (!input) return 'Name a file or folder.';
   if (input.includes('\0')) return 'That path holds a NUL character.';
-  if (!WIN) return undefined;
+  if (currentPlatform() !== 'win32') return undefined;
   // \\?\, \\.\ and \\server\share reach devices and other machines.
   if (/^[\\/]{2}/.test(input)) return 'Network and device paths are not allowed.';
   // A colon past the drive letter names an alternate data stream.

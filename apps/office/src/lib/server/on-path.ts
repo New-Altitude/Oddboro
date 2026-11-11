@@ -1,6 +1,7 @@
 // Where a command runs from, found the way a spawn of it by name finds it.
 import { accessSync, constants } from 'node:fs';
 import { delimiter, join } from 'node:path';
+import { currentPlatform } from '@oddboro/ledger/platform';
 
 /**
  * The file names a spawn of `command` runs. On Windows, Node's spawn (libuv's
@@ -10,7 +11,7 @@ import { delimiter, join } from 'node:path';
  * Read per call, like the tools offered, so a test can stub the system.
  */
 const runnable = (command: string): string[] =>
-  process.platform === 'win32' ? [`${command}.com`, `${command}.exe`] : [command];
+  currentPlatform() === 'win32' ? [`${command}.com`, `${command}.exe`] : [command];
 
 /** The first runnable `command` in a folder on PATH, or undefined when there is none. */
 export function onPath(command: string): string | undefined {

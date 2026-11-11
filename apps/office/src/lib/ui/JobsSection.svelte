@@ -3,7 +3,7 @@
   import { describe, zoneName } from '@oddboro/ledger/time';
   import SchedulePicker from './SchedulePicker.svelte';
   import ChatSignInCard from './ChatSignInCard.svelte';
-  import type { ChatSignIn } from '../server/agent-sign-in.ts';
+  import type { ChatSignIn } from '../staff/chat.ts';
   import { chatAbout, showInChat } from './chat-about.svelte.ts';
   import Markdown from './Markdown.svelte';
   import { call } from './api.ts';

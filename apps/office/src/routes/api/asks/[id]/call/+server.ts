@@ -20,7 +20,7 @@ export const POST: RequestHandler = async ({ params }) => {
   try {
     let result;
     try {
-      result = await makeCall(a.call);
+      result = await makeCall(a.call, a.staffId);
     } catch (e) {
       error(502, `The office could not reach the service: ${e instanceof Error ? e.message : e}`);
     }

@@ -20,6 +20,16 @@ export function repoFiles(): string[] {
 
 export const read = (file: string) => readFileSync(join(ROOT, file), 'utf8');
 
+/**
+ * The text with comments taken out, keeping each line where it was so a
+ * failure names the right one (a `//` after a colon is a URL). Rust's
+ * comments take the same shapes as TypeScript's.
+ */
+export const withoutComments = (text: string) =>
+  text
+    .replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ''))
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+
 /** Print failures and exit 1, or print ok. */
 export function report(name: string, failures: string[]): void {
   if (failures.length) {

@@ -1,6 +1,6 @@
 {
-  "id": "cb9db5ea-45ba-407c-aafb-bee010cf2c70",
-  "prevId": "3c060123-fe21-4f77-900e-0031305777ec",
+  "id": "1e355801-939e-4b5c-9a10-7ef1fc73980c",
+  "prevId": "35ce58bb-9c9a-4b82-9b17-4f8801c2347b",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -291,15 +291,21 @@
           "primaryKey": false,
           "notNull": false
         },
-        "web": {
-          "name": "web",
+        "call": {
+          "name": "call",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
-        "call": {
-          "name": "call",
+        "switches": {
+          "name": "switches",
           "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "odd": {
+          "name": "odd",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -892,12 +898,6 @@
             "cycle": false
           }
         },
-        "request_id": {
-          "name": "request_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "title": {
           "name": "title",
           "type": "text",
@@ -961,13 +961,7 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "goals_requestId_unique": {
-          "name": "goals_requestId_unique",
-          "nullsNotDistinct": false,
-          "columns": ["request_id"]
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -1094,19 +1088,6 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true
-        },
-        "files": {
-          "name": "files",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "changed_at": {
-          "name": "changed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
         },
         "report": {
           "name": "report",
@@ -2004,12 +1985,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "checked_files": {
-          "name": "checked_files",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
         "started_at": {
           "name": "started_at",
           "type": "timestamp with time zone",
@@ -2125,7 +2100,7 @@
           "type": "text[]",
           "primaryKey": false,
           "notNull": true,
-          "default": "'{\"search_ledger\",\"give_owner_a_task\",\"find_connectors\",\"ask_for_access\",\"edit_my_job\",\"edit_my_description\",\"hand_off\",\"poke_owner\"}'"
+          "default": "'{\"see_office\",\"search_ledger\",\"give_owner_a_task\",\"find_connectors\",\"ask_for_access\",\"edit_my_job\",\"edit_my_description\",\"hand_off\",\"poke_owner\"}'"
         },
         "account": {
           "name": "account",
@@ -2190,6 +2165,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "package": {
+          "name": "package",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "hired_at": {
           "name": "hired_at",
           "type": "timestamp with time zone",
@@ -2200,6 +2181,12 @@
         "left_at": {
           "name": "left_at",
           "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "jobs_off": {
+          "name": "jobs_off",
+          "type": "integer[]",
           "primaryKey": false,
           "notNull": false
         }
@@ -2379,19 +2366,6 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true
-        },
-        "response": {
-          "name": "response",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "response_version": {
-          "name": "response_version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
         },
         "status": {
           "name": "status",

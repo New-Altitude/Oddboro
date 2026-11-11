@@ -1,8 +1,10 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import type { Delivery } from '@oddboro/ledger';
+  import { SWITCH_NAMES } from '@oddboro/ledger/access';
   import { FOLDER_LABEL } from '@oddboro/ledger/access';
   import FolderAsk from './FolderAsk.svelte';
+  import FolderWarning from './FolderWarning.svelte';
   import { call } from './api.ts';
 
   let {
@@ -10,26 +12,34 @@
     name,
     onchanged
   }: {
-    item: Pick<Delivery, 'id' | 'status' | 'why' | 'folder' | 'web'>;
+    item: Pick<Delivery, 'id' | 'status' | 'why' | 'folder' | 'switches'>;
     name: string;
     onchanged: () => void;
   } = $props();
   // The parent keys this editor by ask id. Office updates and picker focus keep the owner's edits.
   let path = $state(untrack(() => item.folder?.path ?? ''));
   let level = $state(untrack(() => item.folder?.level ?? 'read'));
-  let changing = $state(false);
+  let changing = $state(untrack(() => item.folder?.path === null));
   let picking = $state(false);
   let busy = $state(false);
   let problem = $state('');
+  let warning = $state<{ path: string; level: typeof level; line: string }>();
 
-  async function decide(decision: 'approve' | 'deny') {
+  async function decide(decision: 'approve' | 'deny', accepted?: typeof warning) {
     if (busy || picking || item.status !== 'open') return;
     busy = true;
     problem = '';
-    const url = `/api/asks/${item.id}`;
+    const url = `/api/asks/${item.id}` as const;
     try {
-      if (decision === 'approve' && item.folder) await call(`${url}/folder`, { path, level });
-      else await call(url, { decision });
+      if (decision === 'approve' && item.folder) {
+        const chosen = accepted ?? { path, level };
+        const result = await call<{ warning?: string }>(`${url}/folder`, {
+          path: chosen.path,
+          level: chosen.level,
+          accept: !!accepted
+        });
+        warning = result.warning ? { ...chosen, line: result.warning } : undefined;
+      } else await call(url, { decision });
     } catch (e) {
       problem = e instanceof Error ? e.message : String(e);
     } finally {
@@ -41,16 +51,21 @@
 
 <div class="space-y-1.5 rounded-lg border border-hairline p-2 text-xs">
   {#if item.status === 'open' && item.why}<p>{item.why}</p>{/if}
-  {#each item.web ?? [] as target (target.id)}
-    <p>
-      <strong>{target.name}</strong> · {target.result ??
-        (target.alreadyOn ? 'Already on. ' : '') + target.reach}
-    </p>
+  {#each item.switches ?? [] as switchName (switchName)}
+    <p>{name} · {SWITCH_NAMES[switchName]}</p>
   {/each}
   {#if item.folder?.given}
     <p>{name} · {FOLDER_LABEL[item.folder.given.level]} · {item.folder.given.path}</p>
   {/if}
-  {#if item.status === 'open'}
+  {#if item.status === 'open' && warning}
+    <FolderWarning
+      folder={warning.path}
+      warning={warning.line}
+      {busy}
+      onaccept={() => decide('approve', warning)}
+      oncancel={() => (warning = undefined)}
+    />
+  {:else if item.status === 'open'}
     {#if item.folder}
       <dl><FolderAsk {name} bind:path bind:level bind:changing bind:picking /></dl>
     {/if}
@@ -64,7 +79,7 @@
       <button
         class="rounded-md bg-sea px-2 py-1 text-night"
         disabled={busy || picking || (!!item.folder && !path.trim())}
-        onclick={() => decide('approve')}>{item.folder ? 'Give access' : 'Allow browsing'}</button
+        onclick={() => decide('approve')}>{item.folder ? 'Give access' : 'Turn on'}</button
       >
     </div>
   {/if}

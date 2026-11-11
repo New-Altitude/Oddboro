@@ -25,7 +25,7 @@ export function staleDraft(draft: Draft | undefined, row: SavedResponse) {
 export async function saveResponse(id: number, draft: Draft, finish?: { note?: string }) {
   writing[id] = true;
   try {
-    const url = `/api/tasks/${id}`;
+    const url = `/api/tasks/${id}` as const;
     const known = saved[id];
     const row =
       finish && known && alreadySaved(draft, known)

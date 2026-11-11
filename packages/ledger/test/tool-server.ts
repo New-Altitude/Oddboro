@@ -8,6 +8,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { after } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -43,7 +44,7 @@ export async function toolServer(staffId: string, env: Record<string, string>): 
   await client.connect(
     new StdioClientTransport({
       command: process.execPath,
-      args: [new URL('../src/mcp.ts', import.meta.url).pathname],
+      args: [fileURLToPath(new URL('../src/mcp.ts', import.meta.url))],
       env: { PATH: process.env.PATH ?? '', ...place, STAFF_ID: staffId, ...env },
       stderr: 'ignore'
     })

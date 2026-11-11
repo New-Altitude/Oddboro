@@ -16,7 +16,8 @@
   // gains its name and job title, and the top slot gains a search that
   // matches name, role or remit. From the search, the arrow keys pick an Odd
   // and Enter opens a chat with it. The portraits keep their place at the
-  // edge, so nothing jumps. The rail sits on the end side, so it flips in a
+  // edge, so nothing jumps. Off a Mac the shortcut is Ctrl+K, and the
+  // button says so. The rail sits on the end side, so it flips in a
   // right-to-left page. The page slides it off the screen while an Odd's
   // panel is open.
   type Props = {
@@ -59,6 +60,10 @@
   let picked = $state(false);
   let query = $state('');
   const open = $derived(!picked && (hovering || focused || asked || !!query.trim()));
+  /** The shortcut as this system names it. ⌘K until the page knows it is not on a Mac. */
+  let mac = $state(true);
+  const keyLabel = $derived(mac ? '⌘K' : 'Ctrl K');
+  const keyName = $derived(mac ? 'Meta+K' : 'Control+K');
 
   let box: HTMLElement | undefined = $state();
   let search: HTMLInputElement | undefined = $state();
@@ -98,6 +103,7 @@
     untrack(findOne);
   });
   onMount(() => {
+    mac = /Mac|iPhone|iPad/.test(navigator.userAgent);
     if (searching) findOne();
   });
 
@@ -173,7 +179,7 @@
         class="min-w-0 flex-1 rounded-lg bg-raise py-2 ps-3 text-sm outline-none placeholder:text-faint focus:ring-1 focus:ring-sea/60"
         placeholder={`Find one of ${staff.length}`}
         aria-label="Find an Odd by name, role or remit. Arrow keys pick one, Enter opens a chat."
-        aria-keyshortcuts="Meta+K"
+        aria-keyshortcuts={keyName}
         bind:value={query}
         onkeydown={keys}
         onfocus={() => (typing = true)}
@@ -183,8 +189,8 @@
     <button
       class="grid size-10 shrink-0 place-items-center rounded-xl text-muted hover:bg-raise hover:text-ink"
       aria-label="Find an Odd"
-      aria-keyshortcuts="Meta+K"
-      title="Find an Odd (⌘K)"
+      aria-keyshortcuts={keyName}
+      title={`Find an Odd (${mac ? '⌘K' : 'Ctrl+K'})`}
       onclick={findOne}
     >
       <svg
@@ -197,7 +203,7 @@
         stroke-linejoin="round"
         aria-hidden="true"><circle cx="11" cy="11" r="6.5" /><path d="m20 20-4.2-4.2" /></svg
       >
-      <span class="-mt-1 text-[9px] leading-none text-faint" aria-hidden="true">⌘K</span>
+      <span class="-mt-1 text-[9px] leading-none text-faint" aria-hidden="true">{keyLabel}</span>
     </button>
   </div>
   <div class="mx-auto my-1 h-px w-8 shrink-0 bg-hairline" aria-hidden="true"></div>

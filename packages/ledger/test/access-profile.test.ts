@@ -14,6 +14,7 @@ import { after, test } from 'node:test';
 import type { Capabilities } from '../src/capabilities.ts';
 import type { ConnectorRow } from '../src/office.ts';
 import { db, toolServer } from './tool-server.ts';
+import { TEMP_IN_APPDATA } from './store-states.ts';
 
 const W = await import('../src/access-words.ts');
 const A = await import('../src/agents.ts');
@@ -106,65 +107,69 @@ const runs = {
   })
 };
 
-test('ownTools is what a run reaches: the switch as its tool takes it, the web, the internet only with both, and given folders still on the disk', () => {
-  const on = (who: ReturnType<typeof odd>, platform: NodeJS.Platform) => {
-    const o = C.ownTools(who, platform);
-    return { commands: o.commands, web: o.web, network: o.network };
-  };
-  assert.deepEqual(on(odd('claude', true, true), 'darwin'), {
-    commands: true,
-    web: true,
-    network: true
-  });
-  assert.deepEqual(on(odd('claude', true, false), 'darwin'), {
-    commands: true,
-    web: false,
-    network: false
-  });
-  // Codex follows the switch on a Mac and Linux. Its walls did not hold the
-  // office's own ports with its network on, so its commands stay off it.
-  for (const platform of ['darwin', 'linux'] as const) {
-    assert.deepEqual(
-      on(odd('codex', true, true), platform),
-      { commands: true, web: true, network: false },
-      platform
-    );
-    assert.deepEqual(
-      on(odd('codex', false, true), platform),
-      { commands: false, web: true, network: false },
-      platform
-    );
+test(
+  'ownTools is what a run reaches: the switch as its tool takes it, the web, the internet only with both, and given folders still on the disk',
+  { skip: TEMP_IN_APPDATA },
+  () => {
+    const on = (who: ReturnType<typeof odd>, platform: NodeJS.Platform) => {
+      const o = C.ownTools(who, platform);
+      return { commands: o.commands, web: o.web, network: o.network };
+    };
+    assert.deepEqual(on(odd('claude', true, true), 'darwin'), {
+      commands: true,
+      web: true,
+      network: true
+    });
+    assert.deepEqual(on(odd('claude', true, false), 'darwin'), {
+      commands: true,
+      web: false,
+      network: false
+    });
+    // Codex follows the switch on a Mac and Linux. Its walls did not hold the
+    // office's own ports with its network on, so its commands stay off it.
+    for (const platform of ['darwin', 'linux'] as const) {
+      assert.deepEqual(
+        on(odd('codex', true, true), platform),
+        { commands: true, web: true, network: false },
+        platform
+      );
+      assert.deepEqual(
+        on(odd('codex', false, true), platform),
+        { commands: false, web: true, network: false },
+        platform
+      );
+    }
+    // On Windows its sandbox opened every Odd's folder, so it has no shell whatever is stored.
+    assert.deepEqual(on(odd('codex', true, true), 'win32'), {
+      commands: false,
+      web: true,
+      network: false
+    });
+    // The network follows the table: a tool marked as holding its walls open gets it, with commands on.
+    const measured = A.AGENT_PLATFORMS.codex.networkWithWeb;
+    A.AGENT_PLATFORMS.codex.networkWithWeb = ['darwin'];
+    try {
+      assert.equal(on(odd('codex', true, true), 'darwin').network, true);
+      assert.equal(on(odd('codex', false, true), 'darwin').network, false);
+    } finally {
+      A.AGENT_PLATFORMS.codex.networkWithWeb = measured;
+    }
+    assert.deepEqual(on(odd('grok', true, true), 'darwin'), {
+      commands: false,
+      web: true,
+      network: false
+    });
+    for (const platform of ['linux', 'win32'] as const)
+      assert.deepEqual(
+        on(odd('claude', true, true), platform),
+        { commands: false, web: true, network: false },
+        platform
+      );
+    assert.deepEqual(C.ownTools(odd('claude', false, false), 'darwin').granted, [
+      { path: kept, write: true }
+    ]);
   }
-  // On Windows its sandbox opened every Odd's folder, so it has no shell whatever is stored.
-  assert.deepEqual(on(odd('codex', true, true), 'win32'), {
-    commands: false,
-    web: true,
-    network: false
-  });
-  // The network follows the table: a tool marked as holding its walls open gets it, with commands on.
-  const measured = { ...A.NETWORK_WITH_WEB };
-  A.NETWORK_WITH_WEB.codex = true;
-  try {
-    assert.equal(on(odd('codex', true, true), 'darwin').network, true);
-    assert.equal(on(odd('codex', false, true), 'darwin').network, false);
-  } finally {
-    Object.assign(A.NETWORK_WITH_WEB, measured);
-  }
-  assert.deepEqual(on(odd('grok', true, true), 'darwin'), {
-    commands: false,
-    web: true,
-    network: false
-  });
-  for (const platform of ['linux', 'win32'] as const)
-    assert.deepEqual(
-      on(odd('claude', true, true), platform),
-      { commands: false, web: true, network: false },
-      platform
-    );
-  assert.deepEqual(C.ownTools(odd('claude', false, false), 'darwin').granted, [
-    { path: kept, write: true }
-  ]);
-});
+);
 
 test('a handed-over run keeps its own commands, web and folders; a write grant waits for the yes', () => {
   const caps: Capabilities = {
@@ -187,12 +192,16 @@ test('a handed-over run keeps its own commands, web and folders; a write grant w
   assert.equal(C.capped(caps, 'read').outside[0].level, 'read');
 });
 
-/** The line an Odd hears for each own tool it lacks, when {owner} can switch it on, by whose card it is. */
-const switchLines = (whose: string) => ({
+/** The line an Odd hears for each own tool it lacks, when it can ask for it. */
+const SWITCH = {
+  commands: 'No shell: ask {owner} to turn on Run commands with ask_for_switch.',
+  web: 'No web: ask {owner} to turn on Browse the web with ask_for_switch.'
+};
+/** The line another Odd reads about one, naming the owner's control on that Odd's card. */
+const switchLinesOf = (whose: string) => ({
   commands: `No shell: {owner} can switch on Run commands in ${whose} Settings tab, under Office.`,
   web: `No web: {owner} can switch on Browse the web in ${whose} Settings tab, under Office.`
 });
-const SWITCH = switchLines('your');
 
 test('each Odd is told its own tools, and how to get each one it lacks', () => {
   const shell = "a shell confined to your folders and {owner}'s developer tools (read only)";
@@ -225,7 +234,7 @@ test('each Odd is told its own tools, and how to get each one it lacks', () => {
   }
 });
 
-test('an Odd is told the owner can switch on a tool it lacks exactly when the owner can, and never told of a tool it lacks', () => {
+test('an Odd is told it can ask for a tool it lacks exactly when it can be had, and never told of a tool it lacks', () => {
   const shell = "a shell confined to your folders and {owner}'s developer tools (read only)";
   type Row = {
     agent: (typeof A.AGENTS)[number];
@@ -384,7 +393,7 @@ test('an Odd is told the owner can switch on a tool it lacks exactly when the ow
     const row = JSON.stringify({ ...r, hears: undefined });
     assert.equal(said, r.hears, row);
     // The Run commands switch line only where the owner's switch reaches the tool and it is off.
-    const lines = switchLines(r.about === undefined ? 'your' : `${r.about}'s`);
+    const lines = r.about === undefined ? SWITCH : switchLinesOf(`${r.about}'s`);
     const switchable = A.commandsHow(r.agent, r.platform).state === 'switch' && !r.commands;
     assert.equal(said.includes(lines.commands), switchable, row);
     assert.equal(said.includes(lines.web), !r.web, row);
@@ -402,8 +411,8 @@ test("the Odd is told the card's own tab, section and switch names, and office_r
   const [line] = C.ownToolsSaid('claude', off, false);
   // The words come from the constants the Settings tab shows (AccessTab reads OFFICE_SECTION and SWITCH_NAMES).
   for (const name of Object.values(W.SWITCH_NAMES))
-    assert.ok(line.includes(`switch on ${name} in ${W.officeSection('your')}.`), line);
-  assert.ok(line.includes(`in your ${W.SETTINGS_TAB} tab, under ${W.OFFICE_SECTION}.`), line);
+    assert.ok(line.includes(`turn on ${name} with ask_for_switch.`), line);
+  assert.doesNotMatch(line, /Settings tab/);
   const [rowans] = C.ownToolsSaid('claude', off, false, 'Rowan');
   assert.ok(
     rowans.includes("can switch on Browse the web in Rowan's Settings tab, under Office."),
@@ -434,9 +443,9 @@ test('raise_ask sends an outside tool to ask_for_access, a folder to ask_for_fol
 
 test('the hire drawer names Run commands only where the owner can switch it, and always the Office section', () => {
   const both =
-    "Optional. You can give tools and switch on Run commands or Browse the web on their Settings tab, under Office, later. They'll tell you when a job needs one.";
+    "Optional. You can give tools and switch on Run commands or Browse the web on their Settings tab, under Office, later. They'll ask you when a job needs one.";
   const web =
-    "Optional. You can give tools and switch on Browse the web on their Settings tab, under Office, later. They'll tell you when a job needs one.";
+    "Optional. You can give tools and switch on Browse the web on their Settings tab, under Office, later. They'll ask you when a job needs one.";
   const rows: [(typeof A.AGENTS)[number], NodeJS.Platform, string][] = [
     ['claude', 'darwin', both],
     ['codex', 'darwin', both],
@@ -478,9 +487,12 @@ test('the line under Browse the web says what its commands do with it', () => {
   // Codex runs no commands on Windows, so there is nothing to say of them.
   assert.equal(A.webLine('codex', 'win32', false), 'Search the web.');
   // The line follows the table, either way.
-  const measured = { ...A.NETWORK_WITH_WEB };
-  A.NETWORK_WITH_WEB.codex = true;
-  A.NETWORK_WITH_WEB.claude = false;
+  const measured = {
+    codex: A.AGENT_PLATFORMS.codex.networkWithWeb,
+    claude: A.AGENT_PLATFORMS.claude.networkWithWeb
+  };
+  A.AGENT_PLATFORMS.codex.networkWithWeb = ['darwin'];
+  A.AGENT_PLATFORMS.claude.networkWithWeb = [];
   try {
     assert.equal(
       A.webLine('codex', 'darwin', false),
@@ -491,7 +503,8 @@ test('the line under Browse the web says what its commands do with it', () => {
       "Search and read web pages. Claude Code's commands stay off the internet."
     );
   } finally {
-    Object.assign(A.NETWORK_WITH_WEB, measured);
+    A.AGENT_PLATFORMS.codex.networkWithWeb = measured.codex;
+    A.AGENT_PLATFORMS.claude.networkWithWeb = measured.claude;
   }
 });
 
@@ -582,31 +595,35 @@ test(
   }
 );
 
-test("office_report lists each Odd's tool, own tools and folders", async () => {
-  const r = await manager.callTool({ name: 'office_report', arguments: {} });
-  const text = (r.content as { type: string; text: string }[])[0]?.text ?? '';
-  const report = JSON.parse(text) as { staff: Record<string, unknown>[] };
-  const mona = report.staff.find((s) => s.id === 'mona');
-  assert.ok(mona, text);
-  assert.deepEqual(
-    [mona.runsOn, mona.ownTools, mona.folders],
-    [
-      'Claude Code',
-      // Another Odd reads the report, so it names whose tools and card they are.
-      process.platform === 'darwin'
-        ? "Mona's own tools work on files, plus web search and fetch. No shell: the owner can switch on Run commands in Mona's Settings tab, under Office."
-        : "Mona's own tools work on files, plus web search and fetch. No shell: Claude Code can't run commands here.",
-      [`${kept} (read only)`]
-    ]
-  );
-  const cody = report.staff.find((s) => s.id === 'cody');
-  assert.ok(cody, text);
-  // With no owner's name set, the office calls them "the owner". Codex has
-  // no shell on Windows, so there its line names no one.
-  assert.equal(
-    cody.ownTools,
-    process.platform === 'win32'
-      ? "Cody's own tools work on files, plus web search. No shell: Codex can't run commands here."
-      : "Cody's own tools work on files, plus a shell confined to Cody's folders and the owner's developer tools (read only), with no network, and web search."
-  );
-});
+test(
+  "office_report lists each Odd's tool, own tools and folders",
+  { skip: TEMP_IN_APPDATA },
+  async () => {
+    const r = await manager.callTool({ name: 'office_report', arguments: {} });
+    const text = (r.content as { type: string; text: string }[])[0]?.text ?? '';
+    const report = JSON.parse(text) as { staff: Record<string, unknown>[] };
+    const mona = report.staff.find((s) => s.id === 'mona');
+    assert.ok(mona, text);
+    assert.deepEqual(
+      [mona.runsOn, mona.ownTools, mona.folders],
+      [
+        'Claude Code',
+        // Another Odd reads the report, so it names whose tools and card they are.
+        process.platform === 'darwin'
+          ? "Mona's own tools work on files, plus web search and fetch. No shell: the owner can switch on Run commands in Mona's Settings tab, under Office."
+          : "Mona's own tools work on files, plus web search and fetch. No shell: Claude Code can't run commands here.",
+        [`${kept} (read only)`]
+      ]
+    );
+    const cody = report.staff.find((s) => s.id === 'cody');
+    assert.ok(cody, text);
+    // With no owner's name set, the office calls them "the owner". Codex has
+    // no shell on Windows, so there its line names no one.
+    assert.equal(
+      cody.ownTools,
+      process.platform === 'win32'
+        ? "Cody's own tools work on files, plus web search. No shell: Codex can't run commands here."
+        : "Cody's own tools work on files, plus a shell confined to Cody's folders and the owner's developer tools (read only), with no network, and web search."
+    );
+  }
+);

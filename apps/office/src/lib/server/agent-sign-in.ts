@@ -18,22 +18,14 @@
 import { execFile } from 'node:child_process';
 import { rmSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
-import { OFFICE_ACCOUNT, accountOf, type StaffRow, type Agent } from '@oddboro/ledger';
-import { claudeCommand, npmCommand } from '@oddboro/ledger/platform';
-import {
-  apiKey,
-  claudeAccount,
-  claudeSettings,
-  claudeAccountOf,
-  claudeHome,
-  cleanEnv,
-  forgetClaudeAccount
-} from './claude.ts';
+import { OFFICE_ACCOUNT, type Agent } from '@oddboro/ledger';
+import { claudeCommand, currentPlatform, npmCommand } from '@oddboro/ledger/platform';
+import { claudeAccountOf, claudeHome, cleanEnv, forgetClaudeAccount } from './claude.ts';
 import { codexAccount, codexHome, codexSignIn } from './codex.ts';
 import { commandSlot, type Slot } from './command-stream.ts';
 import { clearGeminiKey, geminiAccount, setGeminiKey } from './gemini.ts';
 import { grokAccount, grokCommand, grokHome, grokSignIn } from './grok.ts';
-import { NOT_SIGNED_IN, vendorEnv } from './launch.ts';
+import { vendorEnv } from './launch.ts';
 import { onPath } from './on-path.ts';
 
 /** Every tool whose install and sign-in are here: each but Claude Code, whose install is Setup's. */
@@ -67,8 +59,8 @@ export const SIGN_INS: Record<SignInTool, BrowserSignIn | KeySignIn> = {
     how: 'browser',
     // Grok installs only through xAI's own script: its usage line, run as it
     // says, and on Windows its PowerShell one, which puts grok.exe in ~/.grok/bin.
-    install:
-      process.platform === 'win32'
+    get install(): Command {
+      return currentPlatform() === 'win32'
         ? [
             'powershell',
             [
@@ -79,7 +71,8 @@ export const SIGN_INS: Record<SignInTool, BrowserSignIn | KeySignIn> = {
               'irm https://x.ai/cli/install.ps1 | iex'
             ]
           ]
-        : ['bash', ['-c', 'curl -fsSL https://x.ai/cli/install.sh | bash']],
+        : ['bash', ['-c', 'curl -fsSL https://x.ai/cli/install.sh | bash']];
+    },
     auth: (a) => grokHome(a).auth,
     account: grokAccount,
     command: grokSignIn
@@ -133,27 +126,6 @@ function waitingFor(tool: Agent, account: string): SignInState['waiting'] {
   if (running?.action !== 'sign-in' || (signingIn[tool] ?? OFFICE_ACCOUNT) !== account)
     return undefined;
   return running.url ? { url: running.url } : {};
-}
-
-export type ChatSignIn = { agent: Agent; account: string; how: 'key' | 'browser' };
-
-// Check the account the failed run actually used. Older Claude installs may use the owner's login.
-export async function missingSignIn(who: StaffRow, failure = ''): Promise<ChatSignIn | undefined> {
-  const agent = who.agent;
-  const account = await accountOf(who);
-  if (agent === 'claude') {
-    if (account === OFFICE_ACCOUNT && claudeSettings().auth === 'key')
-      return apiKey() ? undefined : { agent, account, how: 'key' };
-    const signed = await claudeSignInState(
-      account,
-      account === OFFICE_ACCOUNT ? claudeAccount : undefined
-    );
-    return signed.signedIn || signed.ownLogin ? undefined : { agent, account, how: signed.how };
-  }
-  const state = signInState(agent, account);
-  // Grok can reject an expired sign-in whose account file still exists.
-  if (!state.signedIn || (agent === 'grok' && failure === `Grok ${NOT_SIGNED_IN}`))
-    return { agent, account, how: state.how };
 }
 
 export function signInState(tool: SignInTool, account: string = OFFICE_ACCOUNT): SignInState {
@@ -254,7 +226,7 @@ export function agentCommand(tool: Agent): Command | undefined {
     if (isAbsolute(cmd)) return [cmd, before];
   }
   // npm's Codex and Gemini on Windows are .cmd shims, which Node will not start.
-  if (process.platform === 'win32' && (tool === 'codex' || tool === 'gemini')) {
+  if (currentPlatform() === 'win32' && (tool === 'codex' || tool === 'gemini')) {
     const found = npmCommand(
       tool,
       tool === 'codex' ? ['@openai', 'codex'] : ['@google', 'gemini-cli']
@@ -271,7 +243,20 @@ export function agentCommand(tool: Agent): Command | undefined {
  * MAC is fixed at import and a test stubs the system.
  */
 export const computerWord = (): 'Mac' | 'computer' =>
-  process.platform === 'darwin' ? 'Mac' : 'computer';
+  currentPlatform() === 'darwin' ? 'Mac' : 'computer';
+
+/**
+ * Why an install through npm cannot start here, or undefined when it can.
+ * Codex and Gemini install with npm, and so does Claude Code off Windows. The
+ * app brings its own Node but not npm, so npm has to be on the PATH the
+ * office started with. Without this check the page showed "spawn npm ENOENT".
+ * Windows is left to the installer as before: its npm is a .cmd shim, which
+ * `onPath` does not look for.
+ */
+export function npmMissing(name: string): string | undefined {
+  if (currentPlatform() === 'win32' || onPath('npm')) return undefined;
+  return `${name} installs with npm, which comes with Node.js, and the office cannot find npm on this ${computerWord()}. Install Node.js from nodejs.org, then quit and reopen Oddboro.`;
+}
 
 /**
  * The environment an installer gets: the office's, with no key of its own and

@@ -1,10 +1,18 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync
+} from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { test } from 'node:test';
 import { L, bin, gave, setOwn } from './office-under-test.ts';
-import { startClock } from './jobs.ts';
+const { startClock } = await import('./jobs.ts');
 
 // The test driver replaces only the model. Its file calls go over stdio to
 // the server the real run registered, with exactly the folders that run got.
@@ -151,6 +159,18 @@ else (async () => {
     assert.equal(renamed?.id, reader.id);
     assert.equal(renamed.name, 'Edition');
     assert.equal((await state()).state, 'configured');
+    const { scheduledFiles } = await import('./scheduled-files.ts');
+    const checked = await scheduledFiles(
+      (await L.staffer('paige'))!,
+      renamed,
+      renamed.files!,
+      'review'
+    );
+    t.assert.snapshot(
+      checked.brief
+        .replaceAll(realpathSync.native(L.home()), '<office>')
+        .replaceAll(String(thread), '<work>')
+    );
     const pending = await review(reader.id);
     assert.match(pending.waiting, /Waiting for "Wire"/);
     assert.equal(pending.checkedAt, null);

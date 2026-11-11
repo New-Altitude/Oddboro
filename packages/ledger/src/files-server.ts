@@ -23,6 +23,7 @@ import { dirname, join, relative, sep } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { findOddboroCheckouts } from './oddboro-source.ts';
 import { resolveIn, wallsFromEnv, type FileWalls } from './file-walls.ts';
 
 /** The most a read shows by default, and the longest line it shows whole. */
@@ -232,6 +233,25 @@ export function fileServer(walls: FileWalls, check?: Check): McpServer {
       if (!names.length) return ok(`${path ?? 'Your folder'} is empty.`);
       const cut = names.length > MAX_LIST ? `\n(${names.length - MAX_LIST} more not shown.)` : '';
       return ok(names.slice(0, MAX_LIST).join('\n') + cut);
+    }
+  );
+
+  tool(
+    'find_oddboro_source',
+    'Find local Oddboro source checkouts in a folder you can already read. Defaults to your own folder. A match identifies the source tree, not its Git remote, branch or release.',
+    { path: z.string().optional() },
+    ({ path }) => {
+      const r = folder(path);
+      if ('refused' in r) return no(r.refused);
+      if (!statSync(r.path).isDirectory()) return no('Choose a folder to search.');
+      const { checkouts, partial } = findOddboroCheckouts(r.path);
+      return ok(
+        [
+          ...checkouts,
+          ...(!checkouts.length ? ['No Oddboro checkout found here.'] : []),
+          ...(partial ? ['Some folders were not searched. You can search a narrower folder.'] : [])
+        ].join('\n')
+      );
     }
   );
 

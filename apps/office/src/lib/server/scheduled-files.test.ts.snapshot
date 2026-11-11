@@ -1,0 +1,3 @@
+exports[`two jobs exchange a checked file on their clocks 1`] = `
+"First read <office>/threads/<work>/lead/wire.md with read_file. Use write_file or edit_file to save this run's result in <office>/threads/<work>/paige/edition.md. You have no direct access to the web. Use only the assigned result."
+`;

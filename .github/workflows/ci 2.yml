@@ -1,0 +1,104 @@
+# Every pull request to main, and every push to it, runs the checks the repo
+# already has on a Mac, Linux and Windows: the setup check, lint, types, the
+# tests, and that the migrations match the schema. Setup has to work on all
+# three systems (hard rule 14), so each check runs on each one.
+name: Checks
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# A newer push to the same branch replaces a run still going.
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # check-types runs cargo check and lint runs cargo clippy on the desktop
+      # shell, which build against these. Copied from release.yml without the
+      # GStreamer plugins, which only the AppImage carries.
+      - name: Install the libraries Tauri builds against
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libxdo-dev \
+            libssl-dev patchelf file build-essential
+
+      # lint runs cargo clippy and cargo fmt, which the minimal profile leaves out.
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy,rustfmt
+          rustup default stable
+
+      # A key of its own, so a check build never takes the release build's cache.
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/desktop/src-tauri/target
+          key: cargo-check-${{ runner.os }}-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock') }}
+          restore-keys: cargo-check-${{ runner.os }}-
+
+      - run: npm ci --no-audit --no-fund
+
+      # There is no .env here, so the database line is the office's own and
+      # blocks nothing: what fails is a check this system cannot pass.
+      - name: Setup check
+        run: npm run setup -- --check
+
+      - run: npm run lint
+
+      - run: npm run check-types
+
+      # Each suite exits on its own, with no --test-force-exit, so a handle a
+      # test leaks would hold the job to its 45 minutes. Each test step stops
+      # at 10 instead; the slowest took under 3 on a runner.
+      - name: Ledger tests
+        timeout-minutes: 10
+        run: npx turbo run test --filter=@oddboro/ledger
+
+      # The test office's stand-in AI tools are scripts that start through
+      # their first line, which Windows is taken not to do.
+      - name: Office tests
+        if: runner.os != 'Windows'
+        timeout-minutes: 10
+        run: npx turbo run test --filter=@oddboro/office
+
+      # A schema change with no migration makes db:generate write one. git
+      # status, not git diff, so a new untracked migration counts.
+      - name: Migrations match the schema
+        run: |
+          npm run db:generate
+          changed=$(git status --porcelain -- packages/ledger/migrations)
+          if [ -n "$changed" ]; then
+            echo "schema.ts changed with no migration. Run npm run db:generate and commit what it writes:" >&2
+            echo "$changed" >&2
+            exit 1
+          fi

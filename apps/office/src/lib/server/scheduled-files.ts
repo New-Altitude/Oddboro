@@ -4,6 +4,7 @@ import { lstatSync, realpathSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   AGENT_NAMES,
+  currentPlatform,
   asksFor,
   connector,
   enabledJobs,
@@ -26,7 +27,8 @@ import {
 } from '@oddboro/ledger';
 import { workName } from '@oddboro/ledger/work-paths';
 import { sourceReady } from './access.ts';
-import { missingSignIn, type ChatSignIn } from './agent-sign-in.ts';
+import { missingChatSignIn } from './chat-sign-in.ts';
+import type { ChatSignIn } from '../staff/chat.ts';
 
 export async function scheduledFiles(
   who: StaffRow,
@@ -60,11 +62,11 @@ export async function scheduledFiles(
       );
       continue;
     }
-    const request = await missingSignIn(p);
+    const request = await missingChatSignIn(p);
     if (request) signIns.push({ name: p.name, request });
     if (request)
       blocks.add(`${p.name} needs ${AGENT_NAMES[p.agent]} to run. Sign in from ${p.name}'s chat.`);
-    if (!filesViaOffice(p.agent, process.platform))
+    if (!filesViaOffice(p.agent, currentPlatform()))
       blocks.add(
         `${p.name} needs the office file tools to check the result. Choose a tool with office files on ${modelSection(p.name + "'s")}.`
       );
@@ -89,7 +91,7 @@ export async function scheduledFiles(
       if (!rows.some((r) => r.staffId === p.id && r.id === source && r.inForce)) {
         if (when === 'review' && source === 'web' && !browse.some((b) => b.id === p.id)) {
           const ask = (await asksFor(p.id)).find(
-            (a) => a.status === 'open' && a.web?.some((w) => w.id === p.id)
+            (a) => a.status === 'open' && a.switches?.includes('web')
           );
           browse.push({ id: p.id, name: p.name, ask: ask && { id: ask.id, title: ask.title } });
         }
