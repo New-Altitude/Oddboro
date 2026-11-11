@@ -72,7 +72,8 @@ export function onlyThisComputer(): Plugin {
     name: 'oddboro:only-this-computer',
     apply: 'serve',
     enforce: 'pre',
-    // Middleware added here runs before Vite's own.
+    // Three of Vite's middlewares run before this one: reject-invalid, CORS and host check.
+    // None serves content, and CORS hands a preflight on because SvelteKit sets `preflightContinue`.
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         if (nodeFromThisComputer(req)) return next();
