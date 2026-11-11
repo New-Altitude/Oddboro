@@ -105,6 +105,37 @@ test('a level the owner raised tells the Odd its run has it, and that hand-offs 
   assert.ok(lines.includes('- The level you asked for: Act'), lines.join('\n'));
 });
 
+test("a level raised to Act, carried out for a colleague's hand-off, tells the Odd this run stays at Draft", () => {
+  const lines = followUpBrief(
+    followUp('carry_out'),
+    { ...ask, kind: 'level', level: 'act' },
+    undefined,
+    undefined,
+    undefined,
+    [],
+    { servesHandOff: true }
+  );
+  assert.equal(
+    lines[0],
+    "{owner} approved your ask #7 for the Act level. Your own work runs at Act from now on; this run serves a colleague's hand-off, so it works at Draft at most."
+  );
+  assert.equal(lines[1], '');
+});
+
+test("a level raised to Draft, carried out for a colleague's hand-off, tells the Odd its run has it", () => {
+  const lines = followUpBrief(
+    followUp('carry_out'),
+    { ...ask, kind: 'level', level: 'draft' },
+    undefined,
+    undefined,
+    undefined,
+    [],
+    { servesHandOff: true }
+  );
+  assert.equal(lines[0], '{owner} approved your ask #7 for the Draft level, and this run has it.');
+  assert.equal(lines[1], '');
+});
+
 test('office tools the owner turned on tell the Odd its run has them', () => {
   const lines = followUpBrief(followUp('carry_out'), {
     ...ask,

@@ -1279,7 +1279,7 @@ tool(
 tool(
   'ask_for_level',
   {
-    description: `Ask ${OWNER} to raise your level when a job needs more than it lets you do. Draft: you prepare changes outside the office, and each waits for their yes. Act: you use a tool they connected for you at read and write without asking each time. Ask with this instead of giving ${OWNER} steps for your ${SETTINGS_TAB} tab: they raise it with one click. Ask for the lowest level the work needs. Your next run, which starts when they say yes, works at it; work a colleague hands you still runs at Draft at most. my_access says your level.${raisedNote}`,
+    description: `Ask ${OWNER} to raise your level when a job needs more than it lets you do. Draft: you prepare changes outside the office, and each waits for their yes. Act: you use a tool they connected for you at read and write without asking each time. Ask with this instead of giving ${OWNER} steps for your ${SETTINGS_TAB} tab: they raise it with one click. Ask for the lowest level the work needs. Your own runs work at it from their yes on; work a colleague hands you still runs at Draft at most. my_access says your level.${raisedNote}`,
     inputSchema: {
       level: z.enum(LEVELS).describe('The level the work needs.'),
       why: z.string().max(1000).describe('What work needs it, in one or two plain sentences.'),

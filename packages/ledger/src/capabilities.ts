@@ -118,8 +118,10 @@ export function accessOf(g: GrantRow & { connector: ConnectorRow }, permission: 
 }
 
 /**
- * What a run below the Odd's own level can do (a hand-off's, either side, or
- * a hub's pick-up): its level is `ceiling`, and a grant that does not work
+ * What a run below the Odd's own level can do (one that serves a colleague's
+ * hand-off, whatever its kind but an approval ask's carry-out, or one the
+ * office starts on its own, such as a hub's pick-up): its level is `ceiling`,
+ * and a grant that does not work
  * there comes down to read, since a grant is only read or act. At a Draft
  * ceiling a write grant stays, and each change through it waits for the
  * owner's yes (`writesWait`), as it does for an Odd at Draft. A grant
@@ -207,7 +209,7 @@ export function accessInRun(
     levelLine(caps.level, owner),
     ...(ceiling
       ? [
-          `This run was started by a colleague or by the office, not by ${owner}'s yes, so it works at ${LEVEL_NAME[ceiling]} at most.`
+          `This run serves a colleague's hand-off or was started by the office, so it works at ${LEVEL_NAME[ceiling]} at most, whatever ${owner} has approved.`
         ]
       : []),
     runsOnLine(caps.agent),

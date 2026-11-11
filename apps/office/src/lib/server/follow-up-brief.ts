@@ -48,7 +48,9 @@ export function followUpBrief(
   t?: { row: TaskRow; files: string[] },
   g?: GoalRow,
   /** Twins answered with `a` whose work this carry-out does too (`standsFor`). */
-  also: AskRow[] = []
+  also: AskRow[] = [],
+  /** The run serves a colleague's hand-off, so it works at Draft at most (staff.ts). */
+  run: { servesHandOff?: boolean } = {}
 ): string[] {
   switch (f.kind) {
     case 'resume':
@@ -60,7 +62,7 @@ export function followUpBrief(
     case 'task_done':
       return taskDoneBrief(f, r, t);
     case 'carry_out':
-      return carryOutBrief(f, a, also);
+      return carryOutBrief(f, a, also, !!run.servesHandOff);
     case 'denied':
       return deniedBrief(f, a);
     case 'rework':
@@ -264,7 +266,12 @@ function carriedLinesOf(a: AskRow): string[] {
  * The carry-out run's brief, by the kind of ask approved. A new kind fails
  * the type check here until it says which brief its yes gets.
  */
-function carryOutBrief(f: FollowUpRow, a: AskRow | undefined, also: AskRow[]): string[] {
+function carryOutBrief(
+  f: FollowUpRow,
+  a: AskRow | undefined,
+  also: AskRow[],
+  servesHandOff: boolean
+): string[] {
   // A connect task's end starts this run and wakes the work parked on that task at once.
   const askLines = [...askLinesOf(a), ...(f.pickedUp ?? []).map((t) => `- ${pickedUpLine(t)}`)];
   const alsoAnswers = (what: string) =>
@@ -314,16 +321,23 @@ function carryOutBrief(f: FollowUpRow, a: AskRow | undefined, also: AskRow[]): s
         '1. If work was waiting on it, do it now.',
         '2. If nothing was waiting, stop there.'
       ];
-    case 'level':
+    case 'level': {
       if (!a.level) return approved();
+      const said = `{owner} approved your ask #${a.id} for the ${LEVEL_NAME[a.level]} level`;
       return [
-        `{owner} approved your ask #${a.id} for the ${LEVEL_NAME[a.level]} level, and this run has it.`,
-        // A colleague's hand-off and a thread's pick-up run at Draft at most, whatever the Odd's level.
-        ...(a.level === 'act'
-          ? [
-              'Work a colleague hands you, and a thread you pick back up, still runs at Draft at most.'
-            ]
-          : []),
+        // A colleague's hand-off and a thread's pick-up run at Draft at most,
+        // whatever the Odd's level. A yes to Draft reaches such a run anyway, so
+        // only a yes to Act, carried out for a colleague's hand-off, says it does not.
+        ...(a.level !== 'act'
+          ? [`${said}, and this run has it.`]
+          : servesHandOff
+            ? [
+                `${said}. Your own work runs at ${LEVEL_NAME[a.level]} from now on; this run serves a colleague's hand-off, so it works at Draft at most.`
+              ]
+            : [
+                `${said}, and this run has it.`,
+                'Work a colleague hands you, and a thread you pick back up, still runs at Draft at most.'
+              ]),
         ...alsoAnswers('level'),
         '',
         ...askLines,
@@ -332,6 +346,7 @@ function carryOutBrief(f: FollowUpRow, a: AskRow | undefined, also: AskRow[]): s
         '1. If work was waiting on it, do it now.',
         '2. If nothing was waiting, stop there.'
       ];
+    }
     case 'office_tool':
       if (!a.officeTools?.length) return approved();
       return [

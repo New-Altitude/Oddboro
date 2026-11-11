@@ -204,7 +204,7 @@ test("my_access says a capped run's level and why, and an uncapped run's own lev
     draftOnly,
     [
       levelLine('draft', 'Sam'),
-      "This run was started by a colleague or by the office, not by Sam's yes, so it works at Draft at most.",
+      "This run serves a colleague's hand-off or was started by the office, so it works at Draft at most, whatever Sam has approved.",
       'Your runs go through Claude Code.',
       'Your own tools work on files only. No shell: ask Sam to turn on Run commands with ask_for_switch. No web: ask Sam to turn on Browse the web with ask_for_switch.',
       'Sam grants other office tools in your Settings tab, under Office; when a job needs one, ask for it with ask_for_office_tool.',

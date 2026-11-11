@@ -4,7 +4,8 @@
 // follow-ups, so the office starts them the moment they are written and nothing
 // polls. Every hand-off is a step in a thread (threads.ts): the colleague's run
 // cannot hand off (mcp.ts), the hub's pick-up may hand on in the same thread,
-// and both work at Draft at most (staff.ts in the office app).
+// and both work at Draft at most (staff.ts in the office app), as does every
+// later run that serves the hand-off, but an approval ask's carry-out.
 import {
   closeSync,
   constants,
@@ -208,9 +209,12 @@ export const SERVES_NO_THREAD: Record<FollowUpKind, boolean> = {
 export const servesNoThread = (kind: FollowUpKind): boolean => SERVES_NO_THREAD[kind];
 
 /**
- * Whether a follow-up's run works at Draft at most: both sides of a hand-off,
- * the hub picking its thread back up, and a run that only reads the owner's
- * reason or edit for a lesson (every kind `SERVES_NO_THREAD` marks).
+ * Whether a follow-up's run works at Draft at most by its kind alone: both
+ * sides of a hand-off, the hub picking its thread back up, and a run that only
+ * reads the owner's reason or edit for a lesson (every kind `SERVES_NO_THREAD`
+ * marks). A run of any other kind that serves a colleague's hand-off
+ * (`servesHandOff`) works at Draft at most too, but an approval ask's
+ * carry-out (staff.ts in the office app).
  */
 export const AT_DRAFT: Record<FollowUpKind, boolean> = {
   carry_out: false,
