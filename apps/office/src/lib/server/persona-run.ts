@@ -10,6 +10,7 @@ import {
   keepPersonaAnswer,
   keepPersonaPreparation,
   ownerName,
+  personaAnswerText,
   setQuiet,
   type StaffRow,
   type PersonaPreparation
@@ -111,6 +112,13 @@ async function consult(
   runTool: (who: StaffRow, message: string, opts: RunOpts) => Promise<Run>,
   key: string
 ): Promise<Run> {
+  if (
+    opts.persona?.message !== undefined &&
+    (opts.persona.message !== message || message.length > PERSONA_MESSAGE_MAX)
+  )
+    throw new Error(
+      'The approved persona message must match the request and fit the service limit.'
+    );
   const quiet = who.package?.quiet;
   if (quiet) {
     const text = QUIET_LINE[quiet](who.name);
@@ -167,7 +175,8 @@ async function consult(
       ? { outcome: 'interrupted' }
       : await askPersona(
           who,
-          voiceMessage({ kind: opts.kind, owner: await ownerName(), asked, report }),
+          opts.persona?.message ??
+            voiceMessage({ kind: opts.kind, owner: await ownerName(), asked, report }),
           opts.kind === 'chat' ? { ownerSaid: asked } : undefined,
           opts.signal
         ).catch((): DoorAnswer => ({ outcome: 'failed' }));
@@ -189,9 +198,7 @@ function result(
   const report = outcome ? hands.text.slice(0, outcome.index).trim() : hands.text;
   const answered = answer.outcome === 'answered';
   const ok = answered || opts.persona?.required === false;
-  const reply = answered
-    ? [answer.frame, answer.reply, answer.caveat].filter(Boolean).join('\n\n')
-    : `${note(name, answer)}\n\n${report}`;
+  const reply = answered ? personaAnswerText(answer) : `${note(name, answer)}\n\n${report}`;
   // A required judgment that never arrived cannot keep the preparation's "done".
   const text =
     opts.kind === 'follow-up' && outcome

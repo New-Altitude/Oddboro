@@ -919,3 +919,7 @@ owner route can map a request to an offered slug and ordinary Odd. Conversion
 in `personas.ts` retains the staff ID and files, pauses jobs and drops carried
 grants. Completion uses the shared transactional task withdrawal and follow-up
 writer. `test/persona-requests.test.ts` holds the preserved and changed records.
+
+## Project reviews
+
+`project-reviews.ts` keeps the approved source and persona answer. Returning it uses `requestProject` in the same transaction. `projectGoalSummaries` reads the existing session and request tables for goal cards. Migration 0026 adds the review and optional goal link without changing existing conversation IDs.

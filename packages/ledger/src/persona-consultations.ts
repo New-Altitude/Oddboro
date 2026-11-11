@@ -80,3 +80,8 @@ export async function forgetFailedPreparation(key: string) {
 export async function keepPersonaAnswer(key: string, answer: PersonaAnswer) {
   await db.update(personaConsultations).set({ answer }).where(eq(personaConsultations.key, key));
 }
+
+export const consultation = async (key: string) =>
+  (await db.select().from(personaConsultations).where(eq(personaConsultations.key, key)))[0];
+export const personaAnswerText = (answer: Extract<PersonaAnswer, { outcome: 'answered' }>) =>
+  [answer.frame, answer.reply, answer.caveat].filter(Boolean).join('\n\n');

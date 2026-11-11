@@ -1,7 +1,7 @@
 // The owner connects a native conversation and can give one Odd access to it.
 // Claims, revocations and replies serialize on the same session row.
 import { randomUUID } from 'node:crypto';
-import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull } from 'drizzle-orm';
 import { addFollowUp } from './threads.ts';
 import { db } from './db.ts';
 import {
@@ -76,16 +76,19 @@ export const projectWork = (id: string) =>
     .orderBy(desc(projectRequests.createdAt))
     .limit(100);
 
-export async function requestProject(input: {
-  id: string;
-  sessionId: string;
-  prompt: string;
-  file?: string;
-  staffId?: string;
-  threadId?: number;
-  draft?: boolean;
-}) {
-  return db.transaction(async (tx) => {
+export async function requestProject(
+  input: {
+    id: string;
+    sessionId: string;
+    prompt: string;
+    file?: string;
+    staffId?: string;
+    threadId?: number;
+    draft?: boolean;
+  },
+  tx?: Parameters<Parameters<typeof db.transaction>[0]>[0]
+) {
+  const write = async (tx: Parameters<Parameters<typeof db.transaction>[0]>[0]) => {
     const [s] = await tx
       .select()
       .from(projectSessions)
@@ -128,7 +131,8 @@ export async function requestProject(input: {
       })
       .returning();
     return row;
-  });
+  };
+  return tx ? write(tx) : db.transaction(write);
 }
 
 /** A claim is durable before the prompt leaves. A crash never replays a sent request. */
@@ -280,3 +284,38 @@ export const proposedProjectWork = () =>
     .innerJoin(projectSessions, eq(projectRequests.sessionId, projectSessions.id))
     .where(eq(projectRequests.state, 'proposed'))
     .orderBy(asc(projectRequests.createdAt));
+
+/** Goal cards read the same session and request rows as the Projects window. */
+export async function projectGoalSummaries() {
+  const sessions = await db.select().from(projectSessions).where(isNotNull(projectSessions.goalId));
+  if (!sessions.length) return [];
+  const ids = sessions.map((s) => s.id);
+  const latest = await db
+    .selectDistinctOn([projectRequests.sessionId])
+    .from(projectRequests)
+    .where(and(inArray(projectRequests.sessionId, ids), eq(projectRequests.state, 'done')))
+    .orderBy(projectRequests.sessionId, desc(projectRequests.createdAt), desc(projectRequests.id));
+  const pending = await db
+    .selectDistinctOn([projectRequests.sessionId])
+    .from(projectRequests)
+    .where(
+      and(
+        inArray(projectRequests.sessionId, ids),
+        inArray(projectRequests.state, [
+          'proposed',
+          'queued',
+          'authorized',
+          'sending',
+          'working',
+          'uncertain'
+        ])
+      )
+    )
+    .orderBy(projectRequests.sessionId, desc(projectRequests.createdAt), desc(projectRequests.id));
+  return sessions.map((s) => ({
+    ...s,
+    latest: latest.find((r) => r.sessionId === s.id),
+    pending: pending.find((r) => r.sessionId === s.id)
+  }));
+}
+export type ProjectGoalSummary = Awaited<ReturnType<typeof projectGoalSummaries>>[number];

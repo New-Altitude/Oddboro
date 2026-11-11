@@ -154,8 +154,8 @@ export const OUTBOUND: readonly Outbound[] = [
     calls: 1,
     to: "A persona's door on New Altitude, at its account's sign-in server.",
     sends:
-      "The persona's own sign-in token, and for each chat, job or follow-up of that persona Odd, a hand-off from another Odd included: the owner's name, what it was asked and its hands' report, cut to the door's limit, with a chat's earlier exchanges.",
-    yes: "The owner's Add on that persona, which lets each of those runs answer through its door."
+      "The persona's own sign-in token, and for each chat, job or follow-up of that persona Odd, a hand-off from another Odd included: the owner's name, what it was asked and its hands' report, cut to the door's limit, with a chat's earlier exchanges. A project review sends the exact owner-approved excerpt, revision and question within that limit, with no truncation.",
+    yes: "The owner's Add on that persona, which lets each of those runs answer through its door. A project review also requires the owner's Send this context action."
   },
   {
     file: 'apps/office/src/instrumentation.server.ts',

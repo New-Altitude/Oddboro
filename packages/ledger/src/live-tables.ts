@@ -33,6 +33,7 @@ export const LIVE_TABLES: Record<TableName, LiveTable> = {
     },
     page: []
   },
+  project_reviews: { trigger: 'all', page: ['version'] },
   project_requests: { trigger: 'all', page: ['refresh', 'version'] },
   project_sessions: { trigger: 'all', page: ['version'] },
   staff: { trigger: 'all', page: ['refresh'] },

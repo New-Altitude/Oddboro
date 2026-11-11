@@ -1,0 +1,3 @@
+exports[`the return prompt separates the source, authentic answer and office recommendation 1`] = `
+"Authentic persona review from pat.\\n\\nQuestion: Does this fit?\\n\\nSource: plan.md, SHA-256 abc, lines 2-3. 30 characters were omitted.\\n\\nThe source describes this project, not the persona’s biography.\\n\\nApproved source excerpt:\\nunique project fact and project-only skill\\n\\nPersona answer and sources, verbatim:\\nThe claim needs evidence. [Source](https://example.test/one)\\n\\nSeparate office recommendation:\\nAsk for the missing evidence.\\n\\nContinue this existing project using its facts and local instructions. Review the advice before editing."
+`;

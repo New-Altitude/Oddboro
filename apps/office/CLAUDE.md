@@ -1746,3 +1746,7 @@ offer and consent, then converts the selected ordinary Odd or uses its offered
 Odd. Callbacks and startup sync complete one saved continuation. Pending sign-in
 states are kept for thirty minutes in the secret store by `pending-sign-ins.ts`.
 See `docs/persona-recovery.md` for the conversion and review checks.
+
+## Persona reviews in native projects
+
+`server/project-review-source.ts` bounds the owner-selected text and records its revision. `server/project-reviews.ts` calls the existing persona runner with an exact message. Interrupted consultations do not repeat; a saved answer can be recovered. `ProjectReviews.svelte` previews the message in Projects, and `GoalProjects.svelte` shows the same session records on a goal. See `docs/project-reviews.md` for the review and live acceptance checks.

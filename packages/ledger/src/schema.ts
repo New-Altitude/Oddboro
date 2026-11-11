@@ -1053,6 +1053,7 @@ export const projectSessions = pgTable(
     id: text().primaryKey(),
     agent: text().$type<'claude' | 'codex'>().notNull(),
     nativeId: text().notNull(),
+    goalId: integer().references(() => goals.id),
     folder: text().notNull(),
     title: text().notNull(),
     staffId: text(),
@@ -1160,5 +1161,41 @@ export const personaRevisions = pgTable('persona_revisions', {
     .references(() => staff.id),
   slug: text().notNull(),
   previous: jsonb().$type<Record<string, unknown>>().notNull(),
+  createdAt: created()
+});
+
+/** The exact text approved for a persona, and its answer, kept with its native project. */
+export const projectReviews = pgTable('project_reviews', {
+  id: text().primaryKey(),
+  sessionId: text()
+    .notNull()
+    .references(() => projectSessions.id),
+  staffId: text()
+    .notNull()
+    .references(() => staff.id),
+  personaId: text()
+    .notNull()
+    .references(() => staff.id),
+  slug: text().notNull(),
+  source: jsonb()
+    .$type<{
+      file: string;
+      sha256: string;
+      start: number;
+      end: number;
+      omitted: number;
+      excerpt: string;
+    }>()
+    .notNull(),
+  question: text().notNull(),
+  message: text().notNull(),
+  state: text()
+    .$type<'ready' | 'asking' | 'answered' | 'unanswered' | 'cancelled'>()
+    .notNull()
+    .default('ready'),
+  answer: text(),
+  reason: text(),
+  recommendation: text(),
+  requestId: text().references(() => projectRequests.id),
   createdAt: created()
 });

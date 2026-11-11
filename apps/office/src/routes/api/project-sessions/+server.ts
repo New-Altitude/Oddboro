@@ -2,6 +2,8 @@ import { json, error } from '@sveltejs/kit';
 import { z } from 'zod';
 import {
   connection,
+  projectGoalSummaries,
+  linkProjectGoal,
   projectConnections,
   projectWork,
   requestProject,
@@ -18,6 +20,7 @@ const file = z.string().min(1).max(4096).optional();
 const prompt = z.string().trim().min(1).max(64000);
 const command = z.discriminatedUnion('action', [
   z.object({ action: z.literal('connections') }),
+  z.object({ action: z.literal('summaries') }),
   z.object({ action: z.literal('find'), agent, folder, socket }),
   z.object({
     action: z.literal('connect'),
@@ -29,6 +32,7 @@ const command = z.discriminatedUnion('action', [
     handedOver: z.boolean().optional()
   }),
   z.object({ action: z.literal('history'), id }),
+  z.object({ action: z.literal('goal'), id, goalId: z.number().int().positive().nullable() }),
   z.object({ action: z.literal('send'), id, key: id, prompt, file }),
   z.object({ action: z.literal('share'), id, staffId: z.string().min(1).max(100).nullable() }),
   z.object({ action: z.literal('decide'), id, key: id, approve: z.boolean() }),
@@ -62,6 +66,8 @@ export const POST: RequestHandler = async ({ request }) => {
     c = projectController();
   try {
     switch (a.action) {
+      case 'summaries':
+        return json(await projectGoalSummaries());
       case 'connections':
         return json(await projectConnections());
       case 'find':
@@ -80,6 +86,9 @@ export const POST: RequestHandler = async ({ request }) => {
         await c.checkInput(a.id, a.prompt, a.file);
         await requestProject({ id: a.key, sessionId: a.id, prompt: a.prompt, file: a.file });
         await c.work(a.id);
+        break;
+      case 'goal':
+        await linkProjectGoal(a.id, a.goalId);
         break;
       case 'share':
         await shareProject(a.id, a.staffId);

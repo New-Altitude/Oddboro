@@ -694,7 +694,7 @@ export const RUN_ENDED = 'run-ended';
 /** What a run is for, and what it may do. */
 export type RunOpts = {
   /** Stable request identity for a persona retry. Required unless the caller explicitly needs only optional commentary. */
-  persona?: { key: string; required: boolean };
+  persona?: { key: string; required: boolean; message?: string };
   runId?: string;
   signal?: AbortSignal;
   kind: UsageKind;

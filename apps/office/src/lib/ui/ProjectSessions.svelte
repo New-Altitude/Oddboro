@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import type { ProjectAgent, ProjectSession, ProjectRequest } from '@oddboro/ledger';
   import { projectApi } from './project-api.ts';
+  import ProjectReviews from './ProjectReviews.svelte';
   import ProjectTerminal from './ProjectTerminal.svelte';
   type View = {
     connected: boolean;
@@ -22,6 +23,7 @@
   type Choice = { id: string; title: string; live: boolean; updated: number; job?: string };
   let { staff, sessionId }: { sessionId?: string; staff: { id: string; name: string }[] } =
     $props();
+  let reviewVersion = $state(0);
   let connections = $state<ProjectSession[]>([]),
     selected = $state<ProjectSession>(),
     candidates = $state<Choice[]>([]),
@@ -81,6 +83,7 @@
     if (selected?.id === id) {
       selected = record.session;
       work = record.work;
+      reviewVersion += 1;
       view = record.view;
     }
   }
@@ -428,6 +431,7 @@
         </div>
       </form>
     {/if}
+    {#key selected.id}<ProjectReviews session={selected} version={reviewVersion} />{/key}
     {#each work as r (r.id)}<div class="border-t pt-2">
         <strong>{r.state}</strong>
         <p class="whitespace-pre-wrap">{r.prompt}</p>
