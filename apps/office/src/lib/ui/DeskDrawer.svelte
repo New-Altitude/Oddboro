@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { AskRow, Desk, LedgerRow, ReportRow, Step, TaskRow } from '@oddboro/ledger';
+  import type { AskKind, AskRow, Desk, LedgerRow, ReportRow, Step, TaskRow } from '@oddboro/ledger';
   import Pixel from './Pixel.svelte';
   import Markdown from './Markdown.svelte';
   import Attachments from './Attachments.svelte';
@@ -228,6 +228,33 @@
       if (!r.warning) show(undefined);
     });
   const picked = (a: AskRow) => a.plan?.items.filter((_, i) => !skip[i]).length ?? 0;
+  /**
+   * What plain Approve reads, by the kind of ask. A reply, a filter, a folder
+   * and a hire have their own buttons, and read Approve only when their part
+   * is missing. A new kind fails the type check here until it says.
+   */
+  const YES_SAID: Record<
+    Exclude<AskKind, 'reply' | 'filter' | 'folder' | 'hire'>,
+    (a: AskRow) => string
+  > = {
+    approval: () => 'Approve',
+    access: (a) => (a.access ? 'Connect' : 'Approve'),
+    goal: () => 'Set the goal',
+    plan: (a) =>
+      a.plan && picked(a) < a.plan.items.length
+        ? `Approve ${picked(a)} of ${a.plan.items.length}`
+        : 'Approve',
+    hand_offs: () => 'Approve',
+    window: () => 'Let it carry on',
+    switch: () => 'Turn on',
+    call: () => (busy ? 'Making the call' : 'Make this call'),
+    remove: () => 'Remove',
+    bring_back: () => 'Bring back'
+  };
+  const yesSaid = (a: AskRow) =>
+    a.kind === 'reply' || a.kind === 'filter' || a.kind === 'folder' || a.kind === 'hire'
+      ? 'Approve'
+      : YES_SAID[a.kind](a);
   const nameOf = (id: string) => staff.find((p) => p.id === id)?.name ?? id;
   const toolName = (id: string) => OFFICE_TOOLS.find((t) => t.id === id)?.name ?? id;
   const step = (t: TaskRow, index: number, body: Record<string, unknown>) =>
@@ -692,25 +719,7 @@
               class="flex-1 rounded-lg bg-sea px-3 py-2 text-sm font-medium text-night disabled:opacity-40"
               disabled={busy || unsaved || (a.kind === 'plan' && !picked(a))}
               onclick={() => (a.kind === 'call' ? makeCall(a) : decide(a, 'approve'))}
-              >{a.kind === 'goal'
-                ? 'Set the goal'
-                : a.kind === 'call'
-                  ? busy
-                    ? 'Making the call'
-                    : 'Make this call'
-                  : a.access
-                    ? 'Connect'
-                    : a.kind === 'switch'
-                      ? 'Turn on'
-                      : a.kind === 'remove'
-                        ? 'Remove'
-                        : a.kind === 'bring_back'
-                          ? 'Bring back'
-                          : a.kind === 'window'
-                            ? 'Let it carry on'
-                            : a.plan && picked(a) < a.plan.items.length
-                              ? `Approve ${picked(a)} of ${a.plan.items.length}`
-                              : 'Approve'}</button
+              >{yesSaid(a)}</button
             >
           {/if}
         </div>

@@ -120,7 +120,14 @@ import {
 } from './access-words.ts';
 import { filterWords, sameCriteria, type GmailFilter } from './filter-words.ts';
 import { nextRun, zone } from './time.ts';
-import { isGrantable, OFFICE_TOOLS, ON_BY_DEFAULT, tickable, yesOrNo } from './tools.ts';
+import {
+  isGrantable,
+  OFFICE_TOOLS,
+  officeToolsSaid,
+  ON_BY_DEFAULT,
+  tickable,
+  yesOrNo
+} from './tools.ts';
 import { HIRE_DEFAULTS } from './grantable.ts';
 import {
   ASK_REPLACED,
@@ -187,15 +194,26 @@ export async function formerStaff(): Promise<StaffRow[]> {
 
 /** Only the owner moves a staffer's level. Grants above the new level wait until it rises again. */
 export async function setPermission(id: string, permission: Level): Promise<void> {
-  const before = await staffer(id);
+  const done = await changeLevel(db, id, permission);
+  if (done) await record({ kind: 'access', actor: 'owner', title: done.title });
+}
+
+/**
+ * The change `setPermission` makes, in `q`, with the ledger title it is
+ * written under. Nothing when the Odd is gone or already at that level.
+ */
+async function changeLevel(
+  q: Db,
+  id: string,
+  permission: Level
+): Promise<{ title: string } | undefined> {
+  const before = await staffer(id, q);
   if (!before || before.permission === permission) return;
-  await db.update(staff).set({ permission }).where(eq(staff.id, id));
+  await q.update(staff).set({ permission }).where(eq(staff.id, id));
   const up = !levelAtMost(permission, before.permission);
-  await record({
-    kind: 'access',
-    actor: 'owner',
+  return {
     title: `${up ? 'Raised' : 'Lowered'} ${before.name} from ${before.permission} to ${permission}`
-  });
+  };
 }
 
 /**
@@ -322,18 +340,37 @@ export async function setAgent(
 
 /** Only the owner grants or removes an office tool. Takes effect on the staffer's next run. */
 export async function setTool(id: string, tool: string, on: boolean): Promise<void> {
-  const found = OFFICE_TOOLS.find((t) => t.id === tool);
-  if (!found || !isGrantable(tool)) throw new Error(`${tool} is not an office tool you grant`);
-  const before = await staffer(id);
-  if (!before || before.tools.includes(tool) === on) return;
-  const tools = on ? [...before.tools, tool] : before.tools.filter((t) => t !== tool);
-  await db.update(staff).set({ tools }).where(eq(staff.id, id));
-  await record({
-    kind: 'access',
-    actor: 'owner',
-    title: on ? `Gave ${before.name} ${found.name}` : `Took ${found.name} from ${before.name}`,
-    body: found.does
-  });
+  const done = await changeTools(db, id, [tool], on);
+  if (done) await record({ kind: 'access', actor: 'owner', ...done });
+}
+
+/**
+ * The change `setTool` makes, for one or more office tools, in `q`, with the
+ * ledger title and body it is written under. Refused when any of them is not
+ * one the owner grants. Tools already so are left; nothing when the Odd is
+ * gone or every tool is already so.
+ */
+async function changeTools(
+  q: Db,
+  id: string,
+  tools: readonly string[],
+  on: boolean
+): Promise<{ title: string; body: string } | undefined> {
+  if (!tools.every(isGrantable)) throw fixedError('That is not an office tool you grant');
+  const before = await staffer(id, q);
+  if (!before) return;
+  const changing = OFFICE_TOOLS.filter(
+    (t) => tools.includes(t.id) && before.tools.includes(t.id) !== on
+  );
+  if (!changing.length) return;
+  const ids: string[] = changing.map((t) => t.id);
+  const after = on ? [...before.tools, ...ids] : before.tools.filter((t) => !ids.includes(t));
+  await q.update(staff).set({ tools: after }).where(eq(staff.id, id));
+  const said = officeToolsSaid(ids);
+  return {
+    title: on ? `Gave ${before.name} ${said}` : `Took ${said} from ${before.name}`,
+    body: changing.map((t) => t.does).join(' ')
+  };
 }
 
 /**
@@ -1180,9 +1217,6 @@ async function refuseSecondSwitch(
     );
 }
 
-/** The asks an Odd raises in its own words, which may not repeat one already open. Access asks have twins instead (`asksNoMore`). */
-const ONCE_ONLY: AskKind[] = ['approval', 'goal', 'remove', 'bring_back'];
-
 export async function raiseAsk(
   staffId: string,
   a: {
@@ -1205,9 +1239,8 @@ export async function raiseAsk(
     call?: HeldCall;
     /** A remove or bring_back ask's Odd (leaving.ts). */
     odd?: string;
-    /** `goal`, `plan`, `reply`, `filter`, `folder`, `switch`, `call`, `remove` and `bring_back` say so; the rest follow from access or hire. */
-    kind?:
-      'goal' | 'plan' | 'reply' | 'filter' | 'folder' | 'switch' | 'call' | 'remove' | 'bring_back';
+    /** Every kind but these says so; `approval`, `access` and `hire` follow from access or hire, and the office raises `hand_offs` and `window` itself. */
+    kind?: Exclude<AskKind, 'approval' | 'access' | 'hire' | 'hand_offs' | 'window'>;
     revises?: number;
     /** The colleague whose handed-back work the lead raised this from (`VIA`). */
     via?: string;
@@ -1230,15 +1263,46 @@ export async function raiseAsk(
   const ask = await db.transaction(async (tx) => {
     // An Odd's own ask may not repeat one on the desk, a reply may not
     // answer an email twice, and a filter may not file the same mail twice.
-    // A folder or switch ask may not repeat one from the same place.
-    // Office-raised kinds and access twins are left alone.
-    if (ONCE_ONLY.includes(kind) || a.reply || a.filter || a.folder || a.switches) {
-      await lockDesk(tx, staffId);
-      if (a.reply) await refuseSecondReply(tx, staffId, a.reply, a.revises);
-      else if (a.filter) await refuseSecondFilter(tx, staffId, a.filter, a.revises);
-      else if (a.folder) await refuseSecondFolder(tx, staffId, { ...a, folder: a.folder });
-      else if (a.switches) await refuseSecondSwitch(tx, staffId, { ...a, switches: a.switches });
-      else await refuseRepeat(tx, staffId, a.title, a.revises);
+    // A folder or switch ask may not repeat one from the same place. Access
+    // asks have twins instead (`asksNoMore`), and the rest are the office's
+    // own or checked where they are made. The office raises `hand_offs` and
+    // `window` asks itself, never through here. A new kind fails the type
+    // check here until it says which.
+    switch (kind) {
+      case 'approval':
+      case 'goal':
+      case 'remove':
+      case 'bring_back':
+        await lockDesk(tx, staffId);
+        await refuseRepeat(tx, staffId, a.title, a.revises);
+        break;
+      case 'reply':
+        if (!a.reply) break;
+        await lockDesk(tx, staffId);
+        await refuseSecondReply(tx, staffId, a.reply, a.revises);
+        break;
+      case 'filter':
+        if (!a.filter) break;
+        await lockDesk(tx, staffId);
+        await refuseSecondFilter(tx, staffId, a.filter, a.revises);
+        break;
+      case 'folder':
+        if (!a.folder) break;
+        await lockDesk(tx, staffId);
+        await refuseSecondFolder(tx, staffId, { ...a, folder: a.folder });
+        break;
+      case 'switch':
+        if (!a.switches) break;
+        await lockDesk(tx, staffId);
+        await refuseSecondSwitch(tx, staffId, { ...a, switches: a.switches });
+        break;
+      case 'access':
+      case 'hire':
+      case 'plan':
+      case 'call':
+        break;
+      default:
+        kind satisfies never;
     }
     // A plan goes on its goal's one thread, whatever run raised it: a chat,
     // the weekly review, or the goal's own planning run. So approving it
@@ -1296,58 +1360,86 @@ export async function asksFor(staffId: string): Promise<AskRow[]> {
 export const DECISIONS = ['approve', 'deny', 'iterate'] as const;
 export type Decision = (typeof DECISIONS)[number];
 
-/** The kinds of ask that have twins (`asksNoMore`): an outside tool, a folder, and switches. */
-const TWINNED: AskKind[] = ['access', 'folder', 'switch'];
+/** How two open asks of one kind, from one Odd, are twins (`asksNoMore`). */
+type Twin = {
+  /** `later` asks for nothing `first` does not. */
+  noMore: (first: AskRow, later: AskRow) => boolean;
+  /** Both want the same thing, whatever the level. */
+  same: (a: AskRow, b: AskRow) => boolean;
+};
+
+/**
+ * Which kinds of ask have twins, and how: an outside tool, a folder, and
+ * switches. Two runs of one Odd can each find one missing at once, and each
+ * raises its own ask. Every other kind is null: an Odd's own words may not
+ * repeat (`raiseAsk`), and the office raises its own once. A new kind fails
+ * the type check here until it says which.
+ */
+const TWINS = {
+  access: {
+    // Asks for another Google account of one product are the same tool.
+    noMore: (first, later) =>
+      !!first.access &&
+      !!later.access &&
+      first.access.another === later.access.another &&
+      (!!first.access.another || first.access.connector === later.access.connector) &&
+      levelAtMost(later.access.level, first.access.level),
+    same: (a, b) => a.access?.connector === b.access?.connector
+  },
+  folder: {
+    noMore: (first, later) =>
+      !!first.folder &&
+      !!later.folder &&
+      first.folder.path === later.folder.path &&
+      (first.folder.level === 'write' || later.folder.level === 'read'),
+    same: (a, b) => a.folder?.path === b.folder?.path
+  },
+  switch: {
+    noMore: (first, later) => (later.switches ?? []).every((s) => first.switches?.includes(s)),
+    same: (a, b) => (b.switches ?? []).every((s) => a.switches?.includes(s))
+  },
+  approval: null,
+  hire: null,
+  goal: null,
+  plan: null,
+  hand_offs: null,
+  window: null,
+  reply: null,
+  filter: null,
+  call: null,
+  remove: null,
+  bring_back: null
+} satisfies Record<AskKind, Twin | null>;
 
 /**
  * Whether `later` asks for nothing `first` does not: the same Odd, the same
- * tool or folder, at the same level or lower. Asks for another Google account
- * of one product are the same tool. Two runs of one Odd can each find a tool
- * or a folder missing at once (a hire's first day and its lead's first
- * hand-off), and each raises its own ask. The owner sees the first alone
- * (`desk`), and their answer to it answers the twin too (`decide`), each back
- * where it came from.
+ * kind, and nothing more of it (`TWINS`), such as the same tool or folder at
+ * the same level or lower. A hire's first day and its lead's first hand-off
+ * can each raise one at once. The owner sees the first alone (`desk`), and
+ * their answer to it answers the twin too (`decide`), each back where it came
+ * from.
  */
 function asksNoMore(first: AskRow, later: AskRow): boolean {
-  if (first.id === later.id || first.staffId !== later.staffId) return false;
-  if (first.kind === 'access' && later.kind === 'access' && first.access && later.access)
-    return (
-      first.access.another === later.access.another &&
-      (!!first.access.another || first.access.connector === later.access.connector) &&
-      levelAtMost(later.access.level, first.access.level)
-    );
-  if (first.kind === 'folder' && later.kind === 'folder' && first.folder && later.folder)
-    return (
-      first.folder.path === later.folder.path &&
-      (first.folder.level === 'write' || later.folder.level === 'read')
-    );
-  if (first.kind === 'switch' && later.kind === 'switch')
-    return (later.switches ?? []).every((s) => first.switches?.includes(s));
-  return false;
+  if (first.id === later.id || first.staffId !== later.staffId || first.kind !== later.kind)
+    return false;
+  return TWINS[first.kind]?.noMore(first, later) ?? false;
 }
 
-/** Whether two asks of one kind ask for the same tool or folder, whatever the level. */
-const sameWanted = (a: AskRow, b: AskRow) =>
-  a.kind === 'folder'
-    ? a.folder?.path === b.folder?.path
-    : a.kind === 'switch'
-      ? (b.switches ?? []).every((s) => a.switches?.includes(s))
-      : a.access?.connector === b.access?.connector;
-
 /**
- * The other access or folder asks the owner's one answer settled with `a`:
- * the same Odd and tool or folder, decided in the same moment, whichever of
- * them the owner saw.
+ * The other asks of `a`'s kind the owner's one answer settled with it: the
+ * same Odd and the same thing wanted (`TWINS`), decided in the same moment,
+ * whichever of them the owner saw.
  */
 export async function answeredWith(a: AskRow): Promise<AskRow[]> {
-  if (!TWINNED.includes(a.kind) || !a.decidedAt) return [];
+  const twin = TWINS[a.kind];
+  if (!twin || !a.decidedAt) return [];
   const rows = await db
     .select()
     .from(asks)
     .where(
       and(eq(asks.staffId, a.staffId), eq(asks.kind, a.kind), eq(asks.decidedAt, a.decidedAt))
     );
-  return rows.filter((r) => r.id !== a.id && r.status === a.status && sameWanted(a, r));
+  return rows.filter((r) => r.id !== a.id && r.status === a.status && twin.same(a, r));
 }
 
 /**
@@ -1675,7 +1767,7 @@ async function decide(
     // A yes or a no answers the twins too, at the same moment (`answeredWith`).
     // Sending one back leaves them waiting for the new version's answer.
     const open =
-      claimed && TWINNED.includes(claimed.kind) && decision !== 'iterate'
+      claimed && TWINS[claimed.kind] && decision !== 'iterate'
         ? await tx
             .select()
             .from(asks)

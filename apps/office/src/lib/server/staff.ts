@@ -1652,10 +1652,8 @@ export async function followThrough(
                 : `Feedback on ${r?.title ?? 'a report'}`));
   const task = t ? { row: t, files: await taskFiles(t.id) } : undefined;
   // One carry-out may stand for twin asks that start no run of their own.
-  const also =
-    f.kind === 'carry_out' && (a?.kind === 'access' || a?.kind === 'folder' || a?.kind === 'switch')
-      ? await standsFor(a)
-      : [];
+  // `standsFor` finds none for a kind that has no twins.
+  const also = f.kind === 'carry_out' && a ? await standsFor(a) : [];
   const details: Record<FollowUpKind, string> = {
     carry_out: `Carrying out ask #${a?.id}`,
     rework: `Reworking ask #${a?.id}`,

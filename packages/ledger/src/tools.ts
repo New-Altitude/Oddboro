@@ -246,6 +246,14 @@ export const GRANTABLE_TOOLS = OFFICE_TOOLS.filter((t) => !t.always).map((t) => 
 const GRANTABLE = new Set<string>(GRANTABLE_TOOLS);
 export const isGrantable = (id: string): id is OfficeToolId => GRANTABLE.has(id);
 
+/** Office tools by name, in the order of `OFFICE_TOOLS`, joined: "Office report, All goals and Propose hires". */
+export const officeToolsSaid = (ids: readonly string[]): string => {
+  const names = OFFICE_TOOLS.filter((t) => ids.includes(t.id)).map((t) => t.name);
+  return names.length > 1
+    ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`
+    : (names[0] ?? '');
+};
+
 /** Whether a staffer holding `granted` may use the office tool `id`. */
 export const hasTool = (granted: readonly string[], id: string) =>
   OFFICE_TOOLS.some((t) => t.id === id && (t.always || granted.includes(id)));

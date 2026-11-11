@@ -199,35 +199,64 @@ function askLinesOf(a?: AskRow): string[] {
         `- Ask #${a.id}: ${a.title}`,
         `- Why: ${a.why}`,
         `- What you said would happen: ${a.ifApproved}`,
-        ...(a.reply
-          ? [
-              `- The reply: to ${a.reply.to.join(', ')}${a.reply.cc.length ? `, cc ${a.reply.cc.join(', ')}` : ''}${a.reply.gmailThreadId ? `, in Gmail thread ${a.reply.gmailThreadId}` : ''}${a.reply.inReplyTo ? `, answering message ${a.reply.inReplyTo}` : ''}`,
-              `- Its subject: ${a.reply.subject}`,
-              '- Its body:',
-              '',
-              a.reply.body,
-              ''
-            ]
-          : []),
-        ...(a.filter
-          ? [`- The filter: ${filterWords(a.filter)}`, `- Its summary: ${a.filter.summary}`]
-          : []),
-        ...(a.folder
-          ? [
-              `- The folder you asked for: ${shownFolder(a.folder.path)} (${FOLDER_SAID[a.folder.level]})`
-            ]
-          : []),
-        ...(a.switches?.length ? [`- What you asked to turn on: ${switchesSaid(a.switches)}`] : []),
-        ...(a.call
-          ? [
-              `- The call: ${a.call.tool} on ${a.call.connector}, with ${JSON.stringify(a.call.arguments)}`,
-              ...(a.call.result ? [`- What it returned: ${callResultText(a.call.result)}`] : [])
-            ]
-          : [])
+        ...carriedLinesOf(a)
       ]
     : [];
 }
 
+/**
+ * What the ask carries, by its kind. A new kind fails the type check here
+ * until it says what its run is shown.
+ */
+function carriedLinesOf(a: AskRow): string[] {
+  switch (a.kind) {
+    case 'reply':
+      return a.reply
+        ? [
+            `- The reply: to ${a.reply.to.join(', ')}${a.reply.cc.length ? `, cc ${a.reply.cc.join(', ')}` : ''}${a.reply.gmailThreadId ? `, in Gmail thread ${a.reply.gmailThreadId}` : ''}${a.reply.inReplyTo ? `, answering message ${a.reply.inReplyTo}` : ''}`,
+            `- Its subject: ${a.reply.subject}`,
+            '- Its body:',
+            '',
+            a.reply.body,
+            ''
+          ]
+        : [];
+    case 'filter':
+      return a.filter
+        ? [`- The filter: ${filterWords(a.filter)}`, `- Its summary: ${a.filter.summary}`]
+        : [];
+    case 'folder':
+      return a.folder
+        ? [
+            `- The folder you asked for: ${shownFolder(a.folder.path)} (${FOLDER_SAID[a.folder.level]})`
+          ]
+        : [];
+    case 'switch':
+      return a.switches?.length ? [`- What you asked to turn on: ${switchesSaid(a.switches)}`] : [];
+    case 'call':
+      return a.call
+        ? [
+            `- The call: ${a.call.tool} on ${a.call.connector}, with ${JSON.stringify(a.call.arguments)}`,
+            ...(a.call.result ? [`- What it returned: ${callResultText(a.call.result)}`] : [])
+          ]
+        : [];
+    case 'approval':
+    case 'access':
+    case 'hire':
+    case 'goal':
+    case 'plan':
+    case 'hand_offs':
+    case 'window':
+    case 'remove':
+    case 'bring_back':
+      return [];
+  }
+}
+
+/**
+ * The carry-out run's brief, by the kind of ask approved. A new kind fails
+ * the type check here until it says which brief its yes gets.
+ */
 function carryOutBrief(f: FollowUpRow, a: AskRow | undefined, also: AskRow[]): string[] {
   // A connect task's end starts this run and wakes the work parked on that task at once.
   const askLines = [...askLinesOf(a), ...(f.pickedUp ?? []).map((t) => `- ${pickedUpLine(t)}`)];
@@ -237,57 +266,7 @@ function carryOutBrief(f: FollowUpRow, a: AskRow | undefined, also: AskRow[]): s
           `This also answers your ${also.length > 1 ? 'asks' : 'ask'} ${also.map((x) => `#${x.id}`).join(', ')}, which another of your runs raised for the same ${what}: do that work once, here.`
         ]
       : [];
-  // What the owner gave for a folder ask, which may be narrower than it asked.
-  const given = a?.folder?.given;
-  if (given)
-    return [
-      `{owner} approved your ask #${a?.id} and gave you ${shownFolder(given.path)} (${FOLDER_SAID[given.level]}). This run reaches it.`,
-      ...alsoAnswers('folder'),
-      '',
-      ...askLines,
-      `- Their reason: ${a?.reason ?? 'none given'}`,
-      '',
-      '1. Check you can reach it: list the folder.',
-      '2. If work was waiting on it, do it now, within what they gave you. If they gave less than you asked and the work needs more, say so in your reply.',
-      '3. If nothing was waiting, stop there.'
-    ];
-  if (a?.kind === 'switch')
-    return [
-      `{owner} approved your ask #${a.id} and turned on ${switchesSaid(a.switches ?? [])} for you. This run has it.`,
-      ...(also.length
-        ? [
-            `This also answers your ${also.length > 1 ? 'asks' : 'ask'} ${also.map((x) => `#${x.id}`).join(', ')}, which another of your runs raised for the same: do that work once, here.`
-          ]
-        : []),
-      '',
-      ...askLines,
-      `- Their reason: ${a.reason ?? 'none given'}`,
-      '',
-      '1. If work was waiting on it, do it now.',
-      '2. If nothing was waiting, stop there.'
-    ];
-  if (a?.access)
-    return [
-      `{owner} approved your ask #${a.id}, and the access is ready now.`,
-      ...alsoAnswers('tool'),
-      '',
-      ...askLines,
-      '',
-      '1. Check the tool answers: one small read.',
-      '2. If work was waiting on this access, do it now.',
-      '3. If nothing was waiting, stop there.'
-    ];
-  if (a?.call)
-    return [
-      `{owner} said yes to your call #${a.id}, and the office made it for you. Do not make it again.`,
-      '',
-      ...askLines,
-      '',
-      '1. Carry on with the work that waited on it, using what it returned.',
-      '2. If it failed, say so plainly and what you would try instead. Do not call it again without a reason {owner} would want.',
-      '3. If nothing more waited on it, stop there.'
-    ];
-  return [
+  const approved = () => [
     `{owner} approved your ask #${a?.id}. Carry it out now.`,
     '',
     ...askLines,
@@ -296,6 +275,74 @@ function carryOutBrief(f: FollowUpRow, a: AskRow | undefined, also: AskRow[]): s
     '1. Do what they approved, and nothing beyond it.',
     '2. If you cannot finish without something from {owner}, put it on their desk with raise_ask or give_owner_a_task, with everything needed to finish, then stop.'
   ];
+  switch (a?.kind) {
+    case 'folder': {
+      // What the owner gave for a folder ask, which may be narrower than it asked.
+      const given = a.folder?.given;
+      if (!given) return approved();
+      return [
+        `{owner} approved your ask #${a.id} and gave you ${shownFolder(given.path)} (${FOLDER_SAID[given.level]}). This run reaches it.`,
+        ...alsoAnswers('folder'),
+        '',
+        ...askLines,
+        `- Their reason: ${a.reason ?? 'none given'}`,
+        '',
+        '1. Check you can reach it: list the folder.',
+        '2. If work was waiting on it, do it now, within what they gave you. If they gave less than you asked and the work needs more, say so in your reply.',
+        '3. If nothing was waiting, stop there.'
+      ];
+    }
+    case 'switch':
+      return [
+        `{owner} approved your ask #${a.id} and turned on ${switchesSaid(a.switches ?? [])} for you. This run has it.`,
+        ...(also.length
+          ? [
+              `This also answers your ${also.length > 1 ? 'asks' : 'ask'} ${also.map((x) => `#${x.id}`).join(', ')}, which another of your runs raised for the same: do that work once, here.`
+            ]
+          : []),
+        '',
+        ...askLines,
+        `- Their reason: ${a.reason ?? 'none given'}`,
+        '',
+        '1. If work was waiting on it, do it now.',
+        '2. If nothing was waiting, stop there.'
+      ];
+    case 'access':
+      if (!a.access) return approved();
+      return [
+        `{owner} approved your ask #${a.id}, and the access is ready now.`,
+        ...alsoAnswers('tool'),
+        '',
+        ...askLines,
+        '',
+        '1. Check the tool answers: one small read.',
+        '2. If work was waiting on this access, do it now.',
+        '3. If nothing was waiting, stop there.'
+      ];
+    case 'call':
+      if (!a.call) return approved();
+      return [
+        `{owner} said yes to your call #${a.id}, and the office made it for you. Do not make it again.`,
+        '',
+        ...askLines,
+        '',
+        '1. Carry on with the work that waited on it, using what it returned.',
+        '2. If it failed, say so plainly and what you would try instead. Do not call it again without a reason {owner} would want.',
+        '3. If nothing more waited on it, stop there.'
+      ];
+    case undefined:
+    case 'approval':
+    case 'hire':
+    case 'goal':
+    case 'plan':
+    case 'hand_offs':
+    case 'window':
+    case 'reply':
+    case 'filter':
+    case 'remove':
+    case 'bring_back':
+      return approved();
+  }
 }
 
 function deniedBrief(f: FollowUpRow, a?: AskRow): string[] {
