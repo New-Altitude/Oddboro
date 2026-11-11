@@ -18,6 +18,7 @@ import { asks, connectors, followUps, goals, grants, staff, threads } from '../s
 // Types only, erased before run, so the code under test still loads after the mock.
 import type { ThreadFor } from '../src/threads.ts';
 import { db } from './pglite.ts';
+import { TEMP_IN_APPDATA } from './store-states.ts';
 
 // A home of the test's own, so a folder given to an Odd is named from `~`.
 const HOME = realpathSync(mkdtempSync(join(tmpdir(), 'thread-access-')));
@@ -261,57 +262,61 @@ test("a held hand-off carries access as it is at the owner's yes, as a fresh han
   assert.deepEqual(started?.handOff, now?.handOff);
 });
 
-test('a colleague is told of the web and the folders others on the thread hold and it lacks, and never to pass on its own', async () => {
-  const p = join(HOME, 'p');
-  mkdirSync(join(p, 'sub'), { recursive: true });
-  // Wes browses the web. Fay was given ~/p, Sol only ~/p/sub, and Pia nothing.
-  await db
-    .insert(staff)
-    .values([
-      { ...odd('wes', 'Wes'), web: true },
-      { ...odd('fay', 'Fay'), folders: [{ path: p, write: true }] },
-      { ...odd('sol', 'Sol'), folders: [{ path: join(p, 'sub'), write: false }] },
-      odd('pia', 'Pia')
+test(
+  'a colleague is told of the web and the folders others on the thread hold and it lacks, and never to pass on its own',
+  { skip: TEMP_IN_APPDATA },
+  async () => {
+    const p = join(HOME, 'p');
+    mkdirSync(join(p, 'sub'), { recursive: true });
+    // Wes browses the web. Fay was given ~/p, Sol only ~/p/sub, and Pia nothing.
+    await db
+      .insert(staff)
+      .values([
+        { ...odd('wes', 'Wes'), web: true },
+        { ...odd('fay', 'Fay'), folders: [{ path: p, write: true }] },
+        { ...odd('sol', 'Sol'), folders: [{ path: join(p, 'sub'), write: false }] },
+        odd('pia', 'Pia')
+      ]);
+    const from = (giver: string, to: string) =>
+      handOff({ from: giver, to, work, thread: { title: `${giver} to ${to}` } });
+    const handedTo = async (r: Awaited<ReturnType<typeof from>>, to: string) => {
+      assert.ok('id' in r, JSON.stringify(r));
+      const f = (await ran(r.thread, 'hand_off')).find((x) => x.staffId === to);
+      assert.ok(f?.handOff);
+      return f.handOff;
+    };
+
+    const toPia = await handedTo(await from('wes', 'pia'), 'pia');
+    assert.deepEqual(toPia.withheld, ['the web']);
+    const brief = handOffBrief({
+      kind: 'hand_off',
+      h: toPia,
+      colleague: { id: 'wes', name: 'Wes' },
+      me: 'pia',
+      result: null,
+      thread: 0
+    }).join('\n');
+    assert.match(brief, /You have no access to the web, which others on this work have/);
+
+    const toFay = await handedTo(await from('wes', 'fay'), 'fay');
+    assert.deepEqual(toFay.kept, ['~/p'], 'Wes lacks ~/p, so Fay keeps it out');
+
+    // Fay's ~/p holds Sol's ~/p/sub, so she lacks nothing of Sol's.
+    const fromSol = await handedTo(await from('sol', 'fay'), 'fay');
+    assert.equal(fromSol.withheld, undefined);
+    assert.deepEqual(fromSol.kept, ['~/p'], 'Sol has only ~/p/sub');
+
+    // Kit and Lou were both given ~/gone, since deleted from the disk. Lou's runs
+    // no longer get it, so it is not hers, and what Kit read there is withheld.
+    const gone = join(HOME, 'gone');
+    mkdirSync(gone);
+    rmSync(gone, { recursive: true });
+    const given = [{ path: gone, write: false }];
+    await db.insert(staff).values([
+      { ...odd('kit', 'Kit'), folders: given },
+      { ...odd('lou', 'Lou'), folders: given }
     ]);
-  const from = (giver: string, to: string) =>
-    handOff({ from: giver, to, work, thread: { title: `${giver} to ${to}` } });
-  const handedTo = async (r: Awaited<ReturnType<typeof from>>, to: string) => {
-    assert.ok('id' in r, JSON.stringify(r));
-    const f = (await ran(r.thread, 'hand_off')).find((x) => x.staffId === to);
-    assert.ok(f?.handOff);
-    return f.handOff;
-  };
-
-  const toPia = await handedTo(await from('wes', 'pia'), 'pia');
-  assert.deepEqual(toPia.withheld, ['the web']);
-  const brief = handOffBrief({
-    kind: 'hand_off',
-    h: toPia,
-    colleague: { id: 'wes', name: 'Wes' },
-    me: 'pia',
-    result: null,
-    thread: 0
-  }).join('\n');
-  assert.match(brief, /You have no access to the web, which others on this work have/);
-
-  const toFay = await handedTo(await from('wes', 'fay'), 'fay');
-  assert.deepEqual(toFay.kept, ['~/p'], 'Wes lacks ~/p, so Fay keeps it out');
-
-  // Fay's ~/p holds Sol's ~/p/sub, so she lacks nothing of Sol's.
-  const fromSol = await handedTo(await from('sol', 'fay'), 'fay');
-  assert.equal(fromSol.withheld, undefined);
-  assert.deepEqual(fromSol.kept, ['~/p'], 'Sol has only ~/p/sub');
-
-  // Kit and Lou were both given ~/gone, since deleted from the disk. Lou's runs
-  // no longer get it, so it is not hers, and what Kit read there is withheld.
-  const gone = join(HOME, 'gone');
-  mkdirSync(gone);
-  rmSync(gone, { recursive: true });
-  const given = [{ path: gone, write: false }];
-  await db.insert(staff).values([
-    { ...odd('kit', 'Kit'), folders: given },
-    { ...odd('lou', 'Lou'), folders: given }
-  ]);
-  const toLou = await handedTo(await from('kit', 'lou'), 'lou');
-  assert.deepEqual(toLou.withheld, ['~/gone']);
-});
+    const toLou = await handedTo(await from('kit', 'lou'), 'lou');
+    assert.deepEqual(toLou.withheld, ['~/gone']);
+  }
+);

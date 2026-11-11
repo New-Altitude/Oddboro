@@ -6,6 +6,7 @@
   // step through the open replies, oldest first.
   import type { AskRow, ReplyDraft } from '@oddboro/ledger';
   import { untrack } from 'svelte';
+  import ChatFiles from './ChatFiles.svelte';
   import Markdown from './Markdown.svelte';
   import ReviewNav from './ReviewNav.svelte';
   import { call } from './api.ts';
@@ -37,6 +38,9 @@
   let cc = $state(wrote.cc.join(', '));
   let subject = $state(wrote.subject);
   let body = $state(wrote.body);
+  /** The Odd's files, and the ones still going: the owner may take any off, never add one. */
+  const attached = wrote.attachments ?? [];
+  let keep = $state(attached.map((f) => f.path));
   let busy = $state(false);
   let problem = $state('');
   /** Ask for changes or Discard, waiting for its note. */
@@ -78,7 +82,15 @@
   }
   const go = (action: 'send' | 'draft') =>
     act(
-      () => call(`/api/asks/${a.id}/reply`, { action, to: list(to), cc: list(cc), subject, body }),
+      () =>
+        call(`/api/asks/${a.id}/reply`, {
+          action,
+          to: list(to),
+          cc: list(cc),
+          subject,
+          body,
+          attachments: keep
+        }),
       after(replies, a.id)
     );
   const decide = (decision: 'iterate' | 'deny') =>
@@ -179,6 +191,34 @@
       bind:value={body}
       disabled={busy}
       use:grow></textarea>
+    {#if attached.length}
+      <div class="flex flex-col gap-1.5">
+        <span class="text-xs text-muted"
+          >Attached{keep.length < attached.length
+            ? ` (${attached.length - keep.length} taken off)`
+            : ''}</span
+        >
+        {#if keep.length}
+          <ChatFiles
+            files={attached
+              .map((f, n) => ({
+                key: f.path,
+                tag: f.name,
+                mediaType: f.mediaType,
+                size: f.size,
+                url: `/api/asks/${a.id}/attachments/${n}`
+              }))
+              .filter((f) => keep.includes(f.key))}
+            onremove={(k) => (keep = keep.filter((p) => p !== k))}
+          />
+        {:else}
+          <button
+            class="self-start text-xs text-sea hover:text-ink"
+            onclick={() => (keep = attached.map((f) => f.path))}>Put them back</button
+          >
+        {/if}
+      </div>
+    {/if}
   </div>
 
   {#if mode}

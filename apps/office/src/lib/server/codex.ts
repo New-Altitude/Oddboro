@@ -18,7 +18,7 @@
 // the owner's data folder, the thread folders it reads and the folders the
 // owner gave it, writes only its folder, its part of a thread, the folders the
 // owner gave it to change and its own temp folder, never an instruction file
-// in them, and never reaches the internet (`NETWORK_WITH_WEB`). Codex's own
+// in them, and never reaches the internet (`networkWithWeb` in `AGENT_PLATFORMS`). Codex's own
 // web search runs outside the profile, only with Browse the web on. The codex
 // process itself and the MCP servers run outside that profile, so the Codex
 // home, the sign-in and every Codex Odd's sessions stay shut to the model.
@@ -29,9 +29,17 @@
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { dirname, join, sep } from 'node:path';
-import { home, OFFICE_ACCOUNT, toolHome, type Effort } from '@oddboro/ledger';
+import {
+  currentPlatform,
+  home,
+  OFFICE_ACCOUNT,
+  OFFICE_MODEL_VAR,
+  toolHome,
+  type Effort
+} from '@oddboro/ledger';
 import { andBelow, instructionPaths } from './files.ts';
 import { devReads } from './sandbox.ts';
+import { sandboxPaths } from './sandbox-paths.ts';
 import { onPath } from './on-path.ts';
 import {
   mcpGrant,
@@ -41,10 +49,12 @@ import {
   sweep,
   toml,
   vendorEnv,
+  type McpServer,
   type RunEvent,
   type RunImage,
   type Toml
 } from './launch.ts';
+import { runEnv } from './run-env-allow.ts';
 
 /**
  * One account's Codex home (`toolHome`), its config, and where its sign-in is
@@ -148,7 +158,7 @@ type CodexRun = {
   input: string;
   /** The session to resume, else a new one. */
   resume?: string;
-  servers: Record<string, Record<string, unknown>>;
+  servers: Record<string, McpServer>;
   /** The MCP tools the run may call, as access() names them for Claude Code (`mcp__server` or `mcp__server__tool`). */
   allowed: string[];
   /** The owner's Browse the web switch: Codex's own web search, which works with the network off. */
@@ -174,10 +184,7 @@ type CodexLaunch = { args: string[]; env: NodeJS.ProcessEnv; stdin: string; done
  * 0.166.0). The folder xcode-select uses by default, and the link it reads
  * when the owner switched it elsewhere; /var is itself a link.
  */
-const DEVELOPER_TOOLS = [
-  '/Library/Developer/CommandLineTools',
-  '/private/var/db/xcode_select_link'
-];
+const developerToolFolders = () => sandboxPaths().codexReads;
 
 /**
  * The OpenSSL config node reads as it starts, at the folder its OpenSSL was
@@ -188,13 +195,13 @@ const DEVELOPER_TOOLS = [
  * node reads its own OPENSSLDIR under the Homebrew prefix instead, which is
  * not granted, so an Odd's JavaScript fails there the same way.
  */
-const NODE_OPENSSL = '/System/Library/OpenSSL/openssl.cnf';
+const nodeOpenssl = () => sandboxPaths().opensslConf;
 
-/** DEVELOPER_TOOLS and the developer folder in use, once found. */
+/** `developerToolFolders` and the developer folder in use, once found. */
 let developerTools: string[] | undefined;
 
 /**
- * DEVELOPER_TOOLS, and the developer folder xcode-select picks as a real path,
+ * `developerToolFolders`, and the developer folder xcode-select picks as a real path,
  * which is Xcode.app's own on a Mac that uses Xcode. Asked once, as the first
  * run's profile is built, and without DEVELOPER_DIR, which a run's shell does
  * not inherit, so it names the folder the shims in the run go to.
@@ -211,9 +218,9 @@ function developerReads(): string[] {
       picked = [realpathSync(out.trim())];
     } catch {
       // No xcode-select, or no developer folder: a shim has nothing more to
-      // read, so the profile reads DEVELOPER_TOOLS alone.
+      // read, so the profile reads `developerToolFolders` alone.
     }
-    developerTools = [...DEVELOPER_TOOLS, ...picked];
+    developerTools = [...developerToolFolders(), ...picked];
   }
   return developerTools;
 }
@@ -221,7 +228,7 @@ function developerReads(): string[] {
 /**
  * The kernel's allowlist for one run, every path a real one. `:root` shuts
  * everything not named; `:minimal` reads what a command needs to start,
- * `developerReads` what the shims in /usr/bin need, NODE_OPENSSL what
+ * `developerReads` what the shims in /usr/bin need, `nodeOpenssl` what
  * node needs, and `devReads` the owner's developer tools; /tmp,
  * which Codex lets a run write by default, is shut. Instruction files in the
  * folders the run writes are shut both ways, each path and what is under it.
@@ -242,7 +249,7 @@ function filesystem(r: CodexRun, temp: string): Record<string, string> {
     ':minimal': 'read',
     ':slash_tmp': 'deny',
     ...Object.fromEntries(
-      [...developerReads(), NODE_OPENSSL, ...codexInstall(), ...dev.reads, ...r.reads].map((p) => [
+      [...developerReads(), nodeOpenssl(), ...codexInstall(), ...dev.reads, ...r.reads].map((p) => [
         p,
         'read'
       ])
@@ -265,7 +272,7 @@ export const GATEWAY_TOKEN = 'ODDBORO_GATEWAY_TOKEN';
 /** The gateway's token a run's servers carry, if any: every outside tool shares the run's one token. */
 function gatewayToken(servers: CodexRun['servers']): string | undefined {
   for (const s of Object.values(servers)) {
-    const auth = (s.headers as Record<string, string> | undefined)?.Authorization;
+    const auth = s.type === 'http' ? s.headers.Authorization : undefined;
     if (auth?.startsWith('Bearer ')) return auth.slice('Bearer '.length);
   }
   return undefined;
@@ -279,7 +286,7 @@ function gatewayToken(servers: CodexRun['servers']): string | undefined {
  * beside the package or inside it; any other install's own folder.
  */
 function codexInstall(): string[] {
-  if (process.platform !== 'linux') return [];
+  if (currentPlatform() !== 'linux') return [];
   const found = onPath('codex');
   if (!found) return [];
   const real = realpathSync(found);
@@ -304,23 +311,32 @@ export function mcpServers(
       const grants = allowed.map(mcpGrant).filter((g) => g.server === name);
       const whole = grants.some((g) => !g.tool);
       const tools = grants.flatMap((g) => (g.tool ? [g.tool] : []));
-      // The gateway's token comes from Codex's environment, never the command
-      // line, where any program could read it. Any other header goes as it is.
-      const { Authorization, ...rest } = (s.headers as Record<string, string> | undefined) ?? {};
-      const fromEnv = Authorization?.startsWith('Bearer ');
-      const headers = fromEnv || !Authorization ? rest : { Authorization, ...rest };
-      const server: Record<string, Toml> =
-        s.type === 'http'
-          ? {
-              url: s.url as string,
-              ...(fromEnv ? { bearer_token_env_var: GATEWAY_TOKEN } : {}),
-              ...(Object.keys(headers).length ? { http_headers: headers } : {})
-            }
-          : {
-              command: s.command as string,
-              args: (s.args as string[] | undefined) ?? [],
-              env: (s.env as Record<string, string> | undefined) ?? {}
-            };
+      let server: Record<string, Toml>;
+      switch (s.type) {
+        case 'http': {
+          // The gateway's token comes from Codex's environment, never the command
+          // line, where any program could read it. Any other header goes as it is.
+          const { Authorization, ...rest } = s.headers;
+          const fromEnv = Authorization?.startsWith('Bearer ');
+          const headers = fromEnv || !Authorization ? rest : { Authorization, ...rest };
+          server = {
+            url: s.url,
+            ...(fromEnv ? { bearer_token_env_var: GATEWAY_TOKEN } : {}),
+            ...(Object.keys(headers).length ? { http_headers: headers } : {})
+          };
+          break;
+        }
+        case 'stdio':
+          server = { command: s.command, args: s.args, env: s.env };
+          break;
+        default: {
+          // A kind with no case here fails the type check; the cast only names it.
+          const missed: never = s;
+          throw new Error(
+            `No way to give Codex the ${name} server, a ${(missed as McpServer).type} one`
+          );
+        }
+      }
       return [
         name,
         {
@@ -379,9 +395,13 @@ export function codexSignedOut(account: string = OFFICE_ACCOUNT): string | undef
   return codexAccount(account) ? undefined : `Codex ${NOT_SIGNED_IN}`;
 }
 
-/** The environment every `codex` the office starts gets: the office's Codex home, and no key or setup of the office's own. */
-function codexEnv(h: CodexHome): NodeJS.ProcessEnv {
-  return Object.assign(vendorEnv(['OPENAI_', 'CODEX_']), { CODEX_HOME: h.dir });
+/**
+ * The environment every `codex` the office starts gets: the office's Codex
+ * home, and no key or setup of the office's own. A run starts from `base`,
+ * its `runEnv`; the sign-in from the owner-side `vendorEnv`.
+ */
+function codexEnv(h: CodexHome, base = vendorEnv(['OPENAI_', 'CODEX_'])): NodeJS.ProcessEnv {
+  return Object.assign(base, { CODEX_HOME: h.dir });
 }
 
 /**
@@ -416,12 +436,9 @@ export function codexLaunch(r: CodexRun): CodexLaunch {
   const shell = shellEnv(temp);
   mkdirSync(shell.GIT_TEMPLATE_DIR, { mode: 0o700 });
   const set = (key: string, value: Toml) => ['-c', `${key}=${toml(value)}`];
-  const model = r.model ?? process.env.OFFICE_CODEX_MODEL;
+  const model = r.model ?? process.env[OFFICE_MODEL_VAR.codex];
   const args = [
     'exec',
-    // Joined to its flag: `--image` takes many values, so a bare file after
-    // it would also take the "-" that reads the message.
-    ...(r.images ?? []).map((i) => `--image=${i.path}`),
     '--json',
     // The Odd's folder is not a git repository.
     '--skip-git-repo-check',
@@ -437,7 +454,7 @@ export function codexLaunch(r: CodexRun): CodexLaunch {
     // The shell only with Run commands; the office's file tools are the way to files.
     ...set('features.shell_tool', r.commands),
     ...set('features.unified_exec', r.commands),
-    ...(process.platform === 'win32'
+    ...(currentPlatform() === 'win32'
       ? set('sandbox_mode', 'read-only')
       : [
           ...set('permissions', {
@@ -449,12 +466,17 @@ export function codexLaunch(r: CodexRun): CodexLaunch {
     ...(r.effort ? set('model_reasoning_effort', r.effort) : []),
     ...(model ? ['-m', model] : []),
     // "-" reads the message from stdin, so one that starts with a dash is never a flag.
-    ...(r.resume ? ['resume', r.resume, '-'] : ['-'])
+    // Pictures go last, after `resume <id>` on a resumed session, which takes its
+    // own `--image` (Codex 0.166). Each is joined to its flag: `--image` takes many
+    // values, so a bare file after it would also take the "-".
+    ...(r.resume ? ['resume', r.resume] : []),
+    ...(r.images ?? []).map((i) => `--image=${i.path}`),
+    '-'
   ];
   return {
     args,
     env: {
-      ...codexEnv(h),
+      ...codexEnv(h, runEnv('codex')),
       TMPDIR: temp,
       // Codex's shell inherits only the core variables, so commands never see it.
       ...(gatewayToken(r.servers) ? { [GATEWAY_TOKEN]: gatewayToken(r.servers) } : {})

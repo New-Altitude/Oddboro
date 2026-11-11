@@ -1,5 +1,5 @@
-// Which requests the office answers: `guardOffice`, the server's `handle`, in
-// front of the real routes, over the office's own database (local-db.ts) in a
+// Which requests the office answers: `guardOffice`, the first step of the
+// server's `handle`, in front of the real routes, over the office's own database (local-db.ts) in a
 // throwaway folder on a free port. Run with `npm test -w @oddboro/office`.
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -106,8 +106,9 @@ async function send(
     });
     return { status: res.status, ran, text: await res.text() };
   } catch (e) {
-    // A route's `error()` throws; SvelteKit turns it into this status.
-    return { status: (e as { status: number }).status, ran, text: '' };
+    // A route's `error()` throws; SvelteKit turns it into this status and message.
+    const thrown = e as { status: number; body?: { message?: string } };
+    return { status: thrown.status, ran, text: thrown.body?.message ?? '' };
   }
 }
 
@@ -115,16 +116,27 @@ const ok: Route = () => new Response('ok');
 const PAGE = { 'sec-fetch-site': 'same-origin', origin: 'http://127.0.0.1:4500' };
 
 /** A fresh open approval from Paige, and its status read back. */
-async function openAsk(): Promise<{ id: string; status: () => Promise<string | undefined> }> {
+async function openAsk(
+  kind = 'approval'
+): Promise<{ id: string; status: () => Promise<string | undefined> }> {
   const [{ id }] = await L.pg<{ id: number }[]>`
     insert into asks (staff_id, kind, title, why, if_approved)
-    values ('paige', 'approval', 'Send the brief', 'It is ready', 'Paige sends it')
+    values ('paige', ${kind}, 'Send the brief', 'It is ready', 'Paige sends it')
     returning id`;
   return { id: String(id), status: async () => (await L.ask(id))?.status };
 }
 
-test("the server's handle is the guard, so every route request passes it", () => {
-  assert.equal(hooks.handle, guardOffice);
+test('every route request passes the guard before anything else', async () => {
+  // The server's handle is a sequence, which needs the request store Kit gives each request.
+  const { sender } = await import('./diagnostics-harness.ts');
+  const send = sender(hooks.handle);
+  const refused = await send({
+    route: '/api/ledger',
+    headers: { host: 'rebind.evil.example:4500' }
+  });
+  assert.deepEqual(refused, { status: 403, ran: false });
+  // The same request from the office's own name reaches the route.
+  assert.deepEqual(await send({ route: '/api/ledger' }), { status: 200, ran: true });
 });
 
 test('an approval sent from another site is refused, and the ask stays open', async () => {
@@ -154,6 +166,20 @@ test("the owner's own page approves the same kind of ask", async () => {
   });
   assert.deepEqual([r.status, r.ran], [200, true]);
   assert.equal(await a.status(), 'approved');
+});
+
+test('a hire is approved by hiring, not from the desk, and a word that is not a decision is refused', async () => {
+  const decide = async (id: string, decision: string) =>
+    send(askRoute.POST as Route, {
+      path: `/api/asks/${id}`,
+      params: { id },
+      headers: { ...PAGE, 'content-type': 'application/json' },
+      body: JSON.stringify({ decision })
+    }).then((r) => [r.status, r.text]);
+  const hire = await openAsk('hire');
+  assert.deepEqual(await decide(hire.id, 'approve'), [400, 'Approve a hire by hiring']);
+  assert.equal(await hire.status(), 'open');
+  assert.deepEqual(await decide(hire.id, 'maybe'), [400, 'Say approve, deny or iterate']);
 });
 
 test('a browser that sends no Sec-Fetch-Site passes when its Origin names the host it asked', async () => {

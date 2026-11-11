@@ -21,9 +21,9 @@ const VISIT_STAY = 2;
 /** Visits that wait behind the one under way: a manager hands on several pieces in one run. */
 const VISIT_QUEUE = 3;
 /**
- * How many times the way out turns after a colleague who moved on while it
- * walked. Past that it stays where it got to, so a colleague who keeps moving
- * is never chased round the floor.
+ * How many times the way out turns after a colleague who set off somewhere
+ * else while it walked. Past that it keeps to where it was going, so a
+ * colleague who keeps moving is never chased round the floor.
  */
 const REAIMS = 3;
 /** The icon's sprite in the atlas: `fx-pop/<icon>` is each one's animation. */
@@ -67,11 +67,20 @@ export class StaffActor {
   private floor: Floor;
   /**
    * A walk over to a colleague and back, which leaves `spot` alone, so the
-   * place stays held for the way back. `reaims` counts the times the way out
-   * turned after the colleague.
+   * place stays held for the way back. `aim` is where the way out leads, and
+   * `reaims` counts the times it turned after the colleague.
    */
   private trip:
-    { phase: 'out' | 'stay' | 'back'; to: StaffActor; left: number; reaims: number } | undefined;
+    | {
+        phase: 'out' | 'stay' | 'back';
+        to: StaffActor;
+        left: number;
+        aim: [number, number];
+        reaims: number;
+      }
+    | undefined;
+  /** A colleague who stopped it mid-walk to talk: it stands still until that talk ends. */
+  private heldBy: StaffActor | undefined;
   /** The icon playing over the head, and how long it has played, in seconds. */
   private popping:
     { sprite: Sprite; frames: Texture[]; meta: SpriteMeta; clock: number } | undefined;
@@ -271,7 +280,7 @@ export class StaffActor {
   private setOff(to: StaffActor): boolean {
     const path = this.pathTo(to.meetAt);
     if (!path) return false;
-    this.trip = { phase: 'out', to, left: VISIT_STAY, reaims: 0 };
+    this.trip = { phase: 'out', to, left: VISIT_STAY, aim: to.meetAt, reaims: 0 };
     this.path = path.slice(1);
     return true;
   }
@@ -282,10 +291,61 @@ export class StaffActor {
     return findPath(w.walkable, w.width, this.tile, at, this.rules());
   }
 
-  /** The owner or the office moved it on: any trip and the visits behind it are off. */
+  /** The owner or the office moved it on: any trip, the visits behind it, and any talk on the way are off. */
   private endTrips() {
     this.trip = undefined;
     this.visits = [];
+    this.heldBy = undefined;
+  }
+
+  /** Stopped mid-walk while a colleague talks to it, and let go once that colleague moves on. */
+  private get held(): boolean {
+    const by = this.heldBy;
+    if (by?.visible && by.trip?.phase === 'stay' && by.trip.to === this) return true;
+    this.heldBy = undefined;
+    return false;
+  }
+
+  /**
+   * A step of the way out is done. A colleague on the move within a tile
+   * stops with it to talk, wherever the two are. One that set off somewhere
+   * else is followed there, up to `REAIMS` times. A seated colleague is met
+   * beside its seat, at the end of the walk.
+   */
+  private onTheWay(trip: NonNullable<StaffActor['trip']>) {
+    const to = trip.to;
+    if (to.moving && to.visible && this.near(to)) return this.meet(trip);
+    const at = to.meetAt;
+    if ((at[0] === trip.aim[0] && at[1] === trip.aim[1]) || trip.reaims >= REAIMS) return;
+    const path = this.pathTo(at);
+    if (!path) return;
+    trip.reaims++;
+    trip.aim = at;
+    this.path = path.slice(1);
+  }
+
+  /** Within a tile of a colleague: beside, or across a corner someone could walk round. */
+  private near(o: StaffActor): boolean {
+    const dx = Math.abs(o.tile[0] - this.tile[0]);
+    const dy = Math.abs(o.tile[1] - this.tile[1]);
+    if (dx + dy <= 1) return true;
+    if (dx !== 1 || dy !== 1) return false;
+    const w = this.floor.world;
+    return (
+      w.walkable[this.tile[1] * w.width + o.tile[0]] ||
+      w.walkable[o.tile[1] * w.width + this.tile[0]]
+    );
+  }
+
+  /** Stop here to talk: the stay starts, and a colleague on the move stops for it too. */
+  private meet(trip: NonNullable<StaffActor['trip']>) {
+    this.path = [];
+    trip.phase = 'stay';
+    this.facing = facingAlong(trip.to.x - this.x, trip.to.y - this.y);
+    const to = trip.to;
+    if (!to.moving) return;
+    to.heldBy = this;
+    to.facing = facingAlong(this.x - to.x, this.y - to.y);
   }
 
   /** The next queued visit a colleague still on the floor can take, or none. */
@@ -309,11 +369,9 @@ export class StaffActor {
       const path = moved && trip.reaims < REAIMS ? this.pathTo(at) : undefined;
       if (path && path.length > 1) {
         trip.reaims++;
+        trip.aim = at;
         this.path = path.slice(1);
-      } else {
-        trip.phase = 'stay';
-        this.facing = facingAlong(trip.to.x - this.x, trip.to.y - this.y);
-      }
+      } else this.meet(trip);
     }
   }
 
@@ -337,8 +395,9 @@ export class StaffActor {
 
   update(dt: number) {
     if (!this.sprite.visible) return;
-    if (this.trip && !this.path.length) this.tripStep(this.trip, dt);
-    const next = this.path[0];
+    const held = this.held;
+    if (!held && this.trip && !this.path.length) this.tripStep(this.trip, dt);
+    const next = held ? undefined : this.path[0];
     if (next) {
       const tx = next[0] * TILE + TILE / 2;
       const ty = (next[1] + 1) * TILE;
@@ -352,12 +411,13 @@ export class StaffActor {
         this.path.shift();
         // Going home ends at the exit: step out of sight.
         if (!this.path.length && this.activity === 'home') this.hide();
+        else if (this.trip?.phase === 'out') this.onTheWay(this.trip);
       } else {
         this.x += (dx / dist) * step;
         this.y += (dy / dist) * step;
       }
       this.play(`walk-${dirOf(this.facing)}`, this.facing === 'left');
-    } else if (this.trip) {
+    } else if (this.trip || held) {
       // Standing with the colleague, facing it.
       this.play(`idle-${dirOf(this.facing)}`, this.facing === 'left');
     } else {

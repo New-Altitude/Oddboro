@@ -3,7 +3,7 @@
 // development they fall back to ~/.oddboro, this repo and port 4500.
 import { mkdtempSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { extname, join } from 'node:path';
+import { extname, join, normalize, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
@@ -40,8 +40,51 @@ export const accountsHome = (): string => home('accounts');
 export const accountHome = (tool: string, account: string): string =>
   home('accounts', tool, account);
 
+/**
+ * The office's own files at the top of an Odd's folder, by what each holds:
+ * the chat log (staff.ts), the chat's run session, and a persona's session at
+ * its door (persona-door.ts). Each writer takes its name from here, so an
+ * Odd never mails one, the Storage tab never lists one, and a replay never
+ * names one as a change (`OFFICE_FILE_NAMES`).
+ */
+export const OFFICE_FILES = {
+  chat: 'chat.jsonl',
+  session: 'session.json',
+  personaSession: 'persona-session.json'
+} as const;
+export const OFFICE_FILE_NAMES: readonly string[] = Object.values(OFFICE_FILES);
+
+// A Mac's and Windows's disks read `Chat.jsonl` as `chat.jsonl`, so case does not count.
+const lowerOfficeFiles = OFFICE_FILE_NAMES.map((n) => n.toLowerCase());
+/**
+ * Whether a file is one of the office's own, given as the path from the Odd's
+ * real folder to the file's real path. Only that path decides, since a link
+ * to the folder, a full path or another letter case names the same file by
+ * another name. A path below the top never matches.
+ */
+export const isOfficeFile = (realInside: string): boolean =>
+  lowerOfficeFiles.includes(realInside.toLowerCase());
+
+// A Mac's disk opens an accented name in either Unicode form, and the real path
+// gives the form it stored, so both sides are compared composed.
+const asNamed = (p: string): string =>
+  normalize(p).normalize('NFC').replace(/\\/g, '/').toLowerCase();
+/**
+ * Whether a file an Odd named by a path inside its folder really is there:
+ * `realInside` is the path from the folder's real path to the file's. A link
+ * on the way names another file, perhaps a hidden one or one outside the
+ * folder, so an email and a hand-off carry only a file where it really is.
+ */
+export function isWhereNamed(file: { realInside: string; named: string }): boolean {
+  const real = asNamed(file.realInside);
+  // win32's reading, since it also takes a posix full path: on Windows
+  // `relative()` gives a file on another drive as `D:\...`, never `..`.
+  if (win32.isAbsolute(file.realInside) || real.split('/')[0] === '..') return false;
+  return real === asNamed(file.named);
+}
+
 /** An Odd's one chat session, which every chat resumes (staff.ts). */
-export const chatSession = (id: string): string => home('staff', id, 'session.json');
+export const chatSession = (id: string): string => home('staff', id, OFFICE_FILES.session);
 
 /** The code: this repo in development, the app's Resources/server folder in a release. */
 export const CODE = process.env.ODDBORO_CODE || fileURLToPath(new URL('../../..', import.meta.url));

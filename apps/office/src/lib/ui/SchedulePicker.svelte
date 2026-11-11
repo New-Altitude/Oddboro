@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Schedule, Weekday } from '@oddboro/ledger';
-  import { WEEKDAYS, zoneName, zoneShort } from '@oddboro/ledger/time';
+  import { SCHEDULE_RULE, WEEKDAYS, zoneName, zoneShort } from '@oddboro/ledger/time';
 
   /** How often a job runs, in the office's time zone. */
   let { value = $bindable() }: { value: Schedule } = $props();
@@ -9,16 +9,18 @@
   let n = $state(value.every === 'minutes' ? value.n : 60);
   let at = $state(value.every === 'minutes' ? '07:00' : value.at);
   let day = $state<Weekday>(value.every === 'week' ? value.day : 'Mon');
+  const { ownerMinMinutes: least, ownerMaxMinutes: most } = SCHEDULE_RULE;
 
   $effect(() => {
     value =
       every === 'minutes'
-        ? { every, n: Math.max(5, Math.round(n || 5)) }
+        ? { every, n: Math.max(least, Math.round(n || least)) }
         : every === 'week'
           ? { every, day, at }
           : { every, at };
   });
-  const perDay = $derived(every === 'minutes' ? Math.floor(1440 / Math.max(5, n || 5)) : 1);
+  // 1440 is the minutes in a day, not the rule's longest gap, though the two are equal today.
+  const perDay = $derived(every === 'minutes' ? Math.floor(1440 / Math.max(least, n || least)) : 1);
 </script>
 
 <div class="flex flex-wrap items-center gap-2 text-sm">
@@ -46,8 +48,8 @@
   {#if every === 'minutes'}
     <input
       type="number"
-      min="5"
-      max="1440"
+      min={least}
+      max={most}
       step="5"
       class="w-20 rounded-lg bg-raise px-2 py-1.5 outline-none"
       bind:value={n}
