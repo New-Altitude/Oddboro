@@ -28,16 +28,22 @@ mock.module('node:child_process', {
     }
   }
 });
-const { MAC, OPENER_FAILS_WITHIN_MS, openFile } = await import('../src/platform.ts');
+const { OPENER_FAILS_WITHIN_MS, openFile } = await import('../src/platform.ts');
 // The failures below are logged on purpose; keep them out of the test output.
 mock.method(console, 'error', () => {});
 
-test('a file opens with the system opener, its path the one argument, detached, with no shell and no wait', async () => {
+test('a file opens with the system opener, the path whole in one argument, detached, with no shell and no wait', async () => {
   then = { exit: 0 };
-  assert.equal(await openFile('/srv/office/game.html'), true);
+  const path = '/srv/office/game.html';
+  const openers: Partial<Record<NodeJS.Platform, [string, string[]]>> = {
+    darwin: ['open', [path]],
+    win32: ['rundll32', ['url.dll,FileProtocolHandler', path]]
+  };
+  const [opener, words] = openers[process.platform] ?? ['xdg-open', [path]];
+  assert.equal(await openFile(path), true);
   const [{ cmd, args, options, child }] = spawned.splice(0);
-  assert.equal(cmd, MAC ? 'open' : 'xdg-open');
-  assert.deepEqual(args, ['/srv/office/game.html']);
+  assert.equal(cmd, opener);
+  assert.deepEqual(args, words);
   assert.deepEqual(options, { detached: true, stdio: 'ignore' });
   assert.equal(child.unrefs, 1, 'the office does not wait on the browser');
 });

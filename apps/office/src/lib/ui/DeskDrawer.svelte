@@ -9,6 +9,7 @@
   import ReplyReview from './ReplyReview.svelte';
   import FilterReview from './FilterReview.svelte';
   import FolderAsk from './FolderAsk.svelte';
+  import FolderWarning from './FolderWarning.svelte';
   import { call } from './api.ts';
   import { AWS_GUIDES, siteLink } from '../site.ts';
   import { ago, when } from './format.ts';
@@ -17,6 +18,7 @@
   import { OFFICE_TOOLS } from '@oddboro/ledger/tools';
   import { describe } from '@oddboro/ledger/time';
   import { tickable, yesOrNo } from '@oddboro/ledger/tools';
+  import type { DeskItem } from '@oddboro/ledger/desk-answers';
   import { untrack } from 'svelte';
   import { goalWhen } from '@oddboro/ledger/goals';
   import { LEVEL_LABEL, type FolderAccess } from '@oddboro/ledger/access';
@@ -37,10 +39,9 @@
   };
   let { desk, staff, focus, onhire, onplan, onstaff }: Props = $props();
 
-  type Item =
-    | { key: string; kind: 'ask'; at: string; row: AskRow }
-    | { key: string; kind: 'task'; at: string; row: TaskRow }
-    | { key: string; kind: 'report'; at: string; row: ReportRow };
+  /** The row each kind of desk item shows. */
+  type DeskRow = { ask: AskRow; task: TaskRow; report: ReportRow };
+  type Item = { [K in DeskItem]: { key: string; kind: K; at: string; row: DeskRow[K] } }[DeskItem];
 
   /**
    * The connect task an approved access ask just made, until the desk reloads
@@ -103,7 +104,7 @@
     const f = focus;
     if (f) untrack(() => go(f));
   });
-  const attached = (kind: 'ask' | 'task', id: number) =>
+  const attached = (kind: Exclude<DeskItem, 'report'>, id: number) =>
     desk.attachments.filter((f) => (kind === 'ask' ? f.askId : f.taskId) === id);
   const open = $derived(items.find((i) => i.key === openKey));
   const who = (id: string | null) => staff.find((p) => p.id === id);
@@ -139,6 +140,13 @@
   let folderPath = $state('');
   let folderLevel = $state<FolderAccess>('read');
   let changing = $state(false);
+  /** The server's warning on a whole drive or system files: Give access waits on Accept or Cancel. */
+  let folderWarning = $state('');
+  // A warning is about the folder and level it was given for: a change to either drops it.
+  $effect(() => {
+    void [folderPath, folderLevel];
+    folderWarning = '';
+  });
 
   // Each newly opened item starts clean, and an ask brings its closest past
   // decisions. Keyed on the item, not its row: the desk reloading (a step
@@ -155,6 +163,7 @@
     skip = {};
     secret = {};
     changing = false;
+    folderWarning = '';
     const asked = i?.kind === 'ask' ? i.row : undefined;
     folderPath = asked?.folder ? (untrack(() => desk.folders[asked.id]) ?? asked.folder.path) : '';
     folderLevel = asked?.folder?.level ?? 'read';
@@ -202,11 +211,21 @@
     });
   /** A held call's inputs, as the tool takes them, for the owner to read. */
   const inputs = (args: Record<string, unknown>) => JSON.stringify(args, null, 2);
-  /** Give the folder as it stands on the card: the server gives it, then approves the ask. */
-  const giveFolder = (a: AskRow) =>
+  /**
+   * Give the folder as it stands on the card: the server gives it, then
+   * approves the ask. A whole drive or system files comes back as a warning
+   * first, and goes only on Accept (`accept`).
+   */
+  const giveFolder = (a: AskRow, accept = false) =>
     act(async () => {
-      await call(`/api/asks/${a.id}/folder`, { path: folderPath, level: folderLevel, reason });
-      show(undefined);
+      const r = await call<{ warning?: string }>(`/api/asks/${a.id}/folder`, {
+        path: folderPath,
+        level: folderLevel,
+        reason,
+        accept
+      });
+      folderWarning = r.warning ?? '';
+      if (!r.warning) show(undefined);
     });
   const picked = (a: AskRow) => a.plan?.items.filter((_, i) => !skip[i]).length ?? 0;
   const nameOf = (id: string) => staff.find((p) => p.id === id)?.name ?? id;
@@ -535,8 +554,7 @@
             </div>
           {:else if a.call}
             {@const c = a.call}
-            <div>
-              <dt class="text-xs text-muted">The call, exactly as the office makes it</dt>
+            {#snippet exact()}
               <dd class="mt-1 flex flex-col gap-1 rounded-lg bg-raise px-2.5 py-2 text-xs">
                 <div><span class="text-muted">Tool:</span> {c.tool}</div>
                 <div class="text-muted">Inputs:</div>
@@ -545,6 +563,28 @@
                     c.arguments
                   )}</pre>
               </dd>
+            {/snippet}
+            <div>
+              {#if c.said && c.shown?.length}
+                <!-- What it does in words, and each email it does it to, as Gmail showed them when it was held. -->
+                <dt class="text-xs text-muted">{c.said}</dt>
+                <dd class="mt-1 rounded-lg bg-raise px-2.5 py-2 text-xs">
+                  <ul class="flex max-h-72 flex-col gap-1 overflow-y-auto">
+                    {#each c.shown as item, n (n)}
+                      <li class="break-words">{item}</li>
+                    {/each}
+                  </ul>
+                </dd>
+                <details class="mt-2">
+                  <summary class="cursor-pointer text-xs text-muted hover:text-ink"
+                    >The call, exactly as the office makes it</summary
+                  >
+                  {@render exact()}
+                </details>
+              {:else}
+                <dt class="text-xs text-muted">The call, exactly as the office makes it</dt>
+                {@render exact()}
+              {/if}
               <p class="mt-1.5 text-[11px] text-faint">
                 Nothing has changed yet. Approve, and the office makes this call once, then {who(
                   a.staffId
@@ -558,6 +598,15 @@
               bind:level={folderLevel}
               bind:changing
             />
+            {#if folderWarning}
+              <FolderWarning
+                folder={folderPath}
+                warning={folderWarning}
+                {busy}
+                onaccept={() => giveFolder(a, true)}
+                oncancel={() => (folderWarning = '')}
+              />
+            {/if}
           {:else}
             <div>
               <dt class="text-xs text-muted">If you approve</dt>
@@ -629,7 +678,7 @@
             {/if}
             <button
               class="flex-[1.4] rounded-lg bg-sea px-3 py-2 text-sm font-medium text-night disabled:opacity-40"
-              disabled={busy || unsaved || !folderPath.trim()}
+              disabled={busy || unsaved || !folderPath.trim() || !!folderWarning}
               onclick={() => giveFolder(a)}>Give access</button
             >
           {:else if a.kind === 'hire'}
@@ -651,11 +700,17 @@
                     : 'Make this call'
                   : a.access
                     ? 'Connect'
-                    : a.kind === 'window'
-                      ? 'Let it carry on'
-                      : a.plan && picked(a) < a.plan.items.length
-                        ? `Approve ${picked(a)} of ${a.plan.items.length}`
-                        : 'Approve'}</button
+                    : a.kind === 'switch'
+                      ? 'Turn on'
+                      : a.kind === 'remove'
+                        ? 'Remove'
+                        : a.kind === 'bring_back'
+                          ? 'Bring back'
+                          : a.kind === 'window'
+                            ? 'Let it carry on'
+                            : a.plan && picked(a) < a.plan.items.length
+                              ? `Approve ${picked(a)} of ${a.plan.items.length}`
+                              : 'Approve'}</button
             >
           {/if}
         </div>

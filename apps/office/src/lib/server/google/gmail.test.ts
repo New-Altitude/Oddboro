@@ -3,12 +3,16 @@
 // keeps every request, so the test sees what would have gone to Google.
 // Run with `node --test --experimental-test-module-mocks apps/office/src/lib/server/google/*.test.ts`.
 import assert from 'node:assert/strict';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { test } from 'node:test';
+import { home } from '@oddboro/ledger/home';
+import { ODD_META } from './http.ts';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { readsOnly } from '@oddboro/ledger';
-import { gmailServer, message } from './gmail.ts';
+import { gmailServer, heldWords, message } from './gmail.ts';
 
 type Sent = { url: string; method: string; body: string; auth: string | null };
 let sent: Sent[] = [];
@@ -245,6 +249,61 @@ test('update_labels takes names or ids and sends ids', async () => {
   assert.match(missing.text, /no label is called "Nope"/);
 });
 
+test('update_labels changes many threads in one call, the labels looked up once', async () => {
+  const r = await use(
+    'update_labels',
+    { thread_ids: ['t1', 't2', 't3', 't2'], remove: ['INBOX'] },
+    (url) => (url.endsWith('/labels') ? { labels: [{ id: 'INBOX', name: 'INBOX' }] } : {})
+  );
+  assert.equal(r.isError, undefined, r.text);
+  assert.deepEqual(
+    sent.filter((s) => s.method === 'POST').map((s) => s.url),
+    ['t1', 't2', 't3'].map((t) => `${GMAIL}/threads/${t}/modify`)
+  );
+  assert.equal(sent.filter((s) => s.url.endsWith('/labels')).length, 1);
+  assert.match(r.text, /^3 threads: added nothing, removed INBOX\.$/);
+  const none = await use('update_labels', { remove: ['INBOX'] });
+  assert.equal(none.isError, true);
+  assert.equal(sent.length, 0);
+});
+
+test('a held Gmail call says what it does from the call alone, and names each email from Gmail', async () => {
+  answer = (url) => {
+    const t = /threads\/(t\d)/.exec(url)?.[1];
+    if (t === 't2') return new Response('gone', { status: 404 });
+    return {
+      messages: [
+        { payload: { headers: [{ name: 'Subject', value: `Weekly digest\r\nBcc: x` }] } },
+        {
+          payload: {
+            headers: [
+              { name: 'From', value: '"PostHog" <hey@posthog.com>' },
+              { name: 'Date', value: 'Tue, 3 Nov 2026 17:00:00 +0000' }
+            ]
+          }
+        }
+      ]
+    };
+  };
+  const token = async () => 'a-fresh-token';
+  const w = await heldWords(token, 'update_labels', {
+    thread_ids: ['t1', 't2'],
+    remove: ['INBOX', 'UNREAD'],
+    add: ['Reports']
+  });
+  assert.equal(w?.title, 'Archive, mark read and label as "Reports": 2 emails');
+  assert.deepEqual(w?.items, [
+    '"Weekly digest Bcc: x" from PostHog, Nov 3',
+    'An email Gmail would not show (thread t2)'
+  ]);
+  assert.equal(
+    (await heldWords(token, 'trash_thread', { thread_id: 't1' }))?.title,
+    'Move to Trash: 1 email'
+  );
+  // A call that acts on no thread keeps its plain form.
+  assert.equal(await heldWords(token, 'create_label', { name: 'Reports' }), undefined);
+});
+
 test('create_draft writes a reply in the thread, ending with the footer, and a line break cannot add a header', async () => {
   const r = await use(
     'create_draft',
@@ -342,6 +401,60 @@ test('an email with an https Markdown link goes as plain text and HTML, everythi
   const plain = await raw('Friday works.');
   assert.ok(plain.lines.includes('Content-Type: text/plain; charset="UTF-8"'));
   assert.deepEqual(plain.parts, [{ type: 'text/plain', text: 'Friday works.' }]);
+});
+
+test("create_draft attaches only the calling Odd's own files, through Gmail's upload address, under the name a recipient should see", async () => {
+  const dir = join(home('staff', 'wren'), 'attachments');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, '20261110-081108-35bc-image.png'), 'png-bytes');
+  mkdirSync(home('staff', 'grace'), { recursive: true });
+  writeFileSync(join(home('staff', 'grace'), 'secret.md'), 'not wren’s');
+  const args = {
+    to: 'ann@x.test',
+    body: 'The screenshot.',
+    attachments: ['attachments/20261110-081108-35bc-image.png']
+  };
+  /** The call as the office makes it for a run of `odd`. */
+  const asOdd = async (odd: string | undefined, a: Record<string, unknown>) => {
+    sent = [];
+    answer = () => ({ id: 'd9' });
+    const r = (await client.callTool({
+      name: 'create_draft',
+      arguments: a,
+      ...(odd ? { _meta: { [ODD_META]: odd } } : {})
+    })) as CallToolResult;
+    return { text: (r.content[0] as { text: string }).text, isError: r.isError };
+  };
+
+  // With no Odd named by the office, no file goes.
+  const none = await asOdd(undefined, args);
+  assert.ok(none.isError);
+  assert.match(none.text, /only from a run/);
+  assert.equal(sent.length, 0);
+  // Another Odd's file, a path out of the folder and a missing file go nowhere.
+  for (const named of [
+    '../grace/secret.md',
+    join(home('staff', 'grace'), 'secret.md'),
+    'nope.png'
+  ]) {
+    const r = await asOdd('wren', { ...args, attachments: [named] });
+    assert.ok(r.isError, named);
+    assert.equal(sent.length, 0, named);
+  }
+
+  const r = await asOdd('wren', args);
+  assert.ok(!r.isError, r.text);
+  assert.match(r.text, /Draft d9 is saved in Drafts with image\.png attached/);
+  assert.equal(
+    sent[0].url,
+    'https://gmail.googleapis.com/upload/gmail/v1/users/me/drafts?uploadType=multipart'
+  );
+  const body = sent[0].body;
+  assert.ok(body.includes('Content-Type: message/rfc822'));
+  assert.ok(body.includes('Content-Type: multipart/mixed'));
+  assert.ok(body.includes('Content-Disposition: attachment; filename="image.png"'));
+  assert.ok(body.includes(Buffer.from('png-bytes').toString('base64')));
+  assert.ok(body.includes(Buffer.from('The screenshot.').toString('base64').slice(0, 12)));
 });
 
 test('send_draft, trash, untrash, spam and back each make one call', async () => {

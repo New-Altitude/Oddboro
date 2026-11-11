@@ -17,6 +17,7 @@ import {
   updateRow,
   type UpdateRow
 } from '@oddboro/ledger';
+import { fixedError } from '@oddboro/ledger/errors';
 import { currentDesign } from './design-job.ts';
 import { emit } from './events.ts';
 import { runsActive } from './staff.ts';
@@ -90,7 +91,7 @@ export function checked(problem?: string): void {
 /** The owner pressed Install now, or Install tonight. */
 export async function installWhen(when: 'now' | 'tonight'): Promise<void> {
   const r = row() ?? (await updateRow());
-  if (!r.readyVersion) throw new Error('No update is ready');
+  if (!r.readyVersion) throw fixedError('No update is ready');
   const now = new Date();
   state.row = await setInstallAt(
     when === 'now' ? now : nextWindowStart(now, r.windowStart, r.windowEnd)
@@ -108,7 +109,7 @@ export async function setWindow(start: string, end: string): Promise<void> {
 
 /** Ask the shell to check now. It reads this line from the server's stdout. */
 export function askShellToCheck(): void {
-  if (!MANAGED) throw new Error('Only the desktop app checks for updates');
+  if (!MANAGED) throw fixedError('Only the desktop app checks for updates');
   state.asked = new Date().toISOString();
   process.stdout.write('oddboro:update-check\n');
   emit({ type: 'change', table: 'app_update' });

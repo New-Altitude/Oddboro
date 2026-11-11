@@ -1,23 +1,30 @@
 <script lang="ts">
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
-  import type { HandOffLine, HandOffStep, LessonLine, PokeRow, ThreadLine } from '@oddboro/ledger';
+  import type { HandOffLine, PokeRow, ThreadLine } from '@oddboro/ledger';
   import { FIRST_QUESTIONS, firstQuestionIn } from '@oddboro/ledger/first-questions';
   import { clockTime } from '@oddboro/ledger/time';
-  import {
-    newTurnId,
-    CHAT_ACCEPT,
-    CHAT_BYTES,
-    CHAT_FILES,
-    type ChatAttachment
-  } from '../staff/chat-input.ts';
   import Markdown from './Markdown.svelte';
   import Lesson from './Lesson.svelte';
-  import { call, failure } from './api.ts';
+  import PersonaQuiet from './PersonaQuiet.svelte';
+  import { newTurnId } from '#lib/staff/chat-input.ts';
+  import { call, sendFile, failure, type ApiUrl } from './api.ts';
+  import ChatFiles from './ChatFiles.svelte';
+  import { hideChoiceLines } from '#lib/choices.ts';
+  import { hasToken, tagFor, withTokens, withoutToken, type Pending } from './chat-attach.ts';
+  import {
+    ACCEPT,
+    attachableType,
+    FILES_MAX,
+    isPicture,
+    refusal,
+    type ChatFile
+  } from '#lib/attachments.ts';
   import { when, workLine } from './format.ts';
   import { chatRequest, takeDraft, type Delivered } from './chat-about.svelte.ts';
   import type { StaffProfile } from '../staff/roster.ts';
   import { runningFor, toolWords, type Work } from '../staff/work.ts';
+  import type { ChatEntry, ChatEvent } from '../staff/chat.ts';
   import { counting, dayBreaks, fullDate, stamp, took } from './chat-lines.ts';
   import { serviceNames } from './service-names.svelte.ts';
 
@@ -46,30 +53,8 @@
     if (visible) scrollDown();
   });
 
-  type Line = {
-    from: 'owner' | 'staff';
-    text: string;
-    turnId?: string;
-    attachments?: Pick<ChatAttachment, 'name'>[];
-    pending?: boolean;
-    failed?: boolean;
-    /** Delivered later by the office, at `at`. */
-    poke?: boolean;
-    at?: string;
-    /** Something the staffer put on the desk, shown where it landed. */
-    item?: Delivered & { status: string };
-    /** What the owner's message replied about. */
-    re?: Delivered;
-    /** A lesson the staffer kept, shown where it kept it. */
-    lesson?: LessonLine;
-    /** One step of work handed to a colleague, or from one. */
-    handOff?: { line: HandOffLine; step: HandOffStep; back?: number };
-    /** A thread the staffer leads, with each hand-off it gave on it. */
-    thread?: { line: ThreadLine; steps: HandOffLine[] };
-    /** How long the run behind a reply took, in milliseconds. */
-    took?: number;
-  };
-  type Entry = Line & { at: string };
+  /** A chat line as the page keeps it: one sent or streaming has no time yet. */
+  type Line = Omit<ChatEntry, 'at'> & { at?: string; pending?: boolean };
 
   /** Where a hand-off stands, in words, and whether the owner has to act. */
   function progress(h: HandOffLine): { text: string; yours: boolean } {
@@ -180,16 +165,12 @@
   let lines = $state<Line[]>([]);
   let draft = $state('');
   let sending = $state(false);
-  let remoteBusy = $state(false);
-  let files = $state<File[]>([]);
-  let picker: HTMLInputElement;
-  let problem = $state('');
-  let attempt:
-    { id: string; staff: string; message: string; re?: Delivered; files: File[] } | undefined;
-  const answered = $derived(
-    new Set(lines.filter((l) => l.from === 'staff' && !l.failed).map((l) => l.turnId))
-  );
-  let reading = 0;
+  /**
+   * What the owner sent while a reply was still coming: it goes once that
+   * reply ends. A second Send while one waits joins it, so the Odd answers
+   * both in one turn.
+   */
+  let waiting = $state<{ text: string; re?: Delivered; files: ChatFile[] } | undefined>();
   let status = $state('');
   let loaded = $state(false);
   let list: HTMLDivElement | undefined = $state();
@@ -261,12 +242,11 @@
   let upcoming = $state<PokeRow[]>([]);
 
   function load(id: string) {
-    const read = ++reading;
-    fetch(`/api/staff/${id}/chat`)
+    fetch(`/api/staff/${id}/chat` satisfies ApiUrl)
       .then((r) => r.json())
-      .then((d: { history: Entry[]; busy: boolean }) => {
-        if (read !== reading || id !== profile.id || sending) return;
-        remoteBusy = d.busy;
+      .then((d: { history: ChatEntry[]; busy: boolean }) => {
+        // A message that started meanwhile is streaming into the list: keep it.
+        if (sending) return;
         lines = d.history.map((h) => ({ ...h }));
         loaded = true;
         scrollDown();
@@ -309,115 +289,114 @@
 
   async function send(e: SubmitEvent) {
     e.preventDefault();
-    if ((!draft.trim() && !files.length) || sending || remoteBusy) return;
-    await say(draft, replyTo, files);
-  }
-
-  function attach(selected: FileList | null) {
-    if (!selected || sending) return;
-    const next = [...files, ...selected];
-    if (
-      next.length > CHAT_FILES ||
-      next.reduce((n, f) => n + f.size, new TextEncoder().encode(draft).length) > CHAT_BYTES
-    ) {
-      problem = 'Use up to 8 files and 8 MiB of text and files per message.';
+    const message = draft;
+    if ((!message.trim() && !pending.length) || uploading) return;
+    let files: ChatFile[] = [];
+    if (pending.length) {
+      // Each file goes to the Odd's attachments folder first; the message names them.
+      uploading = true;
+      try {
+        files = await toAttachments(pending);
+      } catch (err) {
+        refused = err instanceof Error ? err.message : String(err);
+        return;
+      } finally {
+        uploading = false;
+      }
+    }
+    const re = replyTo;
+    draft = '';
+    replyTo = undefined;
+    clearTray();
+    if (sending) {
+      waiting = waiting
+        ? {
+            text: [waiting.text, message].filter(Boolean).join('\n\n'),
+            re: waiting.re ?? re,
+            files: [...waiting.files, ...files]
+          }
+        : { text: message, re, files };
+      scrollDown();
       return;
     }
-    files = next;
-    problem = '';
+    await say(message, re, files);
   }
 
-  function paste(e: ClipboardEvent) {
-    if (!e.clipboardData?.files.length) return;
-    e.preventDefault();
-    attach(e.clipboardData.files);
-    const words = e.clipboardData.getData('text/plain');
-    if (words && box) {
-      box.setRangeText(words, box.selectionStart, box.selectionEnd, 'end');
-      draft = box.value;
-    }
-  }
-
-  function drop(e: DragEvent) {
-    if (!e.dataTransfer?.files.length) return;
-    e.preventDefault();
-    attach(e.dataTransfer.files);
+  /** Take back the message waiting to go: it returns to the box. */
+  function unwait() {
+    if (!waiting) return;
+    draft = [waiting.text, draft.trim() && draft].filter(Boolean).join('\n\n');
+    replyTo ??= waiting.re;
+    // Its files go back in the tray, already kept in the Odd's attachments folder.
+    const text = draft;
+    pending = [
+      ...waiting.files.map((f) => ({
+        key: nextKey++,
+        tag: f.tag,
+        mediaType: f.mediaType,
+        size: f.size,
+        kept: f,
+        url: isPicture(f.mediaType) ? attachmentUrl(f) : undefined,
+        inline: hasToken(text, f.tag)
+      })),
+      ...pending
+    ];
+    waiting = undefined;
+    void tick().then(() => {
+      fit();
+      box?.focus();
+    });
   }
 
   /**
    * The answers to tap under the manager's first questions (`FIRST_QUESTIONS`):
    * only while the question is the chat's last line. Typing an answer works too.
    */
-  const answers = $derived.by(() => {
+  const answers = $derived.by((): { list: readonly string[]; first: boolean } => {
     const last = lines.at(-1);
-    if (sending || remoteBusy || !last || last.from !== 'staff' || last.pending || last.failed)
-      return [];
-    return FIRST_QUESTIONS[firstQuestionIn(last.text)]?.answers ?? [];
+    if (sending || !last || last.from !== 'staff' || last.pending || last.failed)
+      return { list: [], first: false };
+    // Choices the Odd ended its reply with (`splitChoices`), else the manager's first questions.
+    if (last.choices?.length) return { list: last.choices, first: false };
+    return { list: FIRST_QUESTIONS[firstQuestionIn(last.text)]?.answers ?? [], first: true };
   });
 
   /** Send one message and stream the reply into the chat. */
-  async function say(message: string, re?: Delivered, chosen?: File[], retry?: string) {
-    if (sending || remoteBusy) return;
-    const staff = profile.id;
-    const picks = chosen ?? [];
-    // Keep the ID if the office received the POST but the page lost its response.
-    if (
-      !retry &&
-      (!attempt ||
-        attempt.staff !== staff ||
-        attempt.message !== message ||
-        attempt.re !== re ||
-        picks.length !== attempt.files.length ||
-        picks.some((f, i) => f !== attempt?.files[i]))
-    )
-      attempt = { id: newTurnId(), staff, message, re, files: [...picks] };
-    const turnId = retry ?? attempt!.id;
+  async function say(message: string, re?: Delivered, files: ChatFile[] = [], retry?: Line) {
+    const turnId = retry?.turnId ?? newTurnId();
     sending = true;
-    ++reading;
-    problem = '';
     status = 'Thinking';
-    let reply: Line | undefined;
+    if (!retry)
+      lines.push({
+        from: 'owner',
+        turnId,
+        source: { kind: 'chat' },
+        // Files alone are a message too: their tags say it, as the server writes it.
+        text: message || files.map((f) => `[${f.tag}]`).join(' '),
+        re,
+        at: new Date().toISOString(),
+        ...(files.length ? { files } : {})
+      });
+    lines.push({ from: 'staff', text: '', pending: true, turnId });
+    const reply = lines[lines.length - 1];
+    scrollDown();
     onstart();
     try {
-      const turn = retry ? { turnId } : { turnId, message, re: re && { kind: re.kind, id: re.id } };
-      // Like every office action this is JSON. A form POST can be refused by
-      // SvelteKit when the page and the server see different schemes.
-      const attachments = await Promise.all(
-        picks.map(
-          (file) =>
-            new Promise<{ name: string; data: string }>((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
-              reader.onload = () =>
-                resolve({ name: file.name, data: String(reader.result).split(',')[1] });
-              reader.readAsDataURL(file);
-            })
-        )
-      );
-      const res = await fetch(`/api/staff/${staff}/chat`, {
+      const res = await fetch(`/api/staff/${profile.id}/chat` satisfies ApiUrl, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ ...turn, ...(attachments.length ? { files: attachments } : {}) })
+        body: JSON.stringify(
+          retry?.inputHash
+            ? { turnId }
+            : {
+                turnId,
+                message,
+                re: re && { kind: re.kind, id: re.id },
+                ...(files.length ? { files: files.map(({ tag, name }) => ({ tag, name })) } : {})
+              }
+        )
       });
       if (!res.ok || !res.body) throw await failure(res);
-      if (chosen) {
-        draft = '';
-        files = [];
-        replyTo = undefined;
-      }
-      if (!retry) attempt = undefined;
-      if (!lines.some((line) => line.from === 'owner' && line.turnId === turnId))
-        lines.push({
-          from: 'owner',
-          text: message,
-          re,
-          turnId,
-          attachments: picks.map((f) => ({ name: f.name })),
-          at: new Date().toISOString()
-        });
-      lines.push({ from: 'staff', text: '', pending: true, turnId });
-      reply = lines[lines.length - 1];
-      scrollDown();
       const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
       let buffer = '';
       for (;;) {
@@ -429,21 +408,17 @@
           const chunk = buffer.slice(0, cut);
           buffer = buffer.slice(cut + 2);
           if (!chunk.startsWith('data: ')) continue;
-          const ev = JSON.parse(chunk.slice(6)) as
-            | { type: 'delta'; text: string }
-            | { type: 'tool'; name: string }
-            | { type: 'done'; text: string }
-            | { type: 'error'; message: string };
+          const ev = JSON.parse(chunk.slice(6)) as ChatEvent;
           if (ev.type === 'delta') {
             reply.text += ev.text;
             status = '';
           } else if (ev.type === 'tool') status = toolWords(ev.name, serviceNames.byId);
           else if (ev.type === 'done') {
             reply.text = ev.text;
+            if (ev.choices?.length) reply.choices = ev.choices;
             reply.pending = false;
             reply.at = new Date().toISOString();
           } else if (ev.type === 'error') {
-            problem = ev.message;
             reply.text = ev.message;
             reply.pending = false;
             reply.failed = true;
@@ -452,17 +427,20 @@
         }
       }
     } catch (err) {
-      problem = err instanceof Error ? err.message : String(err);
+      reply.text = err instanceof Error ? err.message : String(err);
+      reply.failed = true;
     } finally {
-      if (reply) {
-        if (reply.pending && !problem)
-          problem = 'The reply was interrupted. Check the saved message below.';
-        reply.pending = false;
-      }
+      reply.pending = false;
       sending = false;
       status = '';
       onend();
-      load(profile.id);
+      scrollDown();
+      const next = waiting;
+      waiting = undefined;
+      // What the owner sent meanwhile goes now; its reply reloads the chat after.
+      if (next) void say(next.text, next.re, next.files);
+      // Show what the reply changed: a report it read, a lesson it kept.
+      else if (!reply.failed) load(profile.id);
     }
   }
 
@@ -482,7 +460,8 @@
 
   // The input grows with what the owner types, up to most of the panel. Dragging
   // the bar above it sets how tall it is at least, and that height is kept.
-  const MIN_INPUT = 38;
+  // As tall as the paperclip over Send beside it (32 + 6 + 38).
+  const MIN_INPUT = 76;
   let box: HTMLTextAreaElement | undefined = $state();
   let root: HTMLDivElement | undefined = $state();
   let floor = $state(MIN_INPUT);
@@ -498,13 +477,17 @@
     // Measured first: the brief auto height below scrolls the list on its own.
     const pinned = list ? list.scrollHeight - list.scrollTop - list.clientHeight < 8 : false;
     box.style.blockSize = 'auto';
-    box.style.blockSize = `${Math.min(ceiling(), Math.max(floor, box.scrollHeight))}px`;
+    // At least as tall as the column beside it: the files, the paperclip and Send.
+    box.style.blockSize = `${Math.min(ceiling(), Math.max(floor, side, box.scrollHeight))}px`;
     if (pinned && list) list.scrollTop = list.scrollHeight;
   }
+  /** The height of the column at the box's end side, which grows as files are attached. */
+  let side = $state(0);
   $effect(() => {
     void draft;
     void floor;
     void visible;
+    void side;
     fit();
   });
 
@@ -536,6 +519,132 @@
     } catch {
       // Private window: the height lasts this visit only.
     }
+  }
+
+  // Files the owner attaches. Pasting or dropping puts each one's tag, like
+  // [Image #1], at the caret; the paperclip adds them to the tray alone. The
+  // tray over the paperclip shows everything that will go.
+  let pending = $state<Pending[]>([]);
+  let nextKey = 0;
+  let uploading = $state(false);
+  /** Why the last file was turned away, under the tray. */
+  let refused = $state('');
+  let dragging = $state(false);
+  let picker: HTMLInputElement | undefined = $state();
+
+  const attachmentUrl = (f: ChatFile) =>
+    `/api/staff/${profile.id}/attachments/${encodeURIComponent(f.name)}`;
+
+  function attach(files: File[], how: 'paste' | 'drop' | 'pick') {
+    const taken = [...pending.map((p) => p.tag), ...(waiting?.files.map((f) => f.tag) ?? [])];
+    const added: Pending[] = [];
+    refused = '';
+    for (const file of files) {
+      const why = refusal(file.name, file.type, file.size);
+      if (why) {
+        refused = why;
+        continue;
+      }
+      if (pending.length + added.length >= FILES_MAX) {
+        refused = `Attach up to ${FILES_MAX} files at a time.`;
+        break;
+      }
+      const mediaType = attachableType(file.name, file.type)!;
+      added.push({
+        key: nextKey++,
+        tag: tagFor(file, how === 'paste', [...taken, ...added.map((a) => a.tag)]),
+        mediaType,
+        size: file.size,
+        file,
+        url: isPicture(mediaType) ? URL.createObjectURL(file) : undefined,
+        inline: how !== 'pick'
+      });
+    }
+    if (!added.length) return;
+    pending = [...pending, ...added];
+    const inline = added.filter((a) => a.inline).map((a) => a.tag);
+    if (inline.length && box) {
+      const put = withTokens(draft, box.selectionStart, box.selectionEnd, inline);
+      draft = put.text;
+      void tick().then(() => {
+        box?.focus();
+        box?.setSelectionRange(put.caret, put.caret);
+      });
+    }
+  }
+
+  /** Let go of a picture's preview made on this page. */
+  function unpreview(p: Pending) {
+    if (p.url && p.file) URL.revokeObjectURL(p.url);
+  }
+  function remove(key: string | number) {
+    const p = pending.find((x) => x.key === key);
+    if (!p) return;
+    unpreview(p);
+    pending = pending.filter((x) => x !== p);
+    if (p.inline) draft = withoutToken(draft, p.tag);
+  }
+  function clearTray() {
+    pending.forEach(unpreview);
+    pending = [];
+    refused = '';
+  }
+  // Deleting a tag from the text drops its file, as in Claude Code.
+  $effect(() => {
+    const text = draft;
+    const gone = untrack(() => pending.filter((p) => p.inline && !hasToken(text, p.tag)));
+    if (!gone.length) return;
+    gone.forEach(unpreview);
+    pending = untrack(() => pending.filter((p) => !gone.includes(p)));
+  });
+
+  /** Keep each file in the Odd's attachments folder, in the tray's order. */
+  function toAttachments(items: Pending[]): Promise<ChatFile[]> {
+    return Promise.all(
+      items.map(async (p) => {
+        if (p.kept) return p.kept;
+        const file = p.file!;
+        const kept = await sendFile<Omit<ChatFile, 'tag'>>(
+          `/api/staff/${profile.id}/attachments`,
+          file,
+          file.name || p.tag,
+          p.mediaType
+        );
+        return { ...kept, tag: p.tag };
+      })
+    );
+  }
+
+  function onpaste(e: ClipboardEvent) {
+    const data = e.clipboardData;
+    const files = [...(data?.files ?? [])];
+    // Copied cells or text often bring a picture of themselves: the text wins.
+    if (!files.length || data?.getData('text/plain')) return;
+    e.preventDefault();
+    attach(files, 'paste');
+  }
+  const carriesFiles = (e: DragEvent) => !!e.dataTransfer?.types.includes('Files');
+  function ondragover(e: DragEvent) {
+    if (!carriesFiles(e)) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    dragging = true;
+  }
+  function ondragleave(e: DragEvent) {
+    const into = e.relatedTarget as Node | null;
+    if (!into || !(e.currentTarget as HTMLElement).contains(into)) dragging = false;
+  }
+  function ondrop(e: DragEvent) {
+    if (!carriesFiles(e)) return;
+    e.preventDefault();
+    dragging = false;
+    attach([...(e.dataTransfer?.files ?? [])], 'drop');
+  }
+  function picked(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    attach([...(input.files ?? [])], 'pick');
+    // The same file can be picked again after it is removed.
+    input.value = '';
   }
 
   function onkeydown(e: KeyboardEvent) {
@@ -646,6 +755,18 @@
 {/snippet}
 
 <div class="flex h-full min-h-0 flex-col" bind:this={root}>
+  {#if profile.persona}
+    <div class="flex flex-col gap-2 border-b border-hairline p-3 text-xs">
+      <p class="leading-relaxed text-muted">{profile.persona.disclosure}</p>
+      {#if profile.persona.quiet}
+        <PersonaQuiet
+          slug={profile.persona.slug}
+          name={profile.name}
+          quiet={profile.persona.quiet}
+        />
+      {/if}
+    </div>
+  {/if}
   <div
     bind:this={list}
     {@attach pin}
@@ -796,28 +917,38 @@
         {#if line.poke}
           <div class="-mb-1 ms-1 text-[10px] tracking-[0.16em] text-ember uppercase">Poke</div>
         {/if}
+        {#if line.files?.length}
+          <div class="ms-auto max-w-[85%]">
+            <ChatFiles
+              end
+              files={line.files.map((f) => ({ ...f, key: f.name, url: attachmentUrl(f) }))}
+            />
+          </div>
+        {/if}
         <div
           class="max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed break-words
           {line.from === 'owner'
             ? 'ms-auto rounded-ee-md bg-sea/25 whitespace-pre-wrap text-ink'
-            : 'me-auto rounded-es-md bg-raise text-ink'}"
-          class:text-coral={line.failed}
+            : `me-auto rounded-es-md bg-raise ${line.failed ? 'text-coral' : 'text-ink'}`}"
         >
           {#if line.pending && !line.text}
             <span class="dots" aria-label="Replying"><span></span><span></span><span></span></span>
           {:else if line.from === 'staff' && !line.failed}
-            <Markdown text={line.text} staff={profile.id} />
+            <!-- While it streams, its choice lines wait to become buttons. -->
+            <Markdown
+              text={line.pending ? hideChoiceLines(line.text) : line.text}
+              staff={profile.id}
+            />
           {:else}
             {line.text}
-            {#each line.attachments ?? [] as file, n (n)}
-              <a
-                class="block text-sea underline"
-                href={`/api/staff/${profile.id}/chat/${line.turnId}/${n}`}
-                download={file.name}>{file.name}</a
-              >
-            {/each}
           {/if}
         </div>
+        {#if line.from === 'owner' && line.turnId && !sending && !lines.some((l) => l.from === 'staff' && l.turnId === line.turnId && !l.failed && !l.pending)}
+          <button
+            class="ms-auto text-xs text-sea hover:text-ink"
+            onclick={() => say(line.text, line.re, line.files ?? [], line)}>Retry reply</button
+          >
+        {/if}
         {#if line.pending}
           <!-- What the staffer is doing, under the reply it is working on. -->
           <div class="-mt-1 ms-1 text-xs text-muted" aria-live="polite">
@@ -825,25 +956,38 @@
           </div>
         {:else}
           {@render meta(line, i)}
-          {#if line.from === 'owner' && line.turnId && !answered.has(line.turnId) && !sending}
-            <button
-              class="ms-auto text-xs text-sea"
-              disabled={remoteBusy}
-              onclick={() => say('', undefined, undefined, line.turnId)}
-            >
-              {remoteBusy ? 'Waiting for a reply' : 'Get a reply'}
-            </button>
-          {/if}
         {/if}
       {/if}
     {/each}
-    {#if answers.length}
-      <!-- Each answer a full-width choice on the owner's side, the default first and marked. -->
+    {#if waiting}
+      <!-- Sent while the reply above was still coming: it goes when that reply ends. -->
+      <div class="ms-auto flex max-w-[85%] flex-col items-end gap-0.5">
+        {#if waiting.files.length}
+          <ChatFiles
+            end
+            files={waiting.files.map((f) => ({ ...f, key: f.name, url: attachmentUrl(f) }))}
+          />
+        {/if}
+        {#if waiting.text}
+          <div
+            class="rounded-2xl rounded-ee-md border border-dashed border-sea/40 px-3 py-2 text-sm leading-relaxed break-words whitespace-pre-wrap text-ink"
+          >
+            {waiting.text}
+          </div>
+        {/if}
+        <div class="flex gap-3 pe-1 text-[10px] text-faint">
+          <span>Sends when {profile.name} finishes</span>
+          <button class="hover:text-coral" onclick={unwait}>Cancel</button>
+        </div>
+      </div>
+    {/if}
+    {#if answers.list.length}
+      <!-- Each answer a full-width choice on the owner's side; a first question's default is first and marked. -->
       <div class="ms-auto flex w-[85%] flex-col gap-1.5" role="group" aria-label="Answers">
-        {#each answers as a, n (a)}
+        {#each answers.list as a, n (a)}
           <button class="choice" onclick={() => say(a)}>
             <span class="min-w-0 flex-1">{a}</span>
-            {#if n === 0}<span class="default">Default</span>{/if}
+            {#if answers.first && n === 0}<span class="default">Default</span>{/if}
           </button>
         {/each}
       </div>
@@ -912,56 +1056,99 @@
       >
     </div>
   {/if}
-  {#if problem}<p role="alert" class="px-3 pb-1 text-xs text-coral">{problem}</p>{/if}
-  {#each files as file, i (i)}
-    <div class="flex items-center gap-2 px-3 text-xs text-muted">
-      <span class="truncate">{file.name}</span>
-      <button
-        disabled={sending}
-        aria-label={`Remove ${file.name}`}
-        onclick={() => (files = files.filter((_, n) => n !== i))}>Remove</button
-      >
-    </div>
-  {/each}
-  <form class="flex items-end gap-2 px-3 pb-3" novalidate onsubmit={send}>
+  <form
+    class="flex items-end gap-2 px-3 {refused ? 'pb-2' : 'pb-3'}"
+    novalidate
+    onsubmit={send}
+    {ondragover}
+    {ondragleave}
+    {ondrop}
+  >
     <input
+      bind:this={picker}
       type="file"
       multiple
-      accept={CHAT_ACCEPT}
+      accept={ACCEPT}
       class="hidden"
-      bind:this={picker}
-      onchange={() => {
-        attach(picker.files);
-        picker.value = '';
-      }}
+      onchange={picked}
     />
-    <button
-      type="button"
-      class="py-2 text-sm text-sea"
-      disabled={sending}
-      onclick={() => picker.click()}>Attach</button
-    >
     <textarea
-      onpaste={paste}
-      ondragover={(e) => {
-        if (e.dataTransfer?.types.includes('Files')) e.preventDefault();
-      }}
-      ondrop={drop}
       bind:this={box}
-      class="min-h-[38px] flex-1 resize-none overflow-y-auto rounded-lg bg-raise px-3 py-2 text-sm leading-relaxed text-ink outline-none placeholder:text-faint"
+      class="min-h-[76px] flex-1 resize-none overflow-y-auto rounded-lg bg-raise px-3 py-2 text-sm leading-relaxed text-ink outline-none placeholder:text-faint {dragging
+        ? 'ring-1 ring-sea'
+        : ''}"
       rows="1"
-      placeholder={replyTo ? `Reply to ${profile.name}` : `Message ${profile.name}`}
+      placeholder={dragging
+        ? 'Drop to attach'
+        : replyTo
+          ? `Reply to ${profile.name}`
+          : `Message ${profile.name}`}
       bind:value={draft}
       {onkeydown}
-      disabled={sending}></textarea>
-    <button
-      class="rounded-lg bg-sea px-3 py-2 text-sm font-medium text-night disabled:opacity-40"
-      disabled={sending || remoteBusy || (!draft.trim() && !files.length)}>Send</button
-    >
+      {onpaste}></textarea>
+    <div class="flex shrink-0 flex-col gap-1.5" bind:clientHeight={side}>
+      {#if pending.length}
+        <!-- What goes with the message, over the paperclip: three files tall at most, scrolling past that. -->
+        <div
+          class="tray -me-3 flex justify-center overflow-y-auto overscroll-contain ps-1.5 pe-1.5 pt-1.5"
+          aria-label="Attached files"
+        >
+          <ChatFiles stack files={pending} onremove={remove} />
+        </div>
+      {/if}
+      <button
+        type="button"
+        class="flex h-8 items-center justify-center rounded-lg text-muted hover:bg-raise hover:text-ink"
+        aria-label="Attach files"
+        title="Attach pictures, PDFs or text files"
+        onclick={() => picker?.click()}
+      >
+        <svg
+          class="size-4"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.4"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+          ><path
+            d="M13.5 7.5 8 13a3.5 3.5 0 0 1-5-5l5.8-5.8a2.3 2.3 0 0 1 3.3 3.3L6.3 11.3a1.2 1.2 0 0 1-1.7-1.7L10 4.3"
+          /></svg
+        >
+      </button>
+      <button
+        class="flex h-[38px] items-center justify-center gap-1.5 rounded-lg bg-sea px-3 text-sm font-medium text-night disabled:opacity-40"
+        disabled={(!draft.trim() && !pending.length) || uploading}
+      >
+        <!-- A paper plane: its wings, and the fold down its middle. -->
+        <svg
+          class="size-4 shrink-0"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.4"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+          ><path d="M14.5 1.5 1.5 6.6l5.2 2.2 2.2 5.7z" /><path d="M14.5 1.5 6.7 8.8" /><path
+            d="m6.7 8.8.2 3.7 2-1.9"
+          /></svg
+        >{uploading ? 'Attaching' : 'Send'}
+      </button>
+    </div>
   </form>
+  {#if refused}
+    <p class="px-3 pb-3 text-xs text-coral" role="alert">{refused}</p>
+  {/if}
 </div>
 
 <style>
+  /* Three attached files at most (each 48px square, 2px and a 15px name under
+     it, 8px apart, 6px over the first for its ✕); the rest scroll. */
+  .tray {
+    max-block-size: calc(3 * 65px + 2 * 8px + 6px);
+  }
   .grip {
     position: relative;
     block-size: 12px;

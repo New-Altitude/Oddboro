@@ -31,6 +31,16 @@
 //   gym           Theo jogs round the office's gym: the treadmill, the bike,
 //                 curls at the dumbbells, the bar off the rack, and presses
 //                 on the bench (0.0.8)
+//   personas      inside the lobby, the front doors slide open, smoke pours
+//                 in, and Nate, Michele and Sam Frank walk out of it in gold
+//                 shades and strike a pose. The camera pushes in on their
+//                 faces, the shades come off together, and they walk off,
+//                 Michele one way and the other two the other (0.0.9, New
+//                 Altitude personas)
+//   bug-hunters   a white van marked BUG HUNTERS pulls up in front of the
+//                 office, its back doors swing open, and two bug hunters in
+//                 yellow suits, hoods, masks and spray tanks hop out and walk
+//                 in through the front door (0.0.10, a release of bug fixes)
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { createImage, drawImage, encodePng, scaleImage, type Image } from '@oddboro/sprites/png';
@@ -97,7 +107,52 @@ export type GymLayers = {
   odd: (frame: string) => Image;
 };
 
-export type Layers = { desk: DeskLayers; door: DoorLayers; hall: HallLayers; gym: GymLayers };
+/** The three New Altitude personas 0.0.9 brings in. */
+export type Persona = 'nate' | 'michele' | 'sam';
+
+/** The lobby seen from inside, facing the front doors, with the personas to walk in. */
+export type EntranceLayers = {
+  /** The lobby, lit, once for each step of the doors: shut, three sliding, open. */
+  room: Image[];
+  view: { w: number; h: number };
+  /** The doorway's face in the view's pixels, below the wall's cap. */
+  door: { x: number; y: number; w: number; h: number };
+  /** Each persona in one sprite frame, like `walk-down-2`, lit, 16 by 32. */
+  odd: Record<Persona, (frame: string) => Image>;
+  /** How far a frame moves the head from where it sits standing, for the shades. */
+  head: (frame: string) => [number, number];
+  /** Lights an added sprite the way the lobby is lit. */
+  shade: (img: Image) => Image;
+};
+
+/** The street in front of the office, from the front door down across the near lane. */
+export type CurbLayers = {
+  /** The building's front, the sidewalk and the near lane, lit, the view's width and taller. */
+  room: Image;
+  view: { w: number; h: number };
+  /** The front door, in the room's pixels. */
+  door: { x: number; y: number; w: number; h: number };
+  /** The door open, lit, the size of `door`. */
+  open: Image;
+  /** The near lane's top row, in the room's pixels. */
+  lane: number;
+  /** A bug hunter in one sprite frame, like `walk-up-2`: suit, boots and gloves, lit, 16 by 32. */
+  odd: (frame: string) => Image;
+  /** How far a frame moves the head and the torso from where they sit standing. */
+  head: (frame: string) => [number, number];
+  torso: (frame: string) => [number, number];
+  /** Lights an added sprite the way the street is lit. */
+  shade: (img: Image) => Image;
+};
+
+export type Layers = {
+  curb: CurbLayers;
+  desk: DeskLayers;
+  door: DoorLayers;
+  hall: HallLayers;
+  gym: GymLayers;
+  entrance: EntranceLayers;
+};
 
 /** A sprite drawn in palette keys, one character per pixel, `.` see-through. */
 function sprite(rows: string[]): Image {
@@ -356,29 +411,38 @@ const PADLOCK = sprite([
 // meeting in the middle. Each is 13 columns wide.
 const LEAF = { top: 13, bottom: 30, left: 11, right: 36, w: 13 };
 
-// The sprite's doorway has a transom, two panes and a bar over shorter
-// leaves (rows 13 to 17). Here the leaves run its full height instead: each
-// row listed copies another row of the sprite's own, already lit, between its
-// frame's columns 8 and 39. Shut, the leaf's top rail moves up under the frame
-// and the glass grows, with the pulls where they were. Open, the dark
-// doorway does the same. Rows not listed stay as they are.
-const FULL_HEIGHT = {
-  shut: { 13: 18, 14: 19, 15: 20, 16: 21, 17: 21, 18: 21, 19: 21, 20: 21 },
-  open: { 13: 18, 14: 19, 15: 20, 16: 20, 17: 20, 18: 20, 19: 20 }
-} satisfies Record<string, Record<number, number>>;
-
-/** The door's pixels from `src` at (x, y), with its rows moved as `rows` says. */
-function fullHeight(src: Image, x: number, y: number, rows: Record<number, number>): Image {
+/** The door's pixels from `src` at (x, y). */
+function doorAt(src: Image, x: number, y: number): Image {
   const w = 48;
   const h = 32;
   const img = createImage(w, h);
-  const at = (r: number, c: number) => ((y + r) * src.width + x + c) * 4;
   for (let r = 0; r < h; r++) {
-    const from = rows[r as keyof typeof rows] ?? r;
-    for (let c = 0; c < w; c++) {
-      const s = at(c >= 8 && c <= 39 ? from : r, c);
-      img.data.set(src.data.subarray(s, s + 4), (r * w + c) * 4);
-    }
+    const s = ((y + r) * src.width + x) * 4;
+    img.data.set(src.data.subarray(s, s + w * 4), r * w * 4);
+  }
+  return img;
+}
+
+/**
+ * The door part way shut, over the open doorway: each leaf, whole and full
+ * height, slid in from its side of the jamb, `slid` of the way from open (0)
+ * to shut (1). The part still in the wall does not show.
+ */
+function leaves(shut: Image, opened: Image, slid: number): Image {
+  const img = createImage(opened.width, opened.height);
+  drawImage(img, opened, 0, 0);
+  const off = Math.round(LEAF.w * (1 - slid));
+  for (let i = 0; i < LEAF.w - off; i++) {
+    // The leaf's inner edge leads: column i from the jamb shows the shut
+    // leaf's column i + off.
+    for (const [dx, sx] of [
+      [LEAF.left + i, LEAF.left + i + off],
+      [LEAF.right - i, LEAF.right - i - off]
+    ])
+      for (let y = LEAF.top; y <= LEAF.bottom; y++) {
+        const src = (y * shut.width + sx) * 4;
+        img.data.set(shut.data.subarray(src, src + 4), (y * img.width + dx) * 4);
+      }
   }
   return img;
 }
@@ -395,16 +459,16 @@ function lockedDoor({ room, door, open, odd }: DoorLayers): GifFrame[] {
   // The pulls sit in the door's columns 21 and 26, rows 22 to 24.
   const lock = { x: door.x + 21, y: door.y + 19 };
   const frames: GifFrame[] = [];
-  // The door shut and open, its leaves the doorway's full height.
-  const shut = fullHeight(room, door.x, door.y, FULL_HEIGHT.shut);
-  const opened = fullHeight(open, 0, 0, FULL_HEIGHT.open);
+  // The door shut and open.
+  const shut = doorAt(room, door.x, door.y);
+  const opened = doorAt(open, 0, 0);
   // How far the leaves have slid shut, 0 open to 1 shut.
   let slid = 0;
   let locked = false;
   const scene = (pose: string, y: number, extra?: (img: Image) => void) => {
     const img = createImage(room.width, room.height);
     drawImage(img, room, 0, 0);
-    drawImage(img, slid < 1 ? leaves() : shut, door.x, door.y);
+    drawImage(img, slid < 1 ? leaves(shut, opened, slid) : shut, door.x, door.y);
     if (locked) drawImage(img, PADLOCK, lock.x, lock.y);
     drawImage(img, odd(pose), x, y);
     extra?.(img);
@@ -419,30 +483,6 @@ function lockedDoor({ room, door, open, odd }: DoorLayers): GifFrame[] {
   };
   const click = bubble(6, 'CLICK!');
   const over = (b: Image, y: number) => (img: Image) => drawImage(img, b, x + 4, y - b.height + 2);
-
-  /**
-   * The door part way shut, over the open doorway: each leaf, whole and full
-   * height, slid in from its side of the jamb. The part still in the wall
-   * does not show.
-   */
-  function leaves(): Image {
-    const img = createImage(opened.width, opened.height);
-    drawImage(img, opened, 0, 0);
-    const off = Math.round(LEAF.w * (1 - slid));
-    for (let i = 0; i < LEAF.w - off; i++) {
-      // The leaf's inner edge leads: column i from the jamb shows the shut
-      // leaf's column i + off.
-      for (const [dx, sx] of [
-        [LEAF.left + i, LEAF.left + i + off],
-        [LEAF.right - i, LEAF.right - i - off]
-      ])
-        for (let y = LEAF.top; y <= LEAF.bottom; y++) {
-          const src = (y * shut.width + sx) * 4;
-          img.data.set(shut.data.subarray(src, src + 4), (y * img.width + dx) * 4);
-        }
-    }
-    return img;
-  }
 
   for (let i = 0; i < 6; i++) add('idle-up-0', start);
   walk(start, near);
@@ -929,6 +969,648 @@ function gym({ room, unracked, view, at, bar, odd }: GymLayers): GifFrame[] {
   return frames;
 }
 
+// Big square shades in thick gold frames, wider than the face, worn over each
+// persona's own eyes: black lenses with a grey glint, which flashes white when
+// they strike their pose. Facing you they sit on rows 9 to 12 of the sprite,
+// clear of the mouth; side on, on the near side of the face.
+const SHADES: Record<'down' | 'side', { top: number; rows: string[] }> = {
+  down: {
+    top: 9,
+    rows: [
+      '..YYYYY..YYYYY..', //
+      '..YkkMYYYYkkMY..',
+      '..YkkkY..YkkkY..',
+      '...YYY....YYY...'
+    ]
+  },
+  side: {
+    top: 9,
+    rows: [
+      '........YYYYY...', //
+      '......YYYkkMY...',
+      '........YkkkY...',
+      '.........YYY....'
+    ]
+  }
+};
+const shadesFor = (dir: 'down' | 'side', glint: boolean) =>
+  sprite(SHADES[dir].rows.map((r) => (glint ? r.replaceAll('M', '=') : r)));
+
+/** One puff of smoke: where its middle is, how big it is and will get, and where it drifts. */
+type Puff = { x: number; y: number; r: number; max: number; vx: number; vy: number };
+
+function personas({ room, view, door, odd, head, shade }: EntranceLayers): GifFrame[] {
+  const frames: GifFrame[] = [];
+  const everyone: Persona[] = ['michele', 'nate', 'sam'];
+  /** Which of the lobby's lit images shows: 0 shut to 4 open. */
+  let doors = 0;
+  // Where each persona's sprite stands, the frame it shows, whether it faces
+  // left, and its shades: how many rows they have slipped down the nose, or
+  // null once they are off. They start in the doorway, hidden by the smoke.
+  const sill = door.y + door.h - 32;
+  const at = (x: number, y: number) => ({
+    x,
+    y,
+    pose: 'idle-down-0',
+    flip: false,
+    glint: false,
+    shades: 0 as number | null
+  });
+  const cast: Record<Persona, ReturnType<typeof at>> = {
+    michele: at(door.x + 4, sill + 4),
+    nate: at(door.x + 8, sill + 6),
+    sam: at(door.x + 12, sill + 4)
+  };
+  // Front to back as they stand: whoever is further down the view is drawn last.
+  const order = () => [...everyone].sort((a, b) => cast[a].y - cast[b].y);
+  let shown = false;
+
+  // The camera: how far it has zoomed in, and the point it centres on.
+  const cam = { z: 1, cx: view.w / 2, cy: view.h / 2 };
+  /** The part of the view the camera shows, in the view's pixels. */
+  const frameOf = () => {
+    const w = view.w / cam.z;
+    const h = view.h / cam.z;
+    const x = Math.max(0, Math.min(view.w - w, cam.cx - w / 2));
+    const y = Math.max(0, Math.min(view.h - h, cam.cy - h / 2));
+    return { x, y, w, h };
+  };
+  /** The view through the camera, each pixel the one under it, so pixels stay hard. */
+  const zoom = (img: Image) => {
+    if (cam.z === 1) return img;
+    const f = frameOf();
+    const out = createImage(view.w, view.h);
+    for (let y = 0; y < view.h; y++)
+      for (let x = 0; x < view.w; x++) {
+        const sx = Math.min(view.w - 1, Math.floor(f.x + x / cam.z));
+        const sy = Math.min(view.h - 1, Math.floor(f.y + y / cam.z));
+        const i = (sy * view.w + sx) * 4;
+        out.data.set(img.data.subarray(i, i + 4), (y * view.w + x) * 4);
+      }
+    return out;
+  };
+
+  // The smoke: puffs born in the doorway that swell as they roll into the
+  // lobby, then thin away. A fixed seed, so every build draws the same smoke.
+  const puffs: Puff[] = [];
+  let seed = 9;
+  const rand = () => ((seed = (Math.imul(seed, 1103515245) + 12345) >>> 0) % 10000) / 10000;
+  const puff = () =>
+    puffs.push({
+      x: door.x + 5 + rand() * (door.w - 10),
+      y: door.y + 4 + rand() * (door.h - 8),
+      r: 2 + rand() * 2,
+      max: 7 + rand() * 8,
+      vx: (rand() - 0.5) * 3.4,
+      vy: 0.3 + rand() * 0.7
+    });
+  /** Move the smoke a frame: puffs drift and swell, or shrink when it clears. */
+  const drift = (clearing: boolean) => {
+    for (const p of puffs) {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vx *= 0.94;
+      p.vy *= 0.95;
+      p.r = clearing ? p.r - 0.45 : Math.min(p.max, p.r + 0.5);
+    }
+    for (let i = puffs.length - 1; i >= 0; i--) if (puffs[i].r <= 0.5) puffs.splice(i, 1);
+  };
+  /**
+   * The smoke as one lit layer: a white core, a pale grey ring, and a
+   * dithered edge, all a little see-through, so whoever walks in it shows
+   * through faintly.
+   */
+  const SMOKE = { core: 0.85, ring: 0.8, edge: 0.6 };
+  const smoke = () => {
+    const img = createImage(view.w, view.h);
+    const tone = (key: string, a: number) => {
+      const c = hexToRgba(PALETTE[key].hex);
+      c[3] = Math.round(255 * a);
+      return c;
+    };
+    const core = tone('=', SMOKE.core);
+    const ring = tone('a', SMOKE.ring);
+    const edge = tone('A', SMOKE.edge);
+    for (const p of [...puffs].sort((a, b) => a.y - b.y)) {
+      const r = p.r;
+      for (let y = Math.max(0, Math.floor(p.y - r)); y <= Math.min(view.h - 1, p.y + r); y++)
+        for (let x = Math.max(0, Math.floor(p.x - r)); x <= Math.min(view.w - 1, p.x + r); x++) {
+          const d = Math.hypot(x + 0.5 - p.x, y + 0.5 - p.y) / r;
+          if (d > 1) continue;
+          const i = (y * view.w + x) * 4;
+          if (d < 0.55) img.data.set(core, i);
+          else if (d < 0.85) {
+            if (img.data[i + 3] === 0 || img.data[i + 3] === edge[3]) img.data.set(ring, i);
+          } else if ((x + y) % 2 === 0 && img.data[i + 3] === 0) img.data.set(edge, i);
+        }
+    }
+    return shade(img);
+  };
+
+  const shot = () => {
+    const img = createImage(view.w, view.h);
+    drawImage(img, room[doors], 0, 0);
+    if (shown)
+      for (const who of order()) {
+        const c = cast[who];
+        drawImage(img, odd[who](c.pose), c.x, c.y, c.flip);
+        const dir = c.pose.includes('-side-')
+          ? 'side'
+          : c.pose.includes('-up-')
+            ? undefined
+            : 'down';
+        if (dir && c.shades !== null) {
+          const [hx, hy] = head(c.pose);
+          drawImage(
+            img,
+            shade(shadesFor(dir, c.glint)),
+            c.x + (c.flip ? -hx : hx),
+            c.y + hy + SHADES[dir].top + c.shades,
+            c.flip
+          );
+        }
+      }
+    if (puffs.length) drawImage(img, smoke(), 0, 0);
+    return zoom(img);
+  };
+  const add = (n = 1, step?: () => void) => {
+    for (let i = 0; i < n; i++) {
+      step?.();
+      frames.push({ image: shot(), delay: DELAY });
+    }
+  };
+
+  // A quiet lobby, then the doors slide open.
+  add(8);
+  for (const d of [1, 2, 3, 4]) {
+    doors = d;
+    add(2);
+  }
+  // Smoke rolls in through the open doors, and swells.
+  add(18, () => {
+    puff();
+    puff();
+    puff();
+    drift(false);
+  });
+  // Out of it they walk: Nate down the middle, Michele and Sam a step behind
+  // him, either side, close. A pixel a frame, a new stride every other frame.
+  shown = true;
+  const marks: Record<Persona, Point & { wait: number }> = {
+    nate: { x: door.x + 8, y: view.h - 40, wait: 0 },
+    michele: { x: door.x + 8 - 20, y: view.h - 43, wait: 5 },
+    sam: { x: door.x + 8 + 20, y: view.h - 43, wait: 5 }
+  };
+  const arrived = (who: Persona) => cast[who].x === marks[who].x && cast[who].y === marks[who].y;
+  let t = 0;
+  while (!everyone.every(arrived)) {
+    add(1, () => {
+      if (t < 26) {
+        puff();
+        if (t < 10) puff();
+      }
+      drift(t > 34);
+      for (const who of everyone) {
+        const c = cast[who];
+        const m = marks[who];
+        if (t < m.wait || arrived(who)) {
+          c.pose = 'idle-down-0';
+          continue;
+        }
+        // Down a pixel each frame, and across in step, so each lands at once.
+        const rows = m.y - c.y;
+        if (rows > 0) c.y += 1;
+        const cols = m.x - c.x;
+        if (cols && (rows <= 0 || Math.abs(cols) >= rows || (t + who.length) % 2 === 0))
+          c.x += Math.sign(cols);
+        c.pose = `walk-down-${(t >> 1) % 4}`;
+      }
+      t++;
+    });
+  }
+  // They stop, and on the beat strike a pose: Michele's hands behind her
+  // head, Nate's on his hips, and Sam raises the roof. A hop, then they hold
+  // it, and the light catches each pair of shades in turn.
+  for (const c of Object.values(cast)) c.pose = 'idle-down-0';
+  add(3, () => drift(true));
+  const POSES: Record<Persona, string> = {
+    michele: 'exercise-stretch-0',
+    nate: 'exercise-lift-0',
+    sam: 'exercise-lift-2'
+  };
+  for (const who of everyone) {
+    cast[who].pose = POSES[who];
+    cast[who].y -= 2;
+  }
+  add(2, () => drift(true));
+  for (const c of Object.values(cast)) c.y += 2;
+  for (let i = 0; i < 12; i++)
+    add(1, () => {
+      drift(true);
+      everyone.forEach((who, k) => (cast[who].glint = i >= 2 + k * 3 && i < 4 + k * 3));
+    });
+  // Still posing, the camera pushes in to twice the size, on their faces.
+  const close = { cx: view.w / 2, cy: marks.nate.y + 16 };
+  const from = { cx: cam.cx, cy: cam.cy };
+  for (const z of [1.1, 1.22, 1.36, 1.5, 1.64, 1.78, 1.9, 2])
+    add(1, () => {
+      drift(true);
+      const k = z - 1;
+      cam.z = z;
+      cam.cx = from.cx + (close.cx - from.cx) * k;
+      cam.cy = from.cy + (close.cy - from.cy) * k;
+    });
+  // Arms down, and all at once the shades come off: a quick slip down the
+  // nose, then a flick up and away. Then they stand there, faces bare,
+  // breathing.
+  for (const c of Object.values(cast)) c.pose = 'idle-down-0';
+  add(3, () => drift(true));
+  for (const n of [2, -4, null])
+    add(1, () => {
+      drift(true);
+      for (const c of Object.values(cast)) c.shades = n;
+    });
+  let breath = 0;
+  add(16, () => {
+    drift(true);
+    for (const c of Object.values(cast)) c.pose = `idle-down-${(breath >> 2) % 4}`;
+    breath++;
+  });
+  const still = frames.at(-1)!.image;
+  // Then off they go, out of the camera's frame: Michele to the left, Nate
+  // and Sam to the right, two pixels a frame, a new stride every frame.
+  cast.michele.flip = true;
+  for (const c of Object.values(cast)) c.pose = 'idle-side-0';
+  add(2, () => drift(true));
+  const gone = (who: Persona) => {
+    const f = frameOf();
+    return cast[who].x + 16 <= f.x || cast[who].x >= f.x + f.w;
+  };
+  t = 0;
+  while (!everyone.every(gone)) {
+    add(1, () => {
+      drift(true);
+      for (const who of everyone) {
+        if (gone(who)) continue;
+        cast[who].x += who === 'michele' ? -2 : 2;
+        cast[who].pose = `walk-side-${t % 4}`;
+      }
+      t++;
+    });
+  }
+  add(4, () => drift(true));
+  // The still: the three of them close up, shades off.
+  frames.push({ image: still, delay: 0 });
+  return frames;
+}
+
+// The bug hunters' van, nose to the right like the bus: a white box van with
+// a lower cab, a red stripe, and six columns spare at the rear for its back
+// door to swing into. Its lettering is stamped on below.
+const VAN_ROWS = [
+  '.......kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk............',
+  '......k=====================================k...........',
+  '......k=====================================k...........',
+  '......kqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqk...........',
+  '......kPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPk...........',
+  '......kPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPk...........',
+  '......kPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPkkkkkkk.....',
+  '......kPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPk======k....',
+  '......kPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPkkccccCck...',
+  '......kRPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPkkcccccCck..',
+  '......kRPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPkkccccckCck.',
+  '......kRPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPkkkkkkkkkkk.',
+  '......kPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPkPPPPPPPPPPk',
+  '......kPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPqP55PPPPPPlk',
+  '......kPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPqPPPPPPPPPLk',
+  '......kPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPqPPPPPPPPPPk',
+  '......kRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRqRRRRRRRRRRk',
+  '......kRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRqRRRRRRRRRRk',
+  '......5PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPqPPPPPPPPPPk',
+  '......5qqqqqkkkkkqqqqqqqqqqqqqqqqqqqqqqqqqqqqqkkkkkqqqq5',
+  '......5qqqqkkkkkkkqqqqqqqqqqqqqqqqqqqqqqqqqqqkkkkkkkqqq5',
+  '......kkkkkkK555KkkkkkkkkkkkkkkkkkkkkkkkkkkkkkK555Kkkkkk',
+  '...........kK5k5Kk...........................kK5k5Kk....',
+  '...........kK555Kk...........................kK555Kk....',
+  '............kKKKk.............................kKKKk.....',
+  '.......______kkk_______________________________kkk_____.',
+  '.......________________________________________________.'
+];
+// The open back door, swung out flat beside the box: its outer face, a
+// window, and its hinge on the rear edge.
+const VAN_DOOR = [
+  '.kkkkk',
+  'k====k',
+  'kPPPPk',
+  'kkkkkk',
+  'kcccck',
+  'kcccck',
+  'kkkkkk',
+  ...Array(10).fill('kPPPPk'),
+  'kqqqqk',
+  'kqqqqk',
+  'kkkkkk'
+];
+// The logo: a bug in a red ring, struck through.
+const NO_BUG = ['.RRR.', 'RRk.R', 'RkRkR', 'R.kRR', '.RRR.'];
+
+/** `rows` with `glyphs` stamped in `key` at (x, y), and `art` (palette keys) where it is not `.`. */
+function stamp(rows: string[], at: { x: number; y: number }, art: string[]): string[] {
+  return rows.map((row, y) => {
+    const line = art[y - at.y];
+    if (!line) return row;
+    return [...row]
+      .map((c, x) => (line[x - at.x] && line[x - at.x] !== '.' ? line[x - at.x] : c))
+      .join('');
+  });
+}
+/** Text in the 5-pixel font as rows of `key`, one column between letters. */
+function lettering(text: string, key: string): string[] {
+  return [0, 1, 2, 3, 4].map((y) =>
+    [...text].map((ch) => GLYPHS[ch][y].replaceAll('x', key)).join('.')
+  );
+}
+const VAN_SIDE = (() => {
+  let rows = stamp(VAN_ROWS, { x: 16, y: 4 }, NO_BUG);
+  rows = stamp(rows, { x: 23, y: 4 }, lettering('BUG', 'k'));
+  return stamp(rows, { x: 12, y: 10 }, lettering('HUNTERS', 'k'));
+})();
+// The wheels turn: the hub's dark spot moves round between frames.
+const VAN_ROLL = VAN_SIDE.map((r, y) => (y === 22 ? r.replaceAll('kK5k5Kk', 'kKk5kKk') : r));
+const VAN_OPEN = stamp(VAN_SIDE, { x: 0, y: 1 }, VAN_DOOR);
+
+// A bug hunter's hood, visor and mask, drawn over the head from row 3, by
+// facing: a yellow hood, a dark visor with a glint, and a respirator with a
+// filter each side. From behind it is all hood.
+const HOOD: Record<'down' | 'up' | 'side', string[]> = {
+  down: [
+    '....kkkkkkkk....',
+    '...kyyyyyyyyk...',
+    '..kyyyyyyyyyYk..',
+    '..kyykkkkkkkYk..',
+    '..kykKmKKKKKkk..',
+    '..kykKKKKKmKkk..',
+    '..kyYkkkkkkkYk..',
+    '..kYkk5MM5kkYk..',
+    '..kYkMk55kMk9k..',
+    '..k9kMk55kMk9k..',
+    '...k9kkkkkk9k...',
+    '....kk9999kk....',
+    '....kYYYYYYk....'
+  ],
+  up: [
+    '....kkkkkkkk....',
+    '...kyyyyyyyyk...',
+    '..kyyyyyyyyyYk..',
+    '..kyyyyyyyyyYk..',
+    '..kYyyyyyyyyYk..',
+    '..kYyyyyyyyYYk..',
+    '..kYYyyyyyYY9k..',
+    '..k9YYYYYYYY9k..',
+    '..k9YYYYYYYY9k..',
+    '..k99YYYYYY99k..',
+    '...k99YYYY99k...',
+    '....kk9999kk....',
+    '....kYYYYYYk....'
+  ],
+  side: [
+    '....kkkkkkk.....',
+    '...kyyyyyyyk....',
+    '..kyyyyyyyyyk...',
+    '..kyyyyyykkkkk..',
+    '..kyyyyykKmKKk..',
+    '..kYyyyykKKKMk..',
+    '..kYyyyyykkkkk..',
+    '..kYyyyyk5MMk...',
+    '..k9Yyyyk55MMk..',
+    '..k9YYYYk5MMk...',
+    '...k99YYYkkk....',
+    '....kk999kk.....',
+    '.....kYYYYk.....'
+  ]
+};
+// The spray tank on a hunter's back, from row 15: seen from behind, side on
+// (behind the shoulder), and from the front only its straps show.
+const TANK: Record<'down' | 'up' | 'side', string[]> = {
+  down: ['................', '.....k....k.....', '.....k....k.....', '.....k....k.....'],
+  up: [
+    '.....kkkkkk.....',
+    '....kMrRRR8k....',
+    '....kmrRRR8k....',
+    '....kMrRRR8k....',
+    '....kMrRRR8k....',
+    '....kMrRRR8k....',
+    '....kMrRRR8k....',
+    '.....kkkkkk.....'
+  ],
+  side: ['..kkk...', '.krR8k..', '.krR8k..', '.krR8k..', '.krR8k..', '.krR8k..', '..kkk...']
+};
+
+// How far past the threshold a hunter walks before the lobby's dark takes them.
+const DEPTH = 8;
+// The still: one hunter side on in the mask, the other walking off, the van behind.
+const STILL_AT = 52;
+
+/**
+ * 0.0.10, a release of bug fixes. A white van marked BUG HUNTERS drives up
+ * the near lane and stops past the crossing. Its back door swings open and two
+ * bug hunters hop out, one after the other, in yellow suits with hoods, masks
+ * and spray tanks. They walk to the front door side by side, the view tilting
+ * up with them, the door slides open, and in they go. It slides shut behind
+ * them.
+ */
+function bugHunters({
+  room,
+  view,
+  door,
+  open,
+  lane,
+  odd,
+  head,
+  torso,
+  shade
+}: CurbLayers): GifFrame[] {
+  const frames: GifFrame[] = [];
+  const van = {
+    side: shade(sprite(VAN_SIDE)),
+    roll: shade(sprite(VAN_ROLL)),
+    open: shade(sprite(VAN_OPEN))
+  };
+  const hoods = {
+    down: shade(sprite(HOOD.down)),
+    up: shade(sprite(HOOD.up)),
+    side: shade(sprite(HOOD.side))
+  };
+  const tanks = {
+    down: shade(sprite(TANK.down)),
+    up: shade(sprite(TANK.up)),
+    side: shade(sprite(TANK.side))
+  };
+  const shut = doorAt(room, door.x, door.y);
+  const opened = doorAt(open, 0, 0);
+  // The doorway the hunters step through, inside the jamb, in the room's pixels.
+  const doorway = {
+    x0: door.x + LEAF.left,
+    x1: door.x + LEAF.right,
+    y0: door.y + LEAF.top,
+    y1: door.y + LEAF.bottom
+  };
+
+  // The van's wheels sit on the lane where the bus's do, and it stops with
+  // its nose at the view's edge, its back by the crossing.
+  const vanY = lane + 13 - 24;
+  const stop = view.w - VAN_SIDE[0].length;
+  const car = { x: -VAN_SIDE[0].length, img: van.side };
+  let slid = 1;
+  // The view's top in the room: it starts at the bottom, on the street.
+  let cam = room.height - view.h;
+
+  type Hunter = { x: number; y: number; pose: string; flip: boolean; out: boolean };
+  // Feet on the road beside the van's back door.
+  const kerbY = vanY + 24 - 30;
+  const hunters: Hunter[] = [0, 1].map(() => ({
+    x: 0,
+    y: kerbY,
+    pose: 'idle-side-0',
+    flip: true,
+    out: false
+  }));
+
+  /** A hunter, suited up: the tank behind (or, facing you, its straps in front), then the hood. */
+  const suited = (h: Hunter) => {
+    const dir = h.pose.includes('-side-') ? 'side' : h.pose.includes('-up-') ? 'up' : 'down';
+    const img = createImage(16, 32);
+    const [tx, ty] = torso(h.pose);
+    const [hx, hy] = head(h.pose);
+    if (dir === 'side') drawImage(img, tanks.side, tx, 15 + ty);
+    drawImage(img, odd(h.pose), 0, 0);
+    if (dir !== 'side') drawImage(img, tanks[dir], tx, 15 + ty);
+    drawImage(img, hoods[dir], hx, 3 + hy);
+    return img;
+  };
+
+  const shot = () => {
+    const img = createImage(room.width, room.height);
+    drawImage(img, room, 0, 0);
+    drawImage(img, slid < 1 ? leaves(shut, opened, slid) : shut, door.x, door.y);
+    // Whoever has stepped over the threshold shows only through the doorway,
+    // darker the further into the lobby they go.
+    const sill = door.y + door.h;
+    const inside = (h: Hunter) => h.out && h.y + 30 < sill;
+    for (const h of hunters.filter(inside)) {
+      const body = suited(h);
+      const dim = 1 - (0.75 * (sill - h.y - 30)) / DEPTH;
+      for (let y = 0; y < 32; y++)
+        for (let x = 0; x < 16; x++) {
+          const rx = h.x + x;
+          const ry = h.y + y;
+          if (rx < doorway.x0 || rx > doorway.x1 || ry < doorway.y0 || ry > doorway.y1) continue;
+          const i = (y * 16 + (h.flip ? 15 - x : x)) * 4;
+          if (!body.data[i + 3]) continue;
+          const o = (ry * room.width + rx) * 4;
+          for (let c = 0; c < 3; c++) img.data[o + c] = Math.round(body.data[i + c] * dim);
+        }
+    }
+    // Front to back: the van, then the hunters on the sidewalk, lowest last.
+    drawImage(img, car.img, car.x, vanY);
+    for (const h of [...hunters].filter((h) => h.out && !inside(h)).sort((a, b) => a.y - b.y))
+      drawImage(img, suited(h), h.x, h.y, h.flip);
+    const out = createImage(view.w, view.h);
+    drawImage(out, img, 0, -Math.round(cam));
+    return out;
+  };
+  const add = (n = 1, step?: () => void) => {
+    for (let i = 0; i < n; i++) {
+      step?.();
+      frames.push({ image: shot(), delay: DELAY });
+    }
+  };
+
+  // A quiet street.
+  add(6);
+  // The van drives in, slowing to a stop, its wheels turning.
+  const from = car.x;
+  const STEPS = 26;
+  for (let i = 1; i <= STEPS; i++)
+    add(1, () => {
+      const s = i / STEPS;
+      car.x = Math.round(from + (stop - from) * (1 - (1 - s) * (1 - s)));
+      car.img = i < STEPS && (i >> 1) % 2 ? van.roll : van.side;
+    });
+  car.img = van.side;
+  add(5);
+  // The back door swings open.
+  car.img = van.open;
+  add(3);
+
+  // The hunters' marks: either side of the doorway's middle, on the sidewalk
+  // a step below the door, then through it.
+  const mid = door.x + door.w / 2 - 8;
+  const cols = [mid - 6, mid + 6];
+  const below = door.y + door.h - 30 + 10;
+  const gone = door.y + door.h - 30 - DEPTH;
+  // Each hunter: hop down from the back of the van, walk along the road to
+  // their column, then up the sidewalk and in. The second follows nine
+  // frames behind the first.
+  type Leg = { x?: number; y?: number };
+  const plans: Leg[][] = cols.map((x) => [{ x }, { y: below }, { y: gone }]);
+  const starts = [0, 9];
+  const stepOf = hunters.map(() => 0);
+  const legOf = hunters.map(() => 0);
+  const hop = [-3, -2, 0];
+  let t = 0;
+  const done = () => hunters.every((_, k) => legOf[k] >= plans[k].length);
+  const dooring = () => Math.min(...hunters.map((h) => (h.out ? h.y : Infinity)));
+  while (!done()) {
+    add(1, () => {
+      hunters.forEach((h, k) => {
+        const s = t - starts[k];
+        if (s < 0) return;
+        if (s < hop.length) {
+          // Out of the back door and down onto the road.
+          h.out = true;
+          h.x = car.x + 6 - 14;
+          h.y = kerbY + hop[s];
+          h.pose = 'idle-side-0';
+          h.flip = true;
+          return;
+        }
+        const at = (leg: Leg) => (leg.x ?? h.x) === h.x && (leg.y ?? h.y) === h.y;
+        while (plans[k][legOf[k]] && at(plans[k][legOf[k]])) legOf[k]++;
+        const leg = plans[k][legOf[k]];
+        if (!leg) return;
+        if (leg.x !== undefined && h.x !== leg.x) {
+          h.flip = leg.x < h.x;
+          h.x += Math.sign(leg.x - h.x) * Math.min(2, Math.abs(leg.x - h.x));
+          h.pose = `walk-side-${(stepOf[k]++ >> 1) % 4}`;
+        } else if (leg.y !== undefined && h.y !== leg.y) {
+          h.y += Math.sign(leg.y - h.y) * Math.min(2, Math.abs(leg.y - h.y));
+          h.flip = false;
+          h.pose = `walk-up-${(stepOf[k]++ >> 1) % 4}`;
+        }
+        if (at(leg)) legOf[k]++;
+      });
+      // The door slides open as the first of them nears it.
+      const lead = dooring();
+      if (lead < below + 14 && slid > 0) slid = Math.max(0, slid - 0.2);
+      // The view tilts up with the first of them, a pixel or two a frame.
+      const want = Math.max(0, Math.min(room.height - view.h, lead + 16 - view.h / 2 - 8));
+      if (cam > want) cam = Math.max(want, cam - 2);
+      t++;
+    });
+  }
+  for (const h of hunters) h.out = false;
+  add(3);
+  // The door slides shut behind them.
+  for (const s of [0.15, 0.35, 0.55, 0.72, 0.86, 0.95, 1]) {
+    slid = s;
+    add();
+  }
+  add(14);
+  frames.push({ image: frames[STILL_AT].image, delay: 0 });
+  return frames;
+}
+
 /**
  * Every release's art. `share` is the GIF frame, counted from 0, that becomes
  * the link preview while that release is the newest one, and `shareLight` is
@@ -956,7 +1638,11 @@ const ART: {
   // Ada facing you mid-hall, by day: out of the loop.
   { name: 'loop', frames: (l) => loop(l.hall), share: 270, shareLight: 'day' },
   // Theo on the bench with the bar up.
-  { name: 'gym', frames: (l) => gym(l.gym), share: 197, shareLight: 'day' }
+  { name: 'gym', frames: (l) => gym(l.gym), share: 197, shareLight: 'day' },
+  // The three of them in their pose, by day, the light on Michele's shades.
+  { name: 'personas', frames: (l) => personas(l.entrance), share: 97, shareLight: 'day' },
+  // By day, a hunter side on in the mask beside the van, BUG HUNTERS in full.
+  { name: 'bug-hunters', frames: (l) => bugHunters(l.curb), share: STILL_AT, shareLight: 'day' }
 ];
 
 // The link preview's size, and the ink it sits on.

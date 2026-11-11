@@ -3,7 +3,7 @@
   // and for an AWS tool already connected, change its role or Region, which
   // puts the AWS step on the desk again and opens it there. A change reaches
   // every list through the connectors table's change event.
-  import { call } from './api.ts';
+  import { call, type ApiUrl } from './api.ts';
   import { deskRequest } from './windows.svelte.ts';
 
   type Props = { id: string; name: string; changes?: boolean };
@@ -14,7 +14,7 @@
   let busy = $state(false);
   let problem = $state('');
 
-  const url = $derived(`/api/services/${encodeURIComponent(id)}`);
+  const url = $derived<ApiUrl>(`/api/services/${encodeURIComponent(id)}`);
 
   async function rename() {
     busy = true;

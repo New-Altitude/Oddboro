@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { and, eq, inArray } from 'drizzle-orm';
-import { asks, followUps, goals, planLimits, staff, threads } from '../src/schema.ts';
+import { asks, followUps, goals, planLimits, staff, tasks, threads } from '../src/schema.ts';
 // Types only, erased before run, so the code under test still loads after the mock.
 import type { ThreadFor } from '../src/threads.ts';
 import { db } from './pglite.ts';
@@ -17,6 +17,7 @@ const { parkThread, parkedThreads, wakeThread } = await import('../src/threads.t
 const { goalsWindow } = await import('../src/goals.ts');
 const { decideAsk } = await import('../src/office.ts');
 const { WINDOW_RESET } = await import('../src/usage-window.ts');
+const { parkOnTask } = await import('../src/task-parking.ts');
 const { MANAGER_ROLE } = await import('../src/managers.ts');
 
 const odd = (id: string, name: string) => ({
@@ -309,4 +310,23 @@ test("past the guard, on a goal's thread, its Claude lead's hand-off to an Odd o
   const toClaude = await onGoal('ivy', 'Name the stars');
   assert.ok('problem' in toClaude, JSON.stringify(toClaude));
   assert.match(toClaude.problem, /usage window is at 90%/);
+});
+
+test('work parked on a task that the usage window then holds waits on the window, not the task', async () => {
+  await db.insert(staff).values(odd('wren', 'Wren'));
+  const [t] = await db
+    .insert(threads)
+    .values({ title: 'Parked, then held', hubId: 'wren', holderId: 'wren' })
+    .returning();
+  const [task] = await db
+    .insert(tasks)
+    .values({ staffId: 'wren', title: 'Sign off the sim', why: 'w', steps: [] })
+    .returning();
+  assert.ok('title' in (await parkOnTask('wren', t.id, task.id)));
+  await freshWindow(0.95);
+  const r = await give({ id: t.id }, 'wren');
+  assert.ok('problem' in r, JSON.stringify(r));
+  const after = await row(t.id);
+  assert.equal(after.resumeOnTask, null, 'a hold on the window replaces a park on a task');
+  assert.ok(after.resumeAt, 'the window reset wakes it');
 });

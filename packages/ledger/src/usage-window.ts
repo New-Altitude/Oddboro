@@ -65,6 +65,7 @@ export async function holdForWindow(
     .set({
       resumeAt: resets,
       heldBy,
+      resumeOnTask: null,
       ...(t.endedAt ? { endedAt: null, handOffsUsed: 0 } : {})
     })
     .where(eq(threads.id, t.id));

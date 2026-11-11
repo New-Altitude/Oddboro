@@ -9,7 +9,7 @@ import type { RequestHandler } from './$types';
 /** The page shrinks a headshot to 512 px before sending it, so this is generous. */
 const PHOTO_MAX = 1_500_000;
 /** Models a drawing may ask for by name, to compare them. The page never sends one. */
-const MODELS = ['claude-opus-5-5', 'claude-fable-5-1'];
+const MODELS = ['claude-opus-5-5', 'claude-fable-5-2', 'claude-fable-5-1'];
 
 export const POST: RequestHandler = async ({ request }) => {
   const b = (await request.json().catch(() => ({}))) as Record<string, unknown>;

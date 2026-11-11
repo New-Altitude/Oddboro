@@ -29,7 +29,7 @@ import {
 } from '@oddboro/ledger';
 import { notePlan, pluginsOff, staffEnv } from './staff.ts';
 import { claudeInput, claudeRunHome, modelArgs, spawnClaude } from './claude.ts';
-import { endedEarly, LAUNCHES } from './cli.ts';
+import { endedEarly, LAUNCHES, stoppedWhy } from './cli.ts';
 import { SIGN_IN_WHERE, stopGroups, type RunImage } from './launch.ts';
 import { agentCommand } from './agent-sign-in.ts';
 import { tooOldLine } from './versions.ts';
@@ -62,6 +62,12 @@ export async function runAsOffice(message: string, opts: OfficeRunOpts): Promise
   const owner = await ownerName();
   const say = (s: string) => s.replaceAll('{owner}', owner);
   const agent = officeAgent();
+  // Without this, a tool that is not installed reads as not signed in.
+  if (agent !== 'claude' && !agentCommand(agent))
+    return {
+      ok: false,
+      text: `${AGENT_NAMES[agent]} is not installed. Install it ${SIGN_IN_HERE}.`
+    };
   const tooOld = await tooOldLine(agent, SIGN_IN_HERE);
   if (tooOld) return { ok: false, text: tooOld };
   const said = { ...opts, system: say(opts.system) };
@@ -209,7 +215,7 @@ async function runOn(
       if (launch.ownGroup) stop();
       finish({
         ok: false,
-        text: `${tool} stopped (exit ${code}). ${stderr.trim().split('\n').slice(-2).join(' ')}`
+        text: stoppedWhy(agent, code, stderr, true)
       });
     });
     // A run stopped before it read its message closes its input: the stop says so, not this.

@@ -18,6 +18,13 @@ export const SYSTEM: System | undefined = (
 export const MAC = SYSTEM === 'mac';
 export const LINUX = SYSTEM === 'linux';
 export const WINDOWS = SYSTEM === 'windows';
+/**
+ * The system the office runs on, read at each call. Every other file asks this
+ * instead of reading `process.platform` (scripts/check-platform.ts), so a test
+ * that fakes the system reaches every reader. The constants above are fixed
+ * when this file loads.
+ */
+export const currentPlatform = (): NodeJS.Platform => process.platform;
 
 /**
  * Where the office's logs go. XDG_STATE_HOME wins wherever it is set;
@@ -140,7 +147,7 @@ export function openFile(path: string): Promise<boolean> {
  * The system is read per call too, not from WINDOWS, so a test can stub it.
  */
 export function claudeCommand(): [string, string[]] {
-  if (process.platform !== 'win32') return ['claude', []];
+  if (currentPlatform() !== 'win32') return ['claude', []];
   return (
     npmCommand('claude', ['@anthropic-ai', 'claude-code'], [join(homedir(), '.local', 'bin')]) ?? [
       'claude',

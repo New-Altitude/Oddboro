@@ -18,8 +18,10 @@ import {
   staff,
   staffGoals,
   threads,
-  type GoalPlanItem
+  type GoalPlanItem,
+  type Step
 } from '../src/schema.ts';
+import type { ThreadStory } from '../src/lead-brief.ts';
 import type { ThreadFor } from '../src/threads.ts';
 import { db, sql } from './pglite.ts';
 import { oneThreadPerGoal } from './one-thread.ts';
@@ -118,6 +120,11 @@ const propose = (run: string) =>
     run
   });
 
+// Wren does the steps of the work with no goal at the end of the file. Set up
+// here, above the first test: under --test-force-exit the runner drops every
+// test registered after a top-level await.
+await db.insert(staff).values({ id: 'wren', ...odd('Wren', 'Researcher') });
+
 test('a plan raised again after a no goes on the same thread, opened again for a new round', async () => {
   const { ask: first } = await propose('planning-run');
   await run(planning, 'done', 'Plan raised.');
@@ -211,7 +218,8 @@ test("what the owner tells a colleague in chat about the goal wakes the lead, an
     threadId: goalThread,
     owner: OWNER,
     said,
-    words: 'use the Game of Life glider for the spin.'
+    words: 'use the Game of Life glider for the spin.',
+    reading: 'They want the spin to use the glider.'
   });
   assert.deepEqual(r, { lead: 'Marshall' });
   const wake = (await pending('marshall')).find((f) => f.kind === 'resume');
@@ -313,19 +321,19 @@ test('the lead hands on to the end, and every run on the thread is its own or se
   assert.equal((await threadRow(goalThread)).status, 'done', 'a refused hand-off changes nothing');
 });
 
-test("the lead's chat is told where its goal stands, from the same facts its pick-ups get", async () => {
+test("the lead's chat is told where its goal stands, from the same record as its pick-ups, bounded to openings", async () => {
   const stories = await B.ledStories('marshall', 'chat');
   assert.deepEqual(
     stories.map((s) => s.thread.id),
     [goalThread]
   );
-  const known = B.threadKnown({ story: stories[0] }).join('\n');
-  const chat = B.goalsLedBrief(stories);
+  const shown = stories[0].latest ? [stories[0].latest.id] : [];
+  const known = B.threadKnown({ story: stories[0], shown }).join('\n');
+  const chat = B.workLedBrief(stories);
   assert.ok(chat.includes(known), "the chat holds all the lead's pick-ups know");
-  assert.ok(B.threadBrief({ story: stories[0] }).join('\n').includes(known));
+  assert.ok(B.threadBrief({ story: stories[0], shown }).join('\n').includes(known));
   assert.match(chat, /Review the board \(Tess\): finished\./);
   assert.match(chat, /^Where it stands: finished\.$/m, 'the chat says the work has finished');
-  assert.match(chat, /The latest result, from Tess, in full/);
   assert.match(chat, /- Priya: the intake and the spin/);
   assert.match(chat, /The plan \{owner\} approved, part by part:/);
   assert.match(
@@ -416,7 +424,7 @@ test("after the owner stops the goal's thread, only a new plan opens it again: n
   await O.decideAsk(big.asked, 'deny', null);
   assert.equal((await threadRow(goalThread)).status, 'stopped');
   assert.match(
-    B.goalsLedBrief(await B.ledStories('marshall', 'chat')),
+    B.workLedBrief(await B.ledStories('marshall', 'chat')),
     /^Where it stands: \{owner\} stopped it, so it cannot be continued\.$/m,
     "the lead's chat says the owner stopped the goal's work"
   );
@@ -458,7 +466,7 @@ test("after the owner stops the goal's thread, only a new plan opens it again: n
   assert.equal(t.endedAt, null);
   assert.equal(t.handOffsUsed, 0, 'the new plan starts a new round');
   assert.doesNotMatch(
-    B.goalsLedBrief(await B.ledStories('marshall', 'chat')),
+    B.workLedBrief(await B.ledStories('marshall', 'chat')),
     /Where it stands/,
     'work under way has no ended line'
   );
@@ -574,4 +582,169 @@ test('the manager still opens a thread when it serves a goal and has no job', as
   await db.delete(jobs).where(eq(jobs.staffId, 'marshall'));
   const r = await give(hired.Priya, 'Sweep up', { title: 'Sweep up' });
   assert.equal((await threadRow(r.thread)).hubId, 'marshall');
+});
+
+// The tests below read a piece of work with no goal, whatever ran before them.
+
+/** A new piece of work Marshall leads, with one step handed to Wren and back. */
+async function workWithAStep(title: string, result = 'Done.') {
+  const { thread } = await give('wren', `${title}: first step`, { title });
+  for (const f of await pending('wren')) await run(f, 'done', result);
+  return thread;
+}
+/** Marshall raises an ask on the work. */
+const askOn = (threadId: number, title: string, revises?: number) =>
+  O.raiseAsk('marshall', {
+    title,
+    why: 'The hidden why.',
+    ifApproved: 'The hidden if.',
+    threadId,
+    revises
+  });
+const storyOn = async (id: number) => (await B.ledStories('marshall', { thread: id }))[0];
+const headings = (lines: string) => lines.split('\n').filter((l) => l.startsWith('## '));
+const CHOICE: Step = {
+  text: 'Pick one',
+  done: false,
+  action: { kind: 'choice', options: ['Navy', 'Teal'] }
+};
+
+test("a task the owner finished on a thread appears in that thread's story with their choice", async () => {
+  const id = await workWithAStep('Choose the colours');
+  const task = await O.giveTask('marshall', {
+    title: 'Pick a blue',
+    why: 'w',
+    steps: [CHOICE],
+    threadId: id
+  });
+  await O.tickStep(task.id, 0, 'Navy');
+  await O.finishTask(task.id, true, null);
+  assert.deepEqual((await storyOn(id)).said, [
+    { what: 'Pick a blue', how: 'finished', words: 'Pick one: Navy' }
+  ]);
+});
+
+test("a colleague's story tells the owner's answers and the status, and not the text of the asks", async () => {
+  const id = await workWithAStep('Stock the shelves');
+  const { ask } = await askOn(id, 'Buy the pack');
+  await O.decideAsk(ask.id, 'approve', 'Yes');
+  // Only a goal's work holds a plan, so this one is given it: it must stay out all the same.
+  const story = { ...(await storyOn(id)), plan: { parts: ['Priya: the spin'], answer: 'Go.' } };
+  const told = B.threadOnKnown({ story }).join('\n');
+  assert.ok(told.includes('"Buy the pack": approved. Their words: Yes'), told);
+  assert.match(told, /Marshall leads this work\. You are on it\./);
+  for (const hidden of ['The hidden why.', 'The hidden if.', 'Priya: the spin', 'Go.'])
+    assert.ok(!told.includes(hidden), `a colleague read "${hidden}"`);
+});
+
+test('an ask the Odd replaced with a new version is not told as something the owner said', async () => {
+  const id = await workWithAStep('Paint the door');
+  const first = await askOn(id, 'Buy paint');
+  const second = await askOn(id, 'Buy better paint', first.ask.id);
+  assert.equal((await storyOn(id)).said.length, 0, 'nothing is answered yet');
+  // Approved with no reason, so a filter that compared a null reason would lose it.
+  await O.decideAsk(second.ask.id, 'approve', null);
+  assert.deepEqual((await storyOn(id)).said, [{ what: 'Buy better paint', how: 'approved' }]);
+});
+
+test("an answer or a step's result that holds a heading stays inside its story, on one line", async () => {
+  const id = await workWithAStep('Write the page', 'It is written.\n## Not a section');
+  const { ask } = await askOn(id, 'Publish it');
+  await O.decideAsk(ask.id, 'deny', 'Not yet.\n## Not a section');
+  const story = await storyOn(id);
+  assert.deepEqual(headings(B.threadOnKnown({ story }).join('\n')), [`## Work ${id}`]);
+  assert.deepEqual(headings(B.workLedBrief([story])), [`## Work ${id}`]);
+  assert.deepEqual(headings(B.workOnBrief([story])), [`## Work ${id}`]);
+  // A pick-up's brief holds the latest result whole, so this one says it already holds it.
+  const shown = story.latest ? [story.latest.id] : [];
+  assert.deepEqual(headings(B.threadKnown({ story, shown }).join('\n')), [`## Work ${id}`]);
+  assert.deepEqual(story.said, [
+    { what: 'Publish it', how: 'turned down', words: 'Not yet. ## Not a section' }
+  ]);
+
+  const titled = await storyOn(await workWithAStep('Plan the day\n## Not a section'));
+  const heading = [`## Work ${titled.thread.id}`];
+  assert.deepEqual(headings(B.threadOnKnown({ story: titled }).join('\n')), heading);
+  assert.deepEqual(headings(B.workLedBrief([titled])), heading);
+});
+
+test('a story keeps the newest ten things the owner decided, oldest first', async () => {
+  const id = await workWithAStep('Answer a lot');
+  for (let i = 0; i < 11; i++) {
+    const { ask } = await askOn(id, `Question ${i}`);
+    await O.decideAsk(ask.id, 'approve', null);
+  }
+  assert.deepEqual(
+    (await storyOn(id)).said.map((s) => s.what),
+    Array.from({ length: 10 }, (_, i) => `Question ${i + 1}`)
+  );
+});
+
+test("a chat is told each live goal's work and the latest five others, for its lead and for a colleague", async () => {
+  const made: number[] = [];
+  for (let i = 0; i < 6; i++) made.push(await workWithAStep(`Errand ${i}`));
+  const latest = made.slice(1).reverse();
+  const led = await B.ledStories('marshall', 'chat');
+  assert.ok(
+    led.some((s) => s.thread.id === goalThread),
+    "a live goal's work stays, however much else there is"
+  );
+  assert.deepEqual(
+    led.filter((s) => s.thread.goalId === null).map((s) => s.thread.id),
+    latest
+  );
+  assert.deepEqual(
+    (await B.onStories('wren')).map((s) => s.thread.id),
+    latest
+  );
+  assert.deepEqual(await B.storyOf(0), [], 'no such work has no story');
+  assert.deepEqual(
+    (await B.storyOf(made[0])).map((s) => s.thread.id),
+    [made[0]]
+  );
+});
+
+test("a chat's story holds the last steps of each piece of work and says how many came before, and stays bounded", async () => {
+  const row = await threadRow(await workWithAStep('Fill a story'));
+  const full = (id: number, goalId: number | null = null): ThreadStory => ({
+    thread: { ...row, id, goalId, title: 't'.repeat(140), status: 'open' },
+    steps: Array.from({ length: 8 }, (_, i) => ({
+      title: `s${i}`.padEnd(140, 's'),
+      to: 'Wren',
+      outcome: 'done' as const,
+      text: 'r'.repeat(2_000)
+    })),
+    latest: { id: 1, from: 'Wren', text: 'THE WHOLE RESULT' },
+    waiting: [],
+    said: Array.from({ length: 10 }, (_, i) => ({
+      what: `${i}`.padEnd(140, 'w'),
+      how: 'approved',
+      words: 'x'.repeat(500)
+    })),
+    lead: 'Marshall'
+  });
+  const one = B.workLedBrief([full(1)]);
+  assert.match(one, /3 earlier steps are left out here\./);
+  assert.match(one, /^4\. s3/m, 'each step keeps its real number');
+  assert.ok(!one.includes('THE WHOLE RESULT'), 'a chat reads no full result');
+  assert.ok(one.length < 12_000, `one story took ${one.length} characters`);
+  assert.match(B.workOnBrief([full(1)]), /3 earlier steps are left out here\./);
+
+  const brief = (s: ThreadStory) => B.workLedBrief([s]);
+  const twelve = Array.from({ length: 12 }, (_, i) => full(i + 1));
+  const fit = B.fitStories(twelve, brief, B.CHAT_STORIES_MAX);
+  assert.deepEqual(
+    fit.kept.map((s) => s.thread.id),
+    [12, 11],
+    'whole stories, newest first'
+  );
+  assert.ok(fit.used <= B.CHAT_STORIES_MAX, `used ${fit.used}`);
+  assert.equal(fit.used, B.workLedBrief(fit.kept).length, 'the sum is the length of the brief');
+
+  const withGoal = B.fitStories([...twelve, full(0, goal.id)], brief, B.CHAT_STORIES_MAX);
+  assert.deepEqual(
+    withGoal.kept.map((s) => s.thread.id),
+    [0, 12],
+    "a live goal's story comes before newer work"
+  );
 });

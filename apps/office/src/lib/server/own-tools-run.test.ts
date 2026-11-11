@@ -4,8 +4,16 @@
 // arguments and environment each tool gets, Claude Code's sandbox for
 // commands, and what the Odd is told. Run with `npm test -w @oddboro/office`.
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync
+} from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join, sep } from 'node:path';
 import { test } from 'node:test';
 import {
@@ -23,6 +31,7 @@ import {
   patch,
   recorded,
   refusal,
+  request,
   runOf,
   secrets,
   setOwn,
@@ -59,12 +68,6 @@ function made(...parts: string[]): string {
 const after = (args: string[], flag: string) => args[args.indexOf(flag) + 1];
 /** Every value given with `flag`, which may come more than once. */
 const each = (args: string[], flag: string) => args.filter((_, i) => args[i - 1] === flag);
-/** The values after `flag`, up to the next flag. */
-function listAfter(args: string[], flag: string): string[] {
-  const from = args.indexOf(flag) + 1;
-  const end = args.findIndex((a, i) => i >= from && a.startsWith('--'));
-  return args.slice(from, end);
-}
 type Sandbox = {
   filesystem: {
     denyRead: string[];
@@ -75,7 +78,7 @@ type Sandbox = {
   [k: string]: unknown;
 };
 const settingsOf = (run: Gave) =>
-  JSON.parse(after(run.args, '--settings')) as { sandbox?: Sandbox; enabledPlugins: unknown };
+  run.claudeSettings as { sandbox?: Sandbox; enabledPlugins: unknown };
 
 // In an empty home, so no developer tool folder of this Mac's joins the sandbox's reads.
 test(
@@ -91,8 +94,8 @@ test(
       const run = await chatOf('otto');
       // The office carries its files, so Bash is its one tool of its own.
       assert.equal(after(run.args, '--tools'), 'Bash');
-      assert.ok(listAfter(run.args, '--allowedTools').includes('Bash'));
-      assert.ok(listAfter(run.args, '--allowedTools').includes('mcp__files'));
+      assert.ok(run.claudeSettings!.permissions.allow.includes('Bash'));
+      assert.ok(run.claudeSettings!.permissions.allow.includes('mcp__files'));
       assert.equal(filesOf(run)?.walls.cwd, staffDir('otto'));
       const tmp = `/private/tmp/ob-${run.env.RUN_KEY.slice(0, 8)}`;
       assert.match(run.tmpdir ?? '', /^\/private\/tmp\/ob-[0-9a-f]{8}$/);
@@ -170,7 +173,8 @@ test(
   "with Run commands, Bash keeps every git setting gitEnv gives it, by name, while an owner's token stays hidden and an owner's GIT_..._TOKEN never reaches the run",
   onMac,
   () =>
-    withEnv({ OWNER_API_TOKEN: 'planted', GIT_ASKPASS_TOKEN: 'planted' }, async () => {
+    // An owner's Anthropic token reaches Claude Code (`RUN_ENV_ALLOW`), so its commands must not see it.
+    withEnv({ ANTHROPIC_AUTH_TOKEN: 'planted', GIT_ASKPASS_TOKEN: 'planted' }, async () => {
       await setOwn('otto', { commands: true });
       const run = await chatOf('otto');
       const denied = (settingsOf(run).sandbox?.credentials.envVars ?? []).map((v) => v.name);
@@ -183,7 +187,7 @@ test(
         git.filter((n) => denied.includes(n)),
         []
       );
-      assert.ok(denied.includes('OWNER_API_TOKEN'), JSON.stringify(denied));
+      assert.ok(denied.includes('ANTHROPIC_AUTH_TOKEN'), JSON.stringify(denied));
       assert.ok(!('GIT_ASKPASS_TOKEN' in (run.git ?? {})), 'the token reached the run');
     })
 );
@@ -201,17 +205,14 @@ test(
       const run = await chatOf('otto');
       const denied = settingsOf(run).sandbox?.credentials.envVars ?? [];
       // Claude Code sets CLAUDE_CODE_MESSAGING_TOKEN itself, so it is in no environment the office passes.
-      for (const name of [
-        'ANTHROPIC_API_KEY',
-        'FAKE_TOKEN',
-        'DATABASE_URL',
-        'XAI_API_KEY',
-        'CLAUDE_CODE_MESSAGING_TOKEN'
-      ])
+      for (const name of ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_MESSAGING_TOKEN'])
         assert.ok(
           denied.some((v) => v.name === name && v.mode === 'deny'),
           `${name} reaches Bash: ${JSON.stringify(denied)}`
         );
+      // The office's own secrets never reach the run at all (`runEnv`).
+      for (const name of ['FAKE_TOKEN', 'DATABASE_URL', 'XAI_API_KEY'])
+        assert.ok(!run.envNames.includes(name), `${name} reached the run`);
       assert.ok(denied.every((v) => v.mode === 'deny'));
       assert.ok(
         !denied.some((v) => v.name === 'PATH' || v.name === 'HOME'),
@@ -234,7 +235,7 @@ test("a Claude run with Browse the web gets WebSearch and WebFetch, beside the o
   const run = await chatOf('wes');
   assert.equal(after(run.args, '--tools'), 'WebSearch,WebFetch');
   assert.equal(filesOf(run)?.walls.cwd, staffDir('wes'));
-  const allowed = listAfter(run.args, '--allowedTools');
+  const allowed = run.claudeSettings!.permissions.allow;
   assert.ok(allowed.includes('WebSearch') && allowed.includes('WebFetch'), allowed.join(' '));
   assert.ok(!allowed.includes('Bash'));
   assert.equal(settingsOf(run).sandbox, undefined);
@@ -251,7 +252,7 @@ test('Grok gets the web but never a shell', async () => {
   // Grok never runs commands, so it is never offered the Run commands switch, whatever is stored.
   assert.ok(
     off.system.includes(
-      `Your own tools work on files only. No shell: Grok can't run commands here. No web: ${await L.ownerName()} can switch on Browse the web in your Settings tab, under Office.`
+      `Your own tools work on files only. No shell: Grok can't run commands here. No web: ask ${await L.ownerName()} to turn on Browse the web with ask_for_switch.`
     ),
     off.system
   );
@@ -275,7 +276,7 @@ test('the system prompt says what the Odd reaches', async () => {
   // Claude Code follows the Run commands switch on a Mac only, so only there is Fern told the owner can switch it on.
   const noShell =
     process.platform === 'darwin'
-      ? `No shell: ${owner} can switch on Run commands in your Settings tab, under Office.`
+      ? `No shell: ask ${owner} to turn on Run commands with ask_for_switch.`
       : "No shell: Claude Code can't run commands here.";
   assert.ok(
     system.includes(`Your own tools work on files, plus web search and fetch. ${noShell}`),
@@ -334,8 +335,8 @@ test('a granted folder reaches every tool at its level', async () => {
   for (const id of ['fern', 'gwen', 'cato', 'gem']) await setOwn(id, { folders });
 
   const claude = await chatOf('fern');
-  const allowed = listAfter(claude.args, '--allowedTools');
-  const denied = listAfter(claude.args, '--disallowedTools');
+  const allowed = claude.claudeSettings!.permissions.allow;
+  const denied = claude.claudeSettings!.permissions.deny;
   const rule = (tool: string, p: string) => `${tool}(${L.rulePath(p)})`;
   assert.ok(allowed.includes(rule('Read', `${r}/**`)) && allowed.includes(rule('Read', `${w}/**`)));
   assert.ok(allowed.includes(rule('Edit', `${w}/**`)));
@@ -399,7 +400,10 @@ test('a folder that was deleted can still be removed, and reaches no run', async
   rmSync(gone, { recursive: true });
   const run = await chatOf('fern');
   assert.ok(!each(run.args, '--add-dir').includes(gone), 'a deleted folder was added');
-  assert.ok(!run.args.some((a) => a.includes(gone)), 'a deleted folder reached the run');
+  assert.ok(
+    ![...run.args, JSON.stringify(run.claudeSettings)].some((a) => a.includes(gone)),
+    'a deleted folder reached the run'
+  );
   assert.ok(!run.system.includes(gone), 'the Odd was told of a deleted folder');
   assert.equal((await patch('fern', { folder: gone, access: null })).status, 200);
   assert.deepEqual((await L.staffer('fern'))?.folders, []);
@@ -432,6 +436,76 @@ test('the folder route says each refusal and records each change', async () => {
     assert.ok(await recorded('Let Wes browse the web'));
   });
 });
+
+test(
+  "a folder of system files is only a warning, and given nothing, until the owner's Accept sends accept",
+  { skip: process.platform === 'win32' && "Windows' temp folder sits in the home's AppData" },
+  async () => {
+    await setOwn('wes', {});
+    await ownerHome(async () => {
+      // In the system's temp folder and outside this home, so it counts as system files.
+      const broad = realpathSync(mkdtempSync(join(tmpdir(), 'oddboro-broad-')));
+      try {
+        const change = { folder: broad, access: 'read' };
+        for (const asked of [change, { ...change, accept: false }]) {
+          const said = await patch('wes', asked);
+          assert.equal(said.status, 200);
+          assert.deepEqual(await said.json(), { warning: L.FOLDER_WARNING });
+          assert.deepEqual((await L.staffer('wes'))?.folders, []);
+        }
+        const accepted = await patch('wes', { ...change, accept: true });
+        assert.deepEqual(await accepted.json(), { ok: true });
+        assert.deepEqual((await L.staffer('wes'))?.folders, [{ path: broad, write: false }]);
+      } finally {
+        rmSync(broad, { recursive: true, force: true });
+      }
+    });
+  }
+);
+
+test(
+  "on a folder ask, a folder of system files is only a warning, and given nothing, until the owner's Accept sends accept",
+  { skip: process.platform === 'win32' && "Windows' temp folder sits in the home's AppData" },
+  async () => {
+    await setOwn('wes', {});
+    await ownerHome(async () => {
+      // In the system's temp folder and outside this home, so it counts as system files.
+      const broad = realpathSync(mkdtempSync(join(tmpdir(), 'oddboro-broad-')));
+      try {
+        const { ask } = await L.raiseAsk('wes', {
+          title: 'Asked',
+          why: 'w',
+          ifApproved: 'i',
+          kind: 'folder',
+          folder: { path: broad, level: 'read' }
+        });
+        const give = (body: unknown) =>
+          request('/api/asks/[id]/folder', 'POST', { params: { id: String(ask.id) }, body });
+        const status = async () =>
+          (await L.pg<{ status: string }[]>`select status from asks where id = ${ask.id}`)[0]
+            .status;
+        const change = { path: broad, level: 'read' };
+        // Only `true` is an Accept: the route must not take any other value for one.
+        for (const asked of [change, { ...change, accept: false }, { ...change, accept: 'yes' }]) {
+          const said = await give(asked);
+          assert.equal(said.status, 200);
+          assert.deepEqual(await said.json(), { warning: L.FOLDER_WARNING });
+          assert.deepEqual((await L.staffer('wes'))?.folders, []);
+          assert.equal(await status(), 'open');
+        }
+        const accepted = await give({ ...change, accept: true });
+        assert.deepEqual(await accepted.json(), {
+          ok: true,
+          given: { path: broad, level: 'read' }
+        });
+        assert.deepEqual((await L.staffer('wes'))?.folders, [{ path: broad, write: false }]);
+        assert.equal(await status(), 'approved');
+      } finally {
+        rmSync(broad, { recursive: true, force: true });
+      }
+    });
+  }
+);
 
 test("with Run commands, Bash can write only the run's write folders", onMac, async () => {
   const madeData = !existsSync(ownerData);
@@ -547,7 +621,7 @@ const repoRuns = (w: string) =>
 async function deniedWrites(
   paths: string[]
 ): Promise<Record<'claude' | 'grok' | 'gemini', string[]>> {
-  const claude = listAfter((await chatOf('fern')).args, '--disallowedTools');
+  const claude = (await chatOf('fern')).claudeSettings!.permissions.deny;
   const grok = each((await chatOf('gwen')).args, '--deny');
   const policy = (await chatOf('gem')).policy ?? '';
   return {
@@ -569,7 +643,7 @@ test("a given write folder's git hooks, config and submodules are read and never
   const paths = repoRuns(w);
   assert.deepEqual(await deniedWrites(paths), { claude: paths, grok: paths, gemini: paths });
 
-  const claude = listAfter((await chatOf('fern')).args, '--disallowedTools');
+  const claude = (await chatOf('fern')).claudeSettings!.permissions.deny;
   assert.ok(!claude.some((d) => d.startsWith('Read(') && d.includes('.git')), 'git cannot read');
   assert.ok(!((await chatOf('gwen')).profile ?? '').includes('.git/'), 'the kernel shuts git out');
   // Codex keeps each write folder's own .git read only itself, and refuses a glob it reads.
@@ -602,7 +676,7 @@ test("only a folder the owner gave an Odd to change refuses git's hooks and conf
     assert.deepEqual(await deniedWrites(own(id)), none, `${id}'s own folder`);
 
   // Its tools' instruction files stay shut in its own folder, on every tool.
-  const claude = listAfter((await chatOf('fern')).args, '--disallowedTools');
+  const claude = (await chatOf('fern')).claudeSettings!.permissions.deny;
   assert.ok(claude.includes(`Edit(${L.rulePath(join(dirs.fern, 'CLAUDE.md'))})`));
   const grok = each((await chatOf('gwen')).args, '--deny');
   assert.ok(grok.includes(`Write(${join(dirs.gwen, '**', 'AGENTS.md')})`), grok.join(' '));
