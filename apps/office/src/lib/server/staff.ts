@@ -823,18 +823,64 @@ export type RunOpts = {
   images?: RunImage[];
   timeoutMs: number;
   onEvent?: (e: ChatEvent) => void;
+  /** Set by `run`: when the run must end, and the step it is on while it gets ready. */
+  clock?: Clock;
 };
+
+/**
+ * A run's time limit, counted from when the run was asked for, not from when
+ * its tool starts. `step` names what the run is doing before its tool starts,
+ * so a run that never got that far says where it stopped. While its tool
+ * runs (`going`), the tool's own timer ends it at the same deadline.
+ */
+type Clock = { deadline: number; step: string; over: boolean; going: boolean };
+
+const noReply = (ms: number): Run => ({
+  ok: false,
+  text: `No reply after ${ms / 60_000} minutes.`
+});
 
 /**
  * One run of an Odd. A persona Odd's chat, job or follow-up goes on from its
  * coding tool to its persona on New Altitude (`personaRun`); every other run
  * is the coding tool's alone.
+ *
+ * It ends by its time limit even when something it waits on before its tool
+ * starts never answers, so no chat stays "still replying" and no slot stays
+ * busy. A run still getting ready then never starts its tool (`runTool`).
  */
-async function run(who: StaffRow, message: string, opts: RunOpts): Promise<Run> {
+export async function run(who: StaffRow, message: string, opts: RunOpts): Promise<Run> {
   const kind = opts.kind;
-  return who.package && voiced(kind) && !opts.lessonRun
-    ? personaRun(who, message, { ...opts, kind }, runTool)
-    : runTool(who, message, opts);
+  const clock: Clock = {
+    deadline: Date.now() + opts.timeoutMs,
+    step: 'getting ready',
+    over: false,
+    going: false
+  };
+  const timed = { ...opts, clock };
+  let timer: NodeJS.Timeout | undefined;
+  const over = new Promise<Run>((done) => {
+    timer = setTimeout(() => {
+      if (clock.going) return;
+      clock.over = true;
+      console.error(
+        `${who.name}'s ${kind} run stopped after ${opts.timeoutMs / 60_000} minutes, ${clock.step}.`
+      );
+      const r = noReply(opts.timeoutMs);
+      opts.onEvent?.({ type: 'error', message: r.text });
+      done(r);
+    }, opts.timeoutMs);
+  });
+  try {
+    return await Promise.race([
+      who.package && voiced(kind) && !opts.lessonRun
+        ? personaRun(who, message, { ...timed, kind }, runTool)
+        : runTool(who, message, timed),
+      over
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -843,7 +889,15 @@ async function run(who: StaffRow, message: string, opts: RunOpts): Promise<Run> 
  * tool: no run falls back to another.
  */
 async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<Run> {
+  const clock = opts.clock ?? {
+    deadline: Date.now() + opts.timeoutMs,
+    step: 'getting ready',
+    over: false,
+    going: false
+  };
+  const step = (now: string) => void (clock.step = now);
   const dir = homeOf(who.id);
+  step('reading its account');
   // The account its tool signs in with, and that account's folder. A session
   // saved in another folder (the Odd moved accounts) cannot resume here.
   const account = await accountOf(who);
@@ -860,6 +914,7 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
   // Odd's pick-ups there until it ends (`runsGoing`), even when it is a
   // follow-up on no thread. A call the gateway holds for the owner carries it too.
   const key = randomUUID();
+  step("opening its tools' gateway");
   const { servers, office, allowed, caps, gate } = await access(
     who,
     ceiling,
@@ -875,6 +930,7 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
         }
   );
   // Prompts name the owner as {owner}: each install's staff use its own name.
+  step('writing its brief');
   const owner = await ownerName();
   const say = (s: string) => s.replaceAll('{owner}', owner);
   // Claude Code keeps a session's first system prompt on --resume, so a
@@ -1133,6 +1189,7 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
       }
     };
   }
+  step(`checking ${AGENT_NAMES[who.agent]}'s sign-in and version`);
   // An added Claude account nobody signed in to: say where to sign in, rather than Claude Code's own advice.
   if (who.agent === 'claude' && account !== OFFICE_ACCOUNT && !(await claudeAccountOf(account))) {
     const line = `Claude Code ${NOT_SIGNED_IN}`;
@@ -1145,6 +1202,7 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
     opts.onEvent?.({ type: 'error', message: tooOld });
     return { ok: false, text: tooOld };
   }
+  step(`starting ${AGENT_NAMES[who.agent]}`);
   const launch: Launch | { refused: string } =
     who.agent === 'claude'
       ? claudeLaunch()
@@ -1178,6 +1236,18 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
     return { ok: false, text: launch.refused };
   }
   const tool = AGENT_NAMES[who.agent];
+  // Past its time limit while it got ready: `run` has ended it, and told the
+  // owner, so it starts nothing now.
+  if (clock.over) {
+    launch.done();
+    void closeGateway(gate);
+    console.error(
+      `${who.name}'s ${opts.kind} run was ready only after its time limit, so ${tool} never started.`
+    );
+    return noReply(opts.timeoutMs);
+  }
+  step(`waiting on ${tool}`);
+  clock.going = true;
 
   return new Promise((done) => {
     runsGoing.add(key);
@@ -1225,20 +1295,32 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
       clearTimeout(timer);
       stoppers[who.id]?.delete(leave);
       runsGoing.delete(key);
-      launch.done();
-      void closeGateway(gate);
-      bus.emit(RUN_ENDED);
+      clock.going = false;
       // Saved however the run ended: once the tool names a session, it holds the message.
       const saved = !!(session && opts.sessionFile);
-      if (session && opts.sessionFile)
-        saveSession(opts.sessionFile, { sessionId: session, seen: sections, home: toolDir });
-      opts.onEvent?.(r.ok ? { type: 'done', text: r.text } : { type: 'error', message: r.text });
-      done(saved ? { ...r, saved } : r);
+      // The run ends whatever a step here throws: a throw that skipped `done`
+      // left the chat "still replying" until the office restarted.
+      try {
+        launch.done();
+        void closeGateway(gate);
+        bus.emit(RUN_ENDED);
+        if (session && opts.sessionFile)
+          saveSession(opts.sessionFile, { sessionId: session, seen: sections, home: toolDir });
+        opts.onEvent?.(r.ok ? { type: 'done', text: r.text } : { type: 'error', message: r.text });
+      } catch (e) {
+        console.error(`${who.name}'s run ended, but tidying up after it failed:`, e);
+      } finally {
+        done(saved ? { ...r, saved } : r);
+      }
     };
-    const timer = setTimeout(() => {
-      stop();
-      finish({ ok: false, text: `No reply after ${opts.timeoutMs / 60_000} minutes.` });
-    }, opts.timeoutMs);
+    // What is left of the run's time limit, which started when the run was asked for.
+    const timer = setTimeout(
+      () => {
+        stop();
+        finish(noReply(opts.timeoutMs));
+      },
+      Math.max(0, clock.deadline - Date.now())
+    );
     // The Odd leaving the office stops this run at once (`stopRuns`).
     const leave = () => {
       stop();
