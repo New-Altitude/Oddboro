@@ -172,8 +172,8 @@ const HOME = home('staff', ME);
 const OWNER_SAID = process.env.OWNER_SAID || undefined;
 /**
  * The files the owner attached to that message, set by the office: each one's
- * tag in their message and its path in this Odd's folder. `tell_lead` takes
- * every one to the lead with their words.
+ * tag in their message, its path in this Odd's folder, and the owner's own
+ * name for it. `tell_lead` takes every one to the lead with their words.
  */
 const OWNER_FILES = ownerFiles(process.env.OWNER_FILES);
 // Each Gmail account is a connector of its own. With more than one, the Odd
@@ -458,11 +458,11 @@ async function filesForHandOff(
 }
 
 /** The owner's attachments the office set, or none when it set nothing readable. */
-function ownerFiles(env: string | undefined): { tag: string; path: string }[] {
+function ownerFiles(env: string | undefined): { tag: string; path: string; name: string }[] {
   if (!env) return [];
   try {
     const read = z
-      .array(z.object({ tag: z.string(), path: z.string() }))
+      .array(z.object({ tag: z.string(), path: z.string(), name: z.string() }))
       .safeParse(JSON.parse(env));
     return read.success ? read.data : [];
   } catch {
@@ -474,7 +474,9 @@ function ownerFiles(env: string | undefined): { tag: string; path: string }[] {
 /**
  * The files the owner attached to their message, as `tell_lead` takes them to
  * the lead: what to copy, named by each one's tag, and why any cannot go. The
- * same checks as `hand_off`'s files, and every file goes, not a pick.
+ * same checks as `hand_off`'s files, and every file goes, not a pick. Each
+ * lands under the owner's name for it, its last part only, by the same rules:
+ * never a hidden name or an instruction file's.
  */
 async function attachedForLead(): Promise<{
   carry: CarriedFile[];
@@ -482,10 +484,19 @@ async function attachedForLead(): Promise<{
 }> {
   const carry: CarriedFile[] = [];
   const unfit: { named: string; why: string }[] = [];
-  for (const { tag, path } of OWNER_FILES) {
+  for (const { tag, path, name } of OWNER_FILES) {
     const found = await fitToCarry(path);
-    if ('unfit' in found) unfit.push({ named: tag, why: TELL_LEAD_UNFIT[found.unfit] });
-    else carry.push({ real: found.file.real, name: landingName(found.file.name), named: tag });
+    const plain = name.split(/[\\/]/).pop() ?? '';
+    const why =
+      'unfit' in found
+        ? found.unfit
+        : !plain || plain.startsWith('.')
+          ? 'hidden'
+          : isInstructionFile(plain)
+            ? 'instruction'
+            : undefined;
+    if (why) unfit.push({ named: tag, why: TELL_LEAD_UNFIT[why] });
+    else if ('file' in found) carry.push({ real: found.file.real, name: plain, named: tag });
   }
   return { carry, unfit };
 }
@@ -871,6 +882,7 @@ if (has('give_owner_a_task'))
         steps: all,
         attach: files.paths,
         via: VIA,
+        ownerSaid: OWNER_SAID,
         ...on
       });
       return text(`Task ${t.id} is on ${OWNER}'s desk. The ledger records it when they finish it.`);

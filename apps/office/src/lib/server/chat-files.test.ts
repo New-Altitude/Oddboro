@@ -5,7 +5,13 @@ import { mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { home } from '@oddboro/ledger/home';
-import { attachedFiles, attachmentPath, filesNow, keepAttachment } from './chat-files.ts';
+import {
+  attachedFiles,
+  attachmentPath,
+  filesNow,
+  keepAttachment,
+  plainName
+} from './chat-files.ts';
 
 const bytes = new TextEncoder().encode('picture');
 
@@ -17,6 +23,22 @@ test('a file is kept in the Odd attachments folder under a new safe name with it
   const path = attachmentPath('ada', kept.name);
   assert.equal(path, join(home('staff'), 'ada', 'attachments', kept.name));
   assert.equal(readFileSync(path!, 'utf8'), 'picture');
+});
+
+test("a kept file's plain name is the owner's name for it in safe letters, without the time and letters first", () => {
+  assert.equal(
+    plainName(keepAttachment('ada', 'palette-notes.md', 'text/markdown', bytes).name),
+    'palette-notes.md'
+  );
+  assert.equal(
+    plainName(keepAttachment('ada', 'My Screen Shot [1].PNG', '', bytes).name),
+    'My-Screen-Shot-1.png'
+  );
+  assert.equal(
+    plainName('20261111-090000-ab12-20261111-plan.md'),
+    '20261111-plan.md',
+    'only the first is cut'
+  );
 });
 
 test('a pasted picture with no name keeps its type as its extension', () => {

@@ -179,10 +179,13 @@ function taskDoneBrief(
   const answers = ownerAnswers(t.row.steps).map(
     (a) => `- They answered "${a.step}" with: ${a.answer}`
   );
+  // Their message in the chat you gave it in, which may say what to do once it ends.
+  const said = t.row.ownerSaid && flat(t.row.ownerSaid);
   return [
     `{owner} finished the task you gave them: "${t.row.title}". Pick up the work that waited on it now.`,
     '',
     `- Why you gave it: ${t.row.why}`,
+    ...(said ? [`- What {owner} said in chat when you gave it: "${said}"`] : []),
     ...answers,
     ...(f.note ? [`- Their note: ${f.note}`] : []),
     ...(t.files.length
@@ -194,7 +197,7 @@ function taskDoneBrief(
     ...(f.pickedUp ?? []).map((title) => `- ${pickedUpLine(title)}`),
     '',
     '1. Read what they gave you: the files above, their answers and their note.',
-    `2. Do the next step you told them would follow, now. When it needs their yes, such as a hire, a change outside the office ${ACT_WRITE}, or a new job, raise it with the tool for it (propose_goal_plan for a goal, propose_hire, raise_ask and the rest).`,
+    `2. Do ${said ? 'what they asked for in chat, or ' : ''}the next step you told them would follow, now. When it needs their yes, such as a hire, a change outside the office ${ACT_WRITE}, or a new job, raise it with the tool for it (propose_goal_plan for a goal, propose_hire, raise_ask and the rest).`,
     '3. If something you need is missing or unclear, put one short question on their desk with give_owner_a_task, then stop.',
     '4. If nothing was waiting on this task, say so and stop.'
   ];

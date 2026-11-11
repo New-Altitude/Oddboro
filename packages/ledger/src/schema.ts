@@ -389,6 +389,11 @@ export const tasks = pgTable('tasks', {
   threadId: integer(),
   /** The colleague whose handed-back work the lead gave this from (a staff id). */
   via: text(),
+  /**
+   * The owner's message in the chat the Odd gave this in (`OWNER_SAID`), so the
+   * run that picks it up hears what they asked for. Null outside a chat.
+   */
+  ownerSaid: text(),
   title: text().notNull(),
   why: text().notNull(),
   steps: jsonb().$type<Step[]>().notNull(),

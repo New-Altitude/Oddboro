@@ -150,8 +150,19 @@
   let watching: (() => [number, number] | undefined) | undefined;
   const openSetup = () => open({ id: 'setup', kind: 'setup' });
   let working = $state<Record<string, string>>({});
-  /** Each staffer's work in progress. */
+  /** Each staffer's runs going, or waiting for a slot: every `working` event brings them. */
   let inProgress = $state<Record<string, Work[]>>({});
+  /** Each staffer's follow-ups yet to start, read with the office. */
+  let toStart = $state<Record<string, Work[]>>({});
+  /** Each staffer's work in progress: its runs, then what waits to start. */
+  const work = $derived(
+    Object.fromEntries(
+      [...new Set([...Object.keys(inProgress), ...Object.keys(toStart)])].map((id) => [
+        id,
+        [...(inProgress[id] ?? []), ...(toStart[id] ?? [])]
+      ])
+    )
+  );
   /** A request for the card to open on a tab, from the Odds rail's list. */
   let cardShow = $state<{ id: string; tab: 'work'; n: number } | undefined>();
   /** Bumps when jobs, runs, access, goals, threads or lessons change, so the card's tabs and the Goals and Lessons windows reload. */
@@ -532,6 +543,7 @@
         desk: Desk;
         working: Record<string, string>;
         inProgress: Record<string, Work[]>;
+        toStart: Record<string, Work[]>;
         roomNames: Record<string, string>;
         switchedOff: string[];
         messages: Record<string, number>;
@@ -557,6 +569,7 @@
       desk = next.desk;
       working = next.working;
       inProgress = next.inProgress;
+      toStart = next.toStart;
       roomNames = next.roomNames;
       switchedOff = next.switchedOff;
       messages = next.messages;
@@ -1391,7 +1404,7 @@
         {staff}
         {status}
         {waiting}
-        {inProgress}
+        inProgress={work}
         selected={profile && !rightCollapsed ? selected : undefined}
         find={findAgent}
         searching={railAsked}
@@ -1418,7 +1431,7 @@
             activity={selectedActivity}
             {version}
             working={working[profile.id]}
-            work={inProgress[profile.id] ?? []}
+            work={work[profile.id] ?? []}
             show={cardShow?.id === profile.id ? cardShow : undefined}
             {places}
             manual={!!manual[profile.id]}

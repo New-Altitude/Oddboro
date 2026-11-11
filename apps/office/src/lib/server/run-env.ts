@@ -11,10 +11,11 @@ export type RunFacts = {
   /** In a chat, the last exchange before the owner's message, which `tell_lead` passes on. */
   chatExchange?: string;
   /**
-   * In a chat, every file the owner attached to their message: its tag there
-   * and its path in the Odd's folder. `tell_lead` copies each into the work.
+   * In a chat, every file the owner attached to their message: its tag there,
+   * its path in the Odd's folder, and the name it lands under in the work.
+   * `tell_lead` copies each into the work.
    */
-  ownerFiles?: { tag: string; path: string }[];
+  ownerFiles?: { tag: string; path: string; name: string }[];
   /** The ask the owner approved that this run carries out. */
   approvedAsk?: number;
   /** The tools whose sign-ins ran out, which only this run knows. */

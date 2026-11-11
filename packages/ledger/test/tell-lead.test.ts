@@ -236,7 +236,7 @@ function attached(name: string, text: string) {
   after(() => rmSync(dir, { recursive: true, force: true }));
   const real = join(dir, name);
   writeFileSync(real, text);
-  return { real, name: `attachments-${name}`, named: name };
+  return { real, name, named: name };
 }
 // A junction on Windows, which needs no admin.
 const linkFolder = (to: string, at: string) =>
@@ -245,7 +245,7 @@ const linkFolder = (to: string, at: string) =>
 test("a file the owner attached lands in the colleague's part once, and told again it is left as it is and listed again", async () => {
   const work = await onThread('cole', 'rex', 'Presets with a sketch');
   const sketch = attached('sketch.png', 'png');
-  const at = join(threadPart(work, 'rex'), 'attachments-sketch.png');
+  const at = join(threadPart(work, 'rex'), 'sketch.png');
   for (const time of ['first', 'again']) {
     const r = await tellLead({
       staffId: 'rex',
@@ -296,6 +296,52 @@ test("a file that cannot land never holds back the owner's words: the lead is to
     wake.note?.endsWith(
       `Rex's own reading, which is not Sam's words: ${reading} 2 files Sam attached did not come: swatch.png, since the part of the work it would land in is a link; Image #2, since it is reached through a link.`
     ),
+    wake.note ?? ''
+  );
+});
+
+test("a file the owner attached lands under the next free name when a different file holds its own, the lead's note names it there, and told again it is left as it is", async () => {
+  const work = await onThread('cole', 'rex', 'Presets with notes');
+  const part = threadPart(work, 'rex');
+  mkdirSync(part, { recursive: true });
+  writeFileSync(join(part, 'notes.md'), "Rex's own notes");
+  const notes = attached('notes.md', 'the owner notes');
+  // A second file of the same name, from another message, which the chat tags apart.
+  const more = { ...attached('notes.md', 'more notes'), named: 'notes (2).md' };
+  const tell = (carry: (typeof notes)[]) =>
+    tellLead({
+      staffId: 'rex',
+      threadId: work,
+      owner: 'Sam',
+      said,
+      words: 'make the colours warmer.',
+      reading,
+      files: { carry, unfit: [] }
+    });
+  const second = join(part, 'notes-2.md');
+  const third = join(part, 'notes-3.md');
+  assert.deepEqual(await tell([notes, more]), {
+    lead: 'Cole',
+    files: [
+      { named: 'notes.md', at: second },
+      { named: 'notes (2).md', at: third }
+    ]
+  });
+  assert.deepEqual(await tell([notes]), {
+    lead: 'Cole',
+    files: [{ named: 'notes.md', at: second }]
+  });
+  assert.deepEqual(readdirSync(part).sort(), ['notes-2.md', 'notes-3.md', 'notes.md']);
+  assert.equal(readFileSync(join(part, 'notes.md'), 'utf8'), "Rex's own notes");
+  assert.equal(readFileSync(second, 'utf8'), 'the owner notes');
+  assert.equal(readFileSync(third, 'utf8'), 'more notes');
+  const [wake] = await resumes(work);
+  assert.ok(
+    wake.note
+      ?.split('\n')[0]
+      .endsWith(
+        `Sam attached 2 files to that message, now in this work: notes.md at ${second}; notes (2).md at ${third}.`
+      ),
     wake.note ?? ''
   );
 });

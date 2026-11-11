@@ -82,13 +82,27 @@ function opens(path: string): boolean {
   }
 }
 
+/** The `n`th name for a file whose own name is taken: `notes.md`, then `notes-2.md`. */
+function nth(name: string, n: number): string {
+  if (n === 1) return name;
+  const dot = name.lastIndexOf('.');
+  return dot > 0 ? `${name.slice(0, dot)}-${n}${name.slice(dot)}` : `${name}-${n}`;
+}
+
 /**
- * Copy the files a hand-off carries into the sender's part of its thread.
- * Every check comes before the first copy, so a refused hand-off leaves the
- * work's folder as it was. A file already in the work is never changed: one
- * with the same bytes was carried before, and any other refuses the hand-off.
+ * Copy the files a hand-off carries into the sender's part of its thread, and
+ * return the name each landed under. Every check comes before the
+ * first copy, so a refused hand-off leaves the work's folder as it was. A file
+ * already in the work is never changed: one with the same bytes was carried
+ * before, and any other refuses the hand-off. With `nextFree`, a different
+ * file there instead sends this one to the next free name (`nth`).
  */
-function carryFiles(thread: number, from: string, carry: CarriedFile[]): void {
+function carryFiles(
+  thread: number,
+  from: string,
+  carry: CarriedFile[],
+  nextFree = false
+): string[] {
   const unread = carry.find((c) => !opens(c.real));
   if (unread)
     throw new NotCarried(
@@ -104,20 +118,26 @@ function carryFiles(thread: number, from: string, carry: CarriedFile[]): void {
       'Your part of this work is a link, so files cannot land in it.',
       'the part of the work it would land in is a link'
     );
-  const copies = carry.filter(({ real, name, named }) => {
-    const to = join(part, name);
-    const there = lstatSync(to, { throwIfNoEntry: false });
-    if (!there) return true;
-    // A link is never read through, so it counts as a different file.
-    if (there.isFile() && readFileSync(to).equals(readFileSync(real))) return false;
-    throw new NotCarried(
-      `${named} would land on ${workName(thread, `${from}/${name}`)}, a different file already in this work. Rename your file, or name the work's file instead, and call hand_off again.`,
-      'a different file is already in the work under its name'
-    );
+  const landing = carry.map((c) => {
+    for (let n = 1; ; n++) {
+      const name = nth(c.name, n);
+      const to = join(part, name);
+      const there = lstatSync(to, { throwIfNoEntry: false });
+      if (!there) return { ...c, name, copy: true };
+      // A link is never read through, so it counts as a different file.
+      if (there.isFile() && readFileSync(to).equals(readFileSync(c.real)))
+        return { ...c, name, copy: false };
+      if (!nextFree)
+        throw new NotCarried(
+          `${c.named} would land on ${workName(thread, `${from}/${name}`)}, a different file already in this work. Rename your file, or name the work's file instead, and call hand_off again.`,
+          'a different file is already in the work under its name'
+        );
+    }
   });
   // Never over a file that landed after the check.
-  for (const { real, name } of copies)
-    copyFileSync(real, join(part, name), constants.COPYFILE_EXCL);
+  for (const { real, name, copy } of landing)
+    if (copy) copyFileSync(real, join(part, name), constants.COPYFILE_EXCL);
+  return landing.map((l) => l.name);
 }
 
 /** A file that went with work into the sender's part of it, at its full path there, or why it did not. */
@@ -128,13 +148,14 @@ export type Carried = { named: string; at: string } | { named: string; why: stri
  * same checks and copy as a hand-off's files (`carryFiles`), as `tellLead`
  * passes on the owner's attachments: a file that cannot land is left out, with
  * why, and the rest still land. One already there with the same bytes counts
- * as landed.
+ * as landed. A name taken by a different file is never a reason: the file
+ * lands under the next free name, such as `notes-2.md`, and `at` says which.
  */
 export function carryEach(thread: number, from: string, carry: CarriedFile[]): Carried[] {
   return carry.map((c) => {
     try {
-      carryFiles(thread, from, [c]);
-      return { named: c.named, at: join(threadPart(thread, from), c.name) };
+      const [name] = carryFiles(thread, from, [c], true);
+      return { named: c.named, at: join(threadPart(thread, from), name) };
     } catch (e) {
       if (e instanceof NotCarried) return { named: c.named, why: e.why };
       // A copy that fails on the disk itself, such as one that is full.

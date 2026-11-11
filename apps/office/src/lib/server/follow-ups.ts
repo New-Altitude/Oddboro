@@ -7,13 +7,17 @@
 // so does a thread's hub picking it back up (threads.ts).
 // This listens for changes to follow-ups and starts any nobody has started yet. Nothing polls:
 // a change to the table, or any run ending, is the only thing that looks.
+// It also lists those yet to start, for the In progress section.
 import {
+  anyStaffer,
   closeStaleFollowUps,
   finishFollowUp,
   followUpsToDo,
+  followUpsToStart,
   startFollowUp,
   workTitle
 } from '@oddboro/ledger';
+import { followUpDetail, type Work } from '../staff/work.ts';
 import { bus, listen, type OfficeEvent } from './events.ts';
 import { readEditAgain } from './files.ts';
 import { followThrough, RUN_ENDED } from './staff.ts';
@@ -45,6 +49,34 @@ async function look(): Promise<void> {
         return finishFollowUp(f, about, 'failed', e instanceof Error ? e.message : String(e));
       });
   }
+}
+
+/**
+ * Each Odd's follow-ups yet to start, as In progress lists them beside its
+ * runs (`inProgress` in staff.ts): what each is about, by the one name the
+ * Ledger gives it (`workTitle`), and what it will do. Most wait for the Odd's
+ * run on the same work to end, such as a pick-up after a task the owner
+ * finished while the chat that gave it still goes. The page reads them with
+ * the office (`/api/office`), again on each change to `follow_ups`.
+ */
+export async function followUpsWaiting(): Promise<Record<string, Work[]>> {
+  const out: Record<string, Work[]> = {};
+  for (const f of await followUpsToStart()) {
+    const from = f.handOff?.from;
+    const colleague = from && ((await anyStaffer(from))?.name ?? from);
+    (out[f.staffId] ??= []).push({
+      id: -f.id,
+      kind: 'follow-up',
+      label: await workTitle(f),
+      detail: followUpDetail(f.kind, { ask: f.askId ?? undefined, colleague }),
+      since: f.createdAt.toISOString(),
+      queued: true,
+      toStart: true,
+      steps: 0,
+      ...(f.askId ? { askId: f.askId } : {})
+    });
+  }
+  return out;
 }
 
 /** Start once per process. */

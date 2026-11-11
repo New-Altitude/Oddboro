@@ -360,6 +360,29 @@ test("a lead's chat that hands off on a thread another run opened holds its pick
   assert.equal(await listed(back.id), true);
 });
 
+test("a lead's pick-up after a task it gave in a chat waits while the chat goes, and is listed to start until it starts", async () => {
+  const chat = randomUUID();
+  O.runsGoing.add(chat);
+  const h = await give('rex', 'Fit the lights', undefined, chat);
+  const thread = h.threadId ?? 0;
+  const t = await O.giveTask('lead', {
+    title: 'Buy the bulbs',
+    why: 'w',
+    steps: ['Buy them'],
+    threadId: thread,
+    run: chat
+  });
+  await O.finishTask(t.id, true, 'Bought.');
+  const [after] = await onThread(thread, 'task_done');
+  const toStart = async () => (await O.followUpsToStart()).map((f) => f.id);
+  assert.equal(await listed(after.id), false, 'the pick-up started beside the chat');
+  assert.ok((await toStart()).includes(after.id), 'a pick-up that waits is not listed to start');
+  O.runsGoing.delete(chat);
+  assert.ok(await O.startFollowUp(after.id));
+  assert.equal((await toStart()).includes(after.id), false, 'a started pick-up is still listed');
+  await O.finishFollowUp(after, 'Buy the bulbs', 'done', 'Fitted.');
+});
+
 test("a lone hand-off picks up at once, even while the lead's chat hands off on another thread", async () => {
   const chat = randomUUID();
   O.runsGoing.add(chat);

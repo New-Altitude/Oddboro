@@ -1601,8 +1601,8 @@ test("a chat's tool server gets every file the owner attached to the message, fo
   assert.ok(text.startsWith('{'), `Opal's chat gave no reply: ${text}`);
   const run = JSON.parse(text.slice(0, text.lastIndexOf('\nOutcome:'))) as Gave;
   assert.deepEqual(JSON.parse(run.env.OWNER_FILES ?? '[]'), [
-    { tag: 'Image #1', path: `attachments/${kept[0].name}` },
-    { tag: 'notes.md', path: `attachments/${kept[1].name}` }
+    { tag: 'Image #1', path: `attachments/${kept[0].name}`, name: 'roof.png' },
+    { tag: 'notes.md', path: `attachments/${kept[1].name}`, name: 'notes.md' }
   ]);
   assert.equal((await chatOf('opal', 'Thanks.')).env.OWNER_FILES, undefined);
 });

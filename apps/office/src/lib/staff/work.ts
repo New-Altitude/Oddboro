@@ -1,9 +1,11 @@
 // A staffer's work in progress, as the office tools track it and the page
-// shows it: a job, a follow-up (an approved ask, a rework, feedback) or a
-// draft. Safe to import in the browser.
+// shows it: a job, a follow-up (an approved ask, a rework, feedback, a
+// pick-up after a task or a colleague, work handed over) or a draft. Safe to
+// import in the browser.
+import type { FollowUpKind } from '@oddboro/ledger';
 
 export type Work = {
-  /** Unique while the office runs. */
+  /** Unique while the office runs. A follow-up yet to start is its row's id, below zero. */
   id: number;
   kind: 'job' | 'follow-up' | 'draft';
   /** The job's name or the ask's title. */
@@ -12,14 +14,44 @@ export type Work = {
   detail: string;
   /** When it started, or joined the line for a slot. */
   since: string;
-  /** True while it waits for a free slot. */
+  /** True while it waits for a free slot, or to start. */
   queued: boolean;
+  /**
+   * A follow-up the office has yet to start: it waits for the Odd's run on
+   * the same work to end (`followUpsToStart` in the ledger).
+   */
+  toStart?: true;
   askId?: number;
   /** The tool the staffer is using now, as Claude Code names it. */
   doing?: string;
   /** Tool calls so far. */
   steps: number;
 };
+
+/**
+ * What a follow-up does, in a few words, by its kind: the line over its title
+ * under In progress, whether it runs or waits to start. `ask` is the ask it
+ * answers, `colleague` the name of the Odd that handed the work over or back.
+ */
+export function followUpDetail(
+  kind: FollowUpKind,
+  o: { ask?: number; colleague?: string } = {}
+): string {
+  const words: Record<FollowUpKind, string> = {
+    carry_out: `Carrying out ask #${o.ask}`,
+    rework: `Reworking ask #${o.ask}`,
+    denied: `Reading why you said no to ask #${o.ask}`,
+    task_done: 'Picking up after your task',
+    goal: 'Planning your goal',
+    first_day: 'Getting started',
+    feedback: 'Acting on your feedback',
+    hand_off: `Work ${o.colleague} handed over`,
+    handed_back: `Picking up after ${o.colleague}`,
+    resume: 'Picking the work back up',
+    edited: 'Learning from your edit'
+  };
+  return words[kind];
+}
 
 /**
  * How long a piece of work has run, in whole minutes: "just started",

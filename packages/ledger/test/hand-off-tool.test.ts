@@ -322,7 +322,7 @@ test("tell_lead hands the lead the chat's last exchange, as the office set it", 
   );
 });
 
-test("tell_lead copies every file the owner attached into the colleague's part of the work, lists each for the lead, and says which did not come and why, never holding back the words", async (t) => {
+test("tell_lead copies every file the owner attached into the colleague's part of the work under the owner's name for it, or the next free one, lists each for the lead, and says which did not come and why, never holding back the words", async (t) => {
   await db.insert(staff).values(odd('una', 'Una'));
   const [roof] = await db.insert(goals).values({ title: 'Fix the roof' }).returning();
   const [mend] = await db
@@ -341,15 +341,15 @@ test("tell_lead copies every file the owner attached into the colleague's part o
     put(join(home('staff', 'una'), path), text);
   const part = threadPart(mend.id, 'una');
   // Already in the work: a different file where the notes would land, and the same plan.
-  put(join(part, 'attachments-20261111-090000-bbbb-notes.md'), "Una's own notes");
-  put(join(part, 'attachments-20261111-090000-cccc-plan.md'), 'the plan');
+  put(join(part, 'notes.md'), "Una's own notes");
+  put(join(part, 'plan.md'), 'the plan');
   const c = await toolServer('una', {
     OWNER_SAID: 'Una, the leak is by the chimney [Image #1].',
     OWNER_FILES: JSON.stringify([
-      { tag: 'Image #1', path: shot },
-      { tag: 'notes.md', path: notes },
-      { tag: 'plan.md', path: plan },
-      { tag: 'gone.png', path: 'attachments/20261111-090000-dddd-gone.png' }
+      { tag: 'Image #1', path: shot, name: 'roof.png' },
+      { tag: 'notes.md', path: notes, name: 'notes.md' },
+      { tag: 'plan.md', path: plan, name: 'plan.md' },
+      { tag: 'gone.png', path: 'attachments/20261111-090000-dddd-gone.png', name: 'gone.png' }
     ]),
     RUN_KEY: 'k-una'
   });
@@ -365,12 +365,13 @@ test("tell_lead copies every file the owner attached into the colleague's part o
     }
   });
   assert.equal(r.isError, undefined, said(r));
-  assert.match(said(r), /The 2 files they attached went too\./);
-  assert.match(said(r), /Did not go: notes\.md, since .+; gone\.png, since .+\. Tell .+ so\./);
+  assert.match(said(r), /The 3 files they attached went too\./);
+  assert.match(said(r), /Did not go: gone\.png, since .+\. Tell .+ so\./);
   assert.deepEqual(partNow(part), {
-    'attachments-20261111-090000-aaaa-roof.png': 'png',
-    'attachments-20261111-090000-bbbb-notes.md': "Una's own notes",
-    'attachments-20261111-090000-cccc-plan.md': 'the plan'
+    'notes-2.md': 'the owner notes',
+    'notes.md': "Una's own notes",
+    'plan.md': 'the plan',
+    'roof.png': 'png'
   });
   const [wake] = await db.select().from(followUps).where(eq(followUps.threadId, mend.id));
   assert.equal(wake.staffId, 'mo');
@@ -378,11 +379,50 @@ test("tell_lead copies every file the owner attached into the colleague's part o
   assert.ok(note.includes("words: the leak is by the chimney [Image #1]. Una's own reading"), note);
   assert.ok(
     note.endsWith(
-      ` attached 2 files to that message, now in this work: Image #1 at ${join(part, 'attachments-20261111-090000-aaaa-roof.png')}; plan.md at ${join(part, 'attachments-20261111-090000-cccc-plan.md')}. 2 files the owner attached did not come: notes.md, since a different file is already in the work under its name; gone.png, since the office cannot read it.`
+      ` attached 3 files to that message, now in this work: Image #1 at ${join(part, 'roof.png')}; notes.md at ${join(part, 'notes-2.md')}; plan.md at ${join(part, 'plan.md')}. One file the owner attached did not come: gone.png, since the office cannot read it.`
     ),
     note
   );
   assert.ok(!note.includes('\n'), 'the note stays on one line');
+});
+
+test("tell_lead lands an attachment under the last part of the owner's name for it, and never under a hidden name or an instruction file's", async (t) => {
+  await db.insert(staff).values(odd('uri', 'Uri'));
+  const [deck] = await db.insert(goals).values({ title: 'Paint the deck' }).returning();
+  const [paint] = await db
+    .insert(threads)
+    .values({ title: deck.title, goalId: deck.id, hubId: 'mo', holderId: 'mo' })
+    .returning();
+  await db.insert(staffGoals).values({ staffId: 'uri', goalId: deck.id, part: 'The boards' });
+  const kept = (name: string) => {
+    const path = `attachments/20261111-090000-eeee-${name}`;
+    put(join(home('staff', 'uri'), path), name);
+    return path;
+  };
+  const c = await toolServer('uri', {
+    OWNER_SAID: 'Uri, use these colours.',
+    OWNER_FILES: JSON.stringify([
+      { tag: 'colours.md', path: kept('colours.md'), name: '../../colours.md' },
+      { tag: '.env', path: kept('env.txt'), name: 'x/.env' },
+      { tag: 'CLAUDE.md', path: kept('CLAUDE.md'), name: 'CLAUDE.md' }
+    ]),
+    RUN_KEY: 'k-uri'
+  });
+  t.after(() => c.close());
+  const r = await c.callTool({
+    name: 'tell_lead',
+    arguments: { work: paint.id, words: 'use these colours.', reading: 'Use these colours.' }
+  });
+  assert.equal(r.isError, undefined, said(r));
+  const part = threadPart(paint.id, 'uri');
+  assert.deepEqual(partNow(part), { 'colours.md': 'colours.md' });
+  const [wake] = await db.select().from(followUps).where(eq(followUps.threadId, paint.id));
+  assert.ok(
+    wake.note?.endsWith(
+      ` now in this work: colours.md at ${join(part, 'colours.md')}. 2 files the owner attached did not come: .env, since it is a hidden file; CLAUDE.md, since it is an instruction file.`
+    ),
+    wake.note ?? ''
+  );
 });
 
 test('tell_lead with no files attached says nothing of files, to the lead or in its description', async (t) => {

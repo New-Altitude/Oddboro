@@ -33,7 +33,8 @@ test("a chat's last exchange reaches the tool server, cut to fit", () => {
 test('the files the owner attached reach the tool server whole, never cut, and none sets nothing', () => {
   const files = Array.from({ length: 10 }, (_, i) => ({
     tag: `Image #${i + 1} ${'x'.repeat(400)}`,
-    path: `attachments/20261111-090000-aaaa-${i}.png`
+    path: `attachments/20261111-090000-aaaa-${i}.png`,
+    name: `${i}.png`
   }));
   assert.deepEqual(JSON.parse(officeEnv({ ...plain, ownerFiles: files }).OWNER_FILES), files);
   assert.equal(officeEnv({ ...plain, ownerFiles: [] }).OWNER_FILES, undefined);

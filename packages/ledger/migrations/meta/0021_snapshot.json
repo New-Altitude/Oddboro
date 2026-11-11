@@ -1,5 +1,5 @@
 {
-  "id": "1fb37da7-d9d1-4d27-8d49-ce570b46f615",
+  "id": "844cc7f3-1edb-4ed8-8a0b-61cac0a4d109",
   "prevId": "0e56e216-ad5b-4bff-a999-15c4c6949069",
   "version": "7",
   "dialect": "postgresql",
@@ -300,18 +300,6 @@
         "switches": {
           "name": "switches",
           "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "level": {
-          "name": "level",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "office_tools": {
-          "name": "office_tools",
-          "type": "text[]",
           "primaryKey": false,
           "notNull": false
         },
@@ -2384,6 +2372,12 @@
         },
         "via": {
           "name": "via",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "owner_said": {
+          "name": "owner_said",
           "type": "text",
           "primaryKey": false,
           "notNull": false
