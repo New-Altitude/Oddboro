@@ -161,8 +161,9 @@ function parseRun(row: FollowUpRow): RunState {
   const { startedAt, unparkedTask, unparkedAt, outcome, result, doneAt } = row;
   if (outcome !== null) {
     if (!doneAt) throw new RowNotParsed('follow_ups', row.id, ['outcome', 'done_at']);
-    // Ended before it started (a run its Odd's leaving failed, or a joined
-    // pick-up): ended all the same, never queued again.
+    // A row with no start time can still have ended: an Odd's leaving fails
+    // each follow-up it had yet to start. It is ended, never queued again. A
+    // joined pick-up is not one of these: it gets its start time as it ends.
     return { is: 'ended', outcome, result, doneAt, startedAt };
   }
   if (doneAt) throw new RowNotParsed('follow_ups', row.id, ['outcome', 'done_at']);

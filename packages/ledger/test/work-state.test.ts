@@ -436,16 +436,16 @@ test('a task parses open, done or dropped and writes the same row back', () => {
 });
 
 test("a task's saved response and its version survive parse and write", () => {
-  const t = parseTask(task({ response: 'Account ending 4410', responseVersion: 3 }));
-  assert.deepEqual(
-    { response: t.response, responseVersion: t.responseVersion },
-    { response: 'Account ending 4410', responseVersion: 3 }
-  );
-  const finished = taskRow({ ...t, status: 'done', doneAt: ENDED });
-  assert.deepEqual(
-    { response: finished.response, responseVersion: finished.responseVersion },
-    { response: 'Account ending 4410', responseVersion: 3 }
-  );
+  const saved = { response: 'Account ending 4410', responseVersion: 3 };
+  for (const row of [
+    task(saved),
+    task({ ...saved, status: 'done', doneAt: ENDED }),
+    task({ ...saved, status: 'dropped', doneAt: ENDED, withdrawn: true })
+  ]) {
+    const t = parseTask(row);
+    assert.deepEqual({ response: t.response, responseVersion: t.responseVersion }, saved);
+    assert.deepEqual(taskRow(t), row, `a ${row.status} task`);
+  }
 });
 
 test('a task dropped with no end time parses as ended when it was made', () => {
