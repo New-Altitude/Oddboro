@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { chmodSync, existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { bin, folder, history, withEnv } from './office-under-test.ts';
+import { bin, chatOf, folder, history, withEnv } from './office-under-test.ts';
 
 const { POST } = await import('../../routes/api/staff/[id]/bug-reports/+server.ts');
 
@@ -83,3 +83,20 @@ console.log(input.title === 'A test report' ? '72' : 'no issue number');
     }
   }
 );
+
+test('a typed request to report a bug goes to the Odd as a normal message', async () => {
+  const message = 'please report this message as a bug: x';
+  const before = history('lead').length;
+  const gave = await chatOf('lead', message);
+  assert.ok(gave.message.includes(message), gave.message);
+  // The Odd hears where the owner files a report: the plus menu, never a typed command.
+  assert.match(gave.message, /Report a bug in the chat's plus menu/);
+  const chat = history('lead').slice(before);
+  assert.deepEqual(
+    chat.map((e) => e.from),
+    ['owner', 'staff']
+  );
+  assert.equal(chat[0].text, message);
+  // The reply is the Odd's run, not a line the office wrote.
+  assert.equal(chat[1].told, undefined);
+});

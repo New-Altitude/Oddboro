@@ -3,16 +3,16 @@ export const ISSUES = `https://github.com/${BUG_REPO}/issues`;
 export const TITLE_LIMIT = 256;
 export const BODY_LIMIT = 65536;
 
-/** A request addressed to the office itself. Ordinary conversation goes to the Odd. */
-export function bugRequest(message: string, previous: string): string | undefined {
-  const words = message.trim();
-  const command = /^\/bug(?:\s+([\s\S]*)|$)/i.exec(words);
-  if (command) return command[1]?.trim() ?? '';
-  const request =
-    /^(?:please\s+)?(?:report|file)\s+(?:(this(?:\s+(?:message|error))?)\s+as\s+)?a\s+bug(?:\s+report)?(?:\s*:\s*([\s\S]*)|[.!]?)$/i.exec(
-      words
-    );
-  if (request) return request[2]?.trim() || (request[1] ? previous : '');
+/** A line of a chat, as far as the report form reads it. */
+type ChatLine = { from: 'owner' | 'staff'; text: string; failed?: true; runFailed?: true };
+
+/**
+ * What Report a bug starts its details with: the error of the chat's last
+ * Odd line when that line is a failed reply, else nothing.
+ */
+export function failedReply(lines: readonly ChatLine[]): string {
+  const last = lines.findLast((l) => l.from === 'staff');
+  return last && (last.failed || last.runFailed) ? last.text.trim() : '';
 }
 
 /** Long or heavily encoded drafts travel by clipboard instead of an oversized URL. */

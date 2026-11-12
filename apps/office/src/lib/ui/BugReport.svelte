@@ -128,7 +128,8 @@
         >{copied === body.trim() ? 'Details copied' : 'Copy details'}</button
       >
     {/if}
-    <div class="mt-4 flex flex-wrap justify-end gap-2 text-sm">
+    <p class="mt-4 text-sm">This posts publicly on GitHub. You need a GitHub account.</p>
+    <div class="mt-2 flex flex-wrap justify-end gap-2 text-sm">
       <button
         class="rounded-lg bg-raise px-3 py-2"
         disabled={posting}

@@ -216,7 +216,7 @@ export async function replyToOwnerTurn(
         ...(re ? [re.brief] : []),
         ...(/\b(bug|bugs|issue tracker)\b/i.test(message)
           ? [
-              '(For an Oddboro bug, put the report text in your reply. The owner can choose Report bug under it, review the text, and file a public GitHub issue. A draft is still unfiled.)'
+              "(For an Oddboro bug, put the report text in your reply. The owner can copy it into Report a bug in the chat's plus menu, review it there, and file a public GitHub issue. A draft is still unfiled.)"
             ]
           : []),
         ...aboutBrief(owner)

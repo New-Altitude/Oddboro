@@ -15,7 +15,7 @@
   import { approvalTarget, approveWord, yesWord } from './chat-approval.ts';
   import { chatAnswer } from './task-steps.ts';
   import BugReport from './BugReport.svelte';
-  import { bugRequest } from '../bug-report.ts';
+  import { failedReply } from '../bug-report.ts';
   import Lesson from './Lesson.svelte';
   import PersonaQuiet from './PersonaQuiet.svelte';
   import { newTurnId } from '#lib/staff/chat-input.ts';
@@ -246,7 +246,8 @@
     );
   });
   let draft = $state('');
-  let report = $state<{ text: string; command?: string }>();
+  /** The bug report form's starting details, while it is open. */
+  let bugReport = $state<string>();
   let sending = $state(false);
   // The office already holds the text, files and reply target under this turn id.
   type Blocked = { turnId: string; signIn: ChatSignIn };
@@ -557,12 +558,6 @@
     if (saving || uploading) return;
     const words = draft.trim();
     if (!words && !pending.length) return;
-    const last = lines.at(-1);
-    const details = bugRequest(words, replyTo?.title ?? (last?.text || last?.item?.title || ''));
-    if (details !== undefined) {
-      report = { text: details, command: draft };
-      return;
-    }
     if (decisionMode) {
       const re = replyTo;
       const explicit = approveWord(words);
@@ -917,6 +912,13 @@
         await tick();
         goal?.focus();
       }
+    },
+    // The form takes the focus; a failed reply's error starts its details.
+    {
+      label: 'Report a bug',
+      shown: () => true,
+      focuses: true,
+      run: () => (bugReport = failedReply(lines))
     }
   ];
   const more = $derived(MORE.filter((m) => m.shown()));
@@ -1185,10 +1187,6 @@
       >
       {#if copied === i}<span class="tip shown" aria-live="polite">Copied</span>{/if}
     </button>
-    <button
-      class="hover:text-ink"
-      onclick={() => (report = { text: line.text || line.item?.title || '' })}>Report bug</button
-    >
   </div>
 {/snippet}
 
@@ -1776,13 +1774,12 @@
 
 <svelte:window onpointerdown={outside} />
 
-{#if report}
+{#if bugReport !== undefined}
   <BugReport
-    initial={report.text}
+    initial={bugReport}
     staff={profile.id}
-    onclose={() => (report = undefined)}
+    onclose={() => (bugReport = undefined)}
     onfiled={() => {
-      if (report?.command === draft) draft = '';
       if (!sending) load(profile.id);
     }}
   />

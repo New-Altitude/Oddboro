@@ -1,28 +1,27 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { browserDraft, bugRequest, ISSUES } from './bug-report.ts';
+import { browserDraft, failedReply, ISSUES } from './bug-report.ts';
 
-test('a pasted error takes precedence over the previous chat message', () => {
+test("Report a bug starts with the last Odd line's error when that line is a failed reply", () => {
   const error = 'This server did not offer a sign-in.\nThe task is still open.';
-  assert.equal(
-    bugRequest(`please report this message as a bug: ${error}`, 'private context'),
-    error
-  );
-  assert.equal(bugRequest('Report this as a bug.', 'Last error'), 'Last error');
-  assert.equal(bugRequest('File a bug report', 'unrelated text'), '');
-  assert.equal(bugRequest('/bug The screen froze', ''), 'The screen froze');
-  assert.equal(bugRequest('/bug', 'unrelated text'), '');
+  const owner = { from: 'owner', text: 'Connect the calendar.' } as const;
+  assert.equal(failedReply([owner, { from: 'staff', text: `${error}\n`, failed: true }]), error);
+  // A run the owner's answer on a card started, which failed.
+  assert.equal(failedReply([{ from: 'staff', text: 'Run failed', runFailed: true }]), 'Run failed');
+  // The owner wrote after it: the last Odd line still decides.
+  assert.equal(failedReply([{ from: 'staff', text: error, failed: true }, owner]), error);
 });
 
-test('questions, quoted requests and bug reports for other products stay in chat', () => {
-  for (const text of [
-    'How do I report a bug?',
-    'She said "report this as a bug".',
-    'Report a bug to the calendar vendor',
-    '/bugfix'
-  ]) {
-    assert.equal(bugRequest(text, 'previous'), undefined);
-  }
+test('Report a bug starts empty when the last Odd line is no failed reply', () => {
+  assert.equal(failedReply([]), '');
+  assert.equal(failedReply([{ from: 'owner', text: 'Hello.' }]), '');
+  assert.equal(
+    failedReply([
+      { from: 'staff', text: 'Old error', failed: true },
+      { from: 'staff', text: 'Done. The calendar is connected.' }
+    ]),
+    ''
+  );
 });
 
 test('the browser gets only the reviewed fields at the fixed repository', () => {
