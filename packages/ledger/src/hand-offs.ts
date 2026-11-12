@@ -385,16 +385,17 @@ export async function resultsToJoin(f: FollowUpRow): Promise<FollowUpRow[]> {
 export async function handBackLater(
   handOffId: number,
   outcome: Outcome,
-  answer: string
+  answer: string,
+  q: Db = db
 ): Promise<void> {
-  const [origin] = await db
+  const [origin] = await q
     .select()
     .from(followUps)
     .where(and(eq(followUps.id, handOffId), eq(followUps.kind, 'hand_off')));
   const back = origin && handBack(origin, outcome, answer);
   if (!back?.handOff) return;
   const handOff = { ...back.handOff, answered: true };
-  await db.transaction(async (tx) => {
+  await q.transaction(async (tx) => {
     if (!(await leadLeft(tx, back.staffId))) await addFollowUp(tx, { ...back, handOff });
   });
 }

@@ -1,5 +1,6 @@
 // Work a lead parked until a task on the owner's desk ends. The task's end is
 // the only wake: nothing looks at the clock or goes round a loop for it.
+import type { Db } from './threads.ts';
 import { and, eq, isNull, or } from 'drizzle-orm';
 import { db } from './db.ts';
 import { flat, SAID_AS } from './desk-answers.ts';
@@ -60,8 +61,11 @@ const parkedOn = (taskId: number) => and(eq(threads.resumeOnTask, taskId), isNul
  * The work parked on a task, read before the task's end wakes it, so the run
  * that hears the task ended can be told that work picks up on its own.
  */
-export async function parkedWork(taskId: number): Promise<{ id: number; title: string }[]> {
-  return db.select({ id: threads.id, title: threads.title }).from(threads).where(parkedOn(taskId));
+export async function parkedWork(
+  taskId: number,
+  q: Db = db
+): Promise<{ id: number; title: string }[]> {
+  return q.select({ id: threads.id, title: threads.title }).from(threads).where(parkedOn(taskId));
 }
 
 /**
@@ -82,9 +86,10 @@ export type TaskEnded = 'done' | 'dropped' | 'withdrawn';
  */
 export async function wakeOnTask(
   t: { id: number; title: string; note: string | null },
-  how: { ended: TaskEnded; owner: string; ownRun?: { work: string | null; earlier?: true } }
+  how: { ended: TaskEnded; owner: string; ownRun?: { work: string | null; earlier?: true } },
+  q: Db = db
 ): Promise<void> {
-  const parked = await db
+  const parked = await q
     .update(threads)
     .set({ resumeOnTask: null })
     .where(parkedOn(t.id))
@@ -110,5 +115,6 @@ export async function wakeOnTask(
         : ` "${flat(run.work)}", the work that task was given on, picks up too, and its lead carries that work's own part: do only this work's here.`;
   const next = how.ended === 'done' ? 'Pick it up now' : 'Decide what comes of the work now';
   const said = `${ended}${own} ${next}`;
-  for (const { id } of parked) await answerThread(id, note ? `${said}: ${note}` : `${said}.`);
+  for (const { id } of parked)
+    await answerThread(id, note ? `${said}: ${note}` : `${said}.`, undefined, q);
 }

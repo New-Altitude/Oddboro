@@ -79,17 +79,20 @@ export const POST: RequestHandler = async ({ params, request }) => {
   if (!decision) error(400, `Say ${DECISIONS.slice(0, -1).join(', ')} or ${DECISIONS.at(-1)}`);
   const a = await ask(Number(params.id));
   if (!a) error(404, 'No such ask');
+  if (a.status !== 'open') error(409, 'This ask was already answered');
   const yes: Yes = OWNER_ANSWERS.ask[a.kind].approve;
   if (decision === 'approve' && 'by' in yes) error(400, yes.by);
   const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 2000) : '';
   if (decision === 'approve' && worksOnYes(a.kind)) {
     return APPROVAL_WORK[a.kind](a, reason || null, body.picks);
   }
+  let decided;
   try {
-    await decideAsk(a.id, decision, reason || null, body.report === true);
+    decided = await decideAsk(a.id, decision, reason || null, body.report === true);
   } catch (e) {
     error(400, e instanceof Error ? e.message : String(e));
   }
+  if (!decided) error(409, 'This ask was already answered');
   if (decision === 'approve' && a.access) {
     const task = (await tasksFrom(a.staffId)).find((t) => t.askId === a.id && t.status === 'open');
     return json({ ok: true, task: task ?? null });

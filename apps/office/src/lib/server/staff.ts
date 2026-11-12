@@ -149,7 +149,8 @@ import {
   claudeInput,
   claudeRunHome,
   claudeSettings,
-  modelArgs
+  modelArgs,
+  userTurn
 } from './claude.ts';
 import { keptAt, plainName } from './chat-files.ts';
 import { endedEarly, LAUNCHES, stoppedWhy, streamTools, type Launch } from './cli.ts';
@@ -178,7 +179,7 @@ import { sandboxPaths } from './sandbox-paths.ts';
 import { claudeSandbox, NETWORK_REFUSED, NETWORK_REFUSED_LINE } from './sandbox.ts';
 import { downtime, installsAt } from './update.ts';
 import { tooOldLine } from './versions.ts';
-export { activeReply, chat, correctionSource, replyToOwnerTurn, stopReply } from './chat-run.ts';
+export { activeReply, addToReply, chat, replyToOwnerTurn, stopReply } from './chat-run.ts';
 export { history, keepOwnerTurn } from './chat-turns.ts';
 export { inProgress, isBusy, runsActive, stopRuns, working } from './run-state.ts';
 
@@ -868,6 +869,10 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
   const prior = saved?.sessionId;
   const time = officeNow();
   const inChat = opts.kind === 'chat';
+  // A Claude Code chat reads stream-json and keeps its stdin open until its
+  // result, so Send now can add the owner's words to the turn (`addToReply`).
+  // A persona's chat stays closed: its persona hears only the first message.
+  const streamed = inChat && who.agent === 'claude' && !who.package;
   // What the Odd knows of the work it leads and the work it is on, read now,
   // as the run starts.
   const led = opts.threadId
@@ -1035,7 +1040,7 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
   function claudeArgs(): string[] {
     return [
       '-p',
-      ...(opts.images?.length ? ['--input-format', 'stream-json'] : []),
+      ...(opts.images?.length || streamed ? ['--input-format', 'stream-json'] : []),
       '--output-format',
       'stream-json',
       '--verbose',
@@ -1099,7 +1104,8 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
       opts.images?.map((i) => ({
         mediaType: i.mediaType,
         data: readFileSync(i.path).toString('base64')
-      }))
+      })),
+      streamed
     );
     if (!tmp) return { args: claudeArgs(), env, stdin, done: writeRunFiles(env) };
     mkdirSync(tmp, { recursive: true, mode: 0o700 });
@@ -1212,9 +1218,22 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
     let last = '';
     let session: string | undefined;
     let finished = false;
+    /** The results of a streamed chat that took added words, which may answer them in a turn of their own. */
+    const results: Run[] = [];
+    let added = 0;
+    const live = runsGoing.get(key);
+    const heard = (): Run | undefined =>
+      results.length
+        ? (results.find((r) => !r.ok) ?? {
+            ok: true,
+            text: results.map((r) => r.text).join('\n\n')
+          })
+        : undefined;
     const finish = (end: Run) => {
       if (finished) return;
       finished = true;
+      if (live) live.add = undefined;
+      if (!child.stdin.writableEnded) child.stdin.end();
       // A Claude Code that refuses the open network fails this run: the owner
       // is told plainly, and from now on this office's Claude Code runs keep
       // their commands off the internet (`holdNetwork`).
@@ -1257,7 +1276,7 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
     const timer = setTimeout(
       () => {
         stop();
-        finish(noReply(opts.timeoutMs));
+        finish(heard() ?? noReply(opts.timeoutMs));
       },
       Math.max(0, clock.deadline - Date.now())
     );
@@ -1322,8 +1341,16 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
             opts.onEvent?.({ type: 'delta', text: '\n\n' });
           }
         } else if (e.type === 'result') {
-          if (e.subtype === 'success') finish({ ok: true, text: String(e.result ?? reply).trim() });
-          else finish({ ok: false, text: endedEarly(who.agent, e) });
+          const r: Run =
+            e.subtype === 'success'
+              ? { ok: true, text: String(e.result ?? reply).trim() }
+              : { ok: false, text: endedEarly(who.agent, e) };
+          // A streamed chat takes no more words after its result. Words added
+          // too late for this turn get a turn of their own before Claude Code
+          // ends, so a run that took any ends when Claude Code does.
+          if (!child.stdin.writableEnded) child.stdin.end();
+          if (!added) finish(r);
+          else results.push(r);
         }
       }
     });
@@ -1334,12 +1361,24 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
     );
     child.on('close', (code) => {
       if (ownGroup) stop();
-      finish({
-        ok: false,
-        text: stoppedWhy(who.agent, code, stderr)
-      });
+      finish(
+        heard() ?? {
+          ok: false,
+          text: stoppedWhy(who.agent, code, stderr)
+        }
+      );
     });
-    child.stdin.end(launch.stdin);
+    // A tool that ends before it reads its input breaks the pipe; the run
+    // ends through 'close' all the same.
+    child.stdin.on('error', () => {});
+    if (!streamed || !live) return void child.stdin.end(launch.stdin);
+    child.stdin.write(launch.stdin);
+    live.add = (text) => {
+      if (finished || child.stdin.writableEnded) return false;
+      child.stdin.write(userTurn(text));
+      added++;
+      return true;
+    };
   });
 }
 

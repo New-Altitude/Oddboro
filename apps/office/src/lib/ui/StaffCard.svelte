@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
   import { SETTINGS_TAB } from '@oddboro/ledger/access';
   import Pixel from './Pixel.svelte';
+  import type { AskRow, Desk } from '@oddboro/ledger';
   import ChatPanel from './ChatPanel.svelte';
   import { chatRequest, type Delivered } from './chat-about.svelte.ts';
   import AccessTab from './AccessTab.svelte';
@@ -14,6 +15,9 @@
 
   type Props = {
     profile: StaffProfile;
+    desk: Desk;
+    staff: StaffProfile[];
+    onplan: (hires: AskRow[]) => void;
     activity: Activity;
     /** Bumps when jobs, runs or access change, so those tabs reload. */
     version: number;
@@ -43,6 +47,9 @@
 
   let {
     profile,
+    desk,
+    staff,
+    onplan,
     activity,
     version,
     working,
@@ -328,6 +335,9 @@
        survives switching tabs. -->
     <div class="h-full" class:hidden={tab !== 'chat'}>
       <ChatPanel
+        {desk}
+        {staff}
+        {onplan}
         {profile}
         {version}
         onstart={onchatstart}
