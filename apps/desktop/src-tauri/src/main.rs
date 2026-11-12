@@ -19,7 +19,7 @@ use std::thread;
 use tauri::image::Image;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::webview::NewWindowResponse;
+use tauri::webview::{NewWindowResponse, PageLoadEvent};
 use tauri::{AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
@@ -37,6 +37,17 @@ const NO_SERVER: &str = "Oddboro cannot find the office server. Reinstall Oddbor
 /// answers with a cookie and the same address without it, so the page keeps
 /// the key and the address bar drops it.
 const OWNER_PARAM: &str = "oddboro-key";
+
+/// Why the shell quit, as its exit code, so a script can tell without the
+/// dialog the owner saw. The dialog's words go to the log too (`alert`).
+mod exit {
+    pub const PORT_TAKEN: i32 = 2;
+    pub const NO_NODE: i32 = 3;
+    pub const NO_SERVER: i32 = 4;
+    pub const BAD_URL: i32 = 5;
+    pub const SERVER_FAILED: i32 = 6;
+    pub const NO_WINDOW: i32 = 7;
+}
 
 fn main() {
     // A version the updater just installed waits for the one it replaced.
@@ -112,11 +123,27 @@ fn main() {
 
 /// Runs on its own thread: picks the server, starts it, and opens the office.
 fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
+    let version = &app.package_info().version;
+    let target = env!("ODDBORO_TARGET");
+    let pid = std::process::id();
+    let port = env::port();
+    let home = env::office_home().display().to_string();
+    let webview = tauri::webview_version().unwrap_or_else(|e| format!("unknown ({e})"));
+    server::note(
+        &env::log_file(),
+        &format!(
+            "Oddboro {version} ({target}) opening: pid {pid}, port {port}, home {home}, webview {webview}"
+        ),
+    );
     // The dev escape hatch: open a server that already runs, such as vite dev.
     if let Ok(url) = std::env::var("ODDBORO_SERVER_URL") {
         match Url::parse(&url) {
             Ok(url) => open_main(app, &url),
-            Err(e) => fail(app, &format!("ODDBORO_SERVER_URL is not a URL: {e}")),
+            Err(e) => fail(
+                app,
+                exit::BAD_URL,
+                &format!("ODDBORO_SERVER_URL is not a URL: {e}"),
+            ),
         }
         return;
     }
@@ -127,7 +154,6 @@ fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
         return;
     }
 
-    let port = env::port();
     if server::port_taken(port) {
         alert(
             app,
@@ -135,14 +161,14 @@ fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
                 "Another office is already running on port {port}. Oddboro will quit rather than share it.\n\nQuit the other office, then open Oddboro again."
             ),
         );
-        app.exit(0);
+        app.exit(exit::PORT_TAKEN);
         return;
     }
     let Some(node) = node_binary() else {
-        return broken_install(app, diagnostics, NO_NODE);
+        return broken_install(app, diagnostics, exit::NO_NODE, NO_NODE);
     };
     let Some(code) = server_code(app) else {
-        return broken_install(app, diagnostics, NO_SERVER);
+        return broken_install(app, diagnostics, exit::NO_SERVER, NO_SERVER);
     };
 
     show_loading(app);
@@ -163,7 +189,11 @@ fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
         diagnostics_dsn: diagnostics.map(|d| d.dsn().to_string()),
     };
     let Ok(url) = Url::parse(&server.url()) else {
-        return fail(app, "Oddboro built a bad URL for its server.");
+        return fail(
+            app,
+            exit::BAD_URL,
+            "Oddboro built a bad URL for its server.",
+        );
     };
     update::watch(update::Watch {
         app: app.clone(),
@@ -176,17 +206,22 @@ fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
         if let Some(d) = diagnostics {
             d.gave_up(&why);
         }
-        fail(app, &why.message(&server.log_tail()));
+        fail(app, exit::SERVER_FAILED, &why.message(&server.log_tail()));
     }
 }
 
 /// A release that lacks a part of itself: reported, since a broken release
 /// is what reports are for, then shown to the owner.
-fn broken_install(app: &AppHandle, diagnostics: Option<&Diagnostics>, text: &'static str) {
+fn broken_install(
+    app: &AppHandle,
+    diagnostics: Option<&Diagnostics>,
+    code: i32,
+    text: &'static str,
+) {
     if let Some(d) = diagnostics {
         d.failed(text);
     }
-    fail(app, text);
+    fail(app, code, text);
 }
 
 /// Node sits beside the shell: in `Contents/MacOS` on a Mac, in `usr/bin`
@@ -299,12 +334,26 @@ fn open_main(app: &AppHandle, url: &Url) {
             open_in_browser(&browser_url(&new_window_home, &to, key.as_deref()));
             NewWindowResponse::Deny
         })
+        // The window's side of a start, for the log: the page itself says it
+        // booted once its script runs (`apps/office/src/hooks.client.ts`).
+        .on_page_load(|_, payload| {
+            if matches!(payload.event(), PageLoadEvent::Finished) {
+                server::note(
+                    &env::log_file(),
+                    &format!("office page loaded: {}", payload.url()),
+                );
+            }
+        })
         .build();
     if let Some(loading) = app.get_webview_window(LOADING) {
         let _ = loading.close();
     }
     if let Err(e) = built {
-        fail(app, &format!("Oddboro could not open its window: {e}"));
+        fail(
+            app,
+            exit::NO_WINDOW,
+            &format!("Oddboro could not open its window: {e}"),
+        );
     }
 }
 
@@ -458,7 +507,11 @@ fn toggle_open_at_login(app: &AppHandle, item: &CheckMenuItem<tauri::Wry>) {
 }
 
 /// Shows an error. Only call it off the main thread: it waits for OK.
+/// The words go to the log first, on one line: the dialog waits for someone to
+/// press OK, which nobody does in a test or a support case.
 fn alert(app: &AppHandle, message: &str) {
+    let line = message.split_whitespace().collect::<Vec<_>>().join(" ");
+    server::note(&env::log_file(), &format!("dialog: {line}"));
     app.dialog()
         .message(message)
         .title("Oddboro")
@@ -466,9 +519,9 @@ fn alert(app: &AppHandle, message: &str) {
         .blocking_show();
 }
 
-fn fail(app: &AppHandle, message: &str) {
+fn fail(app: &AppHandle, code: i32, message: &str) {
     alert(app, message);
-    app.exit(1);
+    app.exit(code);
 }
 
 #[cfg(test)]
