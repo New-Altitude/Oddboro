@@ -26,7 +26,9 @@ check that catches a missed place: `docs/architecture.md`.
   whose looks are generated (their specs live in the ledger's `managers.ts`).
 
 - `scripts/mark.ts` draws Oddboro's mark, the glowing pixel O, into every
-  icon and logo file (`npm run mark`, on a Mac). ART.md says where each goes.
+  icon and logo file (`npm run mark`, on a Mac). The grid itself is
+  `src/mark.ts` (`@oddboro/sprites/mark`), which the site's link preview draws
+  too. ART.md says where each goes.
 
 - `src/props/street/street-bus.px` is the bus that brings a new owner's Office
   Manager on their first visit.

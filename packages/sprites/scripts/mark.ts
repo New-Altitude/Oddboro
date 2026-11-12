@@ -1,4 +1,5 @@
-// Draws Oddboro's mark, the glowing pixel O, and writes every file that shows it:
+// Draws Oddboro's mark, the glowing pixel O (its grid is in src/mark.ts), and
+// writes these files from it:
 //
 //   apps/site/static/logo.png             the site's favicon, header and footer
 //   apps/office/static/logo.png           the office's favicon
@@ -12,6 +13,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createImage, encodePng, type Image } from '../src/png.ts';
+import { MARK, MARK_COLOURS } from '../src/mark.ts';
 import { hexToRgba } from '../src/px.ts';
 
 const ROOT = new URL('../../../', import.meta.url).pathname;
@@ -19,31 +21,13 @@ const palette: Record<string, { hex: string }> = JSON.parse(
   readFileSync(new URL('../src/palette.json', import.meta.url), 'utf8')
 ).colors;
 
-// The letter in screen aqua with a glow aqua edge, one ring of teal deep glow
-// around it. `.` is the black it sits on, the middle of the O too.
-const MARK = [
-  '..dddddd..',
-  '.ddhhhhdd.',
-  'ddhllllhdd',
-  'dhlddddhhd',
-  'dhld..dhld',
-  'dhld..dhld',
-  'dhld..dhld',
-  'dhld..dhld',
-  'dhld..dhld',
-  'dhld..dhld',
-  'dhlddddhld',
-  'ddhhhhhldd',
-  '.ddhllldd.',
-  '..dddddd..'
-];
 const W = MARK[0].length;
 const H = MARK.length;
 const BLACK = [0, 0, 0, 255];
 const COLOUR: Record<string, number[]> = {
-  d: hexToRgba(palette['6'].hex),
-  l: hexToRgba(palette['G'].hex),
-  h: hexToRgba(palette['g'].hex),
+  ...Object.fromEntries(
+    Object.entries(MARK_COLOURS).map(([role, key]) => [role, hexToRgba(palette[key].hex)])
+  ),
   '.': BLACK
 };
 
