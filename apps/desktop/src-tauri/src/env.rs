@@ -30,16 +30,23 @@ pub fn office_home() -> PathBuf {
     env::var_os("ODDBORO_HOME").map_or_else(|| home().join(".oddboro"), PathBuf::from)
 }
 
-/// Where Node's output goes: `~/Library/Logs/Oddboro` on a Mac, and on Linux
-/// and Windows the folder the office's own login service logs to
-/// (`packages/ledger/src/platform.ts`).
-#[cfg(target_os = "macos")]
+/// `ODDBORO_LOG` from the shell's own environment, so a test's run never
+/// writes to the owner's log, or else where Node's output goes:
+/// `~/Library/Logs/Oddboro` on a Mac, and on Linux and Windows the folder the
+/// office's own login service logs to (`packages/ledger/src/platform.ts`).
 pub fn log_file() -> PathBuf {
+    env::var_os("ODDBORO_LOG")
+        .filter(|s| !s.is_empty())
+        .map_or_else(default_log_file, PathBuf::from)
+}
+
+#[cfg(target_os = "macos")]
+fn default_log_file() -> PathBuf {
     home().join("Library/Logs/Oddboro/office.log")
 }
 
 #[cfg(target_os = "linux")]
-pub fn log_file() -> PathBuf {
+fn default_log_file() -> PathBuf {
     let state = env::var_os("XDG_STATE_HOME")
         .filter(|s| !s.is_empty())
         .map_or_else(|| home().join(".local/state"), PathBuf::from);
@@ -47,7 +54,7 @@ pub fn log_file() -> PathBuf {
 }
 
 #[cfg(windows)]
-pub fn log_file() -> PathBuf {
+fn default_log_file() -> PathBuf {
     env::var_os("LOCALAPPDATA")
         .filter(|s| !s.is_empty())
         .map_or_else(|| home().join("AppData").join("Local"), PathBuf::from)

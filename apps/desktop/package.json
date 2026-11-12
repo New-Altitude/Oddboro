@@ -8,6 +8,8 @@
     "shell": "ODDBORO_SERVER_URL=${ODDBORO_SERVER_URL:-http://127.0.0.1:4500} tauri dev",
     "bundle": "tauri build --config src-tauri/tauri.bundle.conf.json",
     "release": "node scripts/release.ts",
+    "smoke": "node scripts/smoke.ts",
+    "test": "node --test \"test/*.test.ts\"",
     "tauri": "tauri",
     "check-types": "cargo check --manifest-path src-tauri/Cargo.toml --all-targets",
     "lint": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings && cargo fmt --manifest-path src-tauri/Cargo.toml --check && prettier --check . --ignore-path ../../.prettierignore --ignore-path .gitignore"

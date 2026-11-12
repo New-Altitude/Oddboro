@@ -15,6 +15,19 @@ in `vite.config.ts`), so each package finds its own files beside its code and
 the app ships them whole (`apps/desktop/scripts/stage.ts`). In the app
 (`ODDBORO_APP=1`) `hooks.server.ts` quits on SIGTERM and when stdin closes.
 
+What the office says about itself, for the app's log and its smoke test
+(`apps/desktop/CLAUDE.md`, "Smoke tests"). `init` writes an `office:` line
+with the version and system, one per startup step with its time (secrets,
+database, tables, update row) and `office: ready N ms after Node started`;
+a new version's first start writes `office: first start of X after Y`
+(`backup.ts` in the ledger). `GET /api/health` serves the same: version,
+pid, uptime, step times, how many pages hold the live line and how many page
+errors came in (`src/lib/server/health.ts`). The page reports its boot and
+every error it hits to `POST /api/client-log` (`src/hooks.client.ts`, as
+JSON like every action), which writes one `page:` line each, cut to 600
+characters, at most 30 a minute, with `oddboro:` defused so a page never
+speaks to the shell.
+
 The keychain is the system's own secret store (`@oddboro/ledger/secrets`,
 through `src/lib/server/keychain.ts`). In the Mac app the shell keeps it:
 `init` in `hooks.server.ts` calls `useShellSecrets()`, which loads every
