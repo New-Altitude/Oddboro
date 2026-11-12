@@ -190,6 +190,20 @@
       "when": 1794461656068,
       "tag": "0026_scheduled_files",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1794463652299,
+      "tag": "0027_project_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1794466440542,
+      "tag": "0028_advanced_mode",
+      "breakpoints": true
     }
   ]
 }

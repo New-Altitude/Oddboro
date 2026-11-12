@@ -253,8 +253,11 @@ Every update is required. `src-tauri/src/update.rs` runs them with
   `~/.claude`.
 - `scripts/stage.ts`. Builds the office and the sprites, then lays out
   `stage/`: the office build, which bundles every third-party package the
-  office itself runs but Sentry's, the production `node_modules` that Sentry,
-  the ledger, sprites and world load, at the versions installed in the repo, and those three as plain
+  office itself runs except Sentry, the production `node_modules` that Sentry,
+  the ledger, sprites and world load, at the versions installed in the repo
+  (optional ones too, so the ledger's terminal library, `node-pty`, ships, and
+  a stage that cannot install it fails; it has no Linux prebuild, so a Linux
+  stage compiles it with Python, make and a C++ compiler), and those three as plain
   JavaScript (types stripped, `.ts` imports rewritten) in
   `node_modules/@oddboro/`, with their files beside them. Packages' test
   folders (`__screenshots__`, `__tests__`) and every source map stay out, and a staged path
@@ -262,10 +265,10 @@ Every update is required. `src-tauri/src/update.rs` runs them with
   builder stops at 260, and GitHub's runner puts the stage 60 deep. Sentry's
   build tools stay out too: peer packages (Vite and SvelteKit, with Rolldown
   and Lightning CSS), and `BUILD_ONLY` (Sentry's bundler plugins, the oxc
-  parser and the `sentry` CLI). Native code fails the stage unless `NATIVE`
-  names it (the keyring), and on a Mac unless it carries a Developer ID
-  signature with a secure timestamp, since the release signs only the shell
-  and Node and Apple's notary refuses anything else unsigned. It fetches the Node
+  parser and the `sentry` CLI). The stage keeps only this machine's terminal library and helpers.
+  The Mac release signs and verifies them before bundling the app. The keyring
+  must carry its publisher's timestamped Developer ID signature on a Mac.
+  Any other native code fails the stage. It fetches the Node
   binary for this machine's Node version, system and chip, and checks it
   against nodejs.org's sums (Windows's comes as a zip, unpacked with
   Windows's own `tar`). `--smoke` starts the stage on port 4590 with a

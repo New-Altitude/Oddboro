@@ -109,6 +109,9 @@ export const OWNER_ACTIONS = {
   'PUT /api/goals/[id]': { records: 'decision' },
   'POST /api/goals/[id]/staff': { records: 'decision' },
   'DELETE /api/goals/[id]/staff': { records: 'decision' },
+  'POST /api/project-sessions': {
+    none: 'Connections, grants and instructions are kept in project_sessions and project_requests. Native terminal input never enters the office ledger.'
+  },
   'POST /api/jobs/[id]': { none: NO_ROW },
   'DELETE /api/jobs/away': { none: "Takes the jobs off the desk's While you were away card." },
   'PATCH /api/lessons/[id]': { records: 'decision' },
@@ -152,6 +155,8 @@ export const OWNER_ACTIONS = {
   'POST /api/setup/claude': { notAnAction: SETUP },
   'DELETE /api/setup/claude': { notAnAction: SETUP },
   'POST /api/setup/notify': { notAnAction: SETUP },
+  // The owner's yes to Advanced mode's warning, and turning it off again.
+  'PUT /api/setup/advanced': { records: 'decision' },
   'PATCH /api/services/[id]': { records: 'access' },
   'POST /api/services/[id]': { none: NO_ROW },
   'POST /api/staff': { records: 'hire' },

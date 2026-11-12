@@ -9,6 +9,7 @@ backlog. Read a doc's status before acting on it: **proposed** (not agreed),
 - `office.gif`. The animation at the top of the README. `npm run office-gif -w @oddboro/site` makes it.
 - `hard-rules.md`. **Ratified.** The reason behind each hard rule in the root `CLAUDE.md`, one section per rule, same order.
 - `architecture.md`. **Built.** The picture: the parts, one function per job, and where each new kind of thing starts and which check catches a missed place.
+- `project-sessions.md`. **Built.** Native Codex and Claude Code sessions: start or attach, permissions, and recovery.
 
 ## Later
 

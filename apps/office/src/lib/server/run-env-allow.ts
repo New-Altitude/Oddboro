@@ -179,3 +179,52 @@ export const toolServerEnv = (): Record<string, string> => ({
   ),
   ...(process.env.ODDBORO_SECRETS === 'shell' ? { ODDBORO_SECRETS: 'office' } : {})
 });
+
+/** A native project runs as the owner, with their provider login and project tools.
+ * Office database, gateway and persona credentials never reach that process. */
+const NATIVE_PROJECT_ENV: Names = [
+  'PATH',
+  'HOME',
+  'USER',
+  'LOGNAME',
+  'SHELL',
+  'LANG',
+  /^LC_/,
+  /^TERM/,
+  'COLORTERM',
+  'TMP',
+  'TEMP',
+  'TMPDIR',
+  'USERPROFILE',
+  'SYSTEMROOT',
+  'WINDIR',
+  'PATHEXT',
+  'COMSPEC',
+  'APPDATA',
+  'LOCALAPPDATA',
+  /^PROGRAMFILES/,
+  'HOMEDRIVE',
+  'HOMEPATH',
+  /^XDG_/,
+  'SSH_AUTH_SOCK',
+  'DISPLAY',
+  'WAYLAND_DISPLAY',
+  'DBUS_SESSION_BUS_ADDRESS',
+  ...PROXY,
+  ...NODE_CERTIFICATES,
+  'CODEX_HOME',
+  'CLAUDE_CONFIG_DIR',
+  'ANTHROPIC_API_KEY',
+  'OPENAI_API_KEY',
+  /^CLAUDE_CODE_USE_(BEDROCK|VERTEX|FOUNDRY)$/,
+  'AWS_PROFILE',
+  'AWS_REGION',
+  'GOOGLE_CLOUD_PROJECT'
+];
+export function nativeProjectEnv(): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(process.env).flatMap(([k, v]) =>
+      v !== undefined && listed(k, NATIVE_PROJECT_ENV, currentPlatform()) ? [[k, v]] : []
+    )
+  );
+}
