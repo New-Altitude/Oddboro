@@ -160,11 +160,11 @@ export const OUTBOUND: readonly Outbound[] = [
   },
   {
     file: 'apps/office/src/hooks.client.ts',
-    calls: 1,
+    calls: 2,
     to: 'The office itself: the page sends through it and never to the relay.',
     sends:
-      'Error and trace reports from the page, each through the same filter, which the office then forwards as `instrumentation.server.ts` says.',
-    yes: "The owner's Diagnostics switch in Setup. With no answer, the office drops what it gets."
+      'Error and trace reports from the page, each through the same filter, which the office then forwards as `instrumentation.server.ts` says. Also, to /api/client-log, that the page booted and each error it hit, at most 20 a page load, which the office writes to the log on this computer and sends nowhere.',
+    yes: "The owner's Diagnostics switch in Setup for the reports. With no answer, the office drops what it gets. The log lines stay on this computer, so they need none."
   },
   {
     file: 'apps/office/src/lib/server/versions.ts',

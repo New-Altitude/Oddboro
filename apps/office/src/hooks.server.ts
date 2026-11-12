@@ -19,6 +19,7 @@ import { handleErrorWithSentry, sentryHandle } from '@sentry/sveltekit';
 import { LOCAL, whenOddLeaves } from '@oddboro/ledger';
 import { trustSystemCertificates } from '@oddboro/ledger/certificates';
 import { startLocalDatabase } from '@oddboro/ledger/local-db';
+import { currentPlatform } from '@oddboro/ledger/platform';
 import { useShellSecrets } from '@oddboro/ledger/secrets';
 import { bringUpToDate } from '@oddboro/ledger/upgrade';
 import { keepAddress } from '#lib/server/address.ts';
@@ -46,7 +47,7 @@ if (process.env.ODDBORO_APP) {
 
 export const init: ServerInit = async () => {
   console.log(
-    `office: ${VERSION || 'development'} on ${process.platform} ${release()} ${process.arch}, Node ${process.version}`
+    `office: ${VERSION || 'development'} on ${currentPlatform()} ${release()} ${process.arch}, Node ${process.version}`
   );
   // In the Mac app the shell keeps the secrets; this process alone asks it.
   await timed('secrets', useShellSecrets);
