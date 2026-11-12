@@ -414,9 +414,33 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    picture, else its name, `chat-attach.ts`), and Attach files in the plus
    menu adds files to the tray alone. The plus button (More) beside the box
    opens a short menu built from one list (`MORE`: label, action, where it
-   shows): Attach files, and New goal in the manager's chat. Arrow keys move
-   in it, Enter picks, Escape or a click outside closes it, and focus goes
-   back to the box after an action. The tray previews each file with a ✕, in a column at the
+   shows): Attach files, New goal in the manager's chat, and Report a bug.
+   Arrow keys move in it, Enter picks, Escape or a click outside closes it,
+   and focus goes back to the box after an action. Report a bug opens a
+   review form (`src/lib/ui/BugReport.svelte`) with a title and details,
+   the only two fields that leave the office. When the chat's last Odd line
+   is a failed reply, its error starts the details (`failedReply` in
+   `src/lib/bug-report.ts`), and the owner can edit it. The form says it
+   posts publicly on GitHub and needs a GitHub account. Open draft on
+   GitHub opens the issue form at `New-Altitude/Oddboro` (`BUG_REPO`) in the
+   browser, with details too long for a link left to copy (`browserDraft`);
+   nothing is filed until the owner submits it there. When `gh` is on the
+   path, Post with GitHub CLI files it with the Mac's signed-in `gh`
+   account (`/api/staff/[id]/bug-reports`, the reviewed text on stdin, any
+   `GH_TOKEN` dropped), then adds the issue's link to the chat as a told
+   line. A post GitHub does not confirm keeps the form and links to the
+   issue list; Cancel keeps the chat as it was. The chat has no slash
+   commands: whatever the owner types goes to the Odd, a request to report
+   a bug included, and a message that names a bug tells the Odd to draft it
+   with `draft_bug_report` (`chat-run.ts`). That tool, every Odd's in a chat
+   only, keeps the title and details for its run (`keepBugDraft` in the
+   ledger's `bug-drafts.ts`); when the run ends the office takes them
+   (`takeBugDraft`, gone either way) and keeps them on the reply as `bug`
+   (`ChatEntry`). Under such a reply, File this opens the same review form
+   with that title and details, editable (`formStart` in
+   `src/lib/bug-report.ts`). It never opens GitHub or posts: the owner
+   still picks Open draft on GitHub, the form's main button, or Post with
+   GitHub CLI. The tray previews each file with a ✕, in a column at the
    end side over the plus button and Send, three files tall at most
    (`.tray`), scrolling past that. The box is always as tall as that
    column (`side` in `fit`), and at least as tall as the plus button and
