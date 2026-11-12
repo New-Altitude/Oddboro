@@ -336,7 +336,7 @@
                   >
                 </span>
                 <span class="mt-0.5 block text-sm text-ink">{i.row.title}</span>
-                {#if i.kind === 'task'}
+                {#if i.kind === 'task' && i.row.steps.length}
                   <span class="mt-0.5 block text-xs text-muted"
                     >{doneCount(i.row.steps)} of {i.row.steps.length} steps done</span
                   >
@@ -653,7 +653,8 @@
         {@const t = open.row}
         <p class="mt-2 text-sm leading-relaxed text-muted">{t.why}</p>
         {@const toGo = stepsToGo(t.steps)}
-        <ol class="mt-3 flex flex-col gap-2">
+        <!-- A question with one answer has no steps: the note below is the answer. -->
+        <ol class="mt-3 flex flex-col gap-2" class:hidden={!t.steps.length}>
           {#each t.steps as s, index (index)}
             <li
               class="flex gap-2.5 rounded-xl bg-raise px-3 py-2.5 text-sm"
@@ -785,7 +786,9 @@
         {#key open.key}
           <Attachments items={attached('task', t.id)} start="edit" ondirty={(d) => (unsaved = d)} />
         {/key}
-        <label class="mt-4 block text-xs text-muted" for="note">Note (optional)</label>
+        <label class="mt-4 block text-xs text-muted" for="note"
+          >{t.steps.length ? 'Note (optional)' : 'Your answer'}</label
+        >
         <textarea
           id="note"
           rows="2"

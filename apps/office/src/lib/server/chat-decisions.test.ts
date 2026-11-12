@@ -1,12 +1,34 @@
 // The same ask and task routes serve chat and the Desk in this throwaway office.
+// An answer given on a card in an Odd's chat brings the run it starts back
+// there as the Odd's reply under that card; one given on the Desk does not.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { chatAnswer } from '../ui/task-steps.ts';
 import { L, followThrough, refusal } from './office-under-test.ts';
 
 const goalRoute = await import('../../routes/api/goals/+server.ts');
 const asks = await import('../../routes/api/asks/[id]/+server.ts');
 const tasks = await import('../../routes/api/tasks/[id]/+server.ts');
 const { chatLog } = await import('./staff.ts');
+const { endFollowUp } = await import('./follow-ups.ts');
+
+/** Run the follow-up the owner's answer on `on` started, and end it as the office does. */
+async function runFollowUp(on: { ask?: number; task?: number }) {
+  const waiting = (await L.followUpsToDo()).filter(
+    (f) => (on.ask && f.ask?.id === on.ask) || (on.task && f.task?.id === on.task)
+  );
+  assert.equal(waiting.length, 1);
+  const w = waiting[0];
+  const f = await L.startFollowUp(w.id);
+  assert.ok(f, 'the follow-up did not start');
+  const r = await followThrough(f, w.ask, w.report, w.task, w.goal);
+  await endFollowUp(f, await L.workTitle(f), r.outcome, r.text, r.joined);
+  return { f, r };
+}
+
+/** The Odd's lines in its chat that answer a card. */
+const answersIn = async (id: string) =>
+  (await chatLog(id)).filter((l) => l.from === 'staff' && l.told && l.re);
 
 const post = async <E>(
   route: (event: E) => ReturnType<typeof asks.POST>,
@@ -203,4 +225,147 @@ test('the Desk lists each decision and answer once', async () => {
     'Approved: Plant the bulbs',
     'Sent back: Weed the beds'
   ]);
+});
+
+test("a task answered in chat gets the Odd's reply there, under the task, once", async () => {
+  const q = await L.giveTask('paige', {
+    title: 'What hour does your studio day start?',
+    why: 'To set the reminders.',
+    steps: []
+  });
+  assert.deepEqual(chatAnswer(q, false), { steps: [] });
+  const note = '9 AM, Monday to Friday.';
+  await post(tasks.POST, q.id, { op: 'finish', done: true, note, chat: true });
+  assert.equal((await L.task(q.id))?.status, 'done');
+  const before = (await answersIn('paige')).length;
+  const { f, r } = await runFollowUp({ task: q.id });
+  assert.deepEqual(f.chatCard, { kind: 'task', id: q.id, title: q.title });
+  assert.equal(r.outcome, 'done', r.text);
+  const lines = await answersIn('paige');
+  assert.equal(lines.length, before + 1);
+  const line = lines.at(-1)!;
+  assert.deepEqual(line.re, { kind: 'task', id: q.id, title: q.title });
+  assert.equal(line.text, r.text);
+  assert.equal(line.runFailed, undefined);
+  // The Ledger keeps its line as before.
+  assert.equal(
+    (await L.pg`select id from ledger where title like ${'%' + q.title} and actor = 'paige'`)
+      .length,
+    1
+  );
+  // Ending it again writes nothing more.
+  await endFollowUp(f, q.title, 'done', 'Again.');
+  assert.equal((await answersIn('paige')).length, before + 1);
+});
+
+test('a task finished on the Desk adds no line to the chat', async () => {
+  const q = await L.giveTask('paige', {
+    title: 'Which day suits the tour?',
+    why: 'To book it.',
+    steps: ['Name a day.']
+  });
+  await post(tasks.POST, q.id, { op: 'finish', done: true, note: 'Thursday.' });
+  const before = (await answersIn('paige')).length;
+  const { f } = await runFollowUp({ task: q.id });
+  assert.equal(f.chatCard, null);
+  assert.equal((await answersIn('paige')).length, before);
+});
+
+test('a proposal sent back in chat gets the reworked reply in chat', async () => {
+  const a = await propose('Plant the hedge');
+  await post(asks.POST, a.id, {
+    decision: 'iterate',
+    reason: 'Only the north side.',
+    chat: true
+  });
+  const { f, r } = await runFollowUp({ ask: a.id });
+  assert.equal(f.kind, 'rework');
+  const line = (await answersIn('lead')).at(-1);
+  assert.deepEqual(line?.re, { kind: 'ask', id: a.id, title: a.title });
+  assert.equal(line?.text, r.text);
+});
+
+test('a failed run on a chat answer says so in one line under the card', async () => {
+  const q = await L.giveTask('paige', { title: 'Which room is quiet?', why: 'w', steps: [] });
+  await post(tasks.POST, q.id, { op: 'finish', done: true, note: 'The back room.', chat: true });
+  const waiting = (await L.followUpsToDo()).find((w) => w.task?.id === q.id);
+  const f = await L.startFollowUp(waiting!.id);
+  await endFollowUp(f!, q.title, 'failed', 'Claude Code is signed out.\nTry again later.');
+  const line = (await answersIn('paige')).at(-1);
+  assert.equal(line?.re?.id, q.id);
+  assert.equal(line?.runFailed, true);
+  assert.equal(line?.failed, undefined);
+  assert.equal(line?.text, 'Could not finish this: Claude Code is signed out. Try again later.');
+});
+
+test('a goal or plan approved in chat marks the run it starts to reply there', async () => {
+  const g = await propose('Mend the fence');
+  await post(asks.POST, g.id, { decision: 'approve', chat: true });
+  const [goal] = (await L.allGoals()).filter((row) => row.title === g.title);
+  const [planning] = await L.pg<{ chat_card: unknown }[]>`
+    select chat_card from follow_ups where kind = 'goal' and goal_id = ${goal.id}`;
+  assert.deepEqual(planning.chat_card, { kind: 'ask', id: g.id, title: g.title });
+  const { ask: plan } = await L.raiseAsk('lead', {
+    kind: 'plan',
+    title: 'Fence assignments',
+    why: 'One Odd mends it.',
+    ifApproved: 'Assign the work.',
+    plan: { goalId: goal.id, items: [{ kind: 'assign', staff: 'cleo', part: 'Mend the gate.' }] }
+  });
+  await post(asks.POST, plan.id, { decision: 'approve', picks: [0], chat: true });
+  const [resume] = await L.pg<{ chat_card: unknown }[]>`
+    select chat_card from follow_ups
+    where staff_id = 'lead' and kind = 'resume' and ask_id = ${plan.id}`;
+  assert.deepEqual(resume?.chat_card, { kind: 'ask', id: plan.id, title: plan.title });
+});
+
+test('a choice task finishes in chat with the tapped choice', async () => {
+  const q = await L.giveTask('cleo', {
+    title: 'Should these emails reach you?',
+    why: 'They keep coming.',
+    steps: [
+      { text: 'Choose one.', done: false, action: { kind: 'choice', options: ['Yes', 'No'] } }
+    ]
+  });
+  const how = chatAnswer(q, false);
+  assert.deepEqual(how, { steps: [], choice: { index: 0, options: ['Yes', 'No'] } });
+  // As the chat's tap does: the choice, then the finish, from the chat.
+  await post(tasks.POST, q.id, { op: 'choose', index: how!.choice!.index, answer: 'No' });
+  await post(tasks.POST, q.id, { op: 'finish', done: true, note: '', chat: true });
+  const done = await L.task(q.id);
+  assert.equal(done?.status, 'done');
+  assert.equal(done?.steps[0].answer, 'No');
+  // The Desk's recent answers show the tapped choice, as a typed answer shows its words.
+  const line = (await L.desk()).recent.find((d) => d.title.endsWith(q.title));
+  assert.equal(line?.reason, 'No');
+  const { f, r } = await runFollowUp({ task: q.id });
+  assert.deepEqual(f.chatCard, { kind: 'task', id: q.id, title: q.title });
+  assert.ok(JSON.parse(r.text).system.includes('with: No'));
+  assert.equal((await answersIn('cleo')).at(-1)?.re?.id, q.id);
+});
+
+test('a task with an attachment or a sign-in step stays on the Desk', async () => {
+  const q = await L.giveTask('cleo', {
+    title: 'Fill in the intake',
+    why: 'w',
+    steps: [],
+    attach: ['intake.md']
+  });
+  // As the chat reads it: the Desk's attachments name the task.
+  const attached = (await L.desk()).attachments.some((f) => f.taskId === q.id);
+  assert.equal(attached, true);
+  assert.equal(chatAnswer(q, attached), undefined);
+  const signIn = await L.giveTask('cleo', {
+    title: 'Sign in to the calendar',
+    why: 'w',
+    steps: [
+      {
+        text: 'Click Sign in.',
+        done: false,
+        key: 'oauth:gcal',
+        action: { kind: 'oauth', connector: 'gcal' }
+      }
+    ]
+  });
+  assert.equal(chatAnswer(signIn, false), undefined);
 });
