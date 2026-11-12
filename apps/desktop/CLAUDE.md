@@ -268,7 +268,11 @@ Every update is required. `src-tauri/src/update.rs` runs them with
   parser and the `sentry` CLI). The stage keeps only this machine's terminal library and helpers.
   The Mac release signs and verifies them before bundling the app. The keyring
   must carry its publisher's timestamped Developer ID signature on a Mac.
-  Any other native code fails the stage. It fetches the Node
+  Any other native code fails the stage. It fails if the office lists a
+  third-party package under `dependencies` that `UNBUNDLED` does not name
+  (Sentry's two): its build bundles the rest, so they belong in
+  `devDependencies` (0.0.5 shipped 16,000 files of them, #13). It fails if
+  any page chunk is over 500 kB. It fetches the Node
   binary for this machine's Node version, system and chip, and checks it
   against nodejs.org's sums (Windows's comes as a zip, unpacked with
   Windows's own `tar`). `--smoke` starts the stage on port 4590 with a
@@ -320,8 +324,20 @@ lockfile-only update, so run it by hand for one that should ship. Five jobs:
    and a `latest.json` for `windows-x86_64` or `windows-aarch64`. Only the
    updater key and the Google client's secret are needed. The installer is not code-signed, so Windows
    SmartScreen warns before it runs.
-5. `draft` merges the five `latest.json` files into one, deletes any draft
-   of the same version, and creates a DRAFT release `vX.Y.Z` on the merge
+   Before it signs, `release.ts` checks the build's own version: the Windows
+   app and installer's file version, and the Mac app's `Info.plist`.
+5. `draft` tests and runs `scripts/check-release.ts` on what the five builds
+   uploaded, and creates nothing unless every build passes: exactly the files
+   this version should have, each site copy byte for byte the versioned file,
+   each `latest.json` naming this version, its own machine and this release's
+   file, each updater signature verified against the app's public key over
+   the file's own bytes and naming its file and version, and each served
+   file at least about half its 0.0.8 size, so none is cut off or empty
+   (`smallest` in `BUILDS`; bloat is `stage.ts`'s to catch). 0.0.6 shipped
+   0.0.5's Windows installer (#40); this is the check that stops that. It
+   writes the merged `latest.json` and the list of files to upload, so the
+   draft never takes a file it did not check. Then it deletes any draft of
+   the same version, and creates a DRAFT release `vX.Y.Z` on the merge
    commit, with the notes and these assets:
    `Oddboro.dmg`, `Oddboro-x86_64.AppImage`, `Oddboro-aarch64.AppImage`,
    `Oddboro-x64-setup.exe` and `Oddboro-arm64-setup.exe` (the site's
