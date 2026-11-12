@@ -670,7 +670,8 @@ test("Odds, their tools' web fetch and other programs on this computer cannot re
     for (const path of ['/api/ledger', '/api/staff/paige', '/']) {
       const r = await send(ok, { method: 'GET', at, path });
       assert.deepEqual([at, path, r.status, r.ran], [at, path, 403, false]);
-      if (path === '/' && offices.includes(at)) assert.equal(r.text, NOT_THE_OWNER_PAGE, at);
+      if (path === '/' && offices.some((office) => office === at))
+        assert.equal(r.text, NOT_THE_OWNER_PAGE, at);
     }
 });
 

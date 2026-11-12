@@ -246,7 +246,7 @@ test("on Windows, a command runs with no window unless it opens one the owner mu
     'not set'
   );
   assert.equal(
-    hides('the opener', (s) => s.args.includes(page)),
+    hides('the opener', (s) => s.args.some((arg) => arg === page)),
     'not set'
   );
 });
