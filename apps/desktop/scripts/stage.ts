@@ -10,10 +10,10 @@
 // long enough to stop the Windows installer's builder (see LONGEST).
 //
 // It also fetches the Node binary the app carries, checked against nodejs.org's
-// published sums. `--smoke` then starts the staged office on a spare port and
-// home, and stops it once it answers.
+// published sums. `node apps/desktop/scripts/smoke.ts --stage` then checks the
+// stage as the app would run it.
 import { stagePty } from '../../../scripts/prepare-pty.mjs';
-import { execFileSync, execSync, spawn, spawnSync } from 'node:child_process';
+import { execFileSync, execSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
@@ -56,12 +56,14 @@ const NODE_BIN = join(
 );
 const PACKAGES = ['ledger', 'sprites', 'world'];
 /**
- * What a package does not need at runtime. Its own CLAUDE.md stays behind;
- * every other document in it ships, since the office reads the sprites'
- * FORMAT.md and ART.md when it draws.
+ * What a package does not need at runtime. Its own CLAUDE.md and the
+ * ledger's FILES.md, a list of its files for people working on it, stay
+ * behind; every other document in it ships, since the office reads the
+ * sprites' FORMAT.md and ART.md when it draws.
  */
 const LEAVE_OUT = new Set([
   'CLAUDE.md',
+  'FILES.md',
   'node_modules',
   'out',
   'scripts',
@@ -88,9 +90,25 @@ function build(): void {
 }
 
 /**
+ * The office's third-party dependencies its build leaves out, so the stage
+ * carries them: Sentry's tracing hooks modules as they load. Any other
+ * package listed there would ship twice, bundled and in node_modules (#13).
+ */
+const UNBUNDLED = ['@sentry/core', '@sentry/sveltekit'];
+
+function checkOfficeDependencies(): void {
+  const listed = Object.keys(
+    readJson(join(ROOT, 'apps', 'office', 'package.json')).dependencies ?? {}
+  ).filter((name) => !name.startsWith('@oddboro/') && !UNBUNDLED.includes(name));
+  if (listed.length)
+    throw new Error(
+      `apps/office lists ${listed.join(', ')} under dependencies. The office's build ` +
+        'bundles what it runs, so move them to devDependencies.'
+    );
+}
+
+/**
  * Every third-party runtime dependency, pinned to the version installed here.
- * The office's own are bundled into its build (they sit under its
- * devDependencies), so in practice these are the workspace packages'.
  * Optional ones count too: the ledger's terminal library, node-pty, is
  * optional so `npm install` works where it cannot build, but the app needs it.
  */
@@ -232,6 +250,26 @@ function prune(dir: string, rel = ''): void {
   }
 }
 
+/** 500 kB is Vite's own warning size. 0.0.5's first page loaded a 785 kB chunk (#13). */
+function checkChunks(dir: string): void {
+  const over: string[] = [];
+  const walk = (d: string) => {
+    for (const name of readdirSync(d)) {
+      const path = join(d, name);
+      const s = statSync(path);
+      if (s.isDirectory()) walk(path);
+      else if (name.endsWith('.js') && s.size > 500 * 1024)
+        over.push(`${path.slice(dir.length + 1)} is ${Math.round(s.size / 1024)} kB`);
+    }
+  };
+  walk(dir);
+  if (over.length)
+    throw new Error(
+      `The page has chunks over 500 kB:\n  ${over.join('\n  ')}\n` +
+        'Load what they hold with import() when it is needed.'
+    );
+}
+
 function stageOffice(): void {
   const office = join(STAGE, 'apps', 'office');
   cpSync(join(ROOT, 'apps', 'office', 'build'), join(office, 'build'), { recursive: true });
@@ -277,62 +315,7 @@ async function fetchNode(): Promise<void> {
   rmSync(tmp, { recursive: true, force: true });
 }
 
-/** Start the staged office on a spare port and home, and wait for it to answer. */
-async function smoke(): Promise<void> {
-  const port = 4590;
-  const home = join(tmpdir(), 'oddboro-smoke');
-  rmSync(home, { recursive: true, force: true });
-  const child = spawn(NODE_BIN, [join(STAGE, 'apps', 'office', 'build', 'index.js')], {
-    cwd: join(STAGE, 'apps', 'office'),
-    env: {
-      ...process.env,
-      PORT: String(port),
-      HOST: '127.0.0.1',
-      ORIGIN: `http://127.0.0.1:${port}`,
-      ODDBORO_PORT: String(port),
-      ODDBORO_DB_PORT: '54590',
-      ODDBORO_HOME: home,
-      ODDBORO_CODE: STAGE,
-      // As in the app: the server quits when asked, and a versioned first
-      // start in an empty home makes its folder and records the version.
-      ODDBORO_APP: '1',
-      ODDBORO_VERSION: '0.0.0-smoke',
-      // So Sentry starts in the staged server. The home is new, so the owner
-      // has not said yes and nothing is sent; port 9 would take nothing anyway.
-      ODDBORO_DIAGNOSTICS_DSN: 'http://oddboro@127.0.0.1:9/oddboro/0'
-    },
-    // A held stdin, as the app gives it: the server quits when it closes.
-    stdio: ['pipe', 'inherit', 'inherit']
-  });
-  try {
-    for (let i = 0; i < 90; i++) {
-      await new Promise((r) => setTimeout(r, 1000));
-      const ok = await fetch(`http://127.0.0.1:${port}/`, {
-        signal: AbortSignal.timeout(2000)
-      }).then(
-        (r) => r.status < 500,
-        () => false
-      );
-      if (ok) return console.log(`Smoke: the staged office answered on ${port}.`);
-      if (child.exitCode !== null) throw new Error(`The staged office exited (${child.exitCode})`);
-    }
-    throw new Error('The staged office never answered');
-  } finally {
-    // As the app asks: SIGTERM, or on Windows, which has none, by closing stdin.
-    if (WINDOWS) child.stdin?.end();
-    else child.kill('SIGTERM');
-    const quit = await new Promise((r) => {
-      child.once('exit', () => r(true));
-      setTimeout(() => r(false), 10_000);
-    });
-    if (!quit) {
-      child.kill('SIGKILL');
-      throw new Error('The staged office did not quit when asked');
-    }
-    console.log('Smoke: it quit when asked.');
-  }
-}
-
+checkOfficeDependencies();
 build();
 rmSync(STAGE, { recursive: true, force: true });
 mkdirSync(STAGE, { recursive: true });
@@ -353,6 +336,6 @@ const terminalFiles = new Set(stagePty(STAGE));
 for (const p of PACKAGES) stagePackage(p);
 stageOffice();
 prune(STAGE);
+checkChunks(join(STAGE, 'apps', 'office', 'build', 'client'));
 await fetchNode();
 console.log(`Staged the server in ${STAGE}.`);
-if (process.argv.includes('--smoke')) await smoke();

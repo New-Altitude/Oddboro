@@ -1,7 +1,8 @@
 // A bug report about Oddboro that an Odd drafted in a chat run with
-// `draft_bug_report` (mcp.ts). The tool server keeps it beside the Odd's chat
-// until the run ends, and the office then puts it on the run's reply, where
-// File this opens it in the report form. Nothing here files anything.
+// `draft_bug_report` (mcp-people.ts). The tool server keeps it beside the
+// Odd's chat until the run ends, and the office then puts it on the run's
+// reply, where File this opens it in the report form. Nothing here files
+// anything.
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { home, OFFICE_FILES } from './home.ts';
 

@@ -2,7 +2,7 @@
 // or into a thread of its own from a colleague. The chat's instructions say so
 // (`threadsOnBrief`); this is the backstop in code. An Odd on a goal's thread
 // that has no job and leads no goal does only goals' work it does not lead,
-// so each tool `placed` checks in mcp.ts (the ones that raise an ask or a
+// so each tool `placed` checks in mcp-desk.ts (the ones that raise an ask or a
 // task, and hand_off when it would open a thread; that comment says why the
 // rest are outside) is refused in its chat and pointed to tell_lead. An Odd
 // with a job of its own is told the rule and trusted with it. Opening a
@@ -37,7 +37,7 @@ export async function goalWork(staffId: string, on: ThreadOn[]): Promise<GoalWor
   return { leads: [...new Set(goalThreads.map((t) => t.lead))] };
 }
 
-/** What the Odd is told when a goal's work comes to a tool `placed` checks (mcp.ts). */
+/** What the Odd is told when a goal's work comes to a tool `placed` checks (mcp-desk.ts). */
 export function goalWorkRefused(w: GoalWork, owner: string): string {
   const lead = w.leads.join(' or ');
   return [

@@ -13,6 +13,8 @@ on:
       - 'packages/ledger/test/pglite.ts'
       - 'scripts/prepare-pty.mjs'
       - 'apps/desktop/scripts/stage.ts'
+      - 'apps/desktop/scripts/smoke.ts'
+      - 'apps/desktop/scripts/driver.ts'
       - 'apps/desktop/scripts/check-project-terminal.mjs'
       - '.github/workflows/project-sessions.yml'
   workflow_dispatch:
@@ -35,6 +37,7 @@ jobs:
           node-version-file: .nvmrc
       - run: npm ci --no-audit --no-fund
       - run: node --test --experimental-test-module-mocks packages/ledger/test/project-sessions.test.ts apps/office/src/lib/server/project-sessions/native.test.ts
-      - run: node apps/desktop/scripts/stage.ts --smoke
+      - run: node apps/desktop/scripts/stage.ts
+      - run: node apps/desktop/scripts/smoke.ts --stage
       - name: Check terminal input and resize using bundled Node
         run: node apps/desktop/scripts/check-project-terminal.mjs

@@ -70,7 +70,7 @@ export const filesViaOffice = (agent: Agent, platform: NodeJS.Platform): boolean
  * (`instructions`), and its home folders under the owner's home (`homes`).
  * The office's lists keep their own order, so they are not built from this:
  * a test holds every name here in INSTRUCTIONS (the office's files.ts) and
- * SECRET_STORES (office.ts), so a new tool's files are walled off before it
+ * SECRET_STORES (office-folders.ts), so a new tool's files are walled off before it
  * runs.
  */
 export const AGENT_FILES: Record<

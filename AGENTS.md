@@ -14,6 +14,8 @@ add it to `CLAUDE.md` instead.
   context files.
 - **`docs/decisions/`**. One file per decision. Grep it before planning a
   change: `grep -ril <keyword> docs/decisions/`.
+- **`docs/code-standard.md`**. The rules code is written to and a pull request is
+  reviewed against, Q1 to Q12.
 - **The `CLAUDE.md` in your directory.** These are not loaded for you
   automatically. Open them.
 

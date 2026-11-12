@@ -19,11 +19,11 @@ first in `npm run lint` through `lint:guards`.
 
 Each line says what to do when its trigger comes.
 
-- Once the foundation pull requests (NEW-1680) have merged and no pull request
-  opened before they merged is still open: add `check-size.ts` at the end of
-  `lint:guards`. It fails when a code file (`.ts`, `.js`, `.svelte` or `.rs`,
-  not a test) that was over 1,000 lines at the merge base has grown. The base
-  is `ODDBORO_SIZE_BASE`, else `origin/main`, and CI's lint step sets it to the
-  pull request's. It passes a file deleted or renamed, and passes when nothing
-  is over 1,000 lines. It fails when it cannot find the base or finds no code
-  file at all. Record it as a decision and give it its line above.
+- Once no open pull request still grows a code file already over 1,000 lines
+  (NEW-1733): add `check-size.ts` at the end of `lint:guards`. It fails when a
+  code file (`.ts`, `.js`, `.svelte` or `.rs`, not a test) is over 1,000 lines
+  and longer than at the merge base. A file new since the base counts from 0,
+  and a renamed one from its old path's length. The base is
+  `ODDBORO_SIZE_BASE`, else `origin/main`, and CI's lint step sets it to the
+  pull request's. It fails when it cannot find the base or finds no code file
+  at all. Record it as a decision and give it its line above.

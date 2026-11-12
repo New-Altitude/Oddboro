@@ -65,6 +65,9 @@ export const OWNER_ACTIONS = {
   'DELETE /api/account': {
     none: "Ends the account's sign-in and each persona's, and makes every persona Odd quiet."
   },
+  'POST /api/client-log': {
+    notAnAction: "Writes the page's boot or error to the log on this computer; no record changes."
+  },
   'PUT /api/diagnostics': { notAnAction: SETUP },
   'POST /api/diagnostics/envelope': {
     notAnAction: "Passes the page's error report through the office's filter; nothing is kept."

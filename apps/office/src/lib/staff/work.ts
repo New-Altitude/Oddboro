@@ -71,8 +71,8 @@ const TOOL_WORDS: Record<string, string> = {
 };
 
 /**
- * The office's own tools (the ledger's `mcp.ts`), each in words. A test holds
- * this to every tool `mcp.ts` registers, so a new one cannot show as its name.
+ * The office's own tools (the ledger's `mcp-*.ts` files, which `mcp.ts` imports), each in words. A test holds
+ * this to every tool they register, so a new one cannot show as its name.
  */
 export const OFFICE_TOOL_WORDS: Record<string, string> = {
   ask_for_access: 'Asking you for access',

@@ -84,7 +84,7 @@ type Starts = { permission: Level; tools: OfficeToolId[] };
  * (`hirePersona`), the hire drawer and each grant's `atHire` read it, so it
  * comes before `OWNER_GRANTS`.
  * The rest have homes that work them out: the tool is the office's own
- * (`officeAgent()` in office.ts), the account its Office account and the
+ * (`officeAgent()` in office-staff.ts), the account its Office account and the
  * model the office's (both null), and thinking `DEFAULT_EFFORT`, never below
  * `MANAGER_EFFORT_FLOOR` for the manager (agents.ts).
  */

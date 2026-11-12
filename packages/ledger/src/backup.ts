@@ -36,6 +36,11 @@ export function backUpForNewVersion(version = process.env.ODDBORO_VERSION): stri
   // A first start on a new Mac has no office folder yet.
   mkdirSync(home(), { recursive: true });
   writeFileSync(file, `${version}\n`);
+  // The app's log keeps this line. After the shell's "installed X over Y", no
+  // "first start of X" means the update opened the old version again (#40).
+  console.log(
+    `office: first start of ${version}${last ? ` after ${last}` : ''}${made ? `, backed up to ${made}` : ''}`
+  );
   return made;
 }
 
