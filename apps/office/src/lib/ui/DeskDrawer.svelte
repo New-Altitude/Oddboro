@@ -806,7 +806,12 @@
         </ol>
         {#key open.key}
           {#if t.staffId && !t.askId}
-            <TaskResponse task={t} files={attached('task', t.id)} open={!!how && !how.choice} />
+            <TaskResponse
+              task={t}
+              odd={who(t.staffId)?.name}
+              files={attached('task', t.id)}
+              open={!!how && !how.choice}
+            />
           {/if}
           <Attachments
             items={attached('task', t.id)}

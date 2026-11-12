@@ -4,9 +4,11 @@
   // the chat takes a typed answer. A draft belongs to the task, so it survives
   // moving between tasks; a save names the version it opened, so a stale save
   // never overwrites newer words.
+  import { tick } from 'svelte';
   import type { AttachmentRow, TaskRow } from '@oddboro/ledger';
   import { shownPath, workPath } from '@oddboro/ledger/work-paths';
   import { call } from './api.ts';
+  import { startsFromOdd } from './task-card.ts';
   import { stepsToGo } from './task-steps.ts';
   import { openFile, wins } from './windows.svelte.ts';
   import {
@@ -22,6 +24,8 @@
 
   type Props = {
     task: TaskRow;
+    /** The name of the Odd that gave the task, which says whose starting text is in the box. */
+    odd?: string;
     files?: AttachmentRow[];
     /** Show the editor before there is a response: this task's answer is typed here. */
     open?: boolean;
@@ -31,11 +35,21 @@
     held?: boolean;
     onfinish?: () => void;
   };
-  let { task, files = [], open = false, inChat = false, held = false, onfinish }: Props = $props();
+  let {
+    task,
+    odd = 'The Odd',
+    files = [],
+    open = false,
+    inChat = false,
+    held = false,
+    onfinish
+  }: Props = $props();
   const row = $derived(current(task));
   const draft = $derived(drafts[task.id]);
   const text = $derived(draft?.text ?? row.response ?? '');
   const stale = $derived(staleDraft(draft, row));
+  /** The box holds the Odd's starting text, not the owner's own words. */
+  const oddsDraft = $derived(startsFromOdd(row, !!draft));
   let pending = $state(false);
   const busy = $derived(writing[task.id] || pending);
   let problem = $state('');
@@ -43,6 +57,14 @@
 
   function edit(value: string) {
     drafts[task.id] = { text: value, version: draft?.version ?? row.responseVersion };
+  }
+
+  /** Empty the box as a draft, then put the caret there: the owner still saves or finishes. */
+  let box: HTMLTextAreaElement | undefined = $state();
+  async function clear() {
+    edit('');
+    await tick();
+    box?.focus();
   }
 
   async function attempt(work: () => Promise<unknown>) {
@@ -91,7 +113,14 @@
         >Keep my edit over this version</button
       >
     {/if}
+    {#if oddsDraft}
+      <div class="flex flex-wrap items-center gap-2 text-xs text-muted">
+        <span>{odd}'s draft. Edit it, or clear it.</span>
+        <button class="text-sea hover:text-ink" disabled={busy} onclick={clear}>Clear</button>
+      </div>
+    {/if}
     <textarea
+      bind:this={box}
       id={field}
       class="rounded-lg bg-raise p-3 text-sm text-ink"
       rows={inChat ? 4 : 8}

@@ -6,7 +6,8 @@
   import { clockTime } from '@oddboro/ledger/time';
   import Markdown from './Markdown.svelte';
   import TaskResponse from './TaskResponse.svelte';
-  import { current, saved, type SavedResponse } from './task-response.svelte.ts';
+  import { current, drafts, saved, type SavedResponse } from './task-response.svelte.ts';
+  import { cardText } from './task-card.ts';
   import ChatGoal from './ChatGoal.svelte';
   import GoalProposal from './GoalProposal.svelte';
   import { approvalTarget, approveWord, yesWord } from './chat-approval.ts';
@@ -381,6 +382,26 @@
       new Date(clock)
     )
   );
+
+  /** Whether Open on Desk has somewhere to go: an ask or task still waiting there, or any report. */
+  const opens = (d: Delivered) =>
+    d.kind === 'report' || (d.kind === 'ask' ? desk.asks : desk.tasks).some((r) => r.id === d.id);
+
+  /** A card's words for Copy: its title, and why, steps and response while the desk holds them. */
+  function cardCopy(d: Delivered): string {
+    const a = d.kind === 'ask' ? desk.asks.find((r) => r.id === d.id) : undefined;
+    const t = d.kind === 'task' ? desk.tasks.find((r) => r.id === d.id) : undefined;
+    return cardText({
+      kind: KIND[d.kind],
+      title: d.title,
+      why: (a ?? t)?.why,
+      steps: t?.steps,
+      response:
+        d.kind === 'task'
+          ? (drafts[d.id]?.text ?? (t ? current(t).response : saved[d.id]?.response))
+          : undefined
+    });
+  }
 
   /** The line whose text was just copied, which says so for a moment. */
   let copied = $state<number | undefined>();
@@ -835,11 +856,22 @@
   // The plus menu beside the box: one list of what the owner can add, each
   // shown where it applies. A new action is one more item here.
   let goalOpen = $state(false);
+  let goal: ChatGoal | undefined = $state();
   const canSetGoal = $derived(profile.role === 'Office Manager' && !replyTo && decisionMode);
-  type MoreItem = { label: string; shown: () => boolean; run: () => void };
+  /** `focuses`: the item puts the caret somewhere itself, so focus does not go back to the message box. */
+  type MoreItem = { label: string; shown: () => boolean; run: () => void; focuses?: boolean };
   const MORE: MoreItem[] = [
     { label: 'Attach files', shown: () => true, run: () => picker?.click() },
-    { label: 'New goal', shown: () => canSetGoal, run: () => (goalOpen = true) }
+    {
+      label: 'New goal',
+      shown: () => canSetGoal,
+      focuses: true,
+      run: async () => {
+        goalOpen = true;
+        await tick();
+        goal?.focus();
+      }
+    }
   ];
   const more = $derived(MORE.filter((m) => m.shown()));
   let moreOpen = $state(false);
@@ -857,7 +889,7 @@
     focus?.focus();
   }
   function pickMore(m: MoreItem) {
-    closeMore(box);
+    closeMore(m.focuses ? undefined : box);
     m.run();
   }
   /** Arrow keys move between the items, Escape closes; Enter picks the focused one as a button does. */
@@ -1090,8 +1122,8 @@
     {/if}
     <button
       class="stamp hover:text-ink"
-      aria-label={copied === i ? 'Copied' : 'Copy this message'}
-      onclick={() => copy(i, line.text)}
+      aria-label={copied === i ? 'Copied' : line.item ? 'Copy this card' : 'Copy this message'}
+      onclick={() => copy(i, line.item ? cardCopy(line.item) : line.text)}
     >
       <svg
         class="size-3"
@@ -1244,22 +1276,29 @@
           {KIND[it.kind]}
         </div>
         <div class="me-auto w-[85%]" data-item={keyOf(it)}>
-          <button
-            class="w-full rounded-2xl rounded-es-md bg-raise px-3 py-2 text-start text-sm transition-colors hover:bg-sea/15 {selected ===
+          <!-- Plain text, so the owner can select the title; Open on Desk is its own button. -->
+          <div
+            class="w-full rounded-2xl rounded-es-md bg-raise px-3 py-2 text-sm {selected ===
             keyOf(it)
               ? 'ring-1 ring-sea'
               : ''}"
-            aria-pressed={selected === keyOf(it)}
-            title={`Open this ${KIND[it.kind].toLowerCase()}`}
-            onclick={() => pick(it)}
+            aria-current={selected === keyOf(it) ? 'true' : undefined}
           >
             <span class="block font-medium break-words text-ink">{it.title}</span>
-            <span
-              class="text-xs {it.status === 'open' || it.status === 'new'
-                ? 'text-ember'
-                : 'text-muted'}">{STATUS[it.status] ?? it.status}</span
-            >
-          </button>
+            <div class="flex flex-wrap items-baseline gap-x-3 text-xs">
+              <span
+                class={it.status === 'open' || it.status === 'new' ? 'text-ember' : 'text-muted'}
+                >{STATUS[it.status] ?? it.status}</span
+              >
+              {#if opens(it)}
+                <button class="text-sea hover:text-ink" onclick={() => pick(it)}
+                  >{it.kind === 'report' && !desk.reports.some((r) => r.id === it.id)
+                    ? 'Open report'
+                    : 'Open on Desk'}</button
+                >
+              {/if}
+            </div>
+          </div>
           {#if it.note}
             <p class="mt-1 px-3 text-xs whitespace-pre-wrap text-muted">{it.note}</p>
           {/if}
@@ -1316,6 +1355,7 @@
                   <!-- The one place the chat takes a typed answer to a task. -->
                   <TaskResponse
                     task={t.task}
+                    odd={profile.name}
                     files={t.files}
                     open
                     inChat
@@ -1540,7 +1580,12 @@
     </div>
   {/if}
   {#if canSetGoal}
-    <ChatGoal managerId={profile.id} onset={() => load(profile.id)} bind:open={goalOpen} />
+    <ChatGoal
+      bind:this={goal}
+      managerId={profile.id}
+      onset={() => load(profile.id)}
+      bind:open={goalOpen}
+    />
   {/if}
   <form
     class="flex items-end gap-2 px-3 {refused ? 'pb-2' : 'pb-3'}"

@@ -13,6 +13,11 @@
   let problem = $state('');
   let result = $state('');
   let pending: { title: string; requestId: string } | undefined;
+  let field: HTMLInputElement | undefined = $state();
+  /** Put the caret in the goal field, as New goal does once it opens it. */
+  export function focus() {
+    field?.focus();
+  }
   // Opening the field starts it fresh.
   $effect(() => {
     if (!open) return;
@@ -50,6 +55,7 @@
       <form class="flex flex-col gap-1.5 pb-2" onsubmit={setGoal}>
         <label class="text-muted" for="chat-goal">Goal to set</label>
         <input
+          bind:this={field}
           id="chat-goal"
           class="rounded-lg bg-raise px-2.5 py-2 text-sm text-ink"
           bind:value={title}
