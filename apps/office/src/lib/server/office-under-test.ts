@@ -204,7 +204,7 @@ const fs = require('node:fs');
 // "--version" prints versions/grok in the test office, else the oldest the office runs.
 if (process.argv[2] === '--version') {
   const v = ${JSON.stringify(join(folder, 'versions', 'grok'))};
-  process.stdout.write('grok ' + (fs.existsSync(v) ? fs.readFileSync(v, 'utf8').trim() : '1.0.62') + '\\n');
+  process.stdout.write('grok ' + (fs.existsSync(v) ? fs.readFileSync(v, 'utf8').trim() : '1.0.77') + '\\n');
   process.exit(0);
 }
 const args = process.argv.slice(2);
