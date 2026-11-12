@@ -84,7 +84,8 @@ const route = await import('../../routes/api/account/+server.ts');
 const callback = await import('../../routes/account/callback/+page.server.ts');
 const page = await import('../../routes/+page.server.ts');
 const hooks = await import('../../hooks.server.ts');
-const { PAGE, sender } = await import('./diagnostics-harness.ts');
+// `page` here is the root page's module, so the harness's goes by another name.
+const { page: ownerPage, sender } = await import('./diagnostics-harness.ts');
 const send = sender(hooks.handle);
 
 // The database keeps timers for its open connections from the first page
@@ -116,7 +117,7 @@ async function account(
   const r = await send({
     route: '/api/account',
     method,
-    headers: method === 'GET' ? {} : PAGE,
+    headers: await ownerPage(),
     resolve: async (e) => {
       try {
         const res = await (route[method] as Handler)(e);

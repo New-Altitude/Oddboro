@@ -13,7 +13,7 @@ import { fakeNewAltitude } from './fake-new-altitude.ts';
 import {
   ENVELOPE_PATH,
   ofType,
-  PAGE,
+  page,
   recorder,
   sender,
   tempOffice,
@@ -82,9 +82,13 @@ const arrived = (mark: string, from = 0) => atDoor(from).some((g) => g.body.incl
  * Made here, not at each call: a report carries the source lines around where
  * its error was made, and a caller's lines hold the marks of the reports beside it.
  */
-const fail = (mark: string, headers: Record<string, string> = {}) =>
-  // `fixedError` takes only a literal type; each mark is one the test wrote.
-  send({ route: '/api/goals', headers, resolve: throwing(() => fixedError(mark as 'mark')) });
+const fail = async (mark: string, headers: Record<string, string> = {}) =>
+  send({
+    route: '/api/goals',
+    headers: { ...(await page()), ...headers },
+    // `fixedError` takes only a literal type; each mark is one the test wrote.
+    resolve: throwing(() => fixedError(mark as 'mark'))
+  });
 
 /** Sign in through the fake, as the owner's page and New Altitude's sign-in page do. */
 async function signIn(): Promise<void> {
@@ -101,11 +105,11 @@ const heldToken = (): string =>
   (JSON.parse(store.get(SIGN_IN) ?? '{}') as { tokens?: { access_token?: string } }).tokens
     ?.access_token ?? '';
 
-const signOut = () =>
+const signOut = async () =>
   send({
     route: '/api/account',
     method: 'DELETE',
-    headers: PAGE,
+    headers: await page(),
     resolve: accountRoute.DELETE as Route
   });
 
@@ -117,7 +121,7 @@ test('signed out, a report to New Altitude is not sent; signed in, it is', async
   const yes = await send({
     route: '/api/diagnostics',
     method: 'PUT',
-    headers: { ...PAGE, 'content-type': 'application/json' },
+    headers: { ...(await page()), 'content-type': 'application/json' },
     body: '{"answer":"yes"}',
     resolve: answerRoute.PUT as Route
   });
@@ -149,7 +153,7 @@ test("every report to New Altitude carries the account's access token, and no bo
   const relayed = await send({
     route: '/api/diagnostics/envelope',
     method: 'POST',
-    headers: { ...PAGE, 'content-type': 'application/x-sentry-envelope' },
+    headers: { ...(await page()), 'content-type': 'application/x-sentry-envelope' },
     body: pageReport.map((x) => JSON.stringify(x)).join('\n'),
     resolve: relayRoute.POST as Route
   });

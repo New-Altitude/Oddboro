@@ -88,7 +88,7 @@ const personaRoute = await import('../../routes/api/personas/[slug]/+server.ts')
 const onboardingRoute = await import('../../routes/api/onboarding/+server.ts');
 const callback = await import('../../routes/account/callback/+page.server.ts');
 const hooks = await import('../../hooks.server.ts');
-const { PAGE, sender } = await import('./diagnostics-harness.ts');
+const { page, sender } = await import('./diagnostics-harness.ts');
 const send = sender(hooks.handle);
 
 type Heard = { type: string; slug?: string; joined?: string; problem?: string };
@@ -121,7 +121,8 @@ async function call(
     method,
     path: how.slug ? route.replace('[slug]', how.slug) : route,
     headers:
-      how.headers ?? (method === 'GET' ? {} : { ...PAGE, 'content-type': 'application/json' }),
+      how.headers ??
+      (method === 'GET' ? await page() : { ...(await page()), 'content-type': 'application/json' }),
     body: how.body === undefined ? undefined : JSON.stringify(how.body),
     resolve: async (e) => {
       try {
@@ -393,12 +394,18 @@ test('sync at start lifts quiet when New Altitude lists the persona again, and a
 test('a page from another site cannot make the office read the list of personas', async () => {
   const listings = () => seenAt('/api/personas/odds').length;
   const before = listings();
-  const r = await offers({ 'sec-fetch-site': 'cross-site', origin: 'https://evil.example' });
+  // With the key, as a link from another site brings the cookie: the route's own check refuses it.
+  const owner = await page();
+  const r = await offers({
+    ...owner,
+    'sec-fetch-site': 'cross-site',
+    origin: 'https://evil.example'
+  });
   assert.equal(r.status, 403);
   assert.equal(listings(), before);
-  // The office's own page, and a client that says nothing, still read it.
-  assert.equal((await offers(PAGE)).status, 200);
-  assert.equal((await offers()).status, 200);
+  // The office's own page, and a client with the key that says nothing else, still read it.
+  assert.equal((await offers(owner)).status, 200);
+  assert.equal((await offers({ cookie: owner.cookie })).status, 200);
   assert.equal(listings(), before + 2);
 });
 
