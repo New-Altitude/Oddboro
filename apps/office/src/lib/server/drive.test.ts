@@ -503,6 +503,31 @@ const ROWS: Row[] = [
     }
   },
   {
+    does: "after added words, the first failure is the run's end",
+    tools: ['claude'],
+    streamed: true,
+    message: 'Fail and go on.',
+    // Added once the reply began: the stand-in fails the first and answers the second.
+    hear: (e, ran) => {
+      if (e.type !== 'tool') return;
+      ran.live.add?.('Fail now.');
+      ran.tookLate = ran.live.add?.('late');
+    },
+    check: (end, ran) => {
+      assert.equal(ran.tookLate, true);
+      assert.equal(end.outcome, 'failed', JSON.stringify(end));
+      assert.ok(end.outcome === 'failed');
+      assert.deepEqual(end.why, {
+        result: {
+          subtype: 'error_during_execution',
+          isError: true,
+          text: undefined,
+          errors: ['Failed first.']
+        }
+      });
+    }
+  },
+  {
     does: 'a success result that says is_error ends failed with the result as Claude Code sent it',
     tools: ['claude'],
     message: 'Succeed with an error.',
@@ -663,6 +688,38 @@ test('an office run whose result has no text replies with nothing, as today', as
   assert.deepEqual(await officeRun('Think aloud: Joined words.\nSucceed with no text.'), {
     ok: true,
     text: ''
+  });
+});
+
+await L.pg`insert into staff ${L.pg([odd('tess', 'Tess')])}`;
+
+test("an Odd's Claude chat shows its streamed reply once", async () => {
+  const shown: string[] = [];
+  await chat('tess', 'Think aloud: Some words.\nSend it whole too.', (e) => {
+    if (e.type === 'delta') shown.push(e.text);
+  });
+  assert.equal(shown.join(''), 'Some words');
+});
+
+/** The five-hour share the office's plan record holds, once it is `share` or after two seconds. */
+async function planReaches(share: number): Promise<number | undefined> {
+  for (const start = Date.now(); Date.now() - start < 2000; await sleep(20))
+    if ((await L.plan())?.fiveHour === share) break;
+  return (await L.plan())?.fiveHour;
+}
+
+test("a Claude Code run's plan limit reaches the office's plan record", async () => {
+  // Low shares, which hold back no hand-off in the tests after this one.
+  assert.equal((await chatEnd('sam', 'Plan used: 0.11')).error, undefined);
+  assert.equal(await planReaches(0.11), 0.11);
+  assert.equal((await officeRun('Plan used: 0.12')).ok, true);
+  assert.equal(await planReaches(0.12), 0.12);
+});
+
+test('an office run whose tool exits with an error says so with its exit code and stderr, as today', async () => {
+  assert.deepEqual(await officeRun('Exit with an error.'), {
+    ok: false,
+    text: 'Claude Code stopped (exit 3). The stand-in exited as told.'
   });
 });
 
