@@ -1,6 +1,6 @@
 // What a chat message tells the staffer's chat session before the owner's
 // words: the lines in its chat that no run of the session wrote, the owner's
-// messages whose run failed, the work it put on the desk, and the asks the
+// messages whose run failed or the owner stopped, the work it put on the desk, and the asks the
 // owner decided and tasks they ended, since the session last heard. Without
 // it, an answer to a new manager's hello, or "How did the call go?" after a
 // poke, means nothing to the session.
@@ -77,13 +77,24 @@ export function lastExchange(
     : `Just before, ${who.odd} said: ${quoted(spoken[odd])}.`;
 }
 
+/**
+ * The line that ends the run on the owner's line at `i`: the next one after
+ * it, past what the owner added to the same turn with Send now.
+ */
+function outcomeOf(past: ChatEntry[], i: number): ChatEntry | undefined {
+  const turn = past[i].turnId;
+  return past.slice(i + 1).find((e) => !(turn && e.from === 'owner' && e.turnId === turn));
+}
+
 /** Where `past` stands for `session`: which lines it holds, and the failed runs since the owner last wrote. */
 function heardOf(past: ChatEntry[], session: Session) {
-  // The office saves a failed run's error right after the owner's line (`chat` in staff.ts).
-  const failedOn = (i: number) => past[i].from === 'owner' && past[i + 1]?.failed === true;
+  // The office saves a failed run's error right after the owner's lines (`replyToOwnerTurn`).
+  const failedOn = (i: number) => past[i].from === 'owner' && outcomeOf(past, i)?.failed === true;
+  // The owner stopped that run: it did not fail.
+  const stoppedOn = (i: number) => failedOn(i) && outcomeOf(past, i)?.interrupted === true;
   // The last failed run whose tool named a session (`inSession`): the session
   // a resumed chat takes up is the one it saved.
-  const saved = past.findLastIndex((_, i) => failedOn(i) && past[i + 1].inSession === true);
+  const saved = past.findLastIndex((_, i) => failedOn(i) && outcomeOf(past, i)?.inSession === true);
   // A new session holds what its replay keeps. A resumed one holds every
   // failed run's owner line up to that run's: the run took its own line, and
   // its preface carried each earlier one the session did not hold. It never
@@ -92,7 +103,7 @@ function heardOf(past: ChatEntry[], session: Session) {
     session === 'resumed' ? failedOn(i) && i <= saved : session.replayed.has(i);
   const heard = past.findLastIndex((e, i) => e.from === 'owner' && !failedOn(i)) + 1;
   const failed = past.flatMap((_, i) => (i >= heard && failedOn(i) ? [i] : []));
-  return { failedOn, holds, heard, failed };
+  return { failedOn, stoppedOn, holds, heard, failed };
 }
 
 /** Where in `past` sit the failed runs' owner lines the session never saw, which `chatPreface` retells. */
@@ -107,12 +118,18 @@ export function missedAt(past: ChatEntry[], session: Session): number[] {
  * run's owner line comes as the replay retells it, with its files as they are now under it.
  */
 export function chatPreface(past: RetoldEntry[], landed: Landed[], session: Session): string[] {
-  const { failedOn, holds, heard, failed } = heardOf(past, session);
+  const { failedOn, stoppedOn, holds, heard, failed } = heardOf(past, session);
   const since = past.flatMap((e, i) => (i >= heard && !holds(i) ? [e] : []));
   const told = since.filter((e) => e.told);
   const poked = since.filter((e) => e.poke);
-  const missed = missedAt(past, session).map((i) => past[i]);
-  const ran = failed.filter(holds).length;
+  const missedAll = missedAt(past, session);
+  const missed = missedAll.filter((i) => !stoppedOn(i)).map((i) => past[i]);
+  const missedStopped = missedAll.filter(stoppedOn).map((i) => past[i]);
+  const ran = failed.filter((i) => holds(i) && !stoppedOn(i)).length;
+  const heldStopped = failed.filter((i) => holds(i) && stoppedOn(i));
+  // Words added with Send now share their turn's one reply.
+  const stops = new Set(heldStopped.map((i) => outcomeOf(past, i))).size;
+  const ranStopped = heldStopped.length;
   // The session saw what it delivered up to the end of its last reply.
   const last = past.findLast((e, i) => !unseen(e) && !failedOn(i))?.at ?? '';
   const put = landed.filter((d) => d.at.toISOString() > last);
@@ -137,6 +154,20 @@ export function chatPreface(past: RetoldEntry[], landed: Landed[], session: Sess
           ran === 1
             ? "(Your run on {owner}'s last message you saw before this one failed, so they have no reply from you to it.)"
             : `(Your runs on {owner}'s last ${ran} messages you saw before this one failed, so they have no reply from you to them.)`
+        ]
+      : []),
+    // A stopped reply is the owner's choice, not a failure to make up for.
+    ...(ranStopped
+      ? [
+          `({owner} stopped your ${stops === 1 ? 'reply' : 'replies'} to their last ${ranStopped === 1 ? 'message' : `${ranStopped} messages`} you saw before this one. Do not pick that work back up unless they ask.)`
+        ]
+      : []),
+    ...(missedStopped.length
+      ? [
+          [
+            '({owner} wrote to you before this, then stopped your reply before you saw it. Do not act on it unless they ask:)',
+            ...missedStopped.map(retoldLine)
+          ].join('\n')
         ]
       : []),
     // Each line with its own files, since pasted pictures are numbered from #1 in every message.

@@ -3,6 +3,7 @@
 import { and, asc, desc, eq, gte } from 'drizzle-orm';
 import { db } from './db.ts';
 import { fixedError } from './errors.ts';
+import { type Db } from './threads.ts';
 import {
   asks,
   jobs,
@@ -44,14 +45,17 @@ export async function jobsFor(staffId: string): Promise<(JobRow & { lastRun?: Ru
   );
 }
 
-export async function addJob(j: {
-  staffId: string;
-  name: string;
-  instructions: string;
-  schedule: Schedule;
-  report?: boolean;
-}): Promise<JobRow> {
-  const [row] = await db
+export async function addJob(
+  j: {
+    staffId: string;
+    name: string;
+    instructions: string;
+    schedule: Schedule;
+    report?: boolean;
+  },
+  q: Db = db
+): Promise<JobRow> {
+  const [row] = await q
     .insert(jobs)
     .values({ ...j, nextRunAt: nextRun(j.schedule, new Date()) })
     .returning();

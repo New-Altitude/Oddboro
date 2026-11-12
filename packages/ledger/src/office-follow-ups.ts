@@ -55,17 +55,18 @@ async function followUp(
     note: string | null;
     pickedUp?: string[];
     reportWhenDone?: boolean;
-  }
+  },
+  q: Db = db
 ): Promise<void> {
   // The answer to something raised on a thread works on that thread.
   const [on] = servesNoThread(kind)
     ? []
     : f.askId
-      ? await db.select({ threadId: asks.threadId }).from(asks).where(eq(asks.id, f.askId))
+      ? await q.select({ threadId: asks.threadId }).from(asks).where(eq(asks.id, f.askId))
       : f.taskId
-        ? await db.select({ threadId: tasks.threadId }).from(tasks).where(eq(tasks.id, f.taskId))
+        ? await q.select({ threadId: tasks.threadId }).from(tasks).where(eq(tasks.id, f.taskId))
         : [];
-  await addFollowUp(db, { staffId, kind, ...f, threadId: on?.threadId });
+  await addFollowUp(q, { staffId, kind, ...f, threadId: on?.threadId });
 }
 
 /**

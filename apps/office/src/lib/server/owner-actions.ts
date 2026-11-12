@@ -174,6 +174,10 @@ export const OWNER_ACTIONS = {
   'DELETE /api/staff/[id]/chat': {
     none: 'Stops only the named reply attempt and keeps its outcome in chat.'
   },
+  'PATCH /api/staff/[id]/chat': {
+    notAnAction:
+      "Adds the owner's words to the named reply while it runs; the chat's own log keeps them."
+  },
   'POST /api/staff/[id]/chat': {
     notAnAction:
       "The chat's own log keeps it; a decision in it is recorded by the tool the Odd calls."

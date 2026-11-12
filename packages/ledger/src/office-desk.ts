@@ -1,9 +1,9 @@
 // Reports, and the desk that lists what waits on the owner.
-import { and, asc, desc, eq, isNull, or } from 'drizzle-orm';
+import { and, asc, desc, eq, isNotNull, isNull, or } from 'drizzle-orm';
 import { db } from './db.ts';
-import { asks, attachments, reports, tasks } from './schema.ts';
+import { asks, attachments, ledger, reports, tasks } from './schema.ts';
 import { type DeskItem } from './desk-answers.ts';
-import type { AskRow, TaskRow, AttachmentRow, ReportRow } from './office.ts';
+import type { AskRow, TaskRow, AttachmentRow, ReportRow, LedgerRow } from './office.ts';
 import { ofWorkingOdd } from './office-staff.ts';
 import { shownFolder } from './office-folders.ts';
 import { record } from './office-ledger.ts';
@@ -23,6 +23,8 @@ export async function readReport(id: number): Promise<void> {
 // The desk: everything waiting on the owner
 
 export type Desk = {
+  /** The latest answers, kept apart from the items waiting on the owner. */
+  recent: Pick<LedgerRow, 'id' | 'title' | 'reason'>[];
   asks: AskRow[];
   tasks: TaskRow[];
   reports: ReportRow[];
@@ -36,7 +38,7 @@ export type Desk = {
 };
 
 export async function desk(): Promise<Desk> {
-  const [a, t, r, f] = await Promise.all([
+  const [a, t, r, f, recent] = await Promise.all([
     db
       .select()
       .from(asks)
@@ -59,12 +61,24 @@ export async function desk(): Promise<Desk> {
       .leftJoin(asks, eq(attachments.askId, asks.id))
       .leftJoin(tasks, eq(attachments.taskId, tasks.id))
       .where(or(eq(asks.status, 'open'), eq(tasks.status, 'open')))
-      .orderBy(asc(attachments.id))
+      .orderBy(asc(attachments.id)),
+    db
+      .select({ id: ledger.id, title: ledger.title, reason: ledger.reason })
+      .from(ledger)
+      .where(
+        and(
+          eq(ledger.actor, 'owner'),
+          or(eq(ledger.kind, 'decision'), isNotNull(ledger.taskId), isNotNull(ledger.askId))
+        )
+      )
+      .orderBy(desc(ledger.createdAt), desc(ledger.id))
+      .limit(5)
   ]);
   // A twin waits behind the first ask it repeats, and the owner's answer to
   // that one answers it too (`asksNoMore`, `decide`).
   const shown = a.filter((x) => !a.some((first) => first.id < x.id && asksNoMore(first, x)));
   return {
+    recent,
     asks: shown,
     tasks: t,
     reports: r,
@@ -121,6 +135,8 @@ export type Delivery = {
   status: string;
   /** When the owner decided an ask or finished or dropped a task. */
   decidedAt?: Date | null;
+  /** The owner's words on a decided ask or finished task. */
+  note?: string | null;
 };
 
 /** What one staffer put on the owner's desk, newest last, with where each stands. */
@@ -132,7 +148,8 @@ export async function deliveries(staffId: string, limit = 200): Promise<Delivery
         title: asks.title,
         at: asks.createdAt,
         status: asks.status,
-        decidedAt: asks.decidedAt
+        decidedAt: asks.decidedAt,
+        note: asks.reason
       })
       .from(asks)
       .where(eq(asks.staffId, staffId))
@@ -144,6 +161,7 @@ export async function deliveries(staffId: string, limit = 200): Promise<Delivery
         title: tasks.title,
         at: tasks.createdAt,
         status: tasks.status,
+        note: tasks.note,
         decidedAt: tasks.doneAt
       })
       .from(tasks)

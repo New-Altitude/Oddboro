@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { home, OFFICE_FILES, staffer } from '@oddboro/ledger';
 import { attachableType, FILES_MAX, refusal, type ChatFile } from '#lib/attachments.ts';
-import { CHAT_BYTES, type OwnerInput } from '#lib/staff/chat-input.ts';
+import { CHAT_BYTES, CHAT_ID, type OwnerInput } from '#lib/staff/chat-input.ts';
 import type { ChatEntry, ChatRef } from '#lib/staff/chat.ts';
 import { attachedFiles, keepAttachment } from './chat-files.ts';
 import { replyBrief } from './chat-delivery.ts';
@@ -62,8 +62,7 @@ export async function keepOwnerTurn(
   aboutKey?: string
 ): Promise<ChatEntry> {
   const { turnId, message, source, files = [] } = input;
-  if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(turnId))
-    throw new ChatInputError('This message has no valid ID.');
+  if (!CHAT_ID.test(turnId)) throw new ChatInputError('This message has no valid ID.');
   if (
     !source.kind ||
     source.kind.length > 80 ||

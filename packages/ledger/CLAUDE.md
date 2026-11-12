@@ -304,7 +304,9 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   and each `task_done` or `carry_out` row the task's end starts names it in
   `follow_ups.picked_up` (`OWN_RUN` in `src/desk-answers.ts` says which ends
   start such a run), office text kept
-  out of the owner's `note`: the brief tells the Odd to leave that work to it. A dropped task starts nothing,
+  out of the owner's `note`: the brief tells the Odd to leave that work to it.
+  `finishTask` ends the task, keeps the owner's answer and starts all of this
+  in one transaction, so a failed wake leaves the task open. A dropped task starts nothing,
   unless it was given on a hand-off or a thread (below).
   A denied ask with a reason also starts a `denied` follow-up: the Odd reads
   the reason, keeps a lesson if it says how to work from now on, and never

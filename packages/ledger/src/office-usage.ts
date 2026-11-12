@@ -2,6 +2,7 @@
 import { eq } from 'drizzle-orm';
 import { db, sql as pg } from './db.ts';
 import { fixedError } from './errors.ts';
+import { type Db } from './threads.ts';
 import { owner, planLimits, usage, type UsageKind } from './schema.ts';
 import { zone } from './time.ts';
 
@@ -50,8 +51,8 @@ export async function setPlanLimits(w: Partial<PlanWindows>): Promise<void> {
 }
 
 /** What the staff call the owner. "the owner" until the install sets a name. */
-export async function ownerName(): Promise<string> {
-  const [row] = await db.select().from(owner).where(eq(owner.id, 'owner'));
+export async function ownerName(q: Db = db): Promise<string> {
+  const [row] = await q.select().from(owner).where(eq(owner.id, 'owner'));
   return row?.name.trim() || 'the owner';
 }
 

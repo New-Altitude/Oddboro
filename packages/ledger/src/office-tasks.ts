@@ -2,7 +2,7 @@
 import { and, asc, desc, eq } from 'drizzle-orm';
 import { db } from './db.ts';
 import { parkedWork, wakeOnTask, type TaskEnded } from './task-parking.ts';
-import { keepRun, raisedOn } from './threads.ts';
+import { keepRun, raisedOn, type Db } from './threads.ts';
 import { attachments, tasks, threads, type Step } from './schema.ts';
 import {
   OWN_RUN,
@@ -148,9 +148,9 @@ export async function tickKey(key: string): Promise<void> {
  * own work picks up among it (`OWN_RUN`). `finishTask` and a failed run giving
  * a wait back (`finishFollowUp`) both read it, so parked work hears of the same run.
  */
-async function taskEnd(t: TaskRow) {
+async function taskEnd(t: TaskRow, q: Db = db) {
   // A tool's connect task belongs to the access ask it came from.
-  const from = t.askId ? await ask(t.askId) : undefined;
+  const from = t.askId ? await ask(t.askId, q) : undefined;
   const effects: readonly TaskEffect[] =
     t.status !== 'done'
       ? OWNER_ANSWERS.task.dropped
@@ -169,13 +169,16 @@ async function taskEnd(t: TaskRow) {
 }
 
 /** The run on an ended task's own work that `wakeOnTask` tells parked work of, if one picks up. */
-async function ownRunOf(end: {
-  ownThread: number | null;
-  ownRuns: boolean;
-}): Promise<{ work: string | null } | undefined> {
+async function ownRunOf(
+  end: {
+    ownThread: number | null;
+    ownRuns: boolean;
+  },
+  q: Db = db
+): Promise<{ work: string | null } | undefined> {
   if (!end.ownRuns) return undefined;
   const [own] = end.ownThread
-    ? await db
+    ? await q
         .select({ title: threads.title, hubId: threads.hubId, status: threads.status })
         .from(threads)
         .where(eq(threads.id, end.ownThread))
@@ -183,32 +186,42 @@ async function ownRunOf(end: {
   // Stopped work carries no part of its own, and a lead that left the office
   // runs nothing, so parked work must not leave its part to either. Its lead
   // leaving stopped the work, so a lead brought back since still reads as gone.
-  if (own && (own.status === 'stopped' || !(await staffer(own.hubId)))) return undefined;
+  if (own && (own.status === 'stopped' || !(await staffer(own.hubId, q)))) return undefined;
   return { work: own?.title ?? null };
 }
 
-export async function finishTask(id: number, done: boolean, note: string | null): Promise<void> {
-  const [t] = await db
-    .update(tasks)
-    .set({ status: done ? 'done' : 'dropped', note: note || null, doneAt: new Date() })
-    .where(and(eq(tasks.id, id), eq(tasks.status, 'open')))
-    .returning();
-  if (!t) return;
-  const owner = await ownerName();
-  const answers = ownerAnswers(t.steps).map((a) => `${a.step} ${a.answer}`);
-  await record({
-    kind: 'work',
-    actor: 'owner',
-    title: `${done ? 'Done' : 'Dropped'} by ${owner}: ${t.title}`,
-    // Answers first: search_ledger shows the first 400 characters, and a long why would cut them off.
-    body: [...answers, t.why].join('\n'),
-    reason: t.note,
-    taskId: t.id
-  });
-  await taskEnded(t, {
-    ended: done ? 'done' : 'dropped',
-    owner,
-    said: `${owner} ${done ? 'finished' : 'dropped'} "${t.title}"${t.note ? `: ${t.note}` : '.'}`
+export async function finishTask(id: number, done: boolean, note: string | null): Promise<boolean> {
+  return db.transaction(async (q) => {
+    const [t] = await q
+      .update(tasks)
+      .set({ status: done ? 'done' : 'dropped', note: note || null, doneAt: new Date() })
+      .where(and(eq(tasks.id, id), eq(tasks.status, 'open')))
+      .returning();
+    if (!t) return false;
+    const owner = await ownerName(q);
+    const answers = ownerAnswers(t.steps).map((a) => `${a.step} ${a.answer}`);
+    await record(
+      {
+        kind: 'work',
+        actor: 'owner',
+        title: `${done ? 'Done' : 'Dropped'} by ${owner}: ${t.title}`,
+        // Answers first: search_ledger shows the first 400 characters, and a long why would cut them off.
+        body: [...answers, t.why].join('\n'),
+        reason: t.note,
+        taskId: t.id
+      },
+      q
+    );
+    await taskEnded(
+      t,
+      {
+        ended: done ? 'done' : 'dropped',
+        owner,
+        said: `${owner} ${done ? 'finished' : 'dropped'} "${t.title}"${t.note ? `: ${t.note}` : '.'}`
+      },
+      q
+    );
+    return true;
   });
 }
 
@@ -220,16 +233,17 @@ export async function finishTask(id: number, done: boolean, note: string | null)
  */
 async function taskEnded(
   t: TaskRow,
-  how: { ended: TaskEnded; owner: string; said: string }
+  how: { ended: TaskEnded; owner: string; said: string },
+  q: Db = db
 ): Promise<void> {
   const done = how.ended === 'done';
-  const end = await taskEnd(t);
+  const end = await taskEnd(t, q);
   const { from, effects } = end;
   // Read before the effects: waking the parked work clears what parks it. Its
   // lead's run on the task's own work picks up in the same moment, so each run
   // is told the other has its part, or both do the parked work.
-  const parked = await parkedWork(t.id);
-  const ownRun = parked.length ? await ownRunOf(end) : undefined;
+  const parked = await parkedWork(t.id, q);
+  const ownRun = parked.length ? await ownRunOf(end, q) : undefined;
   const pickedUp = parked.length ? parked.map((p) => p.title) : undefined;
   for (const effect of effects) {
     if (typeof effect === 'object') continue;
@@ -242,24 +256,25 @@ async function taskEnded(
             threadId: t.threadId ?? from?.threadId ?? null
           },
           done ? 'done' : 'failed',
-          [how.said, ...parked.map((p) => pickedUpLine(p.title))].join(' ')
+          [how.said, ...parked.map((p) => pickedUpLine(p.title))].join(' '),
+          q
         );
         break;
       // The owner finished connecting a tool an Odd asked for: it can start the
       // work that was waiting on it, once however many asks that one answer settled.
       case 'carry_out':
         if (t.staffId && from)
-          await carryOutTogether([from, ...(await answeredWith(from))], pickedUp);
+          await carryOutTogether([from, ...(await answeredWith(from, q))], pickedUp, q);
         break;
       // Any other task an Odd gave them: the Odd picks up whatever waited on
       // it, such as hiring from an intake the owner just filled in.
       case 'task_done':
         if (t.staffId)
-          await followUp(t.staffId, 'task_done', { taskId: t.id, note: t.note, pickedUp });
+          await followUp(t.staffId, 'task_done', { taskId: t.id, note: t.note, pickedUp }, q);
         break;
       // Work on another thread that waited on this task, whoever gave it.
       case 'wake_parked':
-        await wakeOnTask(t, { ended: how.ended, owner: how.owner, ownRun });
+        await wakeOnTask(t, { ended: how.ended, owner: how.owner, ownRun }, q);
         break;
       default:
         effect satisfies never;

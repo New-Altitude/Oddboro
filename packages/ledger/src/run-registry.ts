@@ -47,6 +47,11 @@ export type LiveRun = {
   work?: Work;
   /** A queued background run is released by the preceding run or by Stop. */
   enter?: () => void;
+  /**
+   * Adds the owner's words to the run while it goes, in the same turn. Only a
+   * Claude Code chat has it. False once the run can take no more.
+   */
+  add?: (text: string) => boolean;
 };
 
 export const runsGoing = new Map<string, LiveRun>();

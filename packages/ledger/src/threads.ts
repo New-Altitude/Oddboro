@@ -492,8 +492,13 @@ export async function wakeThread(id: number): Promise<void> {
  * line each, so several hires landing together wake it once. The claim
  * returns the row as joined (`startFollowUp`), so the run reads every line.
  */
-export async function answerThread(id: number, answer: string, askId?: number): Promise<void> {
-  await db.transaction(async (tx) => {
+export async function answerThread(
+  id: number,
+  answer: string,
+  askId?: number,
+  q: Db = db
+): Promise<void> {
+  await q.transaction(async (tx) => {
     const [t] = await tx
       .select({ hubId: threads.hubId, leftAt: staff.leftAt })
       .from(threads)

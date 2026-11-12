@@ -5,7 +5,7 @@ import { db } from './db.ts';
 import { fixedError } from './errors.ts';
 import { handBackLater } from './hand-offs.ts';
 import { answerWindow } from './usage-window.ts';
-import { answerHandOffs, answerThread, startHeld, type Tx } from './threads.ts';
+import { answerHandOffs, answerThread, startHeld, type Db, type Tx } from './threads.ts';
 import {
   asks,
   staff,
@@ -53,8 +53,8 @@ export async function decideAsk(
   decision: Decision,
   reason: string | null,
   reportWhenDone = false
-): Promise<void> {
-  await decide(id, decision, reason, { reportWhenDone });
+): Promise<boolean> {
+  return decide(id, decision, reason, { reportWhenDone });
 }
 
 /** What approving an ask means, done before the answer goes back. */
@@ -537,10 +537,11 @@ export async function withdrawTask(id: number, line: string): Promise<void> {
 async function answerLater(
   on: { handOffId: number | null; threadId: number | null; askId?: number },
   outcome: Outcome,
-  answer: string
+  answer: string,
+  q: Db = db
 ): Promise<void> {
-  if (on.handOffId) await handBackLater(on.handOffId, outcome, answer);
-  else if (on.threadId) await answerThread(on.threadId, answer, on.askId);
+  if (on.handOffId) await handBackLater(on.handOffId, outcome, answer, q);
+  else if (on.threadId) await answerThread(on.threadId, answer, on.askId, q);
 }
 
 /**

@@ -257,3 +257,53 @@ test('two failed messages, each with its own pasted [Image #1], each get their o
     ].join('\n')
   ]);
 });
+
+const stopped = (at: string, turnId: string, inSession = false): ChatEntry => ({
+  at,
+  from: 'staff',
+  text: 'You stopped this reply. Completed work and saved files remain.',
+  turnId,
+  interrupted: true,
+  failed: true,
+  ...(inSession ? { inSession: true as const } : {})
+});
+
+test('a reply the owner stopped is told to the next run as stopped, never as failed, and not to be picked back up', () => {
+  const past: ChatEntry[] = [
+    owner('2026-11-06T09:00:00Z', 'Plan the week.'),
+    reply('2026-11-06T09:01:00Z', 'Planned.'),
+    { ...owner('2026-11-06T09:02:00Z', 'Price each.'), turnId: 'a' },
+    stopped('2026-11-06T09:03:00Z', 'a', true)
+  ];
+  const resumed = chatPreface(past, [], 'resumed');
+  assert.deepEqual(resumed, [
+    '({owner} stopped your reply to their last message you saw before this one. Do not pick that work back up unless they ask.)'
+  ]);
+  assert.doesNotMatch(resumed.join('\n'), /failed/);
+  // A stopped run that never reached a session: retold, with the same warning.
+  assert.deepEqual(
+    chatPreface(past.slice(2, 3).concat(stopped('2026-11-06T09:03:00Z', 'a')), [], 'resumed'),
+    [
+      '({owner} wrote to you before this, then stopped your reply before you saw it. Do not act on it unless they ask:)\n{owner}: Price each.'
+    ]
+  );
+});
+
+test('words the owner added to a turn belong to its run, whether it failed or was stopped', () => {
+  const turn: ChatEntry[] = [
+    { ...owner('2026-11-06T09:02:00Z', 'Book the hall.'), turnId: 'b' },
+    { ...owner('2026-11-06T09:03:00Z', 'For Friday.'), turnId: 'b', source: { kind: 'added' } }
+  ];
+  assert.deepEqual(
+    chatPreface([...turn, failed('2026-11-06T09:04:00Z', 'Quota used up.')], [], 'resumed'),
+    [
+      '({owner} wrote to you before this, but your run failed each time, so you never saw it:)\n{owner}: Book the hall.\n{owner}: For Friday.'
+    ]
+  );
+  assert.deepEqual(
+    chatPreface([...turn, stopped('2026-11-06T09:04:00Z', 'b', true)], [], 'resumed'),
+    [
+      '({owner} stopped your reply to their last 2 messages you saw before this one. Do not pick that work back up unless they ask.)'
+    ]
+  );
+});

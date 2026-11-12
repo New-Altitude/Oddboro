@@ -2,7 +2,7 @@
 // answer covers.
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { db } from './db.ts';
-import { goalThread, keepRun, raisedOn, type Tx } from './threads.ts';
+import { goalThread, keepRun, raisedOn, type Db, type Tx } from './threads.ts';
 import {
   asks,
   attachments,
@@ -330,8 +330,8 @@ export async function raiseAsk(
   return { ask, precedent: await precedent(`${a.title}\n${a.why}`) };
 }
 
-export async function ask(id: number): Promise<AskRow | undefined> {
-  const [row] = await db.select().from(asks).where(eq(asks.id, id));
+export async function ask(id: number, q: Db = db): Promise<AskRow | undefined> {
+  const [row] = await q.select().from(asks).where(eq(asks.id, id));
   return row;
 }
 
@@ -390,9 +390,9 @@ const sameWanted = (a: AskRow, b: AskRow) =>
  * the same Odd and tool or folder, decided in the same moment, whichever of
  * them the owner saw.
  */
-export async function answeredWith(a: AskRow): Promise<AskRow[]> {
+export async function answeredWith(a: AskRow, q: Db = db): Promise<AskRow[]> {
   if (!TWINNED.includes(a.kind) || !a.decidedAt) return [];
-  const rows = await db
+  const rows = await q
     .select()
     .from(asks)
     .where(
@@ -430,9 +430,13 @@ function carriedOutBy(together: AskRow[]): AskRow[] {
  * `pickedUp` is the work parked on the connect task that just ended, which
  * picks up in its own run (`finishTask`).
  */
-async function carryOutTogether(together: AskRow[], pickedUp?: string[]): Promise<void> {
+async function carryOutTogether(
+  together: AskRow[],
+  pickedUp?: string[],
+  q: Db = db
+): Promise<void> {
   for (const a of carriedOutBy(together))
-    await followUp(a.staffId, 'carry_out', { askId: a.id, note: null, pickedUp });
+    await followUp(a.staffId, 'carry_out', { askId: a.id, note: null, pickedUp }, q);
 }
 
 /**
