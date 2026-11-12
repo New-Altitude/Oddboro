@@ -1428,7 +1428,7 @@ tool(
 tool(
   'log_progress',
   {
-    description: `Say how a goal you serve is going, once per run that moves it or shows it slipping. One line of evidence, with a number when there is one: "inbox at 14 on Friday, down from 40; a deadline pushed Tuesday's sort to Wednesday". ${OWNER}'s daily report reads these.`,
+    description: `Say how a goal you serve, or whose thread you lead, is going, once per run that moves it or shows it slipping. One line of evidence, with a number when there is one: "inbox at 14 on Friday, down from 40; a deadline pushed Tuesday's sort to Wednesday". ${OWNER}'s daily report reads these.`,
     inputSchema: {
       goal_id: z.number().int(),
       health: z

@@ -6,6 +6,8 @@
 // the answer starts finds the folder. A refusal leaves the ask open and says
 // why in the Settings tab's words. A whole drive or system files comes back
 // as `{ warning }`, given nothing, until the owner's Accept sends `accept`.
+// `chat` says the owner gave it on the ask's card in its Odd's chat, so the
+// run the answer starts replies there too.
 import { error, json } from '@sveltejs/kit';
 import { giveFolder } from '@oddboro/ledger';
 import type { RequestHandler } from './$types';
@@ -20,7 +22,8 @@ export const POST: RequestHandler = async ({ params, request }) => {
     b.path,
     b.level,
     reason || null,
-    b.accept === true
+    b.accept === true,
+    b.chat === true
   );
   if ('refused' in done) error(done.status, done.refused);
   if ('warning' in done) return json({ warning: done.warning });

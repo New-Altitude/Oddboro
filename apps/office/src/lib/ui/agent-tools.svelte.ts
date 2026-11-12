@@ -137,6 +137,7 @@ export class AgentTools {
       ? this.accounts.find((a) => a.id === account)?.signIn
       : this.tools.find((t) => t.id === id)?.signIn;
     if (s) s.waiting = {};
+    let ok = false;
     let last = '';
     try {
       await stream<{ line?: string; url?: string; done?: boolean; ok?: boolean }>(
@@ -145,6 +146,7 @@ export class AgentTools {
         (l) => {
           if (l.line) last = l.line;
           if (l.url) changes++;
+          if (l.done) ok = !!l.ok;
           if (l.done && !l.ok && mine === this.#attempts[id])
             this.problems[id] = last || 'The sign-in stopped.';
         }
@@ -154,6 +156,7 @@ export class AgentTools {
     } finally {
       changes++;
     }
+    return ok && mine === this.#attempts[id];
   }
 
   /**
