@@ -41,21 +41,29 @@ export const QUIET_LINE: Record<Quiet, (name: string) => string> = {
     `You signed out of New Altitude, so ${name} stays quiet. Sign in under Setup, Account, then press Reconnect.`
 };
 
-/** A name as matching reads it: lowercase words, with dots, commas and extra spaces gone. */
-const words = (s: string) =>
+/**
+ * A whole name as matching reads it: lowercase words, with dots, commas, a
+ * trailing "Persona" and any one-letter middle initial gone, so "Pat Q.
+ * Rivers Persona" reads as "pat rivers".
+ */
+const whole = (s: string) =>
   s
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .trim();
+    .trim()
+    .replace(/ persona$/, '')
+    .split(' ')
+    .filter((w, i, all) => w.length > 1 || i === 0 || i === all.length - 1)
+    .join(' ');
 
-/** The names a proposal gives its hire: its name, and its role without a trailing "Persona". */
+/** The names a proposal gives its hire: its name, and its role. */
 const namesIn = (p: Pick<HireProposal, 'name' | 'role'>) =>
-  [words(p.name), words(p.role).replace(/ persona$/, '')].filter(Boolean);
+  [whole(p.name), whole(p.role)].filter(Boolean);
 
 /**
  * The persona a hire proposal names, when New Altitude offers it: by its slug,
  * or else by the whole display name as the proposal's name or role ("Pat Q.
- * Rivers Persona"). A first name alone, or a name inside a longer role, never
+ * Rivers Persona", or "Pat Rivers": a middle initial does not count). A first name alone, or a name inside a longer role, never
  * matches, and two matches are none.
  */
 export function proposedPersona(
@@ -66,7 +74,7 @@ export function proposedPersona(
   const bySlug = slug ? offers.find((o) => o.slug === slug) : undefined;
   if (bySlug) return bySlug;
   const names = namesIn(p);
-  const found = offers.filter((o) => names.includes(words(o.displayName)));
+  const found = offers.filter((o) => names.includes(whole(o.displayName)));
   return found.length === 1 ? found[0] : undefined;
 }
 
@@ -91,11 +99,11 @@ export function withoutLikeness(
   p: Pick<HireProposal, 'name' | 'role'>,
   o: Pick<Offer, 'displayName' | 'name'>
 ): { name: string; role: string; appearance: string } {
-  const theirs = [words(o.displayName), words(o.name)];
+  const theirs = [whole(o.displayName), whole(o.name)];
   const is = (s: string) => theirs.includes(s);
   return {
-    name: is(words(p.name)) ? '' : p.name,
-    role: is(words(p.role).replace(/ persona$/, '')) ? '' : p.role,
+    name: is(whole(p.name)) ? '' : p.name,
+    role: is(whole(p.role)) ? '' : p.role,
     appearance: ''
   };
 }

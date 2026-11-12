@@ -35,6 +35,7 @@ import { preview } from './looks.ts';
 import { deleteSecret, getSecret, setSecret } from './keychain.ts';
 import { exclusive, freshAccess, KeychainProvider, steadyFetch, type Saved } from './oauth.ts';
 import { askDoor, doorUrl, PERSONA_SCOPE, type DoorAnswer } from './persona-door.ts';
+import { heardOffers } from './persona-offered.ts';
 import { isSlug, packageProblems, readListed, type Listed } from './persona-package.ts';
 import { sayInChat } from './staff.ts';
 
@@ -230,6 +231,7 @@ export async function disconnectPersona(slug: string): Promise<void> {
  * in and reconnects it.
  */
 export async function endPersonaGrants(): Promise<void> {
+  heardOffers(undefined);
   // Without the ledger, the kept list still names every sign-in, so the
   // owner's sign-out goes on and ends them all.
   const staff = await roster().catch((e: unknown) => {
@@ -244,8 +246,19 @@ export async function endPersonaGrants(): Promise<void> {
 
 type Listing = Exclude<Offers, { state: 'ok' }> | { state: 'ok'; listed: Listed[] };
 
-/** The personas New Altitude lists with an Odd for this account, each checked; a bad one is left out. */
+/**
+ * The personas New Altitude lists with an Odd for this account, each checked;
+ * a bad one is left out. Each answer tells the Odds who can be proposed
+ * (`heardOffers`); an unreachable New Altitude changes nothing there.
+ */
 async function readListing(): Promise<Listing> {
+  const listing = await askListing();
+  if (listing.state === 'ok') heardOffers(listing.listed);
+  else if (listing.state !== 'unreachable') heardOffers(undefined);
+  return listing;
+}
+
+async function askListing(): Promise<Listing> {
   if (accountStatus().state !== 'in') return { state: 'out' };
   // Signed in with `profile` alone: only a fresh sign-in can add personas.
   if (!accountHasPersonas()) return { state: 'rescope' };

@@ -71,6 +71,17 @@ test('a first name alone, or a name inside a longer role, never matches', () => 
   assert.equal(proposedPersona({ name: 'Mira', role: 'Persona' }, offers), undefined);
 });
 
+test('a middle initial does not count, on either side, but a first name alone never matches', () => {
+  const nate = offer('nate', 'Nate B. Jones', 'Nate');
+  const list = [nate, rowan];
+  assert.equal(proposedPersona({ name: 'Nate', role: 'Nate Jones Persona' }, list), nate);
+  assert.equal(proposedPersona({ name: 'Nate B Jones', role: 'Advisor' }, list), nate);
+  assert.equal(proposedPersona({ name: 'Mira', role: 'Rowan T. Hale Persona' }, list), rowan);
+  assert.equal(proposedPersona({ name: 'Nate', role: 'Advisor' }, list), undefined);
+  assert.equal(proposedPersona({ name: 'Nate', role: 'Nate Persona' }, list), undefined);
+  assert.equal(proposedPersona({ name: 'Mira', role: 'Nate Smith Persona' }, list), undefined);
+});
+
 test('two matches are none', () => {
   assert.equal(
     proposedPersona({ name: 'Rowan Hale', role: 'Pat Q. Rivers Persona' }, offers),

@@ -1711,7 +1711,15 @@ the persona's voice.
    `installPersona` approves the ask once the persona joins, with the note
    "<Owner> added <Name>'s New Altitude persona instead of a new Odd." A
    sign-in left unfinished, an install that fails, a restart or a later Add
-   without the ask leaves the proposal open.
+   without the ask leaves the proposal open. A middle initial does not count
+   in a whole name, so "Nate Jones" matches "Nate B. Jones".
+9. Who an Odd may propose. Each read of New Altitude's list
+   (`readListing`) keeps the names and slugs on offer in memory
+   (`persona-offered.ts`); signed out, or a list refused, keeps none, and an
+   unreachable New Altitude changes nothing. The system prompt of an Odd
+   holding `propose_hire` or `propose_goal_plan` gets one line from it
+   (`offeredSection`): who is on offer, to propose by `persona_slug`, and
+   who already works here. No run calls New Altitude for it.
 
 ## Running it always
 
@@ -1756,6 +1764,7 @@ the persona's voice.
 | `src/lib/account.ts`                  | The account and its states, shared by the server and the page                                                                         |
 | `src/lib/server/persona.ts`           | The personas New Altitude offers: sync, each persona's sign-in, install, Disconnect                                                   |
 | `src/lib/server/persona-package.ts`   | A persona's package checked before the office trusts it                                                                               |
+| `src/lib/server/persona-offered.ts`   | The names and slugs on offer at the last read, as one prompt line for an Odd that can propose a hire                                  |
 | `src/lib/server/persona-run.ts`       | A persona Odd's run: its hands, then its voice, and every word sent to its door                                                       |
 | `src/lib/server/persona-door.ts`      | The persona's door on New Altitude: its address, scope, what a turn sends and what comes back                                         |
 | `src/lib/persona.ts`                  | The offers, the quiet reasons and their lines, shared by the server and the page                                                      |

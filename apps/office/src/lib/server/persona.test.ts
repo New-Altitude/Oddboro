@@ -79,6 +79,7 @@ await bringUpToDate();
 const L = await import('@oddboro/ledger');
 const { accountStatus, accountToken } = await import('./account.ts');
 const { installGrantedPersonas, syncPersonas } = await import('./persona.ts');
+const { offeredSection } = await import('./persona-offered.ts');
 const { history } = await import('./staff.ts');
 const { bus } = await import('./events.ts');
 const accountRoute = await import('../../routes/api/account/+server.ts');
@@ -695,7 +696,16 @@ test("a persona added from a hire ask's window answers that ask once it joins, a
     answered?.reason,
     "Ada added Uma Example's New Altitude persona instead of a new Odd."
   );
+
+  // An Odd that can propose a hire hears who is on offer from the last read,
+  // and who works here already. Signing out takes the list away.
+  const here = new Set(['pat', 'quinn', 'tess', 'uma']);
+  assert.match(offeredSection(new Set(['pat'])), /persona_slug/);
+  assert.match(offeredSection(new Set(['pat'])), /Uma Example \(uma\)/);
+  assert.doesNotMatch(offeredSection(here), /persona_slug/);
+  assert.match(offeredSection(here), /Already working here as personas: Pat Example/);
   assert.equal((await account('DELETE')).status, 200);
+  assert.equal(offeredSection(new Set()), '');
 });
 
 test('no token, code, state or verifier reaches .env or the logs', async () => {
