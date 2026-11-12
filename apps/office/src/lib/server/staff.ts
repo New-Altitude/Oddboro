@@ -297,8 +297,11 @@ export async function runHomeOf(who: StaffRow): Promise<string> {
 
 /**
  * The servers and tool permissions one run gets: the outside tools
- * `capabilities` says it holds. A run from a hand-off works at Draft at most
- * (`ceiling`), so a colleague's words never stand in for the owner's yes. Its
+ * `capabilities` says it holds. A run the office starts on its own
+ * (`atDraft`), and any run that serves a colleague's hand-off, works at Draft
+ * at most (`ceiling`), so a colleague's words never stand in for the owner's
+ * yes. Only the carry-out of an approval ask, the owner's yes to that exact
+ * action, keeps the Odd's level. Its
  * caps come down to the ceiling too (`capped`), so its prompt lists what it loads.
  * Every outside tool reaches the run through the office's gateway
  * (gateway.ts), which keeps the keys and passes on only the tools the grant
@@ -736,7 +739,7 @@ export type RunOpts = {
   ownerNote?: string;
   /** The file the owner edited, and their version of it, which a lesson read from it quotes. The run may not write that file. */
   ownerEdit?: { path: string; text: string };
-  /** Draft at most: a follow-up `atDraft` names. */
+  /** Draft at most: a follow-up `atDraft` names, or one that serves a colleague's hand-off, except an approval ask's carry-out. */
   draftOnly?: boolean;
   /** A run that only reads the owner's reason or edit for a lesson (`servesNoThread`): it hands nothing on. */
   lessonRun?: boolean;
@@ -1543,10 +1546,8 @@ export async function followThrough(
                 : `Feedback on ${r?.title ?? 'a report'}`));
   const task = t ? { row: t, files: await taskFiles(t.id) } : undefined;
   // One carry-out may stand for twin asks that start no run of their own.
-  const also =
-    f.kind === 'carry_out' && (a?.kind === 'access' || a?.kind === 'folder' || a?.kind === 'switch')
-      ? await standsFor(a)
-      : [];
+  // `standsFor` finds none for a kind that has no twins.
+  const also = f.kind === 'carry_out' && a ? await standsFor(a) : [];
   const detail = followUpDetail(f.kind, { ask: a?.id, colleague: colleague?.name });
   // A colleague handed work on a goal's thread is told the goal in its brief.
   const goalServed =
@@ -1565,6 +1566,14 @@ export async function followThrough(
         }
       : undefined;
   const work = { kind: 'follow-up' as const, label, detail, askId: a?.id, about };
+  // Work for a colleague's hand-off runs at Draft at most whatever its kind,
+  // so a colleague's words never stand in for the owner's yes, even after a
+  // yes that raised this Odd's own level or tools. The carry-out of an
+  // approval ask is the owner's yes to that exact action, so it keeps the
+  // Odd's level and one yes stays one yes.
+  const draftOnly =
+    atDraft(f.kind) ||
+    (serves !== undefined && !(f.kind === 'carry_out' && a?.kind === 'approval'));
   const res = await slot(who.id, work, (onEvent, runId) =>
     run(who, label, {
       kind: 'follow-up',
@@ -1581,7 +1590,7 @@ export async function followThrough(
       approvedAsk: f.kind === 'carry_out' ? a?.id : undefined,
       ownerNote: ownerNoteOf(f),
       ownerEdit: edit && { path: edit.path, text: edit.shown.now },
-      draftOnly: atDraft(f.kind),
+      draftOnly,
       lessonRun: servesNoThread(f.kind),
       handOffId: serves?.id,
       threadId: thread?.id,
@@ -1616,7 +1625,7 @@ export async function followThrough(
           : edit
             ? editBrief(edit.path, edit.shown)
             : [
-                ...followUpBrief(f, a, r, task, g, also),
+                ...followUpBrief(f, a, r, task, g, { also, draftOnly }),
                 ...(serves?.handOff && giver && thread
                   ? handOffContext({
                       h: serves.handOff,

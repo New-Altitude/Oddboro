@@ -33,6 +33,7 @@
   import { LEVEL_LABEL, type FolderAccess } from '@oddboro/ledger/access';
   import type { StaffProfile } from '../staff/roster.ts';
   import { chatAnswer, stepText, stepsToGo } from './task-steps.ts';
+  import { yesSaid } from './yes-said.ts';
 
   type Props = {
     desk: Desk;
@@ -694,25 +695,7 @@
               class="flex-1 rounded-lg bg-sea px-3 py-2 text-sm font-medium text-night disabled:opacity-40"
               disabled={busy || unsaved || (a.kind === 'plan' && !picked(a))}
               onclick={() => (a.kind === 'call' ? makeCall(a) : decide(a, 'approve'))}
-              >{a.kind === 'goal'
-                ? 'Set the goal'
-                : a.kind === 'call'
-                  ? busy
-                    ? 'Making the call'
-                    : 'Make this call'
-                  : a.access
-                    ? 'Connect'
-                    : a.kind === 'switch'
-                      ? 'Turn on'
-                      : a.kind === 'remove'
-                        ? 'Remove'
-                        : a.kind === 'bring_back'
-                          ? 'Bring back'
-                          : a.kind === 'window'
-                            ? 'Let it carry on'
-                            : a.plan && picked(a) < a.plan.items.length
-                              ? `Approve ${picked(a)} of ${a.plan.items.length}`
-                              : 'Approve'}</button
+              >{yesSaid(a, { picked: picked(a), busy })}</button
             >
           {/if}
         </div>

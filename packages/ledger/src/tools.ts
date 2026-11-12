@@ -69,6 +69,18 @@ const TOOLS = [
     does: 'Asks you to turn on Run commands or Browse the web for it. You turn it on with one click.',
     always: true
   },
+  {
+    id: 'ask_for_level',
+    name: 'Ask for a higher level',
+    does: 'Asks you to raise its level. You raise it with one click.',
+    always: true
+  },
+  {
+    id: 'ask_for_office_tool',
+    name: 'Ask for office tools',
+    does: 'Asks you to turn on office tools it needs. You turn them on with one click.',
+    always: true
+  },
   { id: 'my_jobs', name: 'Its jobs', does: 'Sees its own jobs and schedules.', always: true },
   {
     id: 'leave_office',
@@ -268,6 +280,14 @@ export const STARTER_TOOLS: OfficeToolId[] = [
 export const GRANTABLE_TOOLS = OFFICE_TOOLS.filter((t) => !t.always).map((t) => t.id);
 const GRANTABLE = new Set<string>(GRANTABLE_TOOLS);
 export const isGrantable = (id: string): id is OfficeToolId => GRANTABLE.has(id);
+
+/** Office tools by name, in the order of `OFFICE_TOOLS`, joined: "Office report, All goals and Propose hires". */
+export const officeToolsSaid = (ids: readonly string[]): string => {
+  const names = OFFICE_TOOLS.filter((t) => ids.includes(t.id)).map((t) => t.name);
+  return names.length > 1
+    ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`
+    : (names[0] ?? '');
+};
 
 /** Whether a staffer holding `granted` may use the office tool `id`. */
 export const hasTool = (granted: readonly string[], id: string) =>

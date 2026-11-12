@@ -16,7 +16,7 @@ import {
 import { type GoalView } from './goals.ts';
 import { goalWhen, HEALTH_WORDS, HORIZONS, STATUS_WORDS } from './goal-words.ts';
 import { handsOff } from './capabilities.ts';
-import { LEVELS } from './access-words.ts';
+import { LEVELS, parseLevel } from './access-words.ts';
 import { type CarriedFile } from './hand-offs.ts';
 import { MANAGER_ROLE } from './managers.ts';
 import { type OwnerWords } from './lessons.ts';
@@ -106,6 +106,11 @@ const APPROVED_ASK = Number(process.env.APPROVED_ASK) || undefined;
  * raises carry it, so the owner's answer goes back, and it cannot hand off.
  */
 const HAND_OFF_ID = Number(process.env.HAND_OFF_ID) || undefined;
+/**
+ * The level this run works at most, set by the office when it is below the
+ * Odd's own. my_access reads it from the env (`accessInRun`).
+ */
+const CEILING = parseLevel(process.env.CEILING);
 /**
  * The thread this run works on, either side, set by the office. Asks and tasks
  * it raises carry it. The hub's runs hand off into it and may park it.
@@ -624,6 +629,8 @@ export {
   mailboxes,
   offered,
   OWNER_WORDS,
+  HAND_OFF_ID,
+  CEILING,
   THREAD_ID,
   RUN_KEY,
   VIA,

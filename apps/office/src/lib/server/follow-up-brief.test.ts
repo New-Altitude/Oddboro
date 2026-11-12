@@ -3,7 +3,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  ASK_KINDS,
   FOLLOW_UP_KINDS,
+  type AskKind,
   type AskRow,
   type FollowUpKind,
   type FollowUpRow,
@@ -11,6 +13,7 @@ import {
   type ReportRow,
   type TaskRow
 } from '@oddboro/ledger';
+import { OWNER_ANSWERS } from '@oddboro/ledger/desk-answers';
 import { followUpBrief } from './follow-up-brief.ts';
 
 // Only the fields a brief reads are filled in; the rest of each row stays out.
@@ -100,15 +103,102 @@ test("a task given in a chat brings the owner's words there to the run that pick
 test('a switch the owner turned on tells the Odd its run has it, names what it asked for, and does the work once for a twin ask', () => {
   const asked = { ...ask, kind: 'switch', switches: ['web'] } as AskRow;
   const twin = { ...ask, id: 8 } as AskRow;
-  const lines = followUpBrief(followUp('carry_out'), asked, undefined, undefined, undefined, [
-    twin
-  ]);
+  const lines = followUpBrief(followUp('carry_out'), asked, undefined, undefined, undefined, {
+    also: [twin]
+  });
   assert.equal(
     lines[0],
     '{owner} approved your ask #7 and turned on Browse the web for you. This run has it.'
   );
   assert.match(lines[1], /^This also answers your ask #8, /);
   assert.ok(lines.includes('- What you asked to turn on: Browse the web'));
+});
+
+test('a level the owner raised tells the Odd its run has it, and that hand-offs stay at Draft', () => {
+  const lines = followUpBrief(followUp('carry_out'), { ...ask, kind: 'level', level: 'act' });
+  assert.equal(lines[0], '{owner} approved your ask #7 for the Act level, and this run has it.');
+  assert.equal(
+    lines[1],
+    'Work a colleague hands you, and a thread you pick back up, still runs at Draft at most.'
+  );
+  assert.ok(lines.includes('- The level you asked for: Act'), lines.join('\n'));
+});
+
+test("a level raised to Act, carried out for a colleague's hand-off, tells the Odd this run stays at Draft", () => {
+  const lines = followUpBrief(
+    followUp('carry_out'),
+    { ...ask, kind: 'level', level: 'act' },
+    undefined,
+    undefined,
+    undefined,
+    { draftOnly: true }
+  );
+  assert.equal(
+    lines[0],
+    "{owner} approved your ask #7 for the Act level. Your own work runs at Act from now on; this run serves a colleague's hand-off, so it works at Draft at most."
+  );
+  assert.equal(lines[1], '');
+});
+
+test("a level raised to Draft, carried out for a colleague's hand-off, tells the Odd its run has it", () => {
+  const lines = followUpBrief(
+    followUp('carry_out'),
+    { ...ask, kind: 'level', level: 'draft' },
+    undefined,
+    undefined,
+    undefined,
+    { draftOnly: true }
+  );
+  assert.equal(lines[0], '{owner} approved your ask #7 for the Draft level, and this run has it.');
+  assert.equal(lines[1], '');
+});
+
+test('office tools the owner turned on tell the Odd its run has them', () => {
+  const lines = followUpBrief(followUp('carry_out'), {
+    ...ask,
+    kind: 'office_tool',
+    officeTools: ['office_report']
+  });
+  assert.equal(
+    lines[0],
+    '{owner} approved your ask #7 and turned on Office report for you. This run has it.'
+  );
+  assert.ok(lines.includes('- What you asked to turn on: Office report'), lines.join('\n'));
+});
+
+/**
+ * The tool an Odd raises each kind of ask with, or null when the office raises
+ * it (a held hand-off, the usage window, a held outside call, missed job runs) or more than one
+ * tool does (`leave_office` and `remove_odd`). Keyed by AskKind, so a new kind
+ * fails the type check here until it names its tool.
+ */
+const RAISED_WITH: Record<AskKind, string | null> = {
+  approval: 'raise_ask',
+  access: 'ask_for_access',
+  hire: 'propose_hire',
+  goal: 'propose_goal',
+  plan: 'propose_goal_plan',
+  hand_offs: null,
+  window: null,
+  reply: 'propose_reply',
+  filter: 'propose_filter',
+  folder: 'ask_for_folder',
+  switch: 'ask_for_switch',
+  level: 'ask_for_level',
+  office_tool: 'ask_for_office_tool',
+  call: null,
+  remove: null,
+  bring_back: 'bring_back_odd',
+  catch_up: null
+};
+
+test('the rework brief names the tool each kind an Odd can rework is raised with', () => {
+  const brief = briefOf('rework').join('\n');
+  for (const kind of ASK_KINDS) {
+    const tool = RAISED_WITH[kind];
+    if (OWNER_ANSWERS.ask[kind].iterate === 'refused' || tool === null) continue;
+    assert.ok(brief.includes(tool), `${kind}: the rework brief names ${tool}`);
+  }
 });
 
 test('every follow-up kind gets its own brief, and feedback gets the feedback brief, as do a hand-off with no hand-off row, a goal with no goal and a task_done with no task', () => {

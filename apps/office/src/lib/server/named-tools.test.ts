@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   FOLLOW_UP_KINDS,
+  type AskKind,
   type AskRow,
   type FollowUpRow,
   type GoalRow,
@@ -61,27 +62,74 @@ const NAMES_UNHELD: Record<string, readonly string[]> = {
 
 // Only the fields a brief reads are filled in; the rest of each row stays out.
 const asked = { id: 7, title: 'Send it', why: 'Because', ifApproved: 'It goes' };
-/** Every ask a brief words apart: by its kind, its answer, whether it got access or plans a hire, and what the owner gave or the office called. */
-const ASKS = [
-  { ...asked, kind: 'approval', status: 'approved' },
-  { ...asked, kind: 'access', status: 'approved', access: {} },
-  { ...asked, kind: 'hire', status: 'approved' },
-  { ...asked, kind: 'plan', status: 'approved', plan: { items: [{ kind: 'hire' }] } },
-  { ...asked, kind: 'plan', status: 'denied', plan: { items: [] } },
-  {
-    ...asked,
-    kind: 'folder',
-    status: 'approved',
-    folder: { path: '/work/taxes', level: 'write', given: { path: '/work/taxes', level: 'read' } }
-  },
-  { ...asked, kind: 'switch', status: 'approved', switches: ['commands', 'web'] },
-  {
-    ...asked,
-    kind: 'call',
-    status: 'approved',
-    call: { connector: 'mail', tool: 'send_message', arguments: { to: 'a' } }
-  }
-] as unknown as AskRow[];
+/**
+ * Every ask a brief words apart, by kind: its answer, whether it got access
+ * or plans a hire, what it carries, and what the owner gave or the office
+ * called. A kind with no rows is worded as an approval is. A new kind fails
+ * the type check here until it says which.
+ */
+const ASK_ROWS: Record<AskKind, object[]> = {
+  approval: [{ ...asked, kind: 'approval', status: 'approved' }],
+  access: [{ ...asked, kind: 'access', status: 'approved', access: {} }],
+  hire: [{ ...asked, kind: 'hire', status: 'approved' }],
+  plan: [
+    { ...asked, kind: 'plan', status: 'approved', plan: { items: [{ kind: 'hire' }] } },
+    { ...asked, kind: 'plan', status: 'denied', plan: { items: [] } }
+  ],
+  folder: [
+    {
+      ...asked,
+      kind: 'folder',
+      status: 'approved',
+      folder: { path: '/work/taxes', level: 'write', given: { path: '/work/taxes', level: 'read' } }
+    }
+  ],
+  switch: [{ ...asked, kind: 'switch', status: 'approved', switches: ['commands', 'web'] }],
+  level: [{ ...asked, kind: 'level', status: 'approved', level: 'act' }],
+  office_tool: [
+    {
+      ...asked,
+      kind: 'office_tool',
+      status: 'approved',
+      officeTools: ['office_report', 'list_goals']
+    }
+  ],
+  call: [
+    {
+      ...asked,
+      kind: 'call',
+      status: 'approved',
+      call: { connector: 'mail', tool: 'send_message', arguments: { to: 'a' } }
+    }
+  ],
+  reply: [
+    {
+      ...asked,
+      kind: 'reply',
+      status: 'approved',
+      reply: { to: ['ada@example.com'], cc: [], subject: 'Lunch', body: 'Yes', summary: 'A lunch' }
+    }
+  ],
+  filter: [
+    {
+      ...asked,
+      kind: 'filter',
+      status: 'approved',
+      filter: {
+        criteria: { from: 'news@example.com' },
+        action: { skipInbox: true },
+        summary: 'News'
+      }
+    }
+  ],
+  goal: [],
+  hand_offs: [],
+  window: [],
+  remove: [],
+  bring_back: [],
+  catch_up: []
+};
+const ASKS = Object.values(ASK_ROWS).flat() as unknown as AskRow[];
 const report = { id: 3, title: 'Weekly', body: 'All well' } as ReportRow;
 const task = {
   row: { id: 4, title: 'Sign in', why: 'Needed', steps: [] } as unknown as TaskRow,
