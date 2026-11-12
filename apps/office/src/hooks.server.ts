@@ -21,13 +21,13 @@ import { handleErrorWithSentry, sentryHandle } from '@sentry/sveltekit';
 import { LOCAL, whenOddLeaves } from '@oddboro/ledger';
 import { trustSystemCertificates } from '@oddboro/ledger/certificates';
 import { startLocalDatabase } from '@oddboro/ledger/local-db';
-import { ownerKey } from '@oddboro/ledger/owner-key';
 import { currentPlatform } from '@oddboro/ledger/platform';
 import { useShellSecrets } from '@oddboro/ledger/secrets';
 import { bringUpToDate } from '@oddboro/ledger/upgrade';
 import { keepAddress } from '#lib/server/address.ts';
 import { startFollowUps } from '#lib/server/follow-ups.ts';
 import { markReady, timed } from '#lib/server/health.ts';
+import { ownerKeyAtStart } from '#lib/server/owner-key-start.ts';
 import { stopRuns } from '#lib/server/staff.ts';
 import { startClock } from '#lib/server/jobs.ts';
 import { guardOffice } from '#lib/server/owner-page.ts';
@@ -52,8 +52,9 @@ export const init: ServerInit = async () => {
   // First, so the owner's key exists before anything can ask for it. The app's
   // shell waits for any answer from the office, then reads the key's file
   // once, and in the app nothing else makes the file. In a release Kit runs
-  // this before the server listens.
-  ownerKey();
+  // this before the server listens. A key file it cannot use stops the start
+  // with one sentence saying what to do.
+  ownerKeyAtStart();
   console.log(
     `office: ${VERSION || 'development'} on ${currentPlatform()} ${release()} ${process.arch}, Node ${process.version}`
   );

@@ -3,8 +3,7 @@ import {
   isExceptionPath,
   isOwnerKey,
   notTheOwner,
-  OWNER_PARAM,
-  ownerKey
+  OWNER_PARAM
 } from '@oddboro/ledger/owner-key';
 import { sentrySvelteKit } from '@sentry/sveltekit/vite';
 import adapter from '@sveltejs/adapter-node';
@@ -15,6 +14,7 @@ import path from 'node:path';
 import type { Duplex } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
+import { ownerKeyAtStart } from './src/lib/server/owner-key-start.ts';
 
 /** The repository's root folder, where every uploaded map's sources start. */
 const REPO = fileURLToPath(new URL('../..', import.meta.url));
@@ -108,8 +108,9 @@ export function ownerOnly(): Plugin {
       // request handler, on the first request. This guard refuses a request
       // without the key before Kit sees it, so without this call nothing in
       // dev makes the key, and the app's shell, which reads the key file once
-      // the office answers, would open on the refusal page.
-      ownerKey();
+      // the office answers, would open on the refusal page. A key file it
+      // cannot use stops the start with one sentence saying what to do.
+      ownerKeyAtStart();
       // Vite adds its live-reload upgrade listener when it makes the server,
       // before this hook runs. A listener added with `on` would run after
       // Vite's, which has already sent its 101 by then, so this one goes

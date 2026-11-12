@@ -1514,7 +1514,9 @@ sends every action as JSON, body or not.
    gives it away. A route asked by any other name gets 403.
 2. The key is one file, `owner-key`, in the office's folder
    (`@oddboro/ledger/owner-key`). The office makes it as it starts
-   (`init` in `hooks.server.ts`, and `ownerOnly` in dev). The owner's page
+   (`init` in `hooks.server.ts`, and `ownerOnly` in dev). A key file that
+   holds no key stops the start with one line, saying to move it aside, and
+   no stack (`ownerKeyAtStart`). The owner's page
    holds it as the cookie `oddboro-owner-<port>`, named by the office's port
    since a browser scopes cookies by host, not port. A page gets the cookie by
    opening any page once with `?oddboro-key=<key>`: the guard answers 303 to
