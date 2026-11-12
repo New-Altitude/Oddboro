@@ -35,6 +35,7 @@ import {
 } from './tools.ts';
 import { home, isOfficeFile, isWhereNamed } from './home.ts';
 import { trustSystemCertificates } from './certificates.ts';
+import { advancedMode, projectConnections } from './project-sessions.ts';
 
 trustSystemCertificates();
 const ME = process.env.STAFF_ID ?? '';
@@ -67,6 +68,11 @@ const mailboxes = (await grantsFor(ME))
 /** This run, as the office tools' row conditions read it. */
 const RUN: ToolRun = {
   gmail: mailboxes.length > 0,
+  // Project tools exist only while the owner keeps Advanced mode on.
+  project:
+    process.env.LESSON_RUN !== '1' &&
+    (await advancedMode()) &&
+    (await projectConnections(ME)).length > 0,
   chat: OWNER_SAID !== undefined,
   manager: me.role === MANAGER_ROLE
 };

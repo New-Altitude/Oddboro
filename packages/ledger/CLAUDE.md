@@ -138,6 +138,22 @@ hand-off or number, which ledger tests and the office's format test share.
 
 `FILES.md` lists each file in this package and what it holds.
 
+Project sessions: `src/project-sessions.ts` holds the native Codex and Claude
+Code sessions the owner connects, the one Odd each is shared with, and their
+requests. All of it needs Advanced mode (`advancedMode`, `setAdvancedMode`,
+`owner.advanced_at`): off, no request is written or claimed and `mcp.ts`
+offers no project tool; turning it off takes every Odd off every session and
+stops waiting work, and each change is a ledger line. An Odd's request waits
+for the owner's Take over and send, whatever its level, unless
+`project_sessions.sends_unasked` names that Odd and it is at Act
+(`letSendUnasked`); `requestProject` and `claimProject` both check.
+`src/project-session-tools.ts` is the local Claude plugin's tool server, with
+no database credentials. `src/project-terminal.ts` opens the native terminal
+through node-pty, an optional dependency loaded on the first open. Migration
+`0027_project_sessions` adds `project_sessions` and `project_requests` with
+their change triggers; `0028_advanced_mode` adds `owner.advanced_at` and
+`project_sessions.sends_unasked`. See `docs/project-sessions.md`.
+
 ## Rules
 
 - A decision, a finished task, a job run and a hire each write one `ledger`

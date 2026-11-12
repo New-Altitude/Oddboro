@@ -14,7 +14,7 @@
   import { threadTag, type HeldThread } from '#lib/staff/thread-tags.ts';
   import StaffCard from '#lib/ui/StaffCard.svelte';
   import { chatRequest, type Delivered } from '#lib/ui/chat-about.svelte.ts';
-  import OddsRail, { ODDS_RAIL } from '#lib/ui/OddsRail.svelte';
+  import OddsRail, { ODDS_RAIL, ODDS_RAIL_OPEN } from '#lib/ui/OddsRail.svelte';
   import type { Work } from '#lib/staff/work.ts';
   import type { LessonEvent, OfficeEvent } from '#lib/server/events.ts';
   import DeskDrawer from '#lib/ui/DeskDrawer.svelte';
@@ -27,15 +27,18 @@
   import GoalsPanel from '#lib/ui/GoalsPanel.svelte';
   import LessonsLibrary from '#lib/ui/LessonsLibrary.svelte';
   import Welcome from '#lib/ui/Welcome.svelte';
+  import ProjectSessions from '#lib/ui/ProjectSessions.svelte';
   import HireDrawer from '#lib/ui/HireDrawer.svelte';
   import FileViewer from '#lib/ui/FileViewer.svelte';
   import ReportView from '#lib/ui/ReportView.svelte';
   import {
+    advanced,
     close,
     deskRequest,
     open,
     openHire,
     openLessons,
+    openProject,
     openReport,
     wins,
     type Win
@@ -120,6 +123,14 @@
   /** False until the owner finishes the welcome, which the office opens on. */
   // svelte-ignore state_referenced_locally
   let welcomed = $state(data.welcomed);
+  // Advanced mode as the server says; Setup changes it on this page as the owner answers.
+  $effect.pre(() => {
+    advanced.on = data.advanced;
+  });
+  // Off, nothing offers Projects, and an open Projects window closes.
+  $effect(() => {
+    if (!advanced.on) for (const w of wins.list) if (w.kind === 'projects') close(w.id, true);
+  });
   /** A new owner's first visit, from the empty lot until their manager says hello. */
   // svelte-ignore state_referenced_locally
   let firstRun = $state(!data.welcomed);
@@ -193,9 +204,12 @@
     { id: 'lessons', label: 'Lessons' },
     { id: 'ledger', label: 'Ledger' },
     { id: 'services', label: 'Services' },
+    { id: 'projects', label: 'Projects' },
     { id: 'hire', label: 'Hire' },
     { id: 'office', label: 'Office' }
   ] as const;
+  /** The sections the top bar offers: Projects only in Advanced mode. */
+  const sections = $derived(SECTIONS.filter((s) => s.id !== 'projects' || advanced.on));
 
   /** Select a staffer, opening its panel if it was folded away. */
   function select(id: string | undefined) {
@@ -278,6 +292,19 @@
   const rightSpace = $derived(
     (showRail && !cardOpen ? ODDS_RAIL + 16 : 0) + (cardOpen && wide ? rightWidth + 8 : 0)
   );
+  /** The Odds rail is wide now: hovered, in the keyboard's path, or opened with ⌘K. */
+  let railOpen = $state(false);
+  /**
+   * Projects in front widens the start panel to the Odd's panel, else to the
+   * Odds rail: px kept free at the end edge, 8 of them a gap. While the rail
+   * is wide, the panel steps back to its edge, so every Odd stays in view.
+   */
+  const projectsReach = $derived.by(() => {
+    if (!wide || !leftOpen || front?.kind !== 'projects') return undefined;
+    if (cardOpen) return rightWidth + 24;
+    if (showRail) return (railOpen ? ODDS_RAIL_OPEN : ODDS_RAIL) + 24;
+    return 16;
+  });
   /** The Odd's panel slides in from the screen's edge (the left in a right-to-left page). */
   const fromEdge = (far = 48) => ({
     x: (getComputedStyle(document.documentElement).direction === 'rtl' ? -1 : 1) * far,
@@ -320,7 +347,11 @@
 
   // The While you were away card counts once, however many jobs it lists.
   const deskCount = $derived(
-    desk.asks.length + desk.tasks.length + desk.reports.length + (desk.away.length ? 1 : 0)
+    desk.asks.length +
+      desk.tasks.length +
+      desk.reports.length +
+      desk.projectWork.length +
+      (desk.away.length ? 1 : 0)
   );
 
   /** Rooms a new hire can work in: any with a place to work, read or sort mail. */
@@ -641,6 +672,7 @@
     if (leftOpen && front?.kind === id) return hide();
     if (id === 'desk') return void openDesk();
     if (id === 'ledger') return open({ id: 'ledger', kind: 'ledger' });
+    if (id === 'projects') return openProject();
     if (id === 'services') return open({ id: 'services', kind: 'services' });
     if (id === 'goals') return open({ id: 'goals', kind: 'goals' });
     if (id === 'lessons') return openLessons();
@@ -662,6 +694,7 @@
   function winTitle(w: Win): string {
     if (w.kind === 'desk') return 'Desk';
     if (w.kind === 'ledger') return 'Ledger';
+    if (w.kind === 'projects') return 'Projects';
     if (w.kind === 'services') return 'Services';
     if (w.kind === 'goals') return 'Goals';
     if (w.kind === 'lessons') return 'Lessons';
@@ -1180,13 +1213,13 @@
     </div>
     <!-- The command center's buttons arrive with the office, once the first run is over. -->
     <div class="flex flex-wrap gap-1.5 {open ? 'px-3 pt-2' : 'mt-2'}" class:hidden={firstRun}>
-      {#each SECTIONS as sec (sec.id)}
+      {#each sections as sec (sec.id)}
+        {@const pressed = leftOpen && front?.kind === sec.id}
         <button
-          class="rounded-full px-3 py-1 text-xs whitespace-nowrap {leftOpen &&
-          front?.kind === sec.id
+          class="rounded-full px-3 py-1 text-xs whitespace-nowrap {pressed
             ? 'bg-sea/25 text-ink'
             : 'bg-raise text-muted hover:text-ink'}"
-          aria-pressed={leftOpen && front?.kind === sec.id}
+          aria-pressed={pressed}
           onclick={() => toggle(sec.id)}
           >{sec.label}{#if sec.id === 'desk' && deskCount}<span class="ms-1 text-ember"
               >{deskCount}</span
@@ -1250,6 +1283,7 @@
       max={Math.max(760, Math.round(innerWidth * 0.4))}
       storageKey="oddboro.panel.start"
       onTop={wins.raised}
+      reach={projectsReach}
     >
       <div class="flex h-full min-h-0 flex-col">
         <div class="pb-2">{@render plate(true)}</div>
@@ -1305,6 +1339,8 @@
                 <LessonsLibrary {staff} {version} bind:filter={w.filter} />
               {:else if w.kind === 'ledger'}
                 <LedgerPanel {staff} version={ledgerVersion} />
+              {:else if w.kind === 'projects'}
+                <ProjectSessions {staff} {version} ask={w.ask} />
               {:else if w.kind === 'services'}
                 <ServicesPanel {staff} {version} onstaff={select} />
               {:else if w.kind === 'setup'}
@@ -1358,8 +1394,11 @@
             </div>
           {/each}
         </div>
+        <!-- The music keeps its place and size while Projects widens the panel. -->
         <div class="border-t border-hairline px-3 py-2">
-          <FloorControls bind:light onfit={fitFloor} onzoom={(d) => floor?.zoomBy(d)} />
+          <div style="max-inline-size: {leftWidth - 24}px">
+            <FloorControls bind:light onfit={fitFloor} onzoom={(d) => floor?.zoomBy(d)} />
+          </div>
         </div>
       </div>
     </SidePanel>
@@ -1374,10 +1413,11 @@
     </header>
   {/if}
 
-  <!-- The desk pill, centred on the floor between the two panels -->
+  <!-- The desk pill, centred on the floor between the two panels. Projects
+       covers the floor, and the plate's Desk button carries the count. -->
   <div
     class="pointer-events-none absolute top-4 flex justify-center max-sm:top-24"
-    class:hidden={firstRun}
+    class:hidden={firstRun || projectsReach !== undefined}
     style="inset-inline: {leftSpace}px {rightSpace}px"
   >
     <button
@@ -1414,6 +1454,7 @@
         onleave={() => (railAsked = false)}
         onselect={select}
         onchat={(id) => chatAbout(id, '')}
+        onwiden={(w) => (railOpen = w)}
       />
     </div>
   {/if}

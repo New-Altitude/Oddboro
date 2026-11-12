@@ -17,6 +17,35 @@ export type Outbound = {
 
 export const OUTBOUND: readonly Outbound[] = [
   {
+    file: 'apps/office/src/lib/server/project-sessions/codex-rpc.ts',
+    calls: 2,
+    to: 'The local Codex App Server, through authenticated loopback or the private socket the owner chose.',
+    sends:
+      'Native conversation requests, assignments, corrections and answers to provider permission prompts.',
+    yes: 'The owner turning on Advanced mode and connecting that conversation; a shared Odd sends only after the owner takes over its exact proposal, or at Act when the owner lets it send to that session without asking.'
+  },
+  {
+    file: 'apps/office/src/lib/ui/ProjectSessions.svelte',
+    calls: 2,
+    to: 'The office on this computer.',
+    sends: 'The selected session ID for updates and a request for the system folder picker.',
+    yes: 'The owner opening Projects and choosing a project folder.'
+  },
+  {
+    file: 'apps/office/src/lib/ui/ProjectTerminal.svelte',
+    calls: 1,
+    to: 'The office on this computer.',
+    sends: 'The selected session and terminal view IDs for its output stream.',
+    yes: 'The owner opening that native terminal.'
+  },
+  {
+    file: 'apps/office/src/lib/ui/project-api.ts',
+    calls: 1,
+    to: 'The office on this computer.',
+    sends: 'The selected project action, instruction, file reference or native terminal input.',
+    yes: 'The owner taking that action in Projects. Native tool approval remains in the native conversation.'
+  },
+  {
     file: 'apps/office/src/lib/server/access.ts',
     calls: 1,
     to: 'A hosted connector, at the address it was saved with.',

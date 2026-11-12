@@ -1,4 +1,5 @@
 // Reports, and the desk that lists what waits on the owner.
+import { proposedProjectWork } from './project-sessions.ts';
 import { and, asc, desc, eq, exists, gt, isNotNull, isNull, not, or } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { db } from './db.ts';
@@ -33,6 +34,7 @@ export async function readReport(id: number): Promise<void> {
 // The desk: everything waiting on the owner
 
 export type Desk = {
+  projectWork: Awaited<ReturnType<typeof proposedProjectWork>>;
   /** The latest answers, kept apart from the items waiting on the owner. */
   recent: Pick<LedgerRow, 'id' | 'title' | 'reason'>[];
   asks: AskRow[];
@@ -51,7 +53,7 @@ export type Desk = {
 
 export async function desk(): Promise<Desk> {
   const later = alias(ledger, 'later');
-  const [a, t, r, f, recent] = await Promise.all([
+  const [a, t, r, f, recent, projectWork] = await Promise.all([
     db
       .select()
       .from(asks)
@@ -103,12 +105,14 @@ export async function desk(): Promise<Desk> {
         )
       )
       .orderBy(desc(ledger.createdAt), desc(ledger.id))
-      .limit(5)
+      .limit(5),
+    proposedProjectWork()
   ]);
   // A twin waits behind the first ask it repeats, and the owner's answer to
   // that one answers it too (`asksNoMore`, `decide`).
   const shown = a.filter((x) => !a.some((first) => first.id < x.id && asksNoMore(first, x)));
   return {
+    projectWork,
     recent,
     asks: shown,
     tasks: t,

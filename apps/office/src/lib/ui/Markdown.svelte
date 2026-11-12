@@ -1,6 +1,14 @@
+<script module lang="ts">
+  type Render = typeof import('./markdown.ts').renderMarkdown;
+  // markdown-it is over a quarter of the first page's code, so it loads with
+  // the first text shown. Every Markdown shares the one load.
+  let loaded: Render | undefined;
+  let loading: Promise<Render> | undefined;
+  const load = () => (loading ??= import('./markdown.ts').then((m) => (loaded = m.renderMarkdown)));
+</script>
+
 <script lang="ts">
   import { askAbout } from './file-links.ts';
-  import { renderMarkdown } from './markdown.ts';
   import { openInBrowser } from './viewer.ts';
   import { openFile, type FileRef } from './windows.svelte.ts';
 
@@ -64,14 +72,23 @@
     node.addEventListener('click', click);
     return () => node.removeEventListener('click', click);
   }
-  const rendered = $derived(renderMarkdown(text, staff));
+  let render = $state(loaded);
+  if (!loaded) void load().then((r) => (render = r));
+  const rendered = $derived(render?.(text, staff));
   // Once per render, for names no page has asked about; the answers render it again.
-  $effect(() => void askAbout(rendered.unknown));
+  $effect(() => {
+    if (rendered) void askAbout(rendered.unknown);
+  });
 </script>
 
 <!-- Safe: markdown-it runs with html off, so every tag here is one it made. -->
 <div class="md {cls}" class:copies={copyCode} {@attach fileLinks} {@attach copies}>
-  {@html rendered.html}
+  {#if rendered}
+    {@html rendered.html}
+  {:else}
+    <!-- Until markdown-it loads: the text as it is, line breaks kept. -->
+    <p class="plain">{text}</p>
+  {/if}
 </div>
 
 <style>
@@ -100,6 +117,9 @@
   .md {
     line-height: 1.55;
     overflow-wrap: anywhere;
+  }
+  .plain {
+    white-space: pre-wrap;
   }
   .md :global(:where(p, ul, ol, pre, blockquote, table, h1, h2, h3, h4)) {
     margin-block: 0 0.6em;

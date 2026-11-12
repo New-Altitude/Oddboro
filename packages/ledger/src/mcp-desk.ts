@@ -2,15 +2,18 @@
 import { z } from 'zod';
 import { asksFor, giveTask, raiseAsk, searchLedger, tasksFrom } from './office.ts';
 import { askReplaced, SAID_AS, taskSaid } from './desk-answers.ts';
-import { SWITCH_NAMES } from './access-words.ts';
+import { parseLevel, SWITCH_NAMES } from './access-words.ts';
 import { notLed, recentThreads, threadsOn } from './threads.ts';
 import { goalWork, goalWorkRefused } from './goal-work.ts';
+import { projectConnections, projectWork, requestProject } from './project-sessions.ts';
 import {
   ME,
+  me,
   OWNER,
   has,
   OWNER_SAID,
   offered,
+  THREAD_ID,
   RUN_KEY,
   VIA,
   RAISED_ON,
@@ -20,10 +23,63 @@ import {
   attachable,
   tool,
   text,
+  json,
   line,
   refused
 } from './mcp-run.ts';
 
+// Connections are granted one at a time by the owner. An Odd can never
+// start a native process or type terminal keys through these tools.
+if (offered('my_project_sessions'))
+  tool(
+    'my_project_sessions',
+    {
+      description:
+        'See the project conversations the owner shared with you and the status and answers of your assignments.',
+      inputSchema: {}
+    },
+    async () => {
+      const sessions = await projectConnections(ME);
+      return json(
+        await Promise.all(
+          sessions.map(async (s) => ({
+            id: s.id,
+            title: s.title,
+            provider: s.agent,
+            work: (await projectWork(s.id))
+              .filter((r) => r.staffId === ME)
+              .map((r) => ({ id: r.id, state: r.state, answer: r.answer }))
+          }))
+        )
+      );
+    }
+  );
+if (offered('send_project_work'))
+  tool(
+    'send_project_work',
+    {
+      description:
+        'Give a shared native project session an assignment. Use a fresh UUID per assignment and reuse it on a retry. It waits for the owner to send it, unless the owner lets you send to that session without asking and you are at Act. Its result comes back as a report.',
+      inputSchema: {
+        session: z.string().uuid(),
+        key: z.string().uuid(),
+        prompt: z.string().trim().min(1).max(64000)
+      }
+    },
+    async (a) => {
+      if ((parseLevel(process.env.CEILING) ?? me.permission) === 'read')
+        return refused('This run can only read project work.');
+      const row = await requestProject({
+        id: a.key,
+        sessionId: a.session,
+        prompt: a.prompt,
+        staffId: ME,
+        threadId: THREAD_ID,
+        draft: (parseLevel(process.env.CEILING) ?? me.permission) !== 'act'
+      });
+      return json({ id: row.id, state: row.state });
+    }
+  );
 if (has('search_ledger'))
   tool(
     'search_ledger',
