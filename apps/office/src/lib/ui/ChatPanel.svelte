@@ -1488,10 +1488,11 @@
         </div>
         {#if line.bug && !line.pending}
           <!-- The Odd drafted a bug report: the form opens with it, and files nothing by itself. -->
-          <button
-            class="ms-1 me-auto text-xs text-sea hover:text-ink"
-            onclick={() => (bugReport = line.bug)}>File this</button
-          >
+          <div class="ms-auto w-[85%]">
+            <button class="choice" onclick={() => (bugReport = line.bug)}
+              >File this bug report</button
+            >
+          </div>
         {/if}
         {#if retryable(line, i)}
           {#if blocked && blocked.turnId === line.turnId}
