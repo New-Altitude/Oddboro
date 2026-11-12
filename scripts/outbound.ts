@@ -196,7 +196,7 @@ export const OUTBOUND: readonly Outbound[] = [
     yes: 'The owner, who sets OLLAMA_URL; with it unset nothing leaves this computer.'
   },
   {
-    file: 'packages/ledger/src/office.ts',
+    file: 'packages/ledger/src/office-access.ts',
     calls: 1,
     to: "Google's token revocation address.",
     sends: 'The Gmail or Drive sign-in being removed, so Google cancels it too.',

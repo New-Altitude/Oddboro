@@ -84,10 +84,18 @@ test('a verb takes -ing the way English spells it', () => {
 });
 
 test('every office tool an Odd can call has its own words, each starting with -ing', () => {
-  const mcp = readFileSync(
-    new URL('../../../../../packages/ledger/src/mcp.ts', import.meta.url),
-    'utf8'
-  );
+  // mcp.ts registers its tools through a chain of modules, each importing the
+  // one before it, so this follows the chain: a module left off it fails here.
+  const src = new URL('../../../../../packages/ledger/src/', import.meta.url);
+  const seen = new Set<string>();
+  const follow = (file: string): string => {
+    if (seen.has(file)) return '';
+    seen.add(file);
+    const text = readFileSync(new URL(file, src), 'utf8');
+    const next = [...text.matchAll(/(?:import|from) '\.\/(mcp-[a-z-]+\.ts)'/g)].map((m) => m[1]);
+    return text + next.map(follow).join('');
+  };
+  const mcp = follow('mcp.ts');
   const registered = [...mcp.matchAll(/\btool\(\s*'([a-z_]+)'/g)].map((m) => m[1]);
   assert.ok(registered.length > 20, `found ${registered.length} office tools`);
   for (const name of registered) {

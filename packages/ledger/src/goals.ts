@@ -304,10 +304,15 @@ export async function serveGoal(
  * The owner hired from a proposed hire. The hire serves the goal it was
  * proposed for in the transaction that approves the ask, since the answer
  * wakes the goal's lead to hand the hire its first piece. If the link fails,
- * the ask stays open and nobody is woken.
+ * the ask stays open and nobody is woken. `note` goes back with the answer,
+ * as when the owner added a persona in place of the proposed Odd.
  */
-export async function approveHire(askId: number, staffId: string): Promise<void> {
-  const approved = await approveAsk(askId, null, {
+export async function approveHire(
+  askId: number,
+  staffId: string,
+  note: string | null = null
+): Promise<void> {
+  const approved = await approveAsk(askId, note, {
     link: async (a, tx) => {
       if (a.kind !== 'hire') throw new Error('That is not a proposed hire');
       if (a.hire?.goal) await serveGoal(staffId, a.hire.goal.id, a.hire.goal.part, tx, askId);

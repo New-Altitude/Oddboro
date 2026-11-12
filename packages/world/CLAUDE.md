@@ -123,7 +123,7 @@ To add a kind of room, start at `ROOM_KINDS` in `src/generate.ts`. The type
 checker then names `KIND_ABOUT` and `ROOM_ID`. Nothing names its furnishing:
 add its case to `recipe()`'s switch, or the kind gets no furniture of its own.
 The room an Odd names in a hire proposal (`room` in `hireFields`,
-`packages/ledger/src/mcp.ts`) lists Main Street's rooms by hand.
+`packages/ledger/src/mcp-run.ts`) lists Main Street's rooms by hand.
 
 | File                | What it does                                               |
 | ------------------- | ---------------------------------------------------------- |

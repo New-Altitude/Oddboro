@@ -80,6 +80,7 @@ await bringUpToDate();
 const L = await import('@oddboro/ledger');
 const { accountStatus, accountToken } = await import('./account.ts');
 const { installGrantedPersonas, syncPersonas } = await import('./persona.ts');
+const { offeredSection } = await import('./persona-offered.ts');
 const { history } = await import('./staff.ts');
 const { bus } = await import('./events.ts');
 const accountRoute = await import('../../routes/api/account/+server.ts');
@@ -641,6 +642,78 @@ test('a store that refuses to write the kept list still lets sign-out end every 
   assert.deepEqual(kept(), ['pat', 'quinn']);
   assert.equal((await account('DELETE')).status, 200);
   assert.equal(store.has(KEPT), false);
+});
+
+/** A persona like Quinn under its own slug, name and hair part, so it can work here too. */
+function another(slug: string, name: string) {
+  const p = structuredClone(QUINN) as typeof QUINN & { displayName: string };
+  p.slug = slug;
+  p.displayName = `${name} Example`;
+  p.odd.name = name;
+  p.odd.parts[0].name = `${slug}-short-tuft`;
+  p.odd.parts[0].px = p.odd.parts[0].px.replace('hair-quinn-short-tuft', `hair-${slug}-short-tuft`);
+  p.odd.look.hair = `${slug}-short-tuft`;
+  return p;
+}
+
+test("a persona added from a hire ask's window answers that ask once it joins, and only then", async () => {
+  await signIn();
+  fake.odds = [PAT, QUINN, another('tess', 'Tess'), another('uma', 'Uma')];
+  const manager = (await L.roster())[0].id;
+  const propose = async (name: string) =>
+    (
+      await L.raiseAsk(manager, {
+        title: `Hire ${name}, ${name} Example Persona`,
+        why: 'For their view.',
+        ifApproved: 'The hire window opens with this filled in.',
+        hire: {
+          name,
+          role: `${name} Example Persona`,
+          permission: 'read',
+          remit: 'Gives a view.',
+          jobDescriptionFile: 'notes/jd.md'
+        }
+      })
+    ).ask.id;
+  const addFrom = (slug: string, askId: number) =>
+    call('/api/personas/[slug]', personaRoute.POST as Handler, {
+      method: 'POST',
+      slug,
+      body: { askId }
+    });
+  const status = async (id: number) => (await L.ask(id))?.status;
+
+  // Add on Tess's proposal, and the owner leaves the sign-in page unfinished.
+  const forTess = await propose('Tess');
+  assert.equal((await addFrom('tess', forTess)).status, 200);
+  assert.equal(await odd('tess'), undefined);
+  assert.equal(await status(forTess), 'open');
+  // Tess joins later from Setup's Add, which names no ask: the proposal stays open.
+  await grant('tess');
+  assert.ok(await odd('tess'));
+  assert.equal(await status(forTess), 'open');
+
+  // Add on Uma's proposal, and the sign-in finishes: her join answers it.
+  const forUma = await propose('Uma');
+  const { body } = await addFrom('uma', forUma);
+  assert.equal((await finish(String(body.url))).title, 'Connected');
+  assert.ok(await odd('uma'));
+  const answered = await L.ask(forUma);
+  assert.equal(answered?.status, 'approved');
+  assert.equal(
+    answered?.reason,
+    "Ada added Uma Example's New Altitude persona instead of a new Odd."
+  );
+
+  // An Odd that can propose a hire hears who is on offer from the last read,
+  // and who works here already. Signing out takes the list away.
+  const here = new Set(['pat', 'quinn', 'tess', 'uma']);
+  assert.match(offeredSection(new Set(['pat'])), /persona_slug/);
+  assert.match(offeredSection(new Set(['pat'])), /Uma Example \(uma\)/);
+  assert.doesNotMatch(offeredSection(here), /persona_slug/);
+  assert.match(offeredSection(here), /Already working here as personas: Pat Example/);
+  assert.equal((await account('DELETE')).status, 200);
+  assert.equal(offeredSection(new Set()), '');
 });
 
 test('no token, code, state or verifier reaches .env or the logs', async () => {

@@ -219,6 +219,8 @@ export type HireProposal = {
   intakeFile?: string;
   /** The goal this hire serves, and its part in it. Hiring links them. */
   goal?: { id: number; part: string };
+  /** A real person New Altitude offers as a persona: its slug. The hire window offers that persona. */
+  personaSlug?: string;
 };
 
 /** Files a recurring job exchanges on one piece of work. Names start inside the thread. */
@@ -758,7 +760,7 @@ export const threads = pgTable('threads', {
   /**
    * The key of each run that put work here from outside the thread: a hand-off,
    * held or not, or a goal's plan (`keepRun` in threads.ts).
-   * While one of them goes (`runsGoing` in office.ts), the hub's pick-ups here
+   * While one of them goes (`runsGoing` in office-follow-ups.ts), the hub's pick-ups here
    * wait, so the hub runs once at a time on its thread.
    */
   runs: text().array().notNull().default([]),

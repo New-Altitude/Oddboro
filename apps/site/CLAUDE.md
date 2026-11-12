@@ -63,17 +63,17 @@ The site never promises that nothing leaves without the owner's yes, because an
 Odd with a write grant at act acts without asking. It says each Odd gets the least
 access its job needs, and every claim rests on the office's real rules:
 
-| Claim on the site                                                     | Where it is true                                                          |
-| --------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| One level per Odd (read, draft, act), only the owner raises it        | `setPermission` in `packages/ledger/src/office.ts`; the 2026-10-29 ruling |
-| A new Odd starts at read with no outside tools                        | `staff.permission` defaults to read in `schema.ts`; grants start empty    |
-| An Odd asks, the owner approves and connects it                       | `grantAccess` and the 2026-10-30 access ruling                            |
-| A tool connects read only, or with write from draft                   | `grantAccess` and `grantWorks`; `access()` in `staff.ts`                  |
-| At draft, each change through a write grant waits for the owner's yes | `writesWait`; the gateway's `raiseCall`, and `makeCall` on the yes        |
-| A lowered level makes a grant above it wait                           | `access()` skips it; `setPermission`'s comment                            |
-| At act, a write grant uses that one tool without asking; revocable    | `revoke` in `office.ts`; the Odd's Settings › Services in `apps/office`   |
-| An Odd pokes the owner in chat at a time it sets                      | `poke_owner` in `packages/ledger/src/mcp.ts`                              |
-| Every Odd reads the people list, which stays on the owner's computer  | `readable` in `staff.ts`; hard rule 9                                     |
+| Claim on the site                                                     | Where it is true                                                                |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| One level per Odd (read, draft, act), only the owner raises it        | `setPermission` in `packages/ledger/src/office-staff.ts`; the 2026-10-29 ruling |
+| A new Odd starts at read with no outside tools                        | `staff.permission` defaults to read in `schema.ts`; grants start empty          |
+| An Odd asks, the owner approves and connects it                       | `grantAccess` and the 2026-10-30 access ruling                                  |
+| A tool connects read only, or with write from draft                   | `grantAccess` and `grantWorks`; `access()` in `staff.ts`                        |
+| At draft, each change through a write grant waits for the owner's yes | `writesWait`; the gateway's `raiseCall`, and `makeCall` on the yes              |
+| A lowered level makes a grant above it wait                           | `access()` skips it; `setPermission`'s comment                                  |
+| At act, a write grant uses that one tool without asking; revocable    | `revoke` in `office-access.ts`; the Odd's Settings › Services in `apps/office`  |
+| An Odd pokes the owner in chat at a time it sets                      | `poke_owner` in `packages/ledger/src/mcp-people.ts`                             |
+| Every Odd reads the people list, which stays on the owner's computer  | `readable` in `staff.ts`; hard rule 9                                           |
 
 An Odd has web search only when the owner turns on Browse the web for it,
 through its tool's own search and fetch; otherwise it has file tools only.

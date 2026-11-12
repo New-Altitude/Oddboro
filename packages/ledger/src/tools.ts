@@ -11,13 +11,13 @@ export type OfficeTool = {
   /** What it lets a staffer do, for the owner. */
   does: string;
   always?: boolean;
-  /** Offered only while the Odd holds Gmail (`mailboxes` in mcp.ts), even by `always`. */
+  /** Offered only while the Odd holds Gmail (`mailboxes` in mcp-run.ts), even by `always`. */
   withGmail?: boolean;
   /** Offered only when the owner shared a native conversation with this Odd. */
   withProject?: boolean;
   /**
    * Offered only in a chat, where the office sets the owner's words
-   * (`OWNER_SAID` in mcp.ts), even by `always`: the tool acts on what the
+   * (`OWNER_SAID` in mcp-run.ts), even by `always`: the tool acts on what the
    * owner just said, and a job or a follow-up has no such words.
    */
   inChat?: boolean;
