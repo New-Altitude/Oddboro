@@ -266,7 +266,7 @@ their change triggers; `0028_advanced_mode` adds `owner.advanced_at` and
   office's `unreadable` also reads; at the home's top by name, and anywhere
   else, in the home or outside it, the same list (`STORE_MARKS`), by name, or
   for a name a project or an ordinary folder may share by what marks the real
-  store, in the folder, the folders above it and each store's own marker path
+  store, in the folder, the folders above it and each store's own path
   below it, and no deeper; a store under another name is not found, and a `.ssh` with only
   custom-named keys and no `known_hosts` is given below the home's top), the
   office's home or its code, and one
