@@ -340,3 +340,25 @@ test("an Odd's new version of its own open reply takes the old one's place on th
   assert.ok(!shown.includes(before.ask.id));
   assert.equal((await ask(before.ask.id))?.status, 'revise');
 });
+
+test('a lead that leaves out work still gives a task, on no work', async () => {
+  // The lead leads the inbox work from the hand-offs above, so its tools take
+  // work. A session that kept the tools' older form sends none at all.
+  const c = await toolServer('lead', { RUN_KEY: 'k-no-work' });
+  const given = said(
+    await c.callTool({
+      name: 'give_owner_a_task',
+      arguments: {
+        title: 'Tell me your favourite animal',
+        why: 'Only you know.',
+        steps: ['Say it.']
+      }
+    })
+  );
+  const taskId = Number(/^Task (\d+) /.exec(given)?.[1]);
+  assert.ok(taskId, `the task went on the desk: ${given}`);
+  const [task] = await sql<
+    { thread_id: number | null }[]
+  >`select thread_id from tasks where id = ${taskId}`;
+  assert.equal(task.thread_id, null);
+});

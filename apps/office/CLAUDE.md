@@ -343,8 +343,9 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    questions (`FIRST_QUESTIONS` in the ledger's `first-questions.ts`). While
    one is the chat's last line, the chat shows its answers as a column of
    choices on the owner's side, the first marked Default; a tap sends that
-   answer as the owner's message. An answer to the first or second,
-   tapped or typed, gets the next question from the office (`chat` in
+   answer as the owner's message. An answer outside the choices runs
+   the manager at once. Each of the first two suggested choices gets a
+   short acknowledgment and the next question from the office (`chat` in
    `staff.ts`, a `told` line, no run); the third runs the manager, whose new
    session hears all three in its replay. Any Odd offers choices the same
    way: a chat reply that ends with `[choice] ...` lines (every run's
@@ -1530,8 +1531,12 @@ the persona's voice.
    its hello with `sayInChat`. An install it refuses ends that persona's
    sign-in, since nothing here would use it. Nothing is drawn.
    `staff.package` holds the slug, the version, New Altitude's disclosure
-   sentence and `quiet`; it is null for every other Odd. A granted persona
-   in an office not yet welcomed joins right after the manager. The page
+   sentence and `quiet`; it is null for every other Odd. A persona the
+   owner added in an office not yet welcomed joins right after the manager.
+   Only the owner's Add in this office, this run, hires one: a sign-in the
+   store kept from before is not a yes, since every office on this computer
+   shares the store and a reset leaves it. That persona's card shows Add,
+   which uses the kept sign-in with no page. The page
    keeps it off the floor until the manager has walked in, then it walks on
    (`firstRun` in `+page.svelte`).
 4. Hands, then voice. `run()` in `staff.ts` hands a persona Odd's chat, job

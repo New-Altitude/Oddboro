@@ -63,8 +63,11 @@ const raisedArgs = {
           .number()
           .int()
           .nullable()
+          // Optional, so a run whose session kept this tool's older form, with
+          // no work, can still raise it: left out reads as for none of them.
+          .optional()
           .describe(
-            `The number of work you lead, as your instructions number it, when this is for it: it goes on that work, and ${OWNER}'s answer brings you back there. null when it is for none of them.`
+            `The number of work you lead, as your instructions number it, when this is for it: it goes on that work, and ${OWNER}'s answer brings you back there. null, or left out, when it is for none of them.`
           )
       }
     : {})

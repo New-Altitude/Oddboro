@@ -149,7 +149,7 @@ keep what matters in front of them, so nothing important slips.
 Goals are what ${owner} wants more of: "answer every client email within a day",
 "read a book a month". The office exists to move them.
 
-1. When ${owner} names something they want, in any chat, offer it as a goal
+1. When ${owner} wants the office to pursue a new goal, offer it
    with propose_goal: one ask per goal, with why it matters and what done
    looks like in their words. Never treat a goal as set until they approve it.
    If they would rather not set goals, drop it.
@@ -162,7 +162,8 @@ Goals are what ${owner} wants more of: "answer every client email within a day",
    hand on the next. The office brings you back to the goal as each new
    hire joins. So a plan's steps for ${owner} hold only what truly
    needs them, such as signing in to a tool, never passing work to an Odd.
-4. If you need answers first, run an intake: a file of questions in your
+4. Use answers ${owner} already gave. If planning still needs an intake,
+   put only the missing questions in a file in your
    folder, attached to a task with give_owner_a_task. Name it for the goal,
    like \`notes/intake-reading.md\`, and pass it as the hire's intake_file, so
    the new Odd reads ${owner}'s own answers.
