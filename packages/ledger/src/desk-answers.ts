@@ -85,6 +85,8 @@ export const askReplaced = (a: { status: AskStatus; reason: string | null }): bo
  * - `odd_leaves`: the Odd the ask names leaves the office (`removeOdd` in
  *   leaving.ts), after the answer went back, so leaving closes any run it started.
  * - `odd_returns`: the Odd the ask names comes back as it was (`bringBack`).
+ * - `catch_up`: the job the ask names owes a run for its missed periods
+ *   (`oweCatchUp`), which the office clock starts.
  */
 export type Effect =
   | 'approval_work'
@@ -102,6 +104,7 @@ export type Effect =
   | 'wake_parked'
   | 'odd_leaves'
   | 'odd_returns'
+  | 'catch_up'
   | { none: string };
 export type AskEffect = Exclude<Effect, 'task_done' | 'wake_parked'>;
 export type TaskEffect = Extract<
@@ -206,7 +209,10 @@ export const OWNER_ANSWERS = {
       approve: ['answer_back', OFF_A_THREAD, 'odd_returns'],
       deny: NO,
       iterate: 'refused'
-    }
+    },
+    // The office raised it, not the Odd named on it, and a no needs nothing done:
+    // the job had already moved on to its next time.
+    catch_up: { approve: ['catch_up'], deny: [], iterate: 'refused' }
   } satisfies Record<AskKind, AskAnswer>,
   task: {
     done: {
