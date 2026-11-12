@@ -379,7 +379,13 @@ private, `latest.json` answers 404 to them.
 a table per step; a failed required row fails the run. It runs the app on
 port 4590, database port 54590, a throwaway home and its own log
 (`ODDBORO_LOG`), and points `ODDBORO_UPDATE_URL` at an address that refuses,
-so the build never updates itself away. The rows: it installs; the version
+so the build never updates itself away. The port, home and log are its own;
+the secrets are not, so the office runs with no secret store
+(`ODDBORO_SECRETS=office`), always with `--stage` and off CI for the app, and
+never reads the owner's Keychain or keyring.
+The Mac app keeps its secrets through its shell, in the same Keychain the
+owner's Oddboro uses, so off CI `--installed` and `--artifact` on a Mac
+refuse to run without `--my-keychain`. The rows: it installs; the version
 matches (the uninstall entry, `oddboro.exe` and the Start menu shortcut on
 Windows; `Info.plist`, `codesign`, `spctl` and the stapled ticket on a Mac);
 it starts with no dialog; the real window shows the welcome and Next moves it
@@ -402,7 +408,7 @@ with its pid, and the run leaves it running.
 
 ```sh
 node apps/desktop/scripts/smoke.ts --stage                       # the staged server, after stage.ts, with Sentry on (port 9 takes nothing)
-node apps/desktop/scripts/smoke.ts --installed                    # the app on this computer, apart from its office
+node apps/desktop/scripts/smoke.ts --installed                    # the app on this computer, on its own port, home and log
 node apps/desktop/scripts/smoke.ts --from <folder> --version 0.0.9   # a build job's output, as release.yml runs it
 ```
 

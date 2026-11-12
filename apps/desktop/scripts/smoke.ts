@@ -11,10 +11,15 @@
 //   node apps/desktop/scripts/smoke.ts --stage
 //
 // --from takes the one build of that version in a folder (a build job's
-// output). --installed runs the app already on this computer, apart from its
-// office. --stage runs the staged server, after stage.ts. --signed adds
-// Gatekeeper's checks on a Mac. --out sets where results go. --annotate
-// writes every result as a GitHub annotation.
+// output). --installed runs the app already on this computer, on its own
+// port, home and log. --stage runs the staged server, after stage.ts.
+// --signed adds Gatekeeper's checks on a Mac. --out sets where results go.
+// --annotate writes every result as a GitHub annotation.
+//
+// Off CI a run never touches the owner's secrets: the office runs with no
+// secret store (ODDBORO_SECRETS=office). The Mac app keeps its secrets
+// through its shell, in the Keychain the owner's Oddboro uses, so off CI it
+// runs only with --my-keychain.
 import { spawn, type ChildProcess } from 'node:child_process';
 import {
   appendFileSync,
@@ -79,7 +84,8 @@ const { values: args } = parseArgs({
     out: { type: 'string' },
     annotate: { type: 'boolean', default: false },
     relaunches: { type: 'string', default: '2' },
-    'replace-installed': { type: 'boolean', default: false }
+    'replace-installed': { type: 'boolean', default: false },
+    'my-keychain': { type: 'boolean', default: false }
   }
 });
 
@@ -305,6 +311,8 @@ async function smokeStage(): Promise<void> {
           HOST: '127.0.0.1',
           ORIGIN: BASE,
           ODDBORO_CODE: stage,
+          // No secret store: never the owner's Keychain or keyring.
+          ODDBORO_SECRETS: 'office',
           // As in the app: the server quits when asked, and a versioned first
           // start in an empty home makes its folder and records the version.
           ODDBORO_APP: '1',
@@ -388,6 +396,10 @@ async function smokeStage(): Promise<void> {
 
 /** The built app: installed, started, driven through its real window. */
 async function smokeApp(): Promise<void> {
+  if (MAC && !CI && !args['my-keychain'])
+    throw new Error(
+      'On a Mac the app reads the Keychain your Oddboro uses, so this run would have your sign-ins. Pass --my-keychain to go on, or run it on CI.'
+    );
   // Before any install: the Windows installer replaces the running app.
   if (shellPids().length)
     throw new Error(
@@ -480,6 +492,9 @@ async function smokeApp(): Promise<void> {
 
   const r = makeRun(OUT);
   currentRun = r;
+  // Linux and Windows: the office then has no secret store. The Mac's shell
+  // sets its own, which --my-keychain accepted above.
+  if (!CI) r.env.ODDBORO_SECRETS = 'office';
   if ((await tcp(PORT)) || (await tcp(DB_PORT)))
     throw new Error(`Port ${PORT} or ${DB_PORT} is taken`);
 
