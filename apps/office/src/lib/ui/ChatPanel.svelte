@@ -1146,6 +1146,18 @@
   </div>
 {/snippet}
 
+<!-- What the Odd is doing, under the reply it is working on, with Stop beside it. -->
+{#snippet doing(extra: string)}
+  <div class="meta {extra} ms-1 me-auto flex items-center text-xs text-muted">
+    <span aria-live="polite">{profile.name} is {status ? status.toLowerCase() : 'replying'}…</span>
+    {#if active}
+      <button type="button" class="text-coral hover:text-ink" disabled={stopping} onclick={stop}
+        >Stop</button
+      >
+    {/if}
+  </div>
+{/snippet}
+
 <!-- The line under a message: when, how long its run took, Reply when there is something to reply about, then Copy, split by thin bars. -->
 {#snippet meta(line: Line, i: number)}
   <div
@@ -1497,15 +1509,16 @@
           {/if}
         {/if}
         {#if line.pending}
-          <!-- What the staffer is doing, under the reply it is working on. -->
-          <div class="-mt-1 ms-1 text-xs text-muted" aria-live="polite">
-            {profile.name} is {status ? status.toLowerCase() : 'replying'}…
-          </div>
+          {@render doing('-mt-1')}
         {:else}
           {@render meta(line, i)}
         {/if}
       {/if}
     {/each}
+    {#if active && !lines.some((l) => l.pending)}
+      <!-- A reply still running from before this chat opened. -->
+      {@render doing('')}
+    {/if}
     {#if waiting}
       <!-- Sent while the reply above was still coming: it goes when that reply ends. -->
       <div class="ms-auto flex max-w-[85%] flex-col items-end gap-0.5">
@@ -1642,12 +1655,6 @@
     <div class="flex gap-2 px-3 pb-1.5 text-xs text-muted">
       <span>To {about.lead} about {about.kind}: {about.title}</span>
       <button aria-label="Clear work selection" onclick={() => (about = undefined)}>✕</button>
-    </div>
-  {/if}
-  {#if active}
-    <div class="flex items-center justify-end gap-2 px-3 pb-1.5 text-xs text-muted">
-      <button type="button" class="text-coral" disabled={stopping} onclick={stop}>Stop reply</button
-      >
     </div>
   {/if}
   {#if canSetGoal}

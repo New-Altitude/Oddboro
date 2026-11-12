@@ -727,7 +727,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    (`gemini-policy.test.ts`); a message starting with `/` goes in after a line
    break, so Gemini never runs it as a command.
    A chat resumes the Odd's session without waiting for a background slot.
-   Stop reply names the run on that saved turn, and later runs hear that
+   Stop, beside "is replying…", names the run on that saved turn, and later runs hear that
    reply as stopped by the owner, not failed (`chatPreface`). Ordinary Send
    queues while a reply runs. On a Claude Code Odd the queued message offers
    Send now, and Ctrl+Enter in the box (Ctrl on every system) queues and
