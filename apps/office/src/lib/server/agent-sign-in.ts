@@ -18,7 +18,14 @@
 import { rmSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { OFFICE_ACCOUNT, type Agent } from '@oddboro/ledger';
-import { claudeCommand, currentPlatform, npmCommand, probe } from '@oddboro/ledger/platform';
+import {
+  claudeCommand,
+  currentPlatform,
+  currentSystem,
+  npmCommand,
+  probe
+} from '@oddboro/ledger/platform';
+import { computerWord } from '@oddboro/ledger/system-words';
 import { claudeAccountOf, claudeHome, cleanEnv, forgetClaudeAccount } from './claude.ts';
 import { codexAccount, codexHome, codexSignIn } from './codex.ts';
 import { commandSlot, type Slot } from './command-stream.ts';
@@ -245,14 +252,6 @@ export function agentCommand(tool: Agent): Command | undefined {
 }
 
 /**
- * What the page calls this computer: Mac on a Mac, computer elsewhere, as the
- * page's header has it (`computer` in +page.server.ts). Read per call, since
- * MAC is fixed at import and a test stubs the system.
- */
-export const computerWord = (): 'Mac' | 'computer' =>
-  currentPlatform() === 'darwin' ? 'Mac' : 'computer';
-
-/**
  * Why an install through npm cannot start here, or undefined when it can.
  * Codex and Gemini install with npm, and so does Claude Code off Windows. The
  * app brings its own Node but not npm, so npm has to be on the PATH the
@@ -262,7 +261,7 @@ export const computerWord = (): 'Mac' | 'computer' =>
  */
 export function npmMissing(name: string): string | undefined {
   if (currentPlatform() === 'win32' || onPath('npm')) return undefined;
-  return `${name} installs with npm, which comes with Node.js, and the office cannot find npm on this ${computerWord()}. Install Node.js from nodejs.org, then quit and reopen Oddboro.`;
+  return `${name} installs with npm, which comes with Node.js, and the office cannot find npm on this ${computerWord(currentSystem())}. Install Node.js from nodejs.org, then quit and reopen Oddboro.`;
 }
 
 /**

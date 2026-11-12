@@ -15,13 +15,12 @@ import {
   roster,
   welcomed,
   zone,
-  SYSTEM,
   zoneName,
   type Probe,
   type System
 } from '@oddboro/ledger';
 import { checkDatabase, checkMachine, type Check } from '@oddboro/ledger/checks';
-import { CAN_NOTIFY } from '#lib/server/notify.ts';
+import { CAN_NOTIFY, canOpenNotifySettings } from '#lib/server/notify.ts';
 import type { RequestHandler } from './$types';
 
 const BUILT_IN: Check = {
@@ -87,9 +86,11 @@ export const GET: RequestHandler = async () => {
   const full = await fullName();
   return json({
     app: IN_APP,
-    system: SYSTEM,
+    system: currentSystem(),
     /** Whether the office can show its own notifications here. */
     notify: CAN_NOTIFY,
+    /** Whether this system has a notification settings page to open. */
+    notifySettings: canOpenNotifySettings(),
     suggested: full.split(' ')[0] ?? '',
     checks: [...machine.filter((c) => c.id !== 'docker'), ...database.checks],
     owner: name === 'the owner' ? '' : name,
