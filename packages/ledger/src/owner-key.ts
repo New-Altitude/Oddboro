@@ -105,29 +105,27 @@ export const EXCEPTION_ROUTES = [UPDATE_PATH, `${GATEWAY_PATH}/[connector]`, ...
 
 /**
  * What a route parameter matches: a connector id. Every id the office writes
- * is lowercase letters, digits and dashes, and a run's address escapes its id,
- * so an id that needed escaping would hold `%` and be refused, never decoded.
+ * is lowercase letters, digits and dashes, and a run's address escapes its id.
+ * It matches no `%`, backslash, `.` or `/`. With no `%`, the path SvelteKit
+ * decodes before it routes is the text the guard read. With no `.` or `/`, it
+ * holds no step a router would resolve to another path.
  */
-const PARAM = '[a-z0-9-]+';
+export const PARAM = '[a-z0-9-]+';
 const literal = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const EXCEPTION = new RegExp(
   `^(?:${EXCEPTION_ROUTES.map((r) => literal(r).replace(/\\\[[a-z]+\\\]/g, PARAM)).join('|')})$`
 );
-/**
- * Text a router may read as another path: an escape, a backslash (a folder
- * separator on Windows), an empty step, or a `.` or `..` step. Refused before
- * any shape is tried, so a looser parameter added later cannot let one in.
- */
-const REREAD = /[%\\]|\/\/|(?:^|\/)\.{1,2}(?:\/|$)/;
 
 /**
- * Whether `path` is exactly one exception route, as given. It does no URL
- * parse and no decode: each guard passes the text its own router routes on,
- * and a guard that read the address differently from its router would let a
- * keyless request through.
+ * Whether `path` is exactly one exception route, as given. It does no parse
+ * and no decode: each guard passes the text its router starts from. SvelteKit
+ * decodes that text before it routes, but no exception route and no PARAM
+ * match holds a `%`, so text that passes reads the same once decoded. A guard
+ * that read the address differently from its router would let a keyless
+ * request through.
  */
 export function isExceptionPath(path: string): boolean {
-  return !REREAD.test(path) && EXCEPTION.test(path);
+  return EXCEPTION.test(path);
 }
 
 /** The gateway member of the exception routes, so guardOffice asks for a run's token. */

@@ -23,9 +23,11 @@ import { CHAT_REQUEST_BYTES } from '../staff/chat-input.ts';
 //   localhost port is same-site, so it carries the cookie too. SvelteKit's own
 //   check covers form posts only, so the office checks every action itself.
 //
-// Whether a path is an exception is judged on `event.url.pathname`, the text
-// Kit routes on, never parsed or decoded again here: a guard that read the
-// address differently from its router would let a keyless request through.
+// Whether a path is an exception is judged on `event.url.pathname`, never
+// parsed or decoded again here. Kit decodes that text before it routes, so
+// the guard and the router agree only because no exception route can match a
+// `%`: text without one decodes to itself. A guard that read the address
+// differently from its router would let a keyless request through.
 //
 // A plain comparison of Origin with the office's own address would refuse the
 // owner's page through Caddy, which reaches the office over http while the
