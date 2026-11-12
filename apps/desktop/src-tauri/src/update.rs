@@ -63,14 +63,15 @@ pub fn on_launch(app: &AppHandle, log: &Path, show: ShowUpdating) -> bool {
             return false;
         }
     };
+    let (from, to) = (&update.current_version, &update.version);
     server::note(
         log,
-        &format!("updating to {} before the office starts", update.version),
+        &format!("updating from {from} to {to} before the office starts"),
     );
     show(app, &update.version);
     match download(&update).and_then(|bytes| install(&update, &bytes)) {
         Ok(()) => {
-            server::note(log, &format!("installed {}, opening it", update.version));
+            server::note(log, &installed(&update));
             relaunch(app);
             true
         }
@@ -162,20 +163,28 @@ fn hand_over(w: &Watch, update: &Update, bytes: &[u8], checks: &Receiver<()>) {
         while checks.try_recv().is_ok() {}
         sleep(ASK_EVERY);
     }
+    let (from, to) = (&update.current_version, &update.version);
     server::note(
         log,
-        &format!("installing {}: stopping the office", update.version),
+        &format!("installing {to} over {from}: stopping the office"),
     );
     (w.show)(app, &update.version);
     server::stop();
     match install(update, bytes) {
-        Ok(()) => server::note(log, &format!("installed {}, opening it", update.version)),
+        Ok(()) => server::note(log, &installed(update)),
         Err(e) => server::note(
             log,
             &format!("install of {} failed, reopening: {e}", update.version),
         ),
     }
     relaunch(app);
+}
+
+/// The office's next start logs "first start of X" (`packages/ledger/src/backup.ts`).
+/// Without it after this line, the update opened the old version again (#40).
+fn installed(update: &Update) -> String {
+    let (from, to) = (&update.current_version, &update.version);
+    format!("installed {to} over {from}, opening it")
 }
 
 fn check(app: &AppHandle) -> Result<Option<Update>, String> {

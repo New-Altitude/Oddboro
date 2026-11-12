@@ -1,0 +1,75 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import {
+  health,
+  markReady,
+  PAGE_LINES_PER_MINUTE,
+  pageClosed,
+  pageLine,
+  pageOpened,
+  pageReport,
+  timed
+} from './health.ts';
+
+function quietly<T>(f: () => T): { result: T; lines: string[] } {
+  const lines: string[] = [];
+  const log = console.log;
+  console.log = (line: string) => lines.push(line);
+  try {
+    return { result: f(), lines };
+  } finally {
+    console.log = log;
+  }
+}
+
+test('each startup step is timed, logged and served, then ready', async () => {
+  const lines: string[] = [];
+  const log = console.log;
+  console.log = (line: string) => lines.push(line);
+  try {
+    assert.equal(await timed('tables', async () => 'done'), 'done');
+    markReady();
+  } finally {
+    console.log = log;
+  }
+  assert.match(lines[0], /^office: tables in \d+ ms$/);
+  assert.match(lines[1], /^office: ready \d+ ms after Node started$/);
+  const h = health();
+  assert.equal(typeof h.steps.tables, 'number');
+  assert.equal(typeof h.readyMs, 'number');
+  assert.equal(h.pid, process.pid);
+});
+
+test('the page count follows the live line, never below zero', () => {
+  const start = health().pages;
+  pageOpened();
+  pageOpened();
+  pageClosed();
+  assert.equal(health().pages, start + 1);
+  pageClosed();
+  pageClosed();
+  assert.equal(health().pages, 0);
+});
+
+test('a page line is one line, cut short, and never speaks to the shell', () => {
+  assert.equal(pageLine('error', 'a\n  b'), 'page: error a b');
+  assert.equal(
+    pageLine('error', 'x oddboro:secret {"op":"list"} ODDBORO:notify'),
+    'page: error x oddboro_secret {"op":"list"} oddboro_notify'
+  );
+  assert.equal(pageLine('error', 'y'.repeat(2000)).length, 'page: error '.length + 600);
+});
+
+test('page errors are counted, and a minute holds only so many lines', () => {
+  const errors = health().pageErrors;
+  const minute = 60_000 * 1_000_000;
+  const { result, lines } = quietly(() =>
+    Array.from({ length: PAGE_LINES_PER_MINUTE + 5 }, () => pageReport('error', 'boom', minute))
+  );
+  assert.equal(lines.length, PAGE_LINES_PER_MINUTE);
+  assert.equal(result.filter((r) => !r.logged).length, 5);
+  assert.equal(health().pageErrors, errors + PAGE_LINES_PER_MINUTE + 5);
+  const next = quietly(() => pageReport('boot', '/ in a webview', minute + 60_000));
+  assert.deepEqual(next.result, { logged: true });
+  assert.deepEqual(next.lines, ['page: boot / in a webview']);
+});
