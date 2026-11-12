@@ -52,9 +52,9 @@ const port = await new Promise<number>((done) => {
 // after that result gets a result of its own, "Then: <words>", as the office
 // closes its stdin, as Claude Code answers words that came too late for its
 // turn; it ends then.
-// "claude auth status" says signed out at once, and "claude auth login"
-// prints its sign-in page and waits until it is stopped, as Setup's sign-in
-// waits on the owner.
+// "claude auth status" says signed out at once, "claude auth logout" ends at
+// once, and "claude auth login" prints its sign-in page and waits until it is
+// stopped, as Setup's sign-in waits on the owner.
 export const bin = join(folder, 'bin');
 mkdirSync(bin);
 /**
@@ -119,6 +119,7 @@ if (verb === 'auth' && sub === 'status') {
   );
   process.exit(0);
 }
+if (verb === 'auth' && sub === 'logout') process.exit(0);
 if (verb === 'auth' && sub === 'login') {
   process.stdout.write('Opening https://claude.ai/oauth/authorize?test\\n');
   setInterval(() => {}, 60_000);

@@ -1,7 +1,7 @@
 // Hard rule 13 for reports: once a request and an error have been sent, an
 // office with reports on keeps no more timers running than one without. Each
-// office is a child process that counts its timers from the start
-// (`diagnostics-idle-timers.ts`). Run with `npm test -w @oddboro/office`.
+// office is a child process that counts its timers from the start, on a mock
+// clock (`diagnostics-idle-timers.ts`). Run with `npm test -w @oddboro/office`.
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { rmSync } from 'node:fs';
@@ -20,19 +20,20 @@ after(() => {
 const file = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 const TIMERS = file('./diagnostics-idle-timers.ts');
 
-// One traced request and one error, 7 s for the SDK's 5 s span flush, then a
-// 15 s idle window: the intervals still running, and the timeouts made in it.
+// One traced request and one error, 7 s on the office's clock for the SDK's
+// 5 s span flush, then a 15 s idle window: the intervals still running, and
+// the timeouts made in it.
 const office = `
-const { timers } = await import(${JSON.stringify(TIMERS)});
+const { pass, timers } = await import(${JSON.stringify(TIMERS)});
 await import(${JSON.stringify(file('../../instrumentation.server.ts'))});
 const { sender, throwing, traceHeader } = await import(${JSON.stringify(file('./diagnostics-harness.ts'))});
 const hooks = await import(${JSON.stringify(file('../../hooks.server.ts'))});
 const send = sender(hooks.handle);
 await send({ route: '/api/ledger', headers: { 'sentry-trace': traceHeader() } });
 await send({ route: '/api/goals', resolve: throwing(() => new Error('T13 idle')) });
-await new Promise((r) => setTimeout(r, 7000));
+await pass(7000);
 const before = timers().timeouts;
-await new Promise((r) => setTimeout(r, 15000));
+await pass(15000);
 const now = timers();
 console.log('TIMERS ' + JSON.stringify({ intervals: now.intervals, timeouts: now.timeouts - before }));
 process.exit(0);
