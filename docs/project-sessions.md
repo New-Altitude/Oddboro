@@ -13,7 +13,7 @@ The ledger keeps your yes, with the date and the warning's words. Turning it off
 
 ## Open Projects
 
-Open **Projects** in the office's top bar, or **Project sessions** from the plus menu beside an Odd's chat box. Projects opens as a tab in the side panel, which widens to the Odd's chat, or to the Odds while no chat is open. Hovering the Odds narrows it so you can pick one. The music player stays where it is. The tab's ✕ closes Projects; sessions keep running.
+Open **Projects** in the office's top bar, or **Project sessions** from the plus menu beside an Odd's chat box. Projects opens as a tab in the side panel, which widens to the Odd's chat, or to the Odds while no chat is open. Drag its edge to make it narrower; the office remembers that width for Projects alone. Hovering the Odds narrows it so you can pick one. The music player stays where it is. The tab's ✕ closes Projects; sessions keep running.
 
 - Every session is listed down the start side: the tool's mark, the project folder's name, the conversation title under it, and a dot for its state (sea for working, ember for waiting for you, moss for done, grey for idle). A portrait shows the Odd allowed to send work there, ringed in ember when it may send without asking. Up and Down move between sessions; Enter opens one.
 - The selected session fills the rest: a slim header (folder, tool, the conversation ID to copy, **Take control of terminal**, **Details**, **Disconnect**) and the native terminal under it, which fills the space and refits as the panel changes size.

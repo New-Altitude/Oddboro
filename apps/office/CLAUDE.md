@@ -1813,7 +1813,10 @@ Projects is a window in the start panel (`openProject` in
 `windows.svelte.ts`). While it is in front on a wide screen, the panel
 stretches to 8 px short of the Odd's panel, else of the Odds rail
 (`projectsReach` in `+page.svelte`, `reach` on `SidePanel.svelte`), the desk
-pill hides, and the music keeps its usual width. While the rail is wide
+pill hides, and the music keeps its usual width. Its handle still drags: the
+width it leaves is Projects' own (`reachWidth`, kept beside the panel's usual
+width), from `min` up to that reach, and dragged all the way it follows the
+reach again. Another tab in front brings the usual width back. While the rail is wide
 (hovered, focused or ⌘K: `onwiden` on `OddsRail.svelte`), the panel steps
 back to the wide rail's edge, in the rail's own 200 ms, so every Odd stays in
 view. Its sessions run down the start side as a listbox; the selected one's
