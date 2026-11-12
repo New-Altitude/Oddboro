@@ -441,7 +441,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    only, keeps the title and details for its run (`keepBugDraft` in the
    ledger's `bug-drafts.ts`); when the run ends the office takes them
    (`takeBugDraft`, gone either way) and keeps them on the reply as `bug`
-   (`ChatEntry`). Under such a reply, File this opens the same review form
+   (`ChatEntry`). Under such a reply, a File this bug report button (styled as a chat choice) opens the same review form
    with that title and details, editable (`formStart` in
    `src/lib/bug-report.ts`). It never opens GitHub or posts: the owner
    still picks Open draft on GitHub, the form's main button, or Post with
@@ -738,7 +738,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    (`gemini-policy.test.ts`); a message starting with `/` goes in after a line
    break, so Gemini never runs it as a command.
    A chat resumes the Odd's session without waiting for a background slot.
-   Stop reply names the run on that saved turn, and later runs hear that
+   Stop, beside "is replying…", names the run on that saved turn, and later runs hear that
    reply as stopped by the owner, not failed (`chatPreface`). Ordinary Send
    queues while a reply runs. On a Claude Code Odd the queued message offers
    Send now, and Ctrl+Enter in the box (Ctrl on every system) queues and

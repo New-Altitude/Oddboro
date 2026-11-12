@@ -2310,7 +2310,7 @@ if (offered('draft_bug_report'))
         };
       keepBugDraft(ME, RUN_KEY, { title, body });
       return text(
-        `Drafted. ${OWNER} sees File this under your reply, which opens the draft for them to review. Nothing is filed yet.`
+        `Drafted. ${OWNER} sees a File this bug report button under your reply, which opens the draft for them to review. Nothing is filed yet.`
       );
     }
   );
