@@ -52,6 +52,7 @@ import {
   logText,
   MAC,
   makeRun,
+  OFFICE_ENTRY,
   officeFetch,
   type Page,
   pageHeaders,
@@ -321,38 +322,35 @@ async function smokeStage(): Promise<void> {
   const node = existsSync(binaries)
     ? readdirSync(binaries).find((n) => n.startsWith('node-'))
     : undefined;
-  if (!existsSync(join(stage, 'apps', 'office', 'build', 'index.js')) || !node)
+  const entry = join(stage, OFFICE_ENTRY);
+  if (!existsSync(entry) || !node)
     throw new Error('No staged server: run node apps/desktop/scripts/stage.ts first');
   const r = makeRun(OUT);
   currentRun = r;
   const start = (): ChildProcess => {
     appendFileSync(r.log, `--- start at ${new Date().toISOString()}\n`);
-    const server = spawn(
-      join(binaries, node),
-      [join(stage, 'apps', 'office', 'build', 'index.js')],
-      {
-        cwd: join(stage, 'apps', 'office'),
-        env: {
-          ...process.env,
-          ...r.env,
-          PORT: String(PORT),
-          HOST: '127.0.0.1',
-          ORIGIN: BASE,
-          ODDBORO_CODE: stage,
-          // No secret store: never the owner's Keychain or keyring.
-          ODDBORO_SECRETS: 'office',
-          // As in the app: the server quits when asked, and a versioned first
-          // start in an empty home makes its folder and records the version.
-          ODDBORO_APP: '1',
-          ODDBORO_VERSION: '0.0.0-smoke',
-          // So Sentry starts in the staged server. The home is new, so the owner
-          // has not said yes and nothing is sent; port 9 would take nothing anyway.
-          ODDBORO_DIAGNOSTICS_DSN: 'http://oddboro@127.0.0.1:9/oddboro/0'
-        },
-        // A held stdin, as the app gives it: the server quits when it closes.
-        stdio: ['pipe', 'pipe', 'pipe']
-      }
-    );
+    const server = spawn(join(binaries, node), [entry], {
+      cwd: join(stage, 'apps', 'office'),
+      env: {
+        ...process.env,
+        ...r.env,
+        PORT: String(PORT),
+        HOST: '127.0.0.1',
+        ORIGIN: BASE,
+        ODDBORO_CODE: stage,
+        // No secret store: never the owner's Keychain or keyring.
+        ODDBORO_SECRETS: 'office',
+        // As in the app: the server quits when asked, and a versioned first
+        // start in an empty home makes its folder and records the version.
+        ODDBORO_APP: '1',
+        ODDBORO_VERSION: '0.0.0-smoke',
+        // So Sentry starts in the staged server. The home is new, so the owner
+        // has not said yes and nothing is sent; port 9 would take nothing anyway.
+        ODDBORO_DIAGNOSTICS_DSN: 'http://oddboro@127.0.0.1:9/oddboro/0'
+      },
+      // A held stdin, as the app gives it: the server quits when it closes.
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
     server.stdout?.on('data', (d) => appendFileSync(r.log, d));
     server.stderr?.on('data', (d) => appendFileSync(r.log, d));
     return server;

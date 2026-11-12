@@ -5,6 +5,7 @@ import {
   notTheOwner,
   OWNER_PARAM
 } from '@oddboro/ledger/owner-key';
+import { holdIpv6Loopback } from '@oddboro/ledger/ipv6-loopback';
 import { sentrySvelteKit } from '@sentry/sveltekit/vite';
 import adapter from '@sveltejs/adapter-node';
 import { sveltekit } from '@sveltejs/kit/vite';
@@ -125,6 +126,22 @@ export function ownerOnly(): Plugin {
 }
 
 /**
+ * Vite's dev server listens on one host, 127.0.0.1, so this holds [::1] on the
+ * same port for it and hands each socket to the same server
+ * (`holdIpv6Loopback`). The guards above sit on that server, so they cover
+ * [::1] unchanged.
+ */
+export function ipv6Loopback(): Plugin {
+  return {
+    name: 'oddboro:ipv6-loopback',
+    apply: 'serve',
+    configureServer(server) {
+      if (server.httpServer) holdIpv6Loopback(server.httpServer);
+    }
+  };
+}
+
+/**
  * Vite's dev server has a route, `/__open-in-editor`, that opens a file in an
  * editor, and it runs before the office's own check (`guardOffice`). Nothing
  * in the office uses it; only Vite's error overlay links there. So it is
@@ -168,6 +185,7 @@ export default defineConfig(({ command }) => ({
   plugins: [
     ownerOnly(),
     noEditorLaunch(),
+    ipv6Loopback(),
     tailwindcss(),
     sentrySvelteKit(buildOptions(process.env)),
     sveltekit({ adapter: adapter() })

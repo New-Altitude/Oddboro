@@ -4,7 +4,7 @@
 use std::collections::VecDeque;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
-use std::net::{SocketAddr, TcpStream};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering::SeqCst};
@@ -13,7 +13,7 @@ use std::thread::{self, sleep};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// The server's entry point, relative to the staged code.
-pub const ENTRY: &str = "apps/office/build/index.js";
+pub const ENTRY: &str = "apps/office/start.js";
 
 const READY_TIMEOUT: Duration = Duration::from_secs(90);
 const STOP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -235,10 +235,18 @@ impl Server {
     }
 }
 
-/// True when anything listens on the port.
+/// True when anything listens on the port at either loopback address. The
+/// office holds both, so a program on [::1] alone stops it as surely as one on
+/// 127.0.0.1.
 pub fn port_taken(port: u16) -> bool {
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_ok()
+    [
+        IpAddr::from([127, 0, 0, 1]),
+        IpAddr::from(Ipv6Addr::LOCALHOST),
+    ]
+    .into_iter()
+    .any(|ip| {
+        TcpStream::connect_timeout(&SocketAddr::new(ip, port), Duration::from_millis(500)).is_ok()
+    })
 }
 
 /// Asks the shell to quit: Node is asked to go, gets up to 10 seconds, and is
@@ -673,6 +681,18 @@ mod tests {
             Route::Notify("Rowan", "The report is ready")
         );
         assert_eq!(route("listening on 127.0.0.1:4500"), Route::Log);
+    }
+
+    #[test]
+    fn a_port_held_on_ipv6_loopback_alone_is_taken() {
+        let Ok(held) = std::net::TcpListener::bind((Ipv6Addr::LOCALHOST, 0)) else {
+            // A system with no IPv6 loopback: the office runs on 127.0.0.1 alone there.
+            return;
+        };
+        let port = held.local_addr().unwrap().port();
+        assert!(port_taken(port));
+        drop(held);
+        assert!(!port_taken(port));
     }
 
     #[test]

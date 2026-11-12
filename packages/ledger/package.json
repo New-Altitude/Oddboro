@@ -21,6 +21,7 @@
     "./home": "./src/home.ts",
     "./owner-key": "./src/owner-key.ts",
     "./office-proof": "./src/office-proof.ts",
+    "./ipv6-loopback": "./src/ipv6-loopback.ts",
     "./local-db": "./src/local-db.ts",
     "./upgrade": "./src/upgrade.ts",
     "./update-window": "./src/update-window.ts",

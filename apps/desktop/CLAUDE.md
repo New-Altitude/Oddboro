@@ -132,8 +132,10 @@ not start or keep running, 7 no window. 0 is a quit.
 
 ## The contract with the server
 
-- Entry: `<resources>/server/apps/office/build/index.js`, run with cwd
-  `<resources>/server/apps/office`.
+- Entry: `<resources>/server/apps/office/start.js`, run with cwd
+  `<resources>/server/apps/office`. It runs the office's build
+  (`build/index.js`), which listens on 127.0.0.1, and holds [::1] on the same
+  port for it, so step 2 looks at both.
 - Node: the sidecar beside the shell, `Contents/MacOS/node` on a Mac,
   `usr/bin/node` in the AppImage and `node.exe` in the install folder on
   Windows, from `src-tauri/binaries/node-<target>` (`aarch64-apple-darwin`,

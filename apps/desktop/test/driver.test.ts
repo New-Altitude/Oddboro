@@ -51,7 +51,7 @@ test('a shell counts by the program it runs, never by its arguments', () => {
     ' 101 /tmp/Oddboro_0.0.9_x86_64.AppImage',
     ' 102 /tmp/.mount_OddborAbC/usr/bin/oddboro',
     ' 103 /private/var/x/Oddboro.app/Contents/MacOS/oddboro',
-    ' 104 /private/var/x/Oddboro.app/Contents/MacOS/node /x/apps/office/build/index.js'
+    ' 104 /private/var/x/Oddboro.app/Contents/MacOS/node /x/apps/office/start.js'
   ].join('\n');
   assert.deepEqual(shellsIn(out, 0), [101, 102, 103]);
   assert.deepEqual(shellsIn(out, 101), [102, 103]);

@@ -2,7 +2,7 @@
 
 The floor the owner watches, and the desk they work from. SvelteKit 3 with Svelte 5
 runes, PixiJS for the pixel-art floor, Tailwind for the page around it, and
-Postgres through `@oddboro/ledger`. Port 4500 on 127.0.0.1, or `ODDBORO_PORT`.
+Postgres through `@oddboro/ledger`. Port 4500 on 127.0.0.1 and [::1], or `ODDBORO_PORT`.
 
 `npm test` builds the sprites first when `packages/sprites/dist/meta.json` is
 missing, as on a fresh clone: hiring reads it.
@@ -1479,7 +1479,12 @@ the office asks `/api/office-proof` there with a fresh nonce and checks the
 answer against its key. Caddy, the office's own or the owner's, sets a header
 holding a hash of the key on every request it hands the office, so an answer
 through Caddy differs from one straight from the office's port, and a program
-on port 80 that hands only the proof to the office fails. The Caddyfile holds
+on port 80 that hands only the proof to the office fails. The office holds
+[::1] on its port as well as 127.0.0.1 (`holdIpv6Loopback` in the ledger, from
+`start.js` in a build and `ipv6Loopback` in `vite.config.ts` in dev), since
+`oddboro.localhost` reaches ::1 first and a program there could hand only the
+proof on. Something else on [::1] stops the office as on 127.0.0.1; a system
+with no IPv6 loopback runs it on 127.0.0.1 alone. The Caddyfile holds
 that hash, so the office writes it readable by the owner alone, and as it
 starts it rewrites it and restarts its Caddy when a new key changed it; in the
 owner's Caddy it replaces a route whose header is stale. With anything else on port

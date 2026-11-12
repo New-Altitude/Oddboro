@@ -28,6 +28,7 @@ import { after, test } from 'node:test';
 import { createServer } from 'vite';
 import config, {
   buildOptions,
+  ipv6Loopback,
   mapSource,
   noEditorLaunch,
   ownerOnly,
@@ -70,7 +71,7 @@ const dev = await createServer({
   logLevel: 'silent',
   appType: 'custom',
   server: { host: '127.0.0.1', port: 0, strictPort: true, watch: null },
-  plugins: [ownerOnly(), noEditorLaunch()]
+  plugins: [ownerOnly(), noEditorLaunch(), ipv6Loopback()]
 });
 const keyAfterStart = existsSync(keyFile);
 await dev.listen();
@@ -86,10 +87,10 @@ after(async () => {
 });
 
 /** A websocket upgrade to the dev server's live reload: its status, or 'closed' when the socket closed first. */
-function upgrade(headers: Record<string, string>): Promise<number | 'closed'> {
+function upgrade(headers: Record<string, string>, host = '127.0.0.1'): Promise<number | 'closed'> {
   return new Promise((done, fail) => {
     const req = request({
-      host: '127.0.0.1',
+      host,
       port: devPort,
       path: '/',
       headers: {
@@ -202,6 +203,19 @@ test('live reload closes an upgrade without the key before it answers, and upgra
   assert.equal(await upgrade({}), 'closed');
   assert.equal(await upgrade({ cookie: `${OWNER_COOKIE}=wrong` }), 'closed');
   assert.equal(await upgrade({ cookie: ownerCookie() }), 101);
+});
+
+test('on [::1] at its port the dev server keeps the same key rule and live reload guard', async () => {
+  const without = await fetch(`http://[::1]:${devPort}/@vite/client`);
+  assert.equal(without.status, 403);
+  assert.equal(await without.text(), NOT_THE_OWNER_PAGE);
+  const withKey = await fetch(`http://[::1]:${devPort}/@vite/client`, {
+    headers: { cookie: ownerCookie() }
+  });
+  assert.equal(withKey.status, 200);
+  await withKey.arrayBuffer();
+  assert.equal(await upgrade({}, '::1'), 'closed');
+  assert.equal(await upgrade({ cookie: ownerCookie() }, '::1'), 101);
 });
 
 test("the office's dev config asks for the key before any other plugin, then refuses the editor route", () => {

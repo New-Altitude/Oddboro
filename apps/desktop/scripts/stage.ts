@@ -3,6 +3,7 @@
 // and no workspace links, so the layout is plain:
 //
 //   stage/apps/office/build/        the office, from vite build
+//   stage/apps/office/start.js      the office's entry, which runs the build on 127.0.0.1 and [::1]
 //   stage/node_modules/             what the workspace packages load, at the versions installed here
 //   stage/node_modules/@oddboro/*   ledger, sprites and world, as JavaScript, with their files
 //
@@ -271,6 +272,7 @@ function checkChunks(dir: string): void {
 function stageOffice(): void {
   const office = join(STAGE, 'apps', 'office');
   cpSync(join(ROOT, 'apps', 'office', 'build'), join(office, 'build'), { recursive: true });
+  cpSync(join(ROOT, 'apps', 'office', 'start.js'), join(office, 'start.js'));
   writeFileSync(
     join(office, 'package.json'),
     JSON.stringify({ name: '@oddboro/office', private: true, type: 'module' }, null, 2) + '\n'

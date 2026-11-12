@@ -30,6 +30,8 @@ export const LINUX = process.platform === 'linux';
 export const PORT = 4590;
 export const DB_PORT = 54590;
 export const BASE = `http://127.0.0.1:${PORT}`;
+/** The office's entry in the staged server, the file the app runs (`ENTRY` in server.rs). */
+export const OFFICE_ENTRY = 'apps/office/start.js';
 // A release build installs any newer version before its server starts. An
 // update address that refuses at once keeps a run on the build it tests.
 const NO_UPDATES = 'https://127.0.0.1:9/latest.json';
@@ -199,16 +201,18 @@ export function shellPids(): number[] {
 }
 
 function officeNodes(): number[] {
+  // In the Windows pattern each `/` becomes a dot, which matches the
+  // command line's backslash.
   if (WIN)
     return ps(
-      `@(Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -match 'office.build.index\\.js' }).ProcessId -join ' '`
+      `@(Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -match '${OFFICE_ENTRY.replaceAll('/', '.')}' }).ProcessId -join ' '`
     )
       .split(/\s+/)
       .filter(Boolean)
       .map(Number);
   return sh('ps', ['-eo', 'pid=,args='])
     .out.split('\n')
-    .filter((l) => l.includes('apps/office/build/index.js'))
+    .filter((l) => l.includes(OFFICE_ENTRY))
     .map((l) => Number(l.trim().split(/\s+/)[0]));
 }
 
