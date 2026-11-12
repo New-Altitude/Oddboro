@@ -5,6 +5,8 @@
   import { FIRST_QUESTIONS, firstQuestionIn } from '@oddboro/ledger/first-questions';
   import { clockTime } from '@oddboro/ledger/time';
   import Markdown from './Markdown.svelte';
+  import TaskResponse from './TaskResponse.svelte';
+  import { current, saved, type SavedResponse } from './task-response.svelte.ts';
   import ChatGoal from './ChatGoal.svelte';
   import GoalProposal from './GoalProposal.svelte';
   import { approvalTarget, approveWord, yesWord } from './chat-approval.ts';
@@ -153,7 +155,7 @@
   /** The delivery the next message replies about. */
   let replyTo = $state<Delivered | undefined>();
 
-  let intent = $state<'reply' | 'proposal' | 'answer' | 'change'>('reply');
+  let intent = $state<'reply' | 'proposal' | 'change'>('reply');
   let saving = $state(false);
   // Two plans can wait in the same chat. Each keeps its own checkboxes.
   let skipped = $state<Record<number, Record<number, boolean>>>({});
@@ -166,18 +168,28 @@
         a.id === d.id &&
         ((a.kind === 'goal' && a.goal) || (a.kind === 'plan' && a.plan))
     );
-  /** An open task of this Odd's the owner answers here with one response, and how (`chatAnswer`). */
+  /**
+   * An open task of this Odd's the owner answers here with one response, and
+   * how (`chatAnswer`): a tap on its choice, or its response editor.
+   */
   const question = (d: Delivered) => {
     if (d.kind !== 'task') return undefined;
     const t = desk.tasks.find((t) => t.staffId === profile.id && t.id === d.id);
-    const how =
-      t &&
-      chatAnswer(
-        t,
-        desk.attachments.some((f) => f.taskId === t.id)
-      );
-    return t && how && { ...how, why: t.why };
+    if (!t) return undefined;
+    const files = desk.attachments.filter((f) => f.taskId === t.id);
+    const how = chatAnswer({ ...t, response: current(t).response }, files.length > 0);
+    return how && { ...how, why: t.why, task: t, files };
   };
+  /** A finished task's saved response, read when the owner opens it on its card. */
+  let unread = $state<Record<number, string>>({});
+  async function readResponse(id: number) {
+    if (saved[id]) return;
+    try {
+      saved[id] = await call<SavedResponse>(`/api/tasks/${id}`);
+    } catch (err) {
+      unread[id] = err instanceof Error ? err.message : String(err);
+    }
+  }
 
   let lines = $state<Line[]>([]);
   const waitingAsks = $derived(
@@ -441,28 +453,21 @@
    * The Desk's own operations. Only a card the owner picked can supply the
    * target. Each says it came from this chat, so the Odd's reply comes back here.
    */
-  async function decide(d: Delivered, act: 'approve' | 'change' | 'answer' | 'choose', words = '') {
+  async function decide(d: Delivered, act: 'approve' | 'change' | 'choose', words = '') {
     if (saving || !decisionMode) return false;
     saving = true;
     refused = '';
     try {
-      if (act === 'answer' || act === 'choose') {
+      if (act === 'choose') {
         const how = question(d);
-        if (!how || (act === 'choose') !== !!how.choice)
-          throw new Error('This task is no longer waiting for this answer.');
+        if (!how?.choice) throw new Error('This task is no longer waiting for this answer.');
         // A tap answers the choice as the Desk does, then finishes the task.
-        if (act === 'choose' && how.choice)
-          await call(`/api/tasks/${d.id}`, {
-            op: 'choose',
-            index: how.choice.index,
-            answer: words
-          });
         await call(`/api/tasks/${d.id}`, {
-          op: 'finish',
-          done: true,
-          note: act === 'answer' ? words : '',
-          chat: true
+          op: 'choose',
+          index: how.choice.index,
+          answer: words
         });
+        await call(`/api/tasks/${d.id}`, { op: 'finish', done: true, chat: true });
       } else {
         const a = proposal(d);
         if (!a) throw new Error('This proposal is no longer open.');
@@ -506,8 +511,7 @@
         approveTo,
         re ? undefined : onlyProposal
       );
-      const action =
-        intent === 'change' || intent === 'answer' ? intent : approved ? 'approve' : undefined;
+      const action = intent === 'change' ? intent : approved ? 'approve' : undefined;
       const target = re ?? approved;
       if (target && action) {
         if (!(await decide(target, action, action === 'approve' ? '' : words))) return;
@@ -1254,14 +1258,28 @@
                     {/each}
                   </div>
                 {:else}
-                  <button
-                    class="choice mt-2"
-                    disabled={saving || !decisionMode}
-                    onclick={() => reply(it, 'answer')}>Answer and finish</button
-                  >
+                  <!-- The one place the chat takes a typed answer to a task. -->
+                  <TaskResponse
+                    task={t.task}
+                    files={t.files}
+                    open
+                    inChat
+                    held={saving || !decisionMode}
+                    onfinish={() => load(profile.id)}
+                  />
                 {/if}
               </div>
             {/if}
+          {:else if it.kind === 'task' && it.responseVersion}
+            <details
+              class="mt-1 px-3 text-xs text-muted"
+              ontoggle={(e) => e.currentTarget.open && readResponse(it.id)}
+            >
+              <summary class="cursor-pointer text-sea">Your response</summary>
+              <p class="mt-1 whitespace-pre-wrap text-ink">
+                {saved[it.id]?.response ?? unread[it.id] ?? 'Opening'}
+              </p>
+            </details>
           {/if}
         </div>
         {@render meta(line, i)}
@@ -1439,11 +1457,7 @@
   {#if replyTo}
     <div class="flex items-center gap-2 px-3 pb-1.5 text-xs text-muted">
       <span class="min-w-0 flex-1 truncate"
-        >{intent === 'answer'
-          ? 'Answering'
-          : intent === 'change'
-            ? 'Asking for changes to'
-            : 'Replying about'}
+        >{intent === 'change' ? 'Asking for changes to' : 'Replying about'}
         {KIND[replyTo.kind].toLowerCase()} “{replyTo.title}”</span
       >
       <button
@@ -1562,13 +1576,7 @@
           ><path d="M14.5 1.5 1.5 6.6l5.2 2.2 2.2 5.7z" /><path d="M14.5 1.5 6.7 8.8" /><path
             d="m6.7 8.8.2 3.7 2-1.9"
           /></svg
-        >{uploading
-          ? 'Attaching'
-          : decisionMode && intent === 'answer'
-            ? 'Send answer'
-            : decisionMode && intent === 'change'
-              ? 'Send changes'
-              : 'Send'}
+        >{uploading ? 'Attaching' : decisionMode && intent === 'change' ? 'Send changes' : 'Send'}
       </button>
     </div>
   </form>

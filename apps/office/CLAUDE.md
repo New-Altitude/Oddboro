@@ -259,7 +259,11 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    out as `Bearer <key>` (`headerSecret`); a value with a scheme goes as it is. Steps without one tick by hand, as a checklist: only a step with an action, and
    the sign-in's step that ticks itself (its `oauth:` key), holds up Mark done (`stepsToGo` in
    `src/lib/ui/task-steps.ts`). Ticking keeps the task open: the drawer opens an item only
-   when its `focus` changes, never because the desk reloaded. Finishing a task records it in the ledger as the owner's work.
+   when its `focus` changes, never because the desk reloaded. Finishing a task records it in the ledger as the owner's work. A task's response
+   (`src/lib/ui/TaskResponse.svelte`, one editor on the Desk and on the task's chat card)
+   saves through `/api/tasks/[id]` with the version it opened; a draft stays on the task
+   (`task-response.svelte.ts`) while the owner moves between tasks. Mark done saves the
+   words shown first (`finishWithResponse`), and the follow-up gets them word for word.
 8. **The Ledger** (`src/lib/ui/LedgerPanel.svelte`) searches every decision and
    piece of work by meaning. **Goals** (`src/lib/ui/GoalsPanel.svelte`) are what
    the owner wants more of, grouped by area: each with why it matters, what
@@ -343,12 +347,15 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    window (`ReportView.svelte`). A goal or plan card also takes a decision
    in chat, using the Desk's ask route and the same plan checkboxes. The
    manager's New goal box starts empty and sets that exact title through the
-   Goals route. A retry with its request id returns the goal already set. Answer and
-   finish on a task sends the owner's words as its closing note, and a task
-   with choices shows them as buttons, a tap answering the choice and finishing
-   it. `chatAnswer` in `src/lib/ui/task-steps.ts` says which tasks take one
-   response in chat; one with a file, a sign-in, a secret or a tool step, or a
-   connect task, stays on the Desk. Neither starts a chat run; the follow-up
+   Goals route. A retry with its request id returns the goal already set. A typed
+   answer to a task has one path: its response editor on the card, opened
+   empty for a plain question, where Save and finish saves the words and
+   finishes the task as from chat. A task with choices shows them as buttons,
+   a tap answering the choice and finishing it. `chatAnswer` in
+   `src/lib/ui/task-steps.ts` says which tasks take one response in chat; one
+   with a file to fill in, a sign-in, a secret or a tool step, a choice and a
+   response together, or a connect task, stays on the Desk. Files beside a
+   response are only to read, so that task answers in chat. Neither starts a chat run; the follow-up
    replies in the chat afterwards. Reply under an item otherwise sends a message about
    it: the run gets the item in full, and a reply about a report marks it read
    and goes in the ledger as the owner's feedback (`replyToReport`). A

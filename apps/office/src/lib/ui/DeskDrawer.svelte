@@ -2,6 +2,14 @@
   import type { AskRow, Desk, LedgerRow, ReportRow, Step, TaskRow } from '@oddboro/ledger';
   import Pixel from './Pixel.svelte';
   import Markdown from './Markdown.svelte';
+  import TaskResponse from './TaskResponse.svelte';
+  import {
+    current,
+    drafts,
+    finishWithResponse,
+    writing,
+    staleDraft
+  } from './task-response.svelte.ts';
   import Attachments from './Attachments.svelte';
   import AwsSignIn from './AwsSignIn.svelte';
   import AwsSecretPick from './AwsSecretPick.svelte';
@@ -23,7 +31,7 @@
   import GoalProposal from './GoalProposal.svelte';
   import { LEVEL_LABEL, type FolderAccess } from '@oddboro/ledger/access';
   import type { StaffProfile } from '../staff/roster.ts';
-  import { stepText, stepsToGo } from './task-steps.ts';
+  import { chatAnswer, stepText, stepsToGo } from './task-steps.ts';
 
   type Props = {
     desk: Desk;
@@ -237,7 +245,9 @@
   }
   const finish = (t: TaskRow, done: boolean) =>
     act(async () => {
-      await call(`/api/tasks/${t.id}`, { op: 'finish', done, note });
+      // Done saves the response the owner sees first, so the Odd gets those words.
+      if (done) await finishWithResponse(t, { note });
+      else await call(`/api/tasks/${t.id}`, { op: 'finish', done, note });
       made = undefined;
     }, true);
 
@@ -653,7 +663,18 @@
         {@const t = open.row}
         <p class="mt-2 text-sm leading-relaxed text-muted">{t.why}</p>
         {@const toGo = stepsToGo(t.steps)}
-        <!-- A question with one answer has no steps: the note below is the answer. -->
+        {@const response = current(t)}
+        {@const draft = drafts[t.id]}
+        {@const needsSave = !!draft || (response.response !== null && !response.responseVersion)}
+        {@const blockedResponse =
+          writing[t.id] ||
+          staleDraft(draft, response) ||
+          (needsSave && !(draft?.text ?? response.response)?.trim())}
+        {@const how = chatAnswer(
+          { ...t, response: response.response },
+          attached('task', t.id).length > 0
+        )}
+        <!-- A question with one answer has no steps: its answer goes in the response below. -->
         <ol class="mt-3 flex flex-col gap-2" class:hidden={!t.steps.length}>
           {#each t.steps as s, index (index)}
             <li
@@ -784,11 +805,17 @@
           {/each}
         </ol>
         {#key open.key}
-          <Attachments items={attached('task', t.id)} start="edit" ondirty={(d) => (unsaved = d)} />
+          {#if t.staffId && !t.askId}
+            <TaskResponse task={t} files={attached('task', t.id)} open={!!how && !how.choice} />
+          {/if}
+          <Attachments
+            items={attached('task', t.id)}
+            reference={response.response !== null}
+            start="edit"
+            ondirty={(d) => (unsaved = d)}
+          />
         {/key}
-        <label class="mt-4 block text-xs text-muted" for="note"
-          >{t.steps.length ? 'Note (optional)' : 'Your answer'}</label
-        >
+        <label class="mt-4 block text-xs text-muted" for="note">Note (optional)</label>
         <textarea
           id="note"
           rows="2"
@@ -808,13 +835,15 @@
           >
           <button
             class="flex-1 rounded-lg bg-sea px-3 py-2 text-sm font-medium text-night disabled:opacity-40"
-            disabled={busy || unsaved || toGo > 0}
+            disabled={busy || unsaved || blockedResponse || toGo > 0}
             onclick={() => finish(t, true)}
             >{unsaved
               ? 'Save the attached file first'
               : toGo
                 ? `${toGo} ${toGo === 1 ? 'step' : 'steps'} to go`
-                : 'Mark done'}</button
+                : needsSave
+                  ? 'Save and finish'
+                  : 'Mark done'}</button
           >
         </div>
       {:else}
