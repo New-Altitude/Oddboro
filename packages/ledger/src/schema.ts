@@ -760,7 +760,7 @@ export const threads = pgTable('threads', {
   /**
    * The key of each run that put work here from outside the thread: a hand-off,
    * held or not, or a goal's plan (`keepRun` in threads.ts).
-   * While one of them goes (`runsGoing` in office.ts), the hub's pick-ups here
+   * While one of them goes (`runsGoing` in office-follow-ups.ts), the hub's pick-ups here
    * wait, so the hub runs once at a time on its thread.
    */
   runs: text().array().notNull().default([]),
