@@ -329,8 +329,9 @@
             >
           </div>
           <p class="mt-0.5 text-xs text-muted">
-            {desk.away.length === 1 ? 'This job' : 'These jobs'} skipped a run, since it was too late
-            to be useful. Each runs again at its next time.
+            {desk.away.length === 1
+              ? 'This job skipped a run that was too late to be useful. It runs again at its next time.'
+              : 'These jobs each skipped a run that was too late to be useful. Each runs again at its next time.'}
           </p>
           <ul class="mt-2 flex flex-col gap-1.5">
             {#each desk.away as j (j.id)}
