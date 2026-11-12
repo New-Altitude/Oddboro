@@ -247,8 +247,11 @@ if (args.some((a) => a.startsWith('- '))) {
   process.exit(2);
 }
 const after = (flag) => args[args.indexOf(flag) + 1];
-const joined = (flag) => args.find((a) => a.startsWith(flag + '='))?.slice(flag.length + 1);
-const replay = /Replay (\\/[^\\r\\n]+\\.jsonl)\\s*$/.exec(joined('--single'))?.[1];
+// The message comes in the file --prompt-file names: plain text, or content blocks in a .json file.
+const promptPath = after('--prompt-file');
+const promptText = fs.readFileSync(promptPath, 'utf8');
+const blocks = promptPath.endsWith('.json') ? JSON.parse(promptText) : undefined;
+const replay = /Replay (\\/[^\\r\\n]+\\.jsonl)\\s*$/.exec(blocks ? '' : promptText)?.[1];
 if (replay) {
   fs.writeFileSync(process.env.GROK_HOME + '/replay-args.json', JSON.stringify(args));
   process.stdout.write(fs.readFileSync(replay, 'utf8'));
@@ -273,9 +276,12 @@ const gave = {
   home: process.env.HOME,
   agentMode: fs.statSync(after('--agent')).mode & 0o777,
   profile,
-  system: joined('--rules'),
-  message: joined('--single'),
-  prompt: joined('--prompt-json') && JSON.parse(joined('--prompt-json'))
+  // The system prompt is the agent file's body, after its frontmatter.
+  system: agent.replace(/^---\\n[\\s\\S]*?\\n---\\n/, '').replace(/\\n$/, ''),
+  promptMode: /^prompt_mode: (.*)$/m.exec(agent)?.[1],
+  promptFileMode: fs.statSync(promptPath).mode & 0o777,
+  message: blocks ? undefined : promptText,
+  prompt: blocks
 };
 const line = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 line({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: 'tool_use', name: 'use_tool' } } });
@@ -666,6 +672,11 @@ export type Gave = {
   /** The Grok run's HOME: the owner's, or the run home `runHome` made. */
   home?: string;
   agentMode?: number;
+  /** The Grok run's agent file's `prompt_mode`, and the mode of the file `--prompt-file` names. */
+  promptMode?: string;
+  promptFileMode?: number;
+  /** The Grok run's message as content blocks, from a `.json` prompt file. */
+  prompt?: { type: string; data?: string; mimeType?: string; text?: string }[];
   profile?: string;
   codexEnv?: Record<string, string>;
   /** The Codex run's MCP servers, as its `-c mcp_servers` said them, or the Grok run's, as its agent file names them. */
