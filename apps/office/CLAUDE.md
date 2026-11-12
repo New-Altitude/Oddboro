@@ -345,8 +345,10 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    of its thread (`threadsFor`), where the thread began, even once it is
    continued: its title, when it began, where it stands in the same words as
    the Goals window (`workLine`) and anything waiting on the owner, with each
-   step on Open. A click on a desk item opens
-   it on the start side: on the Desk while it waits, else a report in its own
+   step on Open. A click anywhere on a desk item's card opens it: the card is
+   one button, its title still selectable, and a click that ends a selection
+   opens nothing; its controls sit below it, outside the button. It opens
+   on the start side: on the Desk while it waits, else a report in its own
    window (`ReportView.svelte`). A goal or plan card also takes a decision
    in chat, using the Desk's ask route and the same plan checkboxes. The
    manager's New goal box opens from the plus menu, starts empty and sets that exact title through the
