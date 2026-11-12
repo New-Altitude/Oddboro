@@ -5,6 +5,8 @@ import { randomUUID } from 'node:crypto';
 import { realpath, writeFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { OFFICE_PORT } from '@oddboro/ledger/home';
+import { ownerCookie } from '@oddboro/ledger/owner-key';
 
 const [address, directory] = process.argv.slice(2);
 if (!address || !directory)
@@ -13,11 +15,23 @@ if (!address || !directory)
   );
 const office = new URL(address);
 assert.equal(office.hostname, '127.0.0.1', 'Use a local test office.');
+// The office refuses a request without the owner's key, and the key's cookie is
+// named by the office's port. Both come from ODDBORO_PORT and ODDBORO_HOME, so
+// they must name the test office, or every request is refused.
+assert.equal(
+  Number(office.port),
+  OFFICE_PORT,
+  "Set ODDBORO_PORT and ODDBORO_HOME to the test office's port and home."
+);
 const folder = await realpath(directory);
 const api = async <T>(action: string, fields: Record<string, unknown> = {}): Promise<T> => {
   const response = await fetch(new URL('/api/project-sessions', office), {
     method: 'POST',
-    headers: { Origin: office.origin, 'Content-Type': 'application/json' },
+    headers: {
+      Origin: office.origin,
+      'Content-Type': 'application/json',
+      cookie: ownerCookie()
+    },
     body: JSON.stringify({ action, ...fields })
   });
   const body = await response.json();
