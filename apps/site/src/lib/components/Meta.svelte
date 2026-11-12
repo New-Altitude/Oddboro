@@ -9,7 +9,7 @@
     ogDescription = description,
     path = '/',
     image = SITE.ogImage,
-    imageAlt = 'The front of a pixel-art office at night, lamps on'
+    imageAlt = 'A glowing pixel O over the name Oddboro on a lawn, two pixel-art Odds to each side'
   }: {
     title?: string;
     description?: string;
