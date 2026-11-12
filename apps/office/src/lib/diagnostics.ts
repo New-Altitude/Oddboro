@@ -133,6 +133,7 @@ export const ROUTE_IDS = {
   '/api/goals/[id]': true,
   '/api/goals/[id]/staff': true,
   '/api/jobs/[id]': true,
+  '/api/jobs/away': true,
   '/api/ledger': true,
   '/api/lessons': true,
   '/api/lessons/[id]': true,

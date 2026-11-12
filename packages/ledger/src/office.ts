@@ -90,6 +90,7 @@ import {
   type ReplyDraft,
   type LedgerKind,
   type RunTrigger,
+  type MissedRuns,
   type Schedule,
   type Step,
   type UsageKind
@@ -112,6 +113,7 @@ import {
 import { MANAGER_ROLE } from './managers.ts';
 import { currentPlatform } from './platform.ts';
 import { bringBack, leavingRefused, removeOdd } from './leaving.ts';
+import { awayJobs, oweCatchUp, type AwayJob } from './missed-runs.ts';
 import {
   GRANT_LABEL,
   grantWorks,
@@ -124,7 +126,7 @@ import {
   type OwnSwitch
 } from './access-words.ts';
 import { filterWords, sameCriteria, type GmailFilter } from './filter-words.ts';
-import { nextRun, zone } from './time.ts';
+import { MISSED_WORDS, nextRun, zone } from './time.ts';
 import { isGrantable, OFFICE_TOOLS, ON_BY_DEFAULT, stepsToGo, tickable, yesOrNo } from './tools.ts';
 import { HIRE_DEFAULTS } from './grantable.ts';
 import {
@@ -1840,6 +1842,9 @@ async function decide(
       case 'odd_returns':
         if (ask.odd) await bringBack(ask.odd, { askId: ask.id });
         break;
+      case 'catch_up':
+        await oweCatchUp(ask);
+        break;
       default:
         effect satisfies never;
     }
@@ -3538,6 +3543,8 @@ export type Desk = {
    * (`shownFolder`), which only the server can work out.
    */
   folders: Record<number, string>;
+  /** The jobs that skipped a run while the office was off: the While you were away card. */
+  away: AwayJob[];
 };
 
 export async function desk(): Promise<Desk> {
@@ -3607,7 +3614,8 @@ export async function desk(): Promise<Desk> {
     attachments: f.map((x) => x.attachments),
     folders: Object.fromEntries(
       shown.flatMap((x) => (x.folder ? [[x.id, shownFolder(x.folder.path)]] : []))
-    )
+    ),
+    away: await awayJobs()
   };
 }
 
@@ -3769,6 +3777,7 @@ export async function addJob(
     instructions: string;
     schedule: Schedule;
     report?: boolean;
+    missed?: MissedRuns;
   },
   q: Db = db
 ): Promise<JobRow> {
@@ -3781,7 +3790,9 @@ export async function addJob(
 
 export async function updateJob(
   id: number,
-  patch: Partial<Pick<JobRow, 'name' | 'instructions' | 'schedule' | 'enabled' | 'report'>>
+  patch: Partial<
+    Pick<JobRow, 'name' | 'instructions' | 'schedule' | 'enabled' | 'report' | 'missed'>
+  >
 ): Promise<void> {
   const [row] = await db.update(jobs).set(patch).where(eq(jobs.id, id)).returning();
   if (row && (patch.schedule || patch.enabled))
@@ -3812,7 +3823,7 @@ async function recordGoAhead(who: StaffRow, go: GoAhead, what: string): Promise<
 export async function editOwnJob(
   staffId: string,
   name: string,
-  patch: Partial<Pick<JobRow, 'instructions' | 'schedule' | 'report'>>,
+  patch: Partial<Pick<JobRow, 'instructions' | 'schedule' | 'report' | 'missed'>>,
   go: GoAhead
 ): Promise<JobRow | undefined> {
   const who = await staffer(staffId);
@@ -3831,7 +3842,8 @@ export async function editOwnJob(
       patch.instructions && `Steps:\n${patch.instructions}`,
       patch.schedule && `Schedule: ${JSON.stringify(patch.schedule)}`,
       patch.report !== undefined &&
-        `Reports to ${await ownerName()}: ${patch.report ? 'yes' : 'no'}`
+        `Reports to ${await ownerName()}: ${patch.report ? 'yes' : 'no'}`,
+      patch.missed && `Missed runs: ${MISSED_WORDS[patch.missed]}`
     ]
       .filter(Boolean)
       .join('\n\n'),

@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { JobRow, RunRow, Schedule } from '@oddboro/ledger';
-  import { describe, zoneName } from '@oddboro/ledger/time';
+  import type { JobRow, MissedRuns, RunRow, Schedule } from '@oddboro/ledger';
+  import { describe, MISSED_WORDS, zoneName } from '@oddboro/ledger/time';
   import SchedulePicker from './SchedulePicker.svelte';
   import Markdown from './Markdown.svelte';
   import { call } from './api.ts';
@@ -26,6 +26,7 @@
   let instructions = $state('');
   let schedule = $state<Schedule>({ every: 'day', at: '07:00' });
   let report = $state(false);
+  let missed = $state<MissedRuns>('latest');
   let problem = $state('');
 
   $effect(() => {
@@ -50,15 +51,29 @@
     instructions = j?.instructions ?? '';
     schedule = j ? { ...j.schedule } : { every: 'day', at: '07:00' };
     report = j?.report ?? false;
+    missed = j?.missed ?? 'latest';
     editing = j ? j.id : 'new';
   }
 
   async function save() {
     await act(async () => {
       if (editing === 'new')
-        await call(`/api/staff/${profile.id}/jobs`, { name, instructions, schedule, report });
+        await call(`/api/staff/${profile.id}/jobs`, {
+          name,
+          instructions,
+          schedule,
+          report,
+          missed
+        });
       else
-        await call(`/api/jobs/${editing}`, { op: 'update', name, instructions, schedule, report });
+        await call(`/api/jobs/${editing}`, {
+          op: 'update',
+          name,
+          instructions,
+          schedule,
+          report,
+          missed
+        });
       editing = undefined;
     });
   }
@@ -98,6 +113,22 @@
         <label class="flex items-center gap-2 text-xs text-muted">
           <input type="checkbox" bind:checked={report} /> Put the result on my desk as a report
         </label>
+        <label class="flex flex-col gap-1 text-xs text-muted">
+          When the office was off at run time
+          <select
+            class="rounded-lg bg-night/60 px-2 py-1.5 text-sm text-ink outline-none"
+            bind:value={missed}
+          >
+            {#each Object.entries(MISSED_WORDS) as [value, words] (value)}
+              <option {value}>{words}</option>
+            {/each}
+          </select>
+          <span class="text-[11px] text-faint"
+            >{missed === 'record'
+              ? 'Each missed run is filled later, one entry per period. For counts and trends that must have no gaps.'
+              : 'Runs once if it is still early enough, else waits for its next time. For sweeps, reports and reminders.'}</span
+          >
+        </label>
         <div class="flex gap-2">
           <button
             class="rounded-lg px-3 py-1.5 text-xs text-muted hover:text-ink"
@@ -135,7 +166,10 @@
                   >{j.name}</span
                 >
                 <span class="block text-xs text-muted">
-                  {describe(j.schedule)}{j.report ? ' · report to your desk' : ''}
+                  {describe(j.schedule)}{j.report ? ' · report to your desk' : ''}{j.missed ===
+                  'record'
+                    ? ' · fills missed runs'
+                    : ''}
                 </span>
               </span>
               {#if working === j.name}

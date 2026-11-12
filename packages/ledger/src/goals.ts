@@ -437,7 +437,11 @@ export async function approvePlan(
             await editOwnJob(
               item.staff,
               item.editJob.name,
-              { instructions: item.editJob.instructions, schedule: item.editJob.schedule },
+              {
+                instructions: item.editJob.instructions,
+                schedule: item.editJob.schedule,
+                missed: item.editJob.missed
+              },
               { askId }
             );
         } else {

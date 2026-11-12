@@ -110,7 +110,9 @@ export type AccountRow = typeof accounts.$inferSelect;
  * the owner's yes turns them on. `remove` asks to let an Odd go (`asks.odd`):
  * an Odd asking to leave names itself, and the Office Manager names another.
  * `bring_back` is the manager's ask to bring back an Odd that left. The owner's
- * yes does it (`removeOdd`, `bringBack`).
+ * yes does it (`removeOdd`, `bringBack`). `catch_up` is the office's ask to
+ * fill more missed periods of a `record` job than it fills on its own
+ * (`asks.catch_up`, missed-runs.ts): the owner's yes owes the job those periods.
  */
 export const ASK_KINDS = [
   'approval',
@@ -126,7 +128,8 @@ export const ASK_KINDS = [
   'switch',
   'call',
   'remove',
-  'bring_back'
+  'bring_back',
+  'catch_up'
 ] as const;
 export type AskKind = (typeof ASK_KINDS)[number];
 /** `revise` means the owner sent it back to be reworked. */
@@ -193,6 +196,8 @@ export type HeldCall = {
   /** Set once the office made the call: whether the tool took it, and its words. */
   result?: { ok: boolean; text: string; at: string };
 };
+/** What a catch_up ask fills: one job's missed scheduled times, ISO, oldest first. */
+export type CatchUp = { jobId: number; times: string[] };
 /** A proposed hire. Approving it opens the hire window filled in with this. */
 export type HireProposal = {
   name: string;
@@ -205,7 +210,7 @@ export type HireProposal = {
   jobDescriptionFile: string;
   /** Office tools beyond the ones every staffer has. */
   tools?: string[];
-  job?: { name: string; instructions: string; schedule: Schedule; report?: boolean };
+  job?: NewJob;
   /** What the person looks like, in words, for drawing their look. */
   appearance?: string;
   /** The owner's intake answers, a file in the proposer's folder. The hire gets a copy as `notes/intake.md`. */
@@ -215,7 +220,13 @@ export type HireProposal = {
 };
 
 /** A new job for a staffer. */
-export type NewJob = { name: string; instructions: string; schedule: Schedule; report?: boolean };
+export type NewJob = {
+  name: string;
+  instructions: string;
+  schedule: Schedule;
+  report?: boolean;
+  missed?: MissedRuns;
+};
 
 /** One piece of a goal plan. The owner ticks the ones to go ahead with. */
 export type GoalPlanItem =
@@ -228,7 +239,7 @@ export type GoalPlanItem =
       /** A new job for it. */
       job?: NewJob;
       /** A change to one of its jobs, by name. */
-      editJob?: { name: string; instructions?: string; schedule?: Schedule };
+      editJob?: { name: string; instructions?: string; schedule?: Schedule; missed?: MissedRuns };
     };
 
 /** How the office meets one goal. */
@@ -330,6 +341,8 @@ export const asks = pgTable('asks', {
   folder: jsonb().$type<FolderRequest>(),
   /** A call ask's held call to an outside tool. */
   call: jsonb().$type<HeldCall>(),
+  /** A catch_up ask's job, and each missed scheduled time it would fill. */
+  catchUp: jsonb().$type<CatchUp>(),
   /** A switch ask's switches, Run commands or Browse the web, to turn on (`ask_for_switch`). */
   switches: jsonb().$type<OwnSwitch[]>(),
   /** A remove or bring_back ask's Odd (a staff id). */
@@ -650,6 +663,15 @@ export type Schedule =
   | { every: 'weekday'; at: string }
   | { every: 'week'; day: Weekday; at: string };
 
+/**
+ * What a job does with runs it missed while the office was off. `latest`: only
+ * the newest run matters, so it catches up once if it is still early enough,
+ * else skips to its next time. `record`: each run adds an entry to a series, so
+ * every missed period is filled. How: `apps/office/src/lib/server/jobs.ts`.
+ */
+export const MISSED_RUNS = ['latest', 'record'] as const;
+export type MissedRuns = (typeof MISSED_RUNS)[number];
+
 export const jobs = pgTable('jobs', {
   id: id(),
   staffId: text()
@@ -662,6 +684,11 @@ export const jobs = pgTable('jobs', {
   report: boolean().notNull().default(false),
   enabled: boolean().notNull().default(true),
   nextRunAt: at('next_run_at'),
+  missed: text().$type<MissedRuns>().notNull().default('latest'),
+  /** Missed scheduled times, ISO, oldest first, that the clock still owes one catch-up run. */
+  owed: jsonb().$type<string[]>(),
+  /** The run a `latest` job skipped, while it waits on the desk's While you were away card. */
+  skippedAt: at('skipped_at'),
   createdAt: created()
 });
 

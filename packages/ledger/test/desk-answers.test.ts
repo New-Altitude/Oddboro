@@ -17,6 +17,7 @@ import {
   followUps,
   goals,
   grants,
+  jobs,
   ledger,
   staff,
   staffGoals,
@@ -255,6 +256,12 @@ const PINNED: Record<AskKind, Record<Decision, Pin>> = {
     },
     deny: NO,
     iterate: REFUSED
+  },
+  // The office raises it on no thread, and a yes owes the job its runs: no Odd hears of it.
+  catch_up: {
+    approve: { cell: ['catch_up'], onThread: [] },
+    deny: { cell: [], onThread: [] },
+    iterate: REFUSED
   }
 };
 
@@ -454,6 +461,31 @@ const raise: Record<AskKind, (onThread: boolean) => Promise<Raised>> = {
       threadId
     });
     return { id: ask.id };
+  },
+  // The office's own ask, as askToCatchUp raises it, for a job of Ada's.
+  catch_up: async () => {
+    const [j] = await db
+      .insert(jobs)
+      .values({
+        staffId: 'ada',
+        name: 'Count the cakes',
+        instructions: 'Count them.',
+        schedule: { every: 'day', at: '09:00' },
+        missed: 'record'
+      })
+      .returning({ id: jobs.id });
+    const [a] = await db
+      .insert(asks)
+      .values({
+        staffId: 'ada',
+        kind: 'catch_up',
+        title: 'Fill 11 missed periods?',
+        why: 'w',
+        ifApproved: 'i',
+        catchUp: { jobId: j.id, times: ['2026-11-01T14:00:00.000Z'] }
+      })
+      .returning({ id: asks.id });
+    return { id: a.id };
   }
 };
 /** The owner's decision, through the function the office answers each with. */

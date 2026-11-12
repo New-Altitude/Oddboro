@@ -251,6 +251,11 @@
       made = undefined;
     }, true);
 
+  /** Run now on a job that skipped a run: it runs, and leaves the While you were away card. */
+  const runAway = (id: number) => act(() => call(`/api/jobs/${id}`, { op: 'run' }));
+  /** Dismiss the While you were away card: every job on it leaves it. */
+  const dismissAway = () => act(() => call('/api/jobs/away', undefined, 'DELETE'));
+
   /** The service's sign-in page opens in a new tab; the step ticks when the owner comes back. */
   async function hostedSignIn(t: TaskRow, index: number) {
     await act(async () => {
@@ -313,7 +318,44 @@
 
   <div class="flex-1 overflow-y-auto p-3">
     {#if !open}
-      {#if !items.length}
+      {#if desk.away.length}
+        <section class="mb-3 rounded-xl bg-raise px-3 py-2.5" aria-label="While you were away">
+          <div class="flex items-center gap-2">
+            <h3 class="flex-1 text-sm font-medium text-ink">While you were away</h3>
+            <button
+              class="rounded-lg px-2.5 py-1 text-xs text-muted hover:text-ink disabled:opacity-40"
+              disabled={busy}
+              onclick={dismissAway}>Dismiss</button
+            >
+          </div>
+          <p class="mt-0.5 text-xs text-muted">
+            {desk.away.length === 1
+              ? 'This job skipped a run that was too late to be useful. It runs again at its next time.'
+              : 'These jobs each skipped a run that was too late to be useful. Each runs again at its next time.'}
+          </p>
+          <ul class="mt-2 flex flex-col gap-1.5">
+            {#each desk.away as j (j.id)}
+              <li class="flex items-center gap-2">
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate text-sm text-ink">{j.name}</span>
+                  <span class="block text-[11px] text-faint"
+                    >{who(j.staffId)?.name ?? j.staffId} · skipped {when(j.skippedAt)}</span
+                  >
+                </span>
+                <button
+                  class="shrink-0 rounded-lg bg-night/60 px-2.5 py-1 text-xs hover:bg-sea/25 disabled:opacity-40"
+                  disabled={busy}
+                  onclick={() => runAway(j.id)}>Run now</button
+                >
+              </li>
+            {/each}
+          </ul>
+          {#if problem}
+            <p class="mt-2 text-xs text-coral">{problem}</p>
+          {/if}
+        </section>
+      {/if}
+      {#if !items.length && !desk.away.length}
         <p class="py-10 text-center text-sm text-muted">
           Desk clear. Your Odds will bring you anything that needs you.
         </p>
