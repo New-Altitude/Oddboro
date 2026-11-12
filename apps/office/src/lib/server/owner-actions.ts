@@ -52,7 +52,9 @@ export const TASK_OPS = [
   'aws-secret-keys',
   'aws-secret',
   'tools',
-  'confirm-tools'
+  'confirm-tools',
+  'postal-inboxes',
+  'postal-select'
 ] as const;
 export type TaskOp = (typeof TASK_OPS)[number];
 
@@ -179,6 +181,10 @@ export const OWNER_ACTIONS = {
     notAnAction:
       "Keeps a file the owner attaches in the Odd's attachments folder, as part of the chat message that names it, which the chat's own log keeps."
   },
+  'POST /api/staff/[id]/bug-reports': {
+    notAnAction:
+      "Files the owner's reviewed bug report on GitHub with their own GitHub CLI, then adds its link to the chat, which the chat's own log keeps."
+  },
   'DELETE /api/staff/[id]/chat': {
     none: 'Stops only the named reply attempt and keeps its outcome in chat.'
   },
@@ -243,6 +249,12 @@ export const OWNER_ACTIONS = {
   'POST /api/tasks/[id]#tools': { notAnAction: 'Lists the tools the server offers.' },
   'POST /api/tasks/[id]#confirm-tools': {
     none: 'Marks the tool ready with the tools it lists, and ticks the step.'
+  },
+  'POST /api/tasks/[id]#postal-inboxes': {
+    notAnAction: 'Lists the LegalZoom mailboxes the sign-in reaches.'
+  },
+  'POST /api/tasks/[id]#postal-select': {
+    none: 'Saves the one LegalZoom mailbox the office reads, marks the tool ready, and ticks the step.'
   },
   // The app's shell reporting an update, and the owner picking when it
   // installs: both write the `app_update` row.

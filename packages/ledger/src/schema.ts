@@ -393,6 +393,7 @@ export type StepAction =
   | { kind: 'secret'; connector: string; name: string }
   | { kind: 'oauth'; connector: string }
   | { kind: 'aws'; connector: string }
+  | { kind: 'postal'; connector: string }
   | { kind: 'choice'; options: string[] }
   | { kind: 'tools'; connector: string };
 /** Steps that share a `key` tick together, e.g. the two steps of one sign-in. */
@@ -619,6 +620,8 @@ export type ConnectorConfig = {
    * nothing else (AWS read only's role), so a Read only grant reaches them all.
    */
   readsByRole?: boolean;
+  /** The one LegalZoom mailbox the owner selected for this office. */
+  pmb?: string;
   /**
    * Environment variables or headers whose value the office fetches from the
    * owner's AWS Secrets Manager when a run first uses the tool, in place of a

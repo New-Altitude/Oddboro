@@ -9,6 +9,7 @@ import {
   reconfigureConnector,
   type ConnectorRow
 } from './office.ts';
+import { POSTAL_ID, POSTAL_NAME, POSTAL_URL } from './access-words.ts';
 import type { ConnectorConfig, ConnectorKind, connectors } from './schema.ts';
 
 const REGISTRY = 'https://registry.modelcontextprotocol.io/v0/servers';
@@ -134,6 +135,14 @@ const AWS_PICK =
 
 export const BUILT_IN: (typeof connectors.$inferInsert)[] = [
   {
+    id: POSTAL_ID,
+    name: POSTAL_NAME,
+    description:
+      'Read incoming physical mail, postal letters and paper mail already scanned in one LegalZoom Virtual Mail inbox. Cannot request a scan, send, forward or shred.',
+    kind: 'http',
+    config: { url: POSTAL_URL, oauth: true }
+  },
+  {
     id: AWS_SECRETS_ID,
     name: 'AWS Secrets Manager',
     description: `The names and descriptions of the owner's secrets in AWS Secrets Manager, never their values. Ask for read when the owner wants their AWS secrets used: once it is connected, the owner can also have other tools take their keys from AWS. ${AWS_PICK}`,
@@ -202,11 +211,16 @@ export async function ensureConnector(
     };
   const isUrl = /^https:\/\/\S+$/.test(wanted);
   const url = isUrl ? new URL(wanted) : undefined;
-  const id = url ? connectorId(`${url.hostname}${url.pathname}`) : wanted;
+  const id =
+    url?.href === POSTAL_URL
+      ? POSTAL_ID
+      : url
+        ? connectorId(`${url.hostname}${url.pathname}`)
+        : wanted;
   const own = await connector(id);
   if (own) {
     // One named by its address and not connected yet takes the way in asked for now.
-    if (way && own.kind === 'http' && !own.registry && !own.readyAt) {
+    if (id !== POSTAL_ID && way && own.kind === 'http' && !own.registry && !own.readyAt) {
       const config = byAddress(own.config.url!, way);
       if (JSON.stringify(config) !== JSON.stringify(own.config)) {
         await reconfigureConnector(own.id, config);

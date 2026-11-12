@@ -750,13 +750,14 @@ for (const [id, holds] of Object.entries(HOLDERS))
 // The test above works out what a run gets with `isOffered`, so a condition
 // dropped from a row, or from `isOffered`, changes what it expects too. These
 // hold the rows themselves, and what `isOffered` gives for each condition.
-test('only leave_office, withdraw, tell_lead, remove_odd and bring_back_odd wait for a chat, only leave_office is kept from the manager, and only see_office shapes the prompt and is never offered, even to a chat holding it', () => {
+test('only leave_office, withdraw, tell_lead, draft_bug_report, remove_odd and bring_back_odd wait for a chat, only leave_office is kept from the manager, and only see_office shapes the prompt and is never offered, even to a chat holding it', () => {
   const where = (field: 'inChat' | 'notToManager' | 'prompt') =>
     OFFICE_TOOLS.filter((t) => t[field]).map((t) => t.id);
   assert.deepEqual(where('inChat'), [
     'leave_office',
     'withdraw',
     'tell_lead',
+    'draft_bug_report',
     'remove_odd',
     'bring_back_odd'
   ]);

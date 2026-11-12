@@ -14,6 +14,8 @@
   import GoalProposal from './GoalProposal.svelte';
   import { approvalTarget, approveWord, yesWord } from './chat-approval.ts';
   import { chatAnswer } from './task-steps.ts';
+  import BugReport from './BugReport.svelte';
+  import { failedReply } from '../bug-report.ts';
   import Lesson from './Lesson.svelte';
   import PersonaQuiet from './PersonaQuiet.svelte';
   import { newTurnId } from '#lib/staff/chat-input.ts';
@@ -245,6 +247,8 @@
     );
   });
   let draft = $state('');
+  /** What the bug report form starts with, while it is open. */
+  let bugReport = $state<{ title?: string; body: string }>();
   let sending = $state(false);
   // The office already holds the text, files and reply target under this turn id.
   type Blocked = { turnId: string; signIn: ChatSignIn };
@@ -766,6 +770,7 @@
           else if (ev.type === 'done') {
             reply.text = ev.text;
             if (ev.choices?.length) reply.choices = ev.choices;
+            if (ev.bug) reply.bug = ev.bug;
             reply.pending = false;
             reply.at = new Date().toISOString();
           } else if (ev.type === 'error') {
@@ -915,6 +920,13 @@
         await tick();
         goal?.focus();
       }
+    },
+    // The form takes the focus; a failed reply's error starts its details.
+    {
+      label: 'Report a bug',
+      shown: () => true,
+      focuses: true,
+      run: () => (bugReport = { body: failedReply(lines) })
     }
   ];
   const more = $derived(MORE.filter((m) => m.shown()));
@@ -1469,6 +1481,13 @@
             {line.text}
           {/if}
         </div>
+        {#if line.bug && !line.pending}
+          <!-- The Odd drafted a bug report: the form opens with it, and files nothing by itself. -->
+          <button
+            class="ms-1 me-auto text-xs text-sea hover:text-ink"
+            onclick={() => (bugReport = line.bug)}>File this</button
+          >
+        {/if}
         {#if retryable(line, i)}
           {#if blocked && blocked.turnId === line.turnId}
             <ChatSignInCard
@@ -1769,6 +1788,17 @@
 </div>
 
 <svelte:window onpointerdown={outside} />
+
+{#if bugReport !== undefined}
+  <BugReport
+    initial={bugReport}
+    staff={profile.id}
+    onclose={() => (bugReport = undefined)}
+    onfiled={() => {
+      if (!sending) load(profile.id);
+    }}
+  />
+{/if}
 
 <style>
   /* Three attached files at most (each 48px square, 2px and a 15px name under

@@ -77,6 +77,7 @@ const TOOL_WORDS: Record<string, string> = {
 export const OFFICE_TOOL_WORDS: Record<string, string> = {
   ask_for_access: 'Asking you for access',
   cancel_poke: 'Calling off a poke',
+  draft_bug_report: 'Drafting a bug report',
   edit_my_description: 'Editing its description',
   edit_my_job: 'Editing its job',
   find_connectors: 'Looking for a tool to connect',
