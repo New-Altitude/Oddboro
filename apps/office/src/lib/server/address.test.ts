@@ -14,9 +14,9 @@ import { join } from 'node:path';
 import { after, mock, test } from 'node:test';
 import { isHttpError } from '@sveltejs/kit';
 import { ownerCookie } from '@oddboro/ledger/owner-key';
-import { openUrl, probe } from '@oddboro/ledger/platform';
+import { openUrl, probe, type Probe, type System } from '@oddboro/ledger/platform';
 import { POST as addressRoute } from '../../routes/api/setup/address/+server.ts';
-import { answers, ownCaddyfile, port80, secureAddress } from './address.ts';
+import { answers, ownCaddyfile, port80, secureAddress, type Port80 } from './address.ts';
 
 const binds = (system: Parameters<typeof ownCaddyfile>[0]) =>
   ownCaddyfile(system)
@@ -84,20 +84,89 @@ test(
   }
 );
 
-test('on a Mac, a missing lsof is not a free port', SHELL_STAND_INS, async () => {
-  assert.deepEqual(await on('darwin', empty, port80), { status: 'unchecked' });
-  assert.deepEqual(await on('darwin', standIn('lsof', 'exit 1'), port80), { status: 'free' });
-  assert.deepEqual(
-    await on('darwin', standIn('lsof', 'echo "lsof: a problem" >&2; exit 1'), port80),
-    { status: 'free' }
+/**
+ * The look at port 80 on `platform`, with every command it starts coming back
+ * as `answer`, the way `probe` would read it. Gives the commands it started
+ * and what it found. The Mac's lsof goes by its full path, which no PATH
+ * stand-in can take the place of, so the stand-in goes on execFile.
+ */
+async function port80On(
+  platform: NodeJS.Platform,
+  answer: Probe
+): Promise<{ started: string[]; port80: Port80 }> {
+  const started: string[] = [];
+  mock.method(
+    childProcess,
+    'execFile',
+    (
+      cmd: string,
+      _args: string[],
+      _options: object,
+      done: (e: Error | null, out: string, err: string) => void
+    ) => {
+      started.push(cmd);
+      switch (answer.status) {
+        case 'ok':
+          done(null, answer.out, answer.err);
+          break;
+        case 'failed':
+          done(Object.assign(new Error('exited'), { code: answer.code }), answer.out, answer.err);
+          break;
+        // As Node reports a command that is not there, and one its timer stopped.
+        case 'missing':
+          done(
+            Object.assign(new Error('not there'), { code: 'ENOENT', syscall: `spawn ${cmd}` }),
+            '',
+            ''
+          );
+          break;
+        case 'timeout':
+          done(Object.assign(new Error('stopped'), { killed: true }), '', '');
+          break;
+      }
+      return {};
+    }
   );
-  assert.deepEqual(await on('darwin', standIn('lsof', 'echo p1; exit 1'), port80), {
-    status: 'unchecked'
-  });
-  assert.deepEqual(await on('darwin', standIn('lsof', 'printf "p812\\ncnginx\\n"'), port80), {
-    status: 'held',
-    by: 'nginx'
-  });
+  syncBuiltinESMExports();
+  try {
+    return { started, port80: await on(platform, empty, port80) };
+  } finally {
+    mock.restoreAll();
+    syncBuiltinESMExports();
+  }
+}
+
+const ok = (out: string): Probe => ({ status: 'ok', out, err: '' });
+const exited = (code: number, out = '', err = ''): Probe => ({ status: 'failed', code, out, err });
+
+test('each system looks at port 80 with its own command: lsof by its full path on a Mac, ss by name on Linux, PowerShell on Windows', async () => {
+  // Keyed by system, so a system added to the office fails the type check here until it is listed.
+  const RUNS: Record<System, { platform: NodeJS.Platform; cmd: string }> = {
+    mac: { platform: 'darwin', cmd: '/usr/sbin/lsof' },
+    linux: { platform: 'linux', cmd: 'ss' },
+    windows: { platform: 'win32', cmd: 'powershell.exe' }
+  };
+  for (const [system, { platform, cmd }] of Object.entries(RUNS))
+    assert.deepEqual((await port80On(platform, ok(''))).started, [cmd], system);
+});
+
+test('on a Mac, a missing lsof is not a free port', async () => {
+  const mac = async (answer: Probe) => (await port80On('darwin', answer)).port80;
+  assert.deepEqual(await mac({ status: 'missing' }), { status: 'unchecked' });
+  assert.deepEqual(await mac(exited(1)), { status: 'free' });
+  assert.deepEqual(await mac(exited(1, '', 'lsof: a problem\n')), { status: 'free' });
+  assert.deepEqual(await mac(exited(1, 'p1\n')), { status: 'unchecked' });
+  assert.deepEqual(await mac(ok('p812\ncnginx\n')), { status: 'held', by: 'nginx' });
+  assert.deepEqual(await mac({ status: 'timeout' }), { status: 'unchecked' });
+});
+
+test('on Windows, only an answer naming nothing is a free port: one naming a program is held, and a failed, missing or stopped look is unchecked', async () => {
+  const windows = async (answer: Probe) => (await port80On('win32', answer)).port80;
+  assert.deepEqual(await windows(ok('')), { status: 'free' });
+  assert.deepEqual(await windows(ok('nginx\r\n')), { status: 'held', by: 'nginx' });
+  assert.deepEqual(await windows(exited(1)), { status: 'unchecked' });
+  assert.deepEqual(await windows({ status: 'missing' }), { status: 'unchecked' });
+  assert.deepEqual(await windows({ status: 'timeout' }), { status: 'unchecked' });
 });
 
 test("on Windows, a command runs with no window unless it opens one the owner must see: certutil's trust dialog and the browser", async () => {
