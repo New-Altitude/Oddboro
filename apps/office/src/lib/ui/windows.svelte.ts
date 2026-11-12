@@ -1,8 +1,7 @@
 // The windows open on the start side: the desk, the goals, the
 // lessons (what the office knows about the owner), the ledger, hires, the office
-// designer, the welcome and setup, files, and reports opened from a staffer's
-// chat once they have left the desk. Projects is no window here: it opens as
-// its own wide work area beside the side panel (`projects` below).
+// designer, the welcome and setup, Projects, files, and reports opened from a
+// staffer's chat once they have left the desk.
 // Every open window stays mounted, so a drawing keeps going and a half-read
 // ask keeps its place while the owner works in another. Closing one with unsaved
 // edits, or one still drawing, waits for the owner to say so.
@@ -13,9 +12,12 @@ export type ReportRef = { id: number; staff: string; title: string };
 export type HireFrom = { askId: number; staff: string; proposal: HireProposal };
 /** Which lessons the Lessons window shows: those for every Odd, those one Odd follows, or all. */
 export type LessonsFilter = 'about' | 'all' | { staff: string };
+/** A session to open in Projects. `n` bumps on every ask, so asking again for the same session still brings it up. */
+export type ProjectAsk = { sessionId?: string; n: number };
 export type Win =
   | { id: 'desk'; kind: 'desk' }
   | { id: 'goals'; kind: 'goals' }
+  | { id: 'projects'; kind: 'projects'; ask: ProjectAsk }
   | { id: 'lessons'; kind: 'lessons'; filter: LessonsFilter }
   | { id: 'ledger'; kind: 'ledger' }
   | { id: 'services'; kind: 'services' }
@@ -69,24 +71,12 @@ export function open(w: Win): void {
   wins.raised = true;
 }
 
-/**
- * The Projects work area: open or not, and the last session asked for. `n`
- * bumps on every ask, so asking again for the same session still brings it up.
- */
-export const projects = $state<{ open: boolean; ask: { sessionId?: string; n: number } }>({
-  open: false,
-  ask: { n: 0 }
-});
-
-/** Open Projects, on that session when one is named. Only in Advanced mode. */
+/** The one Projects window, on that session when one is named. Only in Advanced mode. */
 export function openProject(sessionId?: string): void {
   if (!advanced.on) return;
-  projects.open = true;
-  projects.ask = { sessionId, n: projects.ask.n + 1 };
-}
-
-export function closeProjects(): void {
-  projects.open = false;
+  const w = wins.list.find((x) => x.kind === 'projects');
+  if (w) w.ask = { sessionId, n: w.ask.n + 1 };
+  open(w ?? { id: 'projects', kind: 'projects', ask: { sessionId, n: 1 } });
 }
 
 /** The one Lessons window, on that filter. Already open, it switches to it. */

@@ -60,6 +60,8 @@
       stream.addEventListener('control', (e) => {
         writable = JSON.parse(e.data);
         term.options.disableStdin = !writable;
+        // Another view may have sized the terminal while this one watched.
+        sent = '';
         if (writable) resize();
       });
       stream.addEventListener('output', (e) => term.write(JSON.parse(e.data)));
@@ -79,19 +81,31 @@
           })
           .catch((e) => onerror(e.message));
       });
-      const resize = () => {
-        if (!host.clientWidth || !host.clientHeight) return;
-        fit.fit();
-        if (!writable) return;
+      // The terminal refits at once as its box changes, and tells the session
+      // its new size once the box settles, and only when it differs, so a
+      // panel sliding wider or narrower sends one size, not one per frame.
+      let sent = '',
+        settle: ReturnType<typeof setTimeout> | undefined;
+      const send = () => {
+        const size = `${term.cols}x${term.rows}`;
+        if (!writable || size === sent) return;
+        sent = size;
         void projectApi('size', { id, view, cols: term.cols, rows: term.rows }).catch((e) =>
           onerror(e.message)
         );
+      };
+      const resize = () => {
+        if (!host.clientWidth || !host.clientHeight) return;
+        fit.fit();
+        clearTimeout(settle);
+        settle = setTimeout(send, 150);
       };
       const observer = new ResizeObserver(resize);
       observer.observe(host);
       resize();
       term.focus();
       cleanup = () => {
+        clearTimeout(settle);
         stream.close();
         observer.disconnect();
         input.dispose();

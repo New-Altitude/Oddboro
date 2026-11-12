@@ -1807,13 +1807,19 @@ Retry reply on the saved turn, so the earlier failed reply stays in
 history. Access cards come from database deliveries, never the Odd's chat
 file.
 
-The Projects work area and its local controller live in
+The Projects window and its local controller live in
 `src/lib/ui/ProjectSessions.svelte` and `src/lib/server/project-sessions/`.
-Projects is no window in the side panel: `+page.svelte` draws it as a wide
-area of its own between the start panel (or the plate) and the end side,
-from `projects` in `windows.svelte.ts` (`openProject`, `closeProjects`). Its
-sessions run down the start side as a listbox; the selected one's terminal
-fills the rest, and its details fold out over the terminal.
+Projects is a window in the start panel (`openProject` in
+`windows.svelte.ts`). While it is in front on a wide screen, the panel
+stretches to 8 px short of the Odd's panel, else of the Odds rail
+(`projectsReach` in `+page.svelte`, `reach` on `SidePanel.svelte`), the desk
+pill hides, and the music keeps its usual width. While the rail is wide
+(hovered, focused or ⌘K: `onwiden` on `OddsRail.svelte`), the panel steps
+back to the wide rail's edge, in the rail's own 200 ms, so every Odd stays in
+view. Its sessions run down the start side as a listbox; the selected one's
+terminal fills the rest, and its details fold out over the terminal. The
+terminal refits at once and sends the session its size only once it settles
+(`ProjectTerminal.svelte`).
 They sit behind Advanced mode (`owner.advanced_at`), which the owner turns on
 in Setup's Advanced section (`AdvancedSection.svelte`, `PUT
 /api/setup/advanced`) after one warning. The page holds it in `advanced` in

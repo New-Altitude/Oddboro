@@ -23,6 +23,12 @@
     inset?: number;
     /** Paints over the other side panel, where the two overlap. */
     onTop?: boolean;
+    /**
+     * Stretch across the screen, keeping this many px free at the far edge,
+     * never narrower than `width`. Set, the panel cannot be dragged, and a
+     * change of it slides.
+     */
+    reach?: number;
   };
   let {
     side,
@@ -35,8 +41,13 @@
     children,
     rail,
     inset = 0,
-    onTop = false
+    onTop = false,
+    reach
   }: Props = $props();
+  const size = $derived.by(() => {
+    const own = `min(${collapsed && rail ? RAIL : width}px, calc(100vw - ${24 + inset}px))`;
+    return reach === undefined ? own : `max(${own}, calc(100vw - ${16 + reach}px))`;
+  });
 
   onMount(() => {
     try {
@@ -100,14 +111,13 @@
   class:start-4={side === 'start'}
   class:end-4={side === 'end' && !inset}
   class:z-10={onTop}
-  style="inline-size: min({collapsed && rail ? RAIL : width}px, calc(100vw - {24 + inset}px)){inset
-    ? `; inset-inline-end: ${16 + inset}px`
-    : ''}"
+  class:reaching={reach !== undefined}
+  style="inline-size: {size}{inset ? `; inset-inline-end: ${16 + inset}px` : ''}"
   aria-label={label}
 >
   {#if collapsed && rail}
     {@render rail()}
-  {:else}
+  {:else if reach === undefined}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions: a focusable separator is the ARIA pattern for a keyboard-resizable pane. -->
     <div
       class="handle"
@@ -168,5 +178,14 @@
   }
   .panel {
     overflow: visible;
+  }
+  /* The same 200 ms as the Odds rail, so the two move as one. */
+  .panel.reaching {
+    transition: inline-size 200ms ease;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .panel.reaching {
+      transition: none;
+    }
   }
 </style>

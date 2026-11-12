@@ -1,6 +1,8 @@
 <script lang="ts" module>
   /** The rail's width, which the floor leaves free beside it. */
   export const ODDS_RAIL = 64;
+  /** Its width while wide, with names and the search. */
+  export const ODDS_RAIL_OPEN = 288;
 </script>
 
 <script lang="ts">
@@ -36,6 +38,8 @@
     searching?: boolean;
     /** The rail narrowed with nothing picked: the page sends it away again if a card is open. */
     onleave?: () => void;
+    /** The rail widened or narrowed, so a wide start panel can make room. */
+    onwiden?: (open: boolean) => void;
     onselect: (id: string) => void;
     onchat: (id: string) => void;
   };
@@ -48,6 +52,7 @@
     find,
     searching = false,
     onleave,
+    onwiden,
     onselect,
     onchat
   }: Props = $props();
@@ -60,6 +65,7 @@
   let picked = $state(false);
   let query = $state('');
   const open = $derived(!picked && (hovering || focused || asked || !!query.trim()));
+  $effect(() => onwiden?.(open));
   /** The shortcut as this system names it. ⌘K until the page knows it is not on a Mac. */
   let mac = $state(true);
   const keyLabel = $derived(mac ? '⌘K' : 'Ctrl K');
@@ -149,7 +155,7 @@
   bind:this={box}
   class="rail glass pointer-events-auto absolute end-4 top-4 bottom-4 flex flex-col gap-1 overflow-hidden rounded-2xl py-2.5 max-sm:end-3 max-sm:top-3 max-sm:bottom-3"
   class:open
-  style="--rail: {ODDS_RAIL}px"
+  style="--rail: {ODDS_RAIL}px; --rail-open: {ODDS_RAIL_OPEN}px"
   aria-label="Odds"
   onmouseenter={() => (hovering = true)}
   onmouseleave={() => {
@@ -268,7 +274,7 @@
     transition: inline-size 200ms ease;
   }
   .rail.open {
-    inline-size: min(18rem, calc(100vw - 2rem));
+    inline-size: min(var(--rail-open), calc(100vw - 2rem));
   }
   @media (prefers-reduced-motion: reduce) {
     .rail {

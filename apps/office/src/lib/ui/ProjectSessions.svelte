@@ -11,10 +11,11 @@
   import { projectApi } from './project-api.ts';
   import ProjectTerminal from './ProjectTerminal.svelte';
   import { LOGOS } from './tool-logos.ts';
+  import type { ProjectAsk } from './windows.svelte.ts';
 
-  // The Projects work area, beside the side panel: every session down the
-  // start side as a tab list, and the selected one filling the rest, its
-  // native terminal under a slim header. Details fold out over the terminal,
+  // The Projects window, which widens the side panel while it is in front:
+  // every session down the start side as a tab list, and the selected one
+  // filling the rest, its native terminal under a slim header. Details fold out over the terminal,
   // so the terminal never moves. "+ New session" opens the start form here.
   type View = {
     connected: boolean;
@@ -39,10 +40,9 @@
     /** Bumps when the office's records change, so the list reads again. */
     version: number;
     /** A session to open, from the Desk or a chat. `n` bumps on each ask. */
-    ask: { sessionId?: string; n: number };
-    onclose: () => void;
+    ask: ProjectAsk;
   };
-  let { staff, version, ask, onclose }: Props = $props();
+  let { staff, version, ask }: Props = $props();
 
   let connections = $state<Row[]>([]),
     currentId = $state<string>(),
@@ -306,12 +306,6 @@
     <h2 class="font-pixel text-lg leading-none">Projects</h2>
     <span class="min-w-0 flex-1 truncate text-xs text-muted"
       >Claude Code and Codex in your own folders, with your permissions</span
-    >
-    <button
-      class="rounded-full px-2 py-1 text-muted hover:text-ink"
-      aria-label="Close Projects"
-      title="Close. Sessions keep running."
-      onclick={onclose}>✕</button
     >
   </header>
 
