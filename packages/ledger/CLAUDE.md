@@ -425,8 +425,9 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   on their own inside the office (never sending: the question says nothing
   leaves without the owner's yes), and what to hear about between morning
   reports. Each has three to five answers to tap, the default first (draft and
-  bring it to them; only what needs them). The office
-  asks the next question itself; the manager reads all three answers and keeps
+  bring it to them; only what needs them). An answer outside the choices runs the
+  manager at once. For a suggested first or second answer the office replies
+  to the choice and asks the next question; the manager reads all three answers and keeps
   each about how the office works as a lesson for every Odd.
   `test/managers.test.ts` holds every manager to it.
 - A new hire with a job gets a `first_day` follow-up (`startFirstDay`) that
@@ -473,7 +474,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   thread it leads with `continue_work` instead of opening one; such a run's
   system prompt lists its latest threads (`recentThreads`,
   `recentThreadsBrief`), and its `raise_ask` and `give_owner_a_task` take
-  `work`, the thread it leads that the item is for, or null (`notLed` refuses
+  `work`, the thread it leads that the item is for, or null or left out for none (`notLed` refuses
   one it does not lead or that is stopped). Continuing a done or failed thread reopens it with the
   same folder, history, goal and request, for a new round of work; a stopped
   one stays stopped. A round of work takes up to `HAND_OFF_LIMIT` (8)

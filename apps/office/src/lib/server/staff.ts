@@ -83,7 +83,7 @@ import {
   roster,
   ownerNoteOf,
   firstQuestionIn,
-  FIRST_QUESTIONS,
+  nextFirstQuestion,
   recordUsage,
   setPlanLimits,
   startFirstDay,
@@ -194,7 +194,7 @@ import { tooOldLine } from './versions.ts';
 import { claudeSandbox, NETWORK_REFUSED, NETWORK_REFUSED_LINE } from './sandbox.ts';
 import { sandboxPaths } from './sandbox-paths.ts';
 import { agentCommand } from './agent-sign-in.ts';
-import { ACT_WRITE, house, stillOnDeskSection, whoIsHereSection } from './house.ts';
+import { ACT_WRITE, house, managerWork, stillOnDeskSection, whoIsHereSection } from './house.ts';
 import { followUpBrief, waitEnded } from './follow-up-brief.ts';
 import { OUTCOME_LINE, personaRun, voiced } from './persona-run.ts';
 
@@ -703,6 +703,9 @@ async function prompt(
       ? opts.led.flatMap((story) => threadBrief({ story, shown: opts.shown })).join('\n')
       : workLedBrief(led.kept)) +
     (chat ? workOnBrief(on) : on.flatMap((story) => threadOnKnown({ story })).join('\n')) +
+    (who.role === MANAGER_ROLE
+      ? managerWork(existsSync(join(dir, 'notes', 'pending-judgments.md')))
+      : '') +
     stillOnDeskSection(await stillOnDesk(who.id)) +
     house({
       has: (t) => hasTool(who.tools, t),
@@ -1406,14 +1409,13 @@ export async function chat(
   // Stamped when sent, so what the staffer delivers while replying lands between the two.
   const sent = new Date().toISOString();
   try {
-    // An answer to a manager's first or second question (`FIRST_QUESTIONS`):
-    // the office asks the next one itself, at once and with no run. The third
-    // answer runs the manager, which reads all three in the chat.
+    // A reply in the owner's own words may already be a brief. Let the
+    // manager use it now. The preset path still takes just three taps.
     const last = history(id).at(-1);
     const asked = last?.from === 'staff' ? firstQuestionIn(last.text) : -1;
     const attached = files.map(({ path: _, ...f }) => f);
-    if (asked >= 0 && asked < FIRST_QUESTIONS.length - 1 && !files.length) {
-      const next = FIRST_QUESTIONS[asked + 1].ask;
+    const next = files.length ? undefined : nextFirstQuestion(asked, message);
+    if (next) {
       addToChat(id, { at: sent, from: 'owner', text: message });
       addToChat(id, { at: new Date().toISOString(), from: 'staff', text: next, told: true });
       onEvent({ type: 'done', text: next });

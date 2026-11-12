@@ -273,3 +273,11 @@ test("a carry-out started by a connect task's end names each work that picked up
     );
   }
 });
+
+// Each kind keeps its words in the diff, including the fallback kinds. The run
+// tests separately check that the office passes these words to its AI tool.
+for (const kind of FOLLOW_UP_KINDS) {
+  test(`${kind} keeps the words its run receives`, (t) => {
+    t.assert.snapshot(briefOf(kind));
+  });
+}

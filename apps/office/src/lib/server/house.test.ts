@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { OWNER_GRANTS } from '@oddboro/ledger/grantable';
-import { house, stillOnDeskSection, whoIsHereSection } from './house.ts';
+import { house, managerWork, stillOnDeskSection, whoIsHereSection } from './house.ts';
 
 const section = house({ has: () => false, now: '9:00', zone: 'London time' });
 
@@ -138,3 +138,15 @@ test('the desk section lists each open item with its id, says how many more, and
     "\n## Still on {owner}'s desk from you\n\n- Task #9: Sign the form\n- Ask #4: Reply to Re: Lunch\n- And 3 more.\n"
   );
 });
+
+for (const hasTools of [false, true]) {
+  test(`a run with office tools ${hasTools ? 'on' : 'off'} keeps its house rules`, (t) => {
+    t.assert.snapshot(house({ has: () => hasTools, now: '9:00', zone: 'London time' }));
+  });
+}
+
+for (const pending of [false, true]) {
+  test(`a manager ${pending ? 'with' : 'without'} a pending judgment keeps its current brief`, (t) => {
+    t.assert.snapshot(managerWork(pending));
+  });
+}

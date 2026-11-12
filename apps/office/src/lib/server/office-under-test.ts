@@ -217,7 +217,7 @@ if (args.some((a) => a.startsWith('- '))) {
 }
 const after = (flag) => args[args.indexOf(flag) + 1];
 const joined = (flag) => args.find((a) => a.startsWith(flag + '='))?.slice(flag.length + 1);
-const replay = /Replay (\\/\\S+\\.jsonl)\\s*$/.exec(joined('--single'))?.[1];
+const replay = /Replay (\\/[^\\r\\n]+\\.jsonl)\\s*$/.exec(joined('--single'))?.[1];
 if (replay) {
   fs.writeFileSync(process.env.GROK_HOME + '/replay-args.json', JSON.stringify(args));
   process.stdout.write(fs.readFileSync(replay, 'utf8'));
@@ -310,7 +310,7 @@ function emptyFolder(p) {
 let message = '';
 process.stdin.on('data', (d) => (message += d));
 process.stdin.on('end', () => {
-  const replay = /Replay (\\/\\S+\\.jsonl)\\s*$/.exec(message)?.[1];
+  const replay = /Replay (\\/[^\\r\\n]+\\.jsonl)\\s*$/.exec(message)?.[1];
   if (replay) return process.stdout.write(fs.readFileSync(replay, 'utf8'));
   const sleeper = /Leave a sleeper at (\\/\\S+)/.exec(message)?.[1];
   if (sleeper) {
