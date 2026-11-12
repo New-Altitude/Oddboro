@@ -7,7 +7,8 @@
   import Markdown from './Markdown.svelte';
   import Lesson from './Lesson.svelte';
   import PersonaQuiet from './PersonaQuiet.svelte';
-  import { call, sendFile, type ApiUrl } from './api.ts';
+  import { newTurnId } from '#lib/staff/chat-input.ts';
+  import { call, sendFile, failure, type ApiUrl } from './api.ts';
   import ChatFiles from './ChatFiles.svelte';
   import { hideChoiceLines } from '#lib/choices.ts';
   import { hasToken, tagFor, withTokens, withoutToken, type Pending } from './chat-attach.ts';
@@ -288,8 +289,8 @@
 
   async function send(e: SubmitEvent) {
     e.preventDefault();
-    const message = draft.trim();
-    if ((!message && !pending.length) || uploading) return;
+    const message = draft;
+    if ((!message.trim() && !pending.length) || uploading) return;
     let files: ChatFile[] = [];
     if (pending.length) {
       // Each file goes to the Odd's attachments folder first; the message names them.
@@ -361,18 +362,22 @@
   });
 
   /** Send one message and stream the reply into the chat. */
-  async function say(message: string, re?: Delivered, files: ChatFile[] = []) {
+  async function say(message: string, re?: Delivered, files: ChatFile[] = [], retry?: Line) {
+    const turnId = retry?.turnId ?? newTurnId();
     sending = true;
     status = 'Thinking';
-    lines.push({
-      from: 'owner',
-      // Files alone are a message too: their tags say it, as the server writes it.
-      text: message || files.map((f) => `[${f.tag}]`).join(' '),
-      re,
-      at: new Date().toISOString(),
-      ...(files.length ? { files } : {})
-    });
-    lines.push({ from: 'staff', text: '', pending: true });
+    if (!retry)
+      lines.push({
+        from: 'owner',
+        turnId,
+        source: { kind: 'chat' },
+        // Files alone are a message too: their tags say it, as the server writes it.
+        text: message || files.map((f) => `[${f.tag}]`).join(' '),
+        re,
+        at: new Date().toISOString(),
+        ...(files.length ? { files } : {})
+      });
+    lines.push({ from: 'staff', text: '', pending: true, turnId });
     const reply = lines[lines.length - 1];
     scrollDown();
     onstart();
@@ -380,13 +385,18 @@
       const res = await fetch(`/api/staff/${profile.id}/chat` satisfies ApiUrl, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          message,
-          re: re && { kind: re.kind, id: re.id },
-          ...(files.length ? { files: files.map(({ tag, name }) => ({ tag, name })) } : {})
-        })
+        body: JSON.stringify(
+          retry?.inputHash
+            ? { turnId }
+            : {
+                turnId,
+                message,
+                re: re && { kind: re.kind, id: re.id },
+                ...(files.length ? { files: files.map(({ tag, name }) => ({ tag, name })) } : {})
+              }
+        )
       });
-      if (!res.ok || !res.body) throw new Error((await res.text()) || `HTTP ${res.status}`);
+      if (!res.ok || !res.body) throw await failure(res);
       const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
       let buffer = '';
       for (;;) {
@@ -933,6 +943,12 @@
             {line.text}
           {/if}
         </div>
+        {#if line.from === 'owner' && line.turnId && !sending && !lines.some((l) => l.from === 'staff' && l.turnId === line.turnId && !l.failed && !l.pending)}
+          <button
+            class="ms-auto text-xs text-sea hover:text-ink"
+            onclick={() => say(line.text, line.re, line.files ?? [], line)}>Retry reply</button
+          >
+        {/if}
         {#if line.pending}
           <!-- What the staffer is doing, under the reply it is working on. -->
           <div class="-mt-1 ms-1 text-xs text-muted" aria-live="polite">

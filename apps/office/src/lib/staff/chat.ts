@@ -3,6 +3,7 @@
 import type { HandOffLine, HandOffStep, LessonLine, ThreadLine } from '@oddboro/ledger';
 import type { DeskItem } from '@oddboro/ledger/desk-answers';
 import type { ChatFile } from '#lib/attachments.ts';
+import type { ChatSource } from './chat-input.ts';
 
 /** Something the staffer put on the owner's desk. */
 export type ChatRef = { kind: DeskItem; id: number; title: string };
@@ -23,6 +24,11 @@ export type ChatEntry = {
   at: string;
   from: 'owner' | 'staff';
   text: string;
+  /** One owner submission and each attempt to answer it, across reloads. */
+  turnId?: string;
+  source?: ChatSource;
+  /** The input's digest makes a repeated import reuse its saved files. */
+  inputHash?: string;
   poke?: true;
   told?: true;
   failed?: true;

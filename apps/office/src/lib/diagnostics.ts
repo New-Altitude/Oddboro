@@ -160,6 +160,7 @@ export const ROUTE_IDS = {
   '/api/staff/[id]': true,
   '/api/staff/[id]/access': true,
   '/api/staff/[id]/chat': true,
+  '/api/staff/[id]/chat/[turnId]/[index]': true,
   '/api/staff/[id]/description': true,
   '/api/staff/[id]/attachments': true,
   '/api/staff/[id]/attachments/[name]': true,

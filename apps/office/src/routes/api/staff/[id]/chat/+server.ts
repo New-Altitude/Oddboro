@@ -1,14 +1,14 @@
-// Chat with one staffer. GET returns the history, with everything the staffer
-// put on the owner's desk where it landed; POST sends a message, optionally
-// replying about one of those or with files the owner attached (kept in the
-// Odd's attachments folder first, `attachments/+server.ts`), and streams the reply back as
-// server-sent events.
+// Keep the owner's exact submission before starting a reply. Attachments
+// already uploaded and inline imports share the same saved-turn path.
+import { randomUUID } from 'node:crypto';
 import { error, json } from '@sveltejs/kit';
-import { DESK_ITEMS, type DeskItem } from '@oddboro/ledger/desk-answers';
-import { chat, chatLog, isBusy, isStaff } from '#lib/server/staff.ts';
+import { DESK_ITEMS } from '@oddboro/ledger/desk-answers';
+import { FILES_MAX } from '#lib/attachments.ts';
+import { CHAT_REQUEST_BYTES, type OwnerInput } from '#lib/staff/chat-input.ts';
 import type { ChatEvent } from '#lib/staff/chat.ts';
 import { attachedFiles } from '#lib/server/chat-files.ts';
-import { FILES_MAX } from '#lib/attachments.ts';
+import { keepOwnerTurn, ChatInputError } from '#lib/server/chat-turns.ts';
+import { replyToOwnerTurn, chatLog, isBusy, isStaff } from '#lib/server/staff.ts';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ params }) => {
@@ -18,27 +18,58 @@ export const GET: RequestHandler = async ({ params }) => {
 
 export const POST: RequestHandler = async ({ params, request }) => {
   if (!(await isStaff(params.id))) error(404, 'No such Odd');
-  const body = (await request.json().catch(() => ({}))) as {
-    message?: unknown;
-    re?: unknown;
-    files?: unknown;
-  };
-  let files: ReturnType<typeof attachedFiles>;
-  try {
-    files = attachedFiles(params.id, body.files);
-  } catch (err) {
-    error(400, err instanceof Error ? err.message : String(err));
-  }
-  if (files.length > FILES_MAX) error(400, `Attach up to ${FILES_MAX} files at a time`);
-  const typed = typeof body.message === 'string' ? body.message.trim() : '';
-  // Files alone are a message too: their tags say it.
-  const message = typed || files.map((f) => `[${f.tag}]`).join(' ');
-  const r = body.re as { kind?: unknown; id?: unknown } | undefined;
-  const kind = DESK_ITEMS.find((k: DeskItem) => k === r?.kind);
-  const re = kind && Number.isInteger(r?.id) ? { kind, id: r?.id as number } : undefined;
-  if (!message) error(400, 'Say something first');
-  if (message.length > 8000) error(400, 'That message is too long');
   if (isBusy(params.id)) error(409, 'Still replying to the last message');
+  if (Number(request.headers.get('content-length')) > CHAT_REQUEST_BYTES)
+    error(413, 'Use up to 8 MiB of text and inline files per message.');
+  const parsed: unknown = await request.json().catch(() => null);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+    error(400, 'Send a chat message.');
+  // A JSON object was checked above. Every field is checked before it is used.
+  const body = parsed as Record<string, unknown>;
+  const turnId = body.turnId ?? randomUUID();
+  if (typeof turnId !== 'string' || (!('message' in body) && !body.turnId))
+    error(400, 'Send a chat message.');
+  const r =
+    body.re && typeof body.re === 'object' ? (body.re as Record<string, unknown>) : undefined;
+  const kind = DESK_ITEMS.find((k) => k === r?.kind);
+  const re =
+    kind && typeof r?.id === 'number' && Number.isInteger(r.id) ? { kind, id: r.id } : undefined;
+  if ('message' in body) {
+    if (typeof body.message !== 'string') error(400, 'Send a chat message.');
+    const input: OwnerInput = { turnId, message: body.message, source: { kind: 'chat' } };
+    if (body.files !== undefined) {
+      if (!Array.isArray(body.files) || body.files.length > FILES_MAX)
+        error(400, `Attach up to ${FILES_MAX} files at a time.`);
+      if (body.files.some((f) => f && typeof f === 'object' && 'data' in f)) {
+        input.files = body.files.map((f: unknown) => {
+          if (
+            !f ||
+            typeof f !== 'object' ||
+            !('name' in f) ||
+            typeof f.name !== 'string' ||
+            !('data' in f) ||
+            typeof f.data !== 'string' ||
+            !/^[A-Za-z0-9+/]*={0,2}$/.test(f.data) ||
+            f.data.length % 4 !== 0
+          )
+            error(400, 'Choose a file.');
+          return { name: f.name, bytes: Buffer.from(f.data, 'base64') };
+        });
+      } else {
+        try {
+          input.kept = attachedFiles(params.id, body.files);
+        } catch (e) {
+          error(400, e instanceof Error ? e.message : String(e));
+        }
+      }
+    }
+    try {
+      await keepOwnerTurn(params.id, input, re);
+    } catch (e) {
+      if (e instanceof ChatInputError) error(400, e.message);
+      throw e;
+    }
+  }
 
   const encoder = new TextEncoder();
   // The owner may close or reload the page mid-reply. The reply still finishes and
@@ -49,7 +80,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
       const send = (e: ChatEvent) => {
         if (open) controller.enqueue(encoder.encode(`data: ${JSON.stringify(e)}\n\n`));
       };
-      chat(params.id, message, send, re, files)
+      replyToOwnerTurn(params.id, turnId, send)
         .catch((err: unknown) =>
           send({ type: 'error', message: err instanceof Error ? err.message : String(err) })
         )
