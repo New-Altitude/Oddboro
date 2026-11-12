@@ -90,7 +90,7 @@ function showWindowPlaces(source: Source): string[] {
       n.name.getText(ast) === 'showWindow'
     ) {
       const keys: string[] = [];
-      for (let p = n.parent; p.parent && p.parent !== ast; p = p.parent)
+      for (let p: ts.Node = n.parent; p.parent && p.parent !== ast; p = p.parent)
         if (ts.isPropertyAssignment(p)) keys.unshift(p.name.getText(ast));
       places.push(`${path} ${[nameOf(topOf(n, ast)), ...keys].join('.')}`);
     }
