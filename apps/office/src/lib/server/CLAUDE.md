@@ -26,6 +26,12 @@ then names every other place.
   then starts every tool on every system it runs on, from an office whose
   environment holds things no run should get, and fails its type check until
   the new tool has an Odd there and a reader of its walls (`WALLS`).
+- A route answers only a request that carries the owner's key. To let one
+  answer without it (a caller that proves itself another way), add its route id
+  to `EXCEPTION_ROUTES` in the ledger's `owner-key.ts` and its proof to
+  `provesItself` in `owner-page.ts`. `owner-page.test.ts` walks every route
+  (`route-ids.ts`) and fails until each one refuses a request without the key,
+  an exception excepted.
 - To call out of the computer from new code (a door to an outside service,
   such as a persona's, an error report, or a new connector kind), add or
   update the file's entry in `OUTBOUND` in the repo's `scripts/outbound.ts`:

@@ -8,8 +8,8 @@ import { test } from 'node:test';
 import ts from 'typescript';
 import { parse, sourceFiles, type Source } from './source-files.ts';
 
-/** The count at 96a19da. Lower it as branches move home; never raise it. */
-const BASELINE = 57;
+/** The count at 71a7c3f, measured by this test. Lower it as branches move home; never raise it. */
+const BASELINE = 49;
 
 /** The one home of system branches, which the count leaves out. */
 const HOME = new Set(['packages/ledger/src/platform.ts', 'packages/ledger/src/system-words.ts']);

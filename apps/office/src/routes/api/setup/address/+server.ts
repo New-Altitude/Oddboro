@@ -1,5 +1,5 @@
-// The office's address on this Mac, https://local.oddboro.com. GET says how
-// things stand. POST sets it up; POST { action: 'secure' } has this Mac trust
+// The office's address on this computer, https://local.oddboro.com. GET says how
+// things stand. POST sets it up; POST { action: 'secure' } has this computer trust
 // Caddy's certificate, with the owner's password. `?probe=1` is how the office
 // tells its own answer from something else on port 80 or 443. The Mac app has
 // no address: it opens the office in its own window and never touches Caddy,

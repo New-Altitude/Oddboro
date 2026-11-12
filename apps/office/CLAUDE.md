@@ -586,7 +586,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    read or Can read and change, anywhere on the computer; `checkFolder`
    refuses the home folder and one that holds or sits in a secret store (at the
    home's top by name, anywhere else by what it holds, in the folder, the folders
-   above it and one level down), the office's
+   above it and each store's own marker path below it), the office's
    home or Oddboro's code, comparing real paths as the disk spells
    them (`realpathSync.native`), and one whose real path holds `*`, `?`, `[`
    or `]`, which Codex cannot take ("That folder's path has a character an
@@ -770,7 +770,9 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    `~/.aws`, `~/.gnupg`, `~/.config`, `~/Library`, `~/AppData`,
    `~/.claude.json`, `~/.google_workspace_mcp` (where
    that MCP server keeps its sign-ins for other apps on the Mac), `~/.grok`,
-   `~/.codex`, `~/.gemini`, `~/.docker` and `~/.kube`, everything
+   `~/.codex`, `~/.gemini`, `~/.docker` and `~/.kube`, and on Linux the browsers' and keyrings' folders
+   `~/.mozilla`, `~/.local/share/keyrings`, `~/.pki`, `~/snap` and `~/.var/app`,
+   everything
    in `~/.oddboro` besides `staff/` and `data/` (and `threads/<id>/` for a
    run on that thread), every other
    Odd's folder, and everything in `~/.claude` besides this run's sessions.
@@ -1350,7 +1352,7 @@ welcomed, the page loads the sample's empty lot (`currentOffice({ lot: true })`,
 the start panel, titled "{name}'s Lot" until the office stands on it. The
 command center's buttons and tabs appear there once the first run is over, so
 the owner meets the panel first. The cards: Your computer (`MacCard`, the checks
-from `/api/setup`, and Notifications: a test of the Mac's (`notifyMac` in `src/lib/server/notify.ts`, which macOS shows as Oddboro's in the app and as Script Editor's from the repo) with the way to System Settings if it does not show, and, outside the app, the browser's for the Desk; the owner moves on with Next), their name, Your AI (`AiCard`, item 18: a tile per tool, the picked one the office's tool, and its panel below: Claude Code's installs it through `/api/setup/claude` and is `ClaudeCard`, a Claude plan tab with the account Claude Code is signed in to, from `claude auth status`, and Sign in with Claude or Switch account, or an API key tab, with a model picker in both. On Claude Code, Sonnet cannot draw looks or design offices: `canDraw()` in `claude.ts` refuses them, and the later cards offer only the ready-made managers and Main Street; the model,
+from `/api/setup`, and Notifications: a test of the computer's (`notifyMac` in `src/lib/server/notify.ts`, which macOS shows as Oddboro's in the app and as Script Editor's from the repo) with that system's own steps if it does not show (`notify-help.ts`, shown by `NotifyHelp.svelte`: System Settings on a Mac, Settings on Windows, and on Linux a check that notifications are on and that the desktop has a notification service), and, outside the app, the browser's for the Desk; the owner moves on with Next), their name, Your AI (`AiCard`, item 18: a tile per tool, the picked one the office's tool, and its panel below: Claude Code's installs it through `/api/setup/claude` and is `ClaudeCard`, a Claude plan tab with the account Claude Code is signed in to, from `claude auth status`, and Sign in with Claude or Switch account, or an API key tab, with a model picker in both. On Claude Code, Sonnet cannot draw looks or design offices: `canDraw()` in `claude.ts` refuses them, and the later cards offer only the ready-made managers and Main Street; the model,
 or an API key kept in the keychain; `src/lib/server/claude.ts` passes both to
 every run. Next waits until the picked tool is signed in), the Office Manager (`ManagerCard`: four ready-made ones from
 `GET /api/onboarding`, or one described and drawn by `/api/looks` while the
@@ -1403,7 +1405,11 @@ policy through Caddy's admin API (127.0.0.1:2019, with an explicit origin, which
 that API wants), touches none of their files, and adds them again when the
 office starts and when a page loads (`keepAddress`). With anything else on port
 80 it stays at `:4500`; on Windows that is often http.sys, Windows' own web
-server. On Windows the office's own Caddy listens on 127.0.0.1 and [::1]
+server. Port 80 is looked at with `ss` on Linux, `lsof` on a Mac and
+PowerShell on Windows, each through `probe`. A look that fails, times out or
+finds its command missing gives `unchecked`, never free, since reading it as
+free would offer a Caddy that cannot start: the address then stays at `:4500`
+and the card says it could not look. On Windows the office's own Caddy listens on 127.0.0.1 and [::1]
 only (`ownCaddyfile`), so the firewall never asks. On a Mac it listens on
 every address, since a process the owner runs can bind a port under 1024
 only there (127.0.0.1 and ::1 were refused, measured), so other machines on
@@ -1419,34 +1425,61 @@ address when it answers and is trusted.
 
 ## Who the office answers
 
-Other pages open in the owner's browser can send requests to the office too,
-so `guardOffice` (`src/lib/server/owner-page.ts`, the first step of the
-server's `handle` in `hooks.server.ts`, before Sentry's) checks every route
-and API request before the route sees it, in every mode. Files built into the
-page (scripts, styles, images) are served before the check. SvelteKit's own
-check stays on as well, for form posts and any action with no content type.
-In a release, whose port moves, the adapter takes the office's origin to be
-https, so that check refuses the owner's own http page. So the page's `call()`
-(`src/lib/ui/api.ts`) sends every action as JSON, body or not.
+Any program on the computer, and any page open in the owner's browser, can
+send requests to the office with whatever headers it likes. So the office
+answers only a request that carries the owner's key. `guardOffice`
+(`src/lib/server/owner-page.ts`, the first step of the server's `handle` in
+`hooks.server.ts`, before Sentry's) checks every route and API request before
+the route sees it, in every mode. Files built into the page (scripts, styles,
+images) are served before the check. SvelteKit's own check stays on as well,
+for form posts and any action with no content type. In a release, whose port
+moves, the adapter takes the office's origin to be https, so that check
+refuses the owner's own http page. So the page's `call()` (`src/lib/ui/api.ts`)
+sends every action as JSON, body or not.
 
 1. The Host must be one of the office's names, whatever the port: 127.0.0.1,
    [::1], localhost, the addresses through Caddy (`HOSTS` in
    `src/lib/server/hosts.ts`) and the app's `ORIGIN`. A site that points its
    own name at 127.0.0.1 looks same-origin to the browser, so only the name
    gives it away. A route asked by any other name gets 403.
-2. Anything but GET, HEAD and OPTIONS must come from the owner's page
-   (`fromOwnerPage`): Sec-Fetch-Site says same-origin, or, with none, the
-   Origin names the Host asked, whatever the scheme, since through Caddy the
-   page is https and the office http. With neither, 403.
-3. The one other client is the app's shell, which reports updates to
-   `/api/update` with the token it passed the server (`fromShell` in
-   `src/lib/server/update.ts`).
-4. `/account/callback` and `/connect/callback` arrive as GETs from the
-   owner's browser, sent back by the service's sign-in page, so they pass
-   rule 2 with no Origin.
-5. Vite's dev server has its own route, `/__open-in-editor`, that opens a file
+2. The key is one file, `owner-key`, in the office's folder
+   (`@oddboro/ledger/owner-key`). The office makes it as it starts
+   (`init` in `hooks.server.ts`, and `ownerOnly` in dev). The owner's page
+   holds it as the cookie `oddboro-owner-<port>`, named by the office's port
+   since a browser scopes cookies by host, not port. A page gets the cookie by
+   opening any page once with `?oddboro-key=<key>`: the guard answers 303 to
+   the same address without it, setting the cookie. The app's shell
+   opens its window with it, and a new window on the office's own origin opens
+   in the browser with it. `npm run setup` opens the page with it, and its own
+   checks, and the office's own requests to itself, send the cookie. A wrong key in the
+   address is refused like none.
+3. A request without the key, a read included, reaches only an exact exception
+   route (`EXCEPTION_ROUTES`, judged by `isExceptionPath` on the text the server
+   routes on, never decoded again), each with its own proof. `/api/update`
+   takes the shell's token (`fromShell` in `src/lib/server/update.ts`).
+   `/api/gateway/<id>` takes a run's token (`fromRun` in `gateway.ts`).
+   `/account/callback` and `/connect/callback` take GET or HEAD, sent back by
+   the service's sign-in page, proved by the sign-in's own state. Anything else
+   gets 403: a short line for an `/api/` path, a page saying how to open the
+   office for any other.
+4. With the key, anything but GET, HEAD and OPTIONS must also come from the
+   owner's page (`fromOwnerPage`), the second factor: a page on another
+   localhost port is same-site, so it carries the cookie too. Sec-Fetch-Site
+   says same-origin, or, with none, the Origin names the Host asked, whatever
+   the scheme, since through Caddy the page is https and the office http.
+   With neither, 403.
+5. In dev, Vite answers many requests before `handle` does: its files,
+   modules, `/@fs` and live-reload websocket. `ownerOnly` in `vite.config.ts`
+   is the first plugin, and applies rule 3 to them from the same module,
+   closing a websocket upgrade that has no key.
+6. Vite's dev server has its own route, `/__open-in-editor`, that opens a file
    in an editor and runs before the handle. `noEditorLaunch` in
    `vite.config.ts` refuses it with 403, always: nothing in the office uses it.
+
+The key stops a program on this computer only when it cannot read
+`~/.oddboro`. A program running as the owner can read it, as it can read the
+database beside it. `npm run reset` moves it aside, so the next start makes a
+new one.
 
 ## Diagnostics
 
