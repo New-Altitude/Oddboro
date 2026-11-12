@@ -416,7 +416,8 @@ node apps/desktop/scripts/smoke.ts --from <folder> --version 0.0.9   # a build j
 replaces and then uninstalls the Oddboro installed for this user, so off a
 runner it asks for `--replace-installed`. Quit Oddboro first: Linux and
 Windows keep to one at a time. Results go to `--out`: `results.json`,
-`summary.md`, `office.log`, `shell.log` and a screenshot.
+`summary.md`, `office.log`, `shell.log` and a screenshot. The run's home
+goes when it ends, pass or fail; `--keep` keeps it for a look.
 
 ### Secrets
 

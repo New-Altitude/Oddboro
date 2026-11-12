@@ -14,7 +14,8 @@
 // output). --installed runs the app already on this computer, on its own
 // port, home and log. --stage runs the staged server, after stage.ts.
 // --signed adds Gatekeeper's checks on a Mac. --out sets where results go.
-// --annotate writes every result as a GitHub annotation.
+// --annotate writes every result as a GitHub annotation. --keep keeps the
+// run's home for a look after; otherwise it goes when the run ends.
 //
 // Off CI a run never touches the owner's secrets: the office runs with no
 // secret store (ODDBORO_SECRETS=office). The Mac app keeps its secrets
@@ -27,6 +28,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  rmSync,
   writeFileSync
 } from 'node:fs';
 import { arch, release, tmpdir } from 'node:os';
@@ -85,7 +87,8 @@ const { values: args } = parseArgs({
     annotate: { type: 'boolean', default: false },
     relaunches: { type: 'string', default: '2' },
     'replace-installed': { type: 'boolean', default: false },
-    'my-keychain': { type: 'boolean', default: false }
+    'my-keychain': { type: 'boolean', default: false },
+    keep: { type: 'boolean', default: false }
   }
 });
 
@@ -235,9 +238,21 @@ async function windowCheck(page: Page): Promise<string> {
   return `before: ${before.slice(0, 300)} || after Next: ${after.slice(0, 400)}`;
 }
 
+/** The run's home, and on Windows its WebView2 profile, gone unless --keep. */
+function cleanUp(): void {
+  if (!currentRun || args.keep) return;
+  for (const dir of [currentRun.home, currentRun.env.WEBVIEW2_USER_DATA_FOLDER])
+    if (dir) rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+}
+
 function report(): never {
   const logFile = join(OUT, 'office.log');
   if (!existsSync(logFile) && currentRun) writeFileSync(logFile, logText(currentRun));
+  try {
+    cleanUp();
+  } catch (e) {
+    log(`could not remove the run's home: ${e instanceof Error ? e.message : e}`);
+  }
   const failed = results.filter((r) => r.required && !r.ok);
   const env = `${process.platform} ${arch()} ${release()}${process.env.ImageOS ? `, image ${process.env.ImageOS} ${process.env.ImageVersion}` : ''}`;
   writeFileSync(
@@ -279,7 +294,7 @@ function report(): never {
     }
   }
   log(
-    `${failed.length ? `${failed.length} required step(s) failed` : 'every required step passed'}. Results in ${OUT}`
+    `${failed.length ? `${failed.length} required step(s) failed` : 'every required step passed'}. Results in ${OUT}${args.keep && currentRun ? `, its home in ${currentRun.home}` : ''}`
   );
   process.exit(failed.length ? 1 : 0);
 }
@@ -360,7 +375,10 @@ async function smokeStage(): Promise<void> {
   };
 
   let server = start();
-  if (!(await step('the staged office answers', true, () => answered(server)))) return;
+  if (!(await step('the staged office answers', true, () => answered(server)))) {
+    await stop(server).catch(() => undefined);
+    return;
+  }
   const health = await officeChecks({ version: '0.0.0-smoke', claude: false });
   await step('serves its health, with every startup step', health, async () => {
     const h = await getJson<{ steps: Record<string, number>; readyMs: number | null }>(
