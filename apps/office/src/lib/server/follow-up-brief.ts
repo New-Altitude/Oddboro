@@ -144,7 +144,7 @@ function firstDayBrief(): string[] {
     'You joined the office today, and you just said hello to {owner} in chat. Get started now, so they never have to ask.',
     '',
     '1. Read your job description, notes/intake.md if you have one, my_goals and my_jobs.',
-    '2. If you cannot do good work without answers from {owner}, write only the questions your intake did not answer to a file in your folder, put it on their desk with give_owner_a_task, attached, then stop.',
+    '2. If you cannot do good work without answers from {owner}, put only the questions your intake did not answer in the response of give_owner_a_task, then stop.',
     `3. If a tool you need is not in my_access, ask for it with ask_for_access. For ${SWITCH_NAMES.commands} or ${SWITCH_NAMES.web}, ask with ask_for_switch when my_access says {owner} can switch it on.`,
     '4. Otherwise do the first piece of real work your job calls for, now: the first run of your job, or the first thing your job description says to do, so {owner} sees it today. Work for a goal you serve is not yours to start: the Odd who leads it hands you each piece.',
     '5. Your reply goes on their desk. Write it to {owner}: what you did, and what comes next.'
@@ -163,7 +163,7 @@ function goalBrief(f: FollowUpRow, r?: ReportRow, g?: GoalRow): string[] {
     '',
     '1. Read the office: office_report for each Odd, what it does, its level and the tools it holds or is waiting on, and list_goals for the goals they already serve.',
     `2. Work out who does what, how often, and with which tools (find_connectors). Give the work to Odds already here when one fits, with a new job or a change to one. Give a part to an Odd whose level and tools cover it. Never put a level raise or an office tool in owner_steps: the Odd asks for it itself with ask_for_level or ask_for_office_tool when its part needs it. For an outside tool an Odd lacks, have the Odd ask for it itself with ask_for_access when its officeTools include it, or put connecting it in owner_steps when they do not. For ${SWITCH_NAMES.commands} or ${SWITCH_NAMES.web}, never put switching it on in owner_steps: the Odd asks for it itself with ask_for_switch when its part needs it, and office_report says whether {owner} can switch it on for that Odd. Keep every other step only {owner} can do in owner_steps too. Hire only for work nobody here fits.`,
-    '3. Read the brief and any answers already given. If a missing answer changes the plan, write only those questions to a file in your folder, put it on their desk with give_owner_a_task, attached, then stop. You pick up when they finish it.',
+    '3. Read the brief and any answers already given. If a missing answer changes the plan, put only those questions in the response of give_owner_a_task, then stop. You pick up when they finish it.',
     "4. Otherwise bring the whole plan in one ask with propose_goal_plan. Write each hire's job description to a file first, and pass any intake as its intake_file.",
     '5. Once {owner} approves the plan, you pick up here on the goal and lead the work: you hand each piece to the Odd who does it. So its owner steps hold only what truly needs {owner}, such as signing in to a tool, never passing work or a request to an Odd.',
     '6. If the office already meets this goal as it is, say so and stop.'
@@ -187,11 +187,16 @@ function taskDoneBrief(
     `- Why you gave it: ${t.row.why}`,
     ...(said ? [`- What {owner} said in chat when you gave it: "${said}"`] : []),
     ...answers,
+    ...(t.row.responseVersion
+      ? [
+          `- Use the owner's saved response (version ${t.row.responseVersion}) in this run's message.`
+        ]
+      : []),
     ...(f.note ? [`- Their note: ${f.note}`] : []),
     ...(t.files.length
       ? [
           // A file from a thread's folder is named from the office's folder, so the run gets where it is.
-          `- Attached, with anything they filled in: ${t.files.map((f) => (workPath(f) ? home(f) : f)).join(', ')}. Read each one first.`
+          `- ${t.row.responseVersion ? 'Reference files' : 'Attached, with anything they filled in'}: ${t.files.map((f) => (workPath(f) ? home(f) : f)).join(', ')}. Read each one first.`
         ]
       : []),
     ...(f.pickedUp ?? []).map((title) => `- ${pickedUpLine(title)}`),

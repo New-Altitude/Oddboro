@@ -400,6 +400,9 @@ export const tasks = pgTable('tasks', {
   title: text().notNull(),
   why: text().notNull(),
   steps: jsonb().$type<Step[]>().notNull(),
+  /** The task's working text. Version zero is the Odd's starting text until the owner saves it. */
+  response: text(),
+  responseVersion: integer().notNull().default(0),
   status: text().$type<TaskStatus>().notNull().default('open'),
   note: text(),
   /**

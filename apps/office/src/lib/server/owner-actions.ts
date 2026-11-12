@@ -36,6 +36,8 @@ export type OwnerAction =
 /** Every `op` the task route takes. The route's `op` has this type, so it can compare no other. */
 export const TASK_OPS = [
   'finish',
+  'start-response',
+  'response',
   'tick',
   'untick',
   'choose',
@@ -191,6 +193,12 @@ export const OWNER_ACTIONS = {
     notAnAction: 'Drafts a job description for the hire window; nothing is kept until a hire.'
   },
   'PUT /api/switches': { none: NO_ROW },
+  'POST /api/tasks/[id]#start-response': {
+    none: 'Starts the response on an open task from its selected reference file.'
+  },
+  'POST /api/tasks/[id]#response': {
+    none: 'Keeps the versioned response on its task. Finishing records the owner action.'
+  },
   'POST /api/tasks/[id]#finish': { records: 'work' },
   // Finishing is the task's one ledger row, so the steps before it write none.
   'POST /api/tasks/[id]#tick': { none: 'Ticks one step of the task.' },

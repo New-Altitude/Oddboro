@@ -1,34 +1,30 @@
 // Which of a task's steps hold up Mark done. Safe to import in the browser.
 import type { Step, TaskRow } from '@oddboro/ledger';
+import { mustDo } from '@oddboro/ledger/tools';
 
-/**
- * A step the office does something for: a sign-in, a secret, a tool list or
- * a choice, and the sign-in's step that ticks itself when it lands (it shares
- * the sign-in's `oauth:` key). The task cannot be done without these. Every
- * other step is a checklist the owner may tick or not.
- */
-export const mustDo = (s: Step): boolean => !!s.action || !!s.key?.startsWith('oauth:');
+export { mustDo, stepsToGo } from '@oddboro/ledger/tools';
 
 /** How the owner answers a task in its Odd's chat (`chatAnswer`). */
 export type ChatAnswer = {
   /** The steps to show on the card: every step but the choice. */
   steps: Step[];
-  /** The open choice a tap answers and finishes with. Without one, they write the answer. */
+  /** The open choice a tap answers and finishes with. Without one, they type the answer in the task's response editor. */
   choice?: { index: number; options: string[] };
 };
 
 /**
- * How the owner answers a task in its Odd's chat, with one response: a written
- * answer, or a tap on one of its choices. Undefined when it needs the Desk: a
- * file to fill in or read, a step the office does something for other than one
- * choice (a sign-in, a secret, a tool list), or a connect task (`askId`),
- * whose end starts work that needs the tool connected.
+ * How the owner answers a task in its Odd's chat, with one response: a tap on
+ * one of its choices, or words typed in its response editor. Undefined when it
+ * needs the Desk: a file to fill in (files beside a response are only to read),
+ * a step the office does something for other than one choice (a sign-in, a
+ * secret, a tool list), a choice and a response together, or a connect task
+ * (`askId`), whose end starts work that needs the tool connected.
  */
 export function chatAnswer(
-  t: Pick<TaskRow, 'askId' | 'steps'>,
+  t: Pick<TaskRow, 'askId' | 'steps' | 'response'>,
   attached: boolean
 ): ChatAnswer | undefined {
-  if (t.askId || attached) return undefined;
+  if (t.askId || (attached && t.response === null)) return undefined;
   const held = t.steps.filter(mustDo);
   if (held.some((s) => s.action?.kind !== 'choice')) return undefined;
   const open = t.steps.flatMap((s, index) =>
@@ -36,13 +32,9 @@ export function chatAnswer(
       ? [{ index, options: s.action.options }]
       : []
   );
-  if (open.length > 1) return undefined;
+  if (open.length > 1 || (open.length && t.response !== null)) return undefined;
   return { steps: t.steps.filter((s) => !mustDo(s)), ...(open[0] ? { choice: open[0] } : {}) };
 }
-
-/** How many steps still hold up Mark done. */
-export const stepsToGo = (steps: Step[]): number =>
-  steps.filter((s) => mustDo(s) && !s.done).length;
 
 /**
  * A step's text as the desk renders it: a bare email address becomes inline

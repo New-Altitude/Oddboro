@@ -18,6 +18,7 @@
 // level (the tools the server marks as only reading, `readsOnly`) or at write
 // level (every tool), each through the office's gateway (gateway.ts), which
 // keeps the keys and sign-ins. Hosted servers get a fresh OAuth token per run.
+import { savedTaskWords } from './chat-delivery.ts';
 import {
   accountOf,
   accountsHome,
@@ -1565,6 +1566,10 @@ export async function followThrough(
   const res = await slot(who.id, work, (onEvent, runId) =>
     run(who, label, {
       kind: 'follow-up',
+      literal:
+        f.kind === 'task_done' && t?.responseVersion && t.response
+          ? savedTaskWords(t.response)
+          : undefined,
       runId,
       onEvent,
       asked:
