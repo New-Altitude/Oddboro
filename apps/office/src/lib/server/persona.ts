@@ -92,10 +92,11 @@ class PersonaGrant extends KeychainProvider {
 const grant = (slug: string) => new PersonaGrant(slug);
 
 /**
- * Personas signed in to since the office started, and each listed one a sync
- * found holding a sign-in with no Odd. During the first visit the office is
- * not welcomed yet, so a persona granted on its card waits here until Open
- * the office installs it.
+ * Personas the owner added in this office since it started. During the first
+ * visit the office is not welcomed yet, so a persona granted on its card waits
+ * here until Open the office installs it. A sign-in the store kept from before
+ * is never a yes on its own: the store is shared by every office on this
+ * computer and outlives a reset, so that persona waits for its Add.
  */
 const grantedThisRun = new Set<string>();
 
@@ -286,11 +287,8 @@ async function applyListing(listed: Listed[]): Promise<void> {
   }
 }
 
-/**
- * One offer as the page shows it, with the package's portrait drawn. `kept`
- * is the kept list, so only a persona it names costs a read of its sign-in.
- */
-async function toOffer(l: Listed, kept: Set<string>): Promise<Offer> {
+/** One offer as the page shows it, with the package's portrait drawn. */
+async function toOffer(l: Listed): Promise<Offer> {
   const odd = await personaOdd(l.slug);
   const art = await preview({
     look: l.pkg.look,
@@ -306,11 +304,7 @@ async function toOffer(l: Listed, kept: Set<string>): Promise<Offer> {
     role: l.pkg.role,
     remit: l.pkg.remit,
     portrait: art.portrait,
-    joined: odd
-      ? 'installed'
-      : grantedThisRun.has(l.slug) || (kept.has(l.slug) && grant(l.slug).tokens())
-        ? 'granted'
-        : 'no',
+    joined: odd ? 'installed' : grantedThisRun.has(l.slug) ? 'granted' : 'no',
     ...(odd?.package?.quiet ? { quiet: odd.package.quiet } : {})
   };
 }
@@ -320,12 +314,7 @@ export async function syncPersonas(): Promise<Offers> {
   const listing = await readListing();
   if (listing.state !== 'ok') return listing;
   await applyListing(listing.listed);
-  const kept = keptGrants();
-  const offers = await Promise.all(listing.listed.map((l) => toOffer(l, kept)));
-  // A sign-in kept from before a restart, with no Odd yet: this run takes it up
-  // again, so Open the office installs it.
-  for (const o of offers) if (o.joined === 'granted') grantedThisRun.add(o.slug);
-  return { state: 'ok', offers };
+  return { state: 'ok', offers: await Promise.all(listing.listed.map(toOffer)) };
 }
 
 /**

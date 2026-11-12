@@ -561,9 +561,9 @@ test('the kept list names each persona whose sign-in the store holds, and no oth
   await grant('pat');
 });
 
-test('a sign-in kept from before a restart, for a persona with no Odd, joins at Open when listed and ends at sign-out either way', async () => {
-  // Rae and Sam were added on an earlier run's first-visit card, and the office
-  // restarted before it opened. New Altitude lists Rae and has stopped listing Sam.
+test('a kept sign-in for a persona with no Odd hires nobody until Add, and ends at sign-out either way', async () => {
+  // The store holds sign-ins for Rae and Sam from another office on this
+  // computer, or from before a reset. New Altitude lists Rae and has stopped listing Sam.
   const rae = structuredClone(QUINN);
   rae.slug = 'rae';
   rae.odd.name = 'Rae';
@@ -571,23 +571,29 @@ test('a sign-in kept from before a restart, for a persona with no Odd, joins at 
   rae.odd.parts[0].px = rae.odd.parts[0].px.replace('hair-quinn-short-tuft', 'hair-rae-short-tuft');
   rae.odd.look.hair = 'rae-short-tuft';
   fake.odds = [PAT, QUINN, rae];
-  const blob = saved('new-altitude-persona-pat:oauth');
+  // Each made from Pat's sign-in, with its own tokens and its own door.
+  const pat = store.get('new-altitude-persona-pat:oauth')!;
   for (const slug of ['rae', 'sam']) {
     fake.issueGrant(`access-${slug}`, `refresh-${slug}`, 'stream');
+    const blob = JSON.parse(pat.replaceAll('/pat/', `/${slug}/`)) as Blob;
     blob.tokens = { access_token: `access-${slug}`, refresh_token: `refresh-${slug}` };
     store.set(`new-altitude-persona-${slug}:oauth`, JSON.stringify(blob));
   }
   // The earlier run's writes named them in the kept list.
   store.set(KEPT, JSON.stringify([...kept(), 'rae', 'sam']));
 
+  // A sign-in is not the owner's yes: Rae's card still offers Add, and Open hires nobody.
   const listed = (await offers()).body.offers as { slug: string; joined: string }[];
-  assert.equal(listed.find((o) => o.slug === 'rae')?.joined, 'granted');
+  assert.equal(listed.find((o) => o.slug === 'rae')?.joined, 'no');
   assert.equal(
     listed.find((o) => o.slug === 'sam'),
     undefined
   );
-  // What Open the office runs once the manager is hired: the listed one joins.
   await installGrantedPersonas();
+  assert.equal(await odd('rae'), undefined);
+  assert.equal(await odd('sam'), undefined);
+  // Add uses the kept sign-in, so no page opens, and Rae joins the open office.
+  assert.equal((await persona('POST', 'rae')).body.url, '');
   assert.ok(await odd('rae'));
   assert.equal(await odd('sam'), undefined);
   const held = [ACCOUNT, ...personaSecrets()].map((k) => saved(k).tokens?.refresh_token);
