@@ -219,6 +219,8 @@ export type HireProposal = {
   intakeFile?: string;
   /** The goal this hire serves, and its part in it. Hiring links them. */
   goal?: { id: number; part: string };
+  /** A real person New Altitude offers as a persona: its slug. The hire window offers that persona. */
+  personaSlug?: string;
 };
 
 /** Files a recurring job exchanges on one piece of work. Names start inside the thread. */

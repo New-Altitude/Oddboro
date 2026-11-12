@@ -117,7 +117,7 @@ if (has('propose_hire'))
   tool(
     'propose_hire',
     {
-      description: `Propose a new Odd to ${OWNER}. Write the job description to a file in your folder first, then pass its path. It lands on their desk as an ask; approving it opens the hire window filled in with this, and they hire from there. They may edit the file before they hire, so the window reads it then. One hire per ask. For a hire that serves a goal, use propose_goal_plan instead.${raisedNote}`,
+      description: `Propose a new Odd to ${OWNER}. Write the job description to a file in your folder first, then pass its path. It lands on their desk as an ask; approving it opens the hire window filled in with this, and they hire from there. They may edit the file before they hire, so the window reads it then. One hire per ask. For a real person New Altitude offers as a persona, propose them by persona_slug or full name: ${OWNER} adds the real persona from the hire window, and the office never builds a look-alike of a real person. For a hire that serves a goal, use propose_goal_plan instead.${raisedNote}`,
       inputSchema: {
         ...hireFields,
         why: z.string().describe('Why this hire, in one to three sentences.'),

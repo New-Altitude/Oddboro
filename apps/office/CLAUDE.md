@@ -15,6 +15,19 @@ in `vite.config.ts`), so each package finds its own files beside its code and
 the app ships them whole (`apps/desktop/scripts/stage.ts`). In the app
 (`ODDBORO_APP=1`) `hooks.server.ts` quits on SIGTERM and when stdin closes.
 
+What the office says about itself, for the app's log and its smoke test
+(`apps/desktop/CLAUDE.md`, "Smoke tests"). `init` writes an `office:` line
+with the version and system, one per startup step with its time (secrets,
+database, tables, update row) and `office: ready N ms after Node started`;
+a new version's first start writes `office: first start of X after Y`
+(`backup.ts` in the ledger). `GET /api/health` serves the same: version,
+pid, uptime, step times, how many pages hold the live line and how many page
+errors came in (`src/lib/server/health.ts`). The page reports its boot and
+every error it hits to `POST /api/client-log` (`src/hooks.client.ts`, as
+JSON like every action), which writes one `page:` line each, cut to 600
+characters, at most 30 a minute, with `oddboro:` defused so a page never
+speaks to the shell.
+
 The keychain is the system's own secret store (`@oddboro/ledger/secrets`,
 through `src/lib/server/keychain.ts`). In the Mac app the shell keeps it:
 `init` in `hooks.server.ts` calls `useShellSecrets()`, which loads every
@@ -345,8 +358,10 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    of its thread (`threadsFor`), where the thread began, even once it is
    continued: its title, when it began, where it stands in the same words as
    the Goals window (`workLine`) and anything waiting on the owner, with each
-   step on Open. A click on a desk item opens
-   it on the start side: on the Desk while it waits, else a report in its own
+   step on Open. A click anywhere on a desk item's card opens it: the card is
+   one button, its title still selectable, and a click that ends a selection
+   opens nothing; its controls sit below it, outside the button. It opens
+   on the start side: on the Desk while it waits, else a report in its own
    window (`ReportView.svelte`). A goal or plan card also takes a decision
    in chat, using the Desk's ask route and the same plan checkboxes. The
    manager's New goal box opens from the plus menu, starts empty and sets that exact title through the
@@ -1699,6 +1714,40 @@ the persona's voice.
    same wait or problem. The chat prints the disclosure above the messages.
    `hand_off` tells a colleague that a persona's replies come from New
    Altitude, so what is handed to it leaves this computer.
+8. A proposal for a real person. A hire window opened from a proposal that
+   names a persona on offer shows that persona in place of the builder,
+   with Add, which starts the install on the hire grid with it picked.
+   `proposedPersona` in `src/lib/persona.ts` matches by the proposal's
+   `personaSlug`, or else by the whole display name as its name or role
+   ("<Full Name> Persona"), never a first name, and two matches are none. A
+   middle initial does not count, so "Nate Jones" matches "Nate B. Jones".
+   `proposalView` picks what the window shows:
+   - A proposal that may name a persona (`hasPersonaHint`: a slug, the word
+     persona, or a name of more than one word) shows a still placeholder
+     until the offers answer, so the builder never shows only to be
+     replaced. After five seconds with no answer the builder opens and stays.
+   - One that says it means a persona (`namesPersona`: a slug or the word
+     persona) and has no match asks for the New Altitude sign-in while
+     signed out (`AccountSignIn`; signing in reads the offers again), offers
+     Try again while New Altitude does not answer, and says so when the
+     list lacks the person.
+   - Any other proposal opens the builder, at once when it has no hint.
+   - Build an ordinary Odd instead is on every persona view. The builder it
+     opens, as the timeout's, never starts with the person's name, role or
+     appearance (`ordinaryFrom`).
+   - Add sends the ask's id with the persona's sign-in to
+     `POST /api/personas/[slug]`. The office keeps it in memory, and
+     `installPersona` approves the ask once the persona joins, with the note
+     "<Owner> added <Name>'s New Altitude persona instead of a new Odd." A
+     sign-in left unfinished, an install that fails, a restart or a later Add
+     without the ask leaves the proposal open.
+9. Who an Odd may propose. Each read of New Altitude's list
+   (`readListing`) keeps the names and slugs on offer in memory
+   (`persona-offered.ts`); signed out, or a list refused, keeps none, and an
+   unreachable New Altitude changes nothing. The system prompt of an Odd
+   holding `propose_hire` or `propose_goal_plan` gets one line from it
+   (`offeredSection`): who is on offer, to propose by `persona_slug`, and
+   who already works here. No run calls New Altitude for it.
 
 ## Running it always
 
@@ -1743,6 +1792,7 @@ the persona's voice.
 | `src/lib/account.ts`                  | The account and its states, shared by the server and the page                                                                         |
 | `src/lib/server/persona.ts`           | The personas New Altitude offers: sync, each persona's sign-in, install, Disconnect                                                   |
 | `src/lib/server/persona-package.ts`   | A persona's package checked before the office trusts it                                                                               |
+| `src/lib/server/persona-offered.ts`   | The names and slugs on offer at the last read, as one prompt line for an Odd that can propose a hire                                  |
 | `src/lib/server/persona-run.ts`       | A persona Odd's run: its hands, then its voice, and every word sent to its door                                                       |
 | `src/lib/server/persona-door.ts`      | The persona's door on New Altitude: its address, scope, what a turn sends and what comes back                                         |
 | `src/lib/persona.ts`                  | The offers, the quiet reasons and their lines, shared by the server and the page                                                      |

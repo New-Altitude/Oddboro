@@ -173,6 +173,7 @@ import {
 } from './launch.ts';
 import { notifyMac } from './notify.ts';
 import { OUTCOME_LINE, personaRun, voiced } from './persona-run.ts';
+import { offeredSection } from './persona-offered.ts';
 import { catchUp, NOW, parseSession, saveSession, sectionsOf } from './resume.ts';
 import { runEnv, toolServerEnv } from './run-env-allow.ts';
 import { cut, officeEnv } from './run-env.ts';
@@ -529,6 +530,12 @@ async function prompt(
     (chat ? workOnBrief(on) : on.flatMap((story) => threadOnKnown({ story })).join('\n')) +
     (who.role === MANAGER_ROLE
       ? managerWork(existsSync(join(dir, 'notes', 'pending-judgments.md')))
+      : '') +
+    // An Odd that can propose a hire hears which real people it may propose as personas.
+    (hasTool(who.tools, 'propose_hire') || hasTool(who.tools, 'propose_goal_plan')
+      ? offeredSection(
+          new Set((await roster()).flatMap((o) => (o.package ? [o.package.slug] : [])))
+        )
       : '') +
     stillOnDeskSection(await stillOnDesk(who.id)) +
     house({

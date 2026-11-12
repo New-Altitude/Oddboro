@@ -470,6 +470,13 @@ const hireFields = {
     .optional()
     .describe(
       `An intake ${OWNER} filled in for this hire, a file in your folder. The new Odd gets a copy as notes/intake.md and reads their answers first-hand.`
+    ),
+  persona_slug: z
+    .string()
+    .max(80)
+    .optional()
+    .describe(
+      `When the hire is a real person New Altitude offers as a persona: its slug, if you know it. Set role to "<Full Name> Persona" either way.`
     )
 };
 const hireShape = z.object(hireFields);
@@ -491,7 +498,8 @@ function hireFrom(a: HireArgs): HireProposal | string {
     tools: a.office_tools?.filter(isGrantable),
     appearance: a.appearance,
     job: a.first_job,
-    intakeFile: intake
+    intakeFile: intake,
+    personaSlug: a.persona_slug?.trim() || undefined
   };
 }
 
