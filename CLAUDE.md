@@ -7,7 +7,7 @@ Postgres with Drizzle and pgvector for the office's records.
 
 This file carries hard rules, layout, commands and pointers. Nothing else.
 Decisions live in `docs/decisions/`, and the reasons behind each rule in
-`docs/hard-rules.md`.
+`docs/hard-rules.md`. Code is written and reviewed to `docs/code-standard.md`.
 
 ## Hard rules
 
