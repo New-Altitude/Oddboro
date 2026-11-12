@@ -12,7 +12,13 @@ import {
 } from '@oddboro/ledger';
 import { deniedEdits } from './files.ts';
 import { claudeLaunch, type ClaudeRun } from './claude.ts';
-import { configServers, type McpServer, type RunEvent, type RunImage } from './launch.ts';
+import {
+  configServers,
+  type McpServer,
+  type ResultFacts,
+  type RunEvent,
+  type RunImage
+} from './launch.ts';
 import { GROK_PLAN_LIMIT, GROK_SIGN_IN, grokLaunch, grokSignedOut } from './grok.ts';
 import { codexLaunch, codexReader, codexSignedOut } from './codex.ts';
 import { geminiKeyMissing, geminiLaunch, geminiReader } from './gemini.ts';
@@ -238,11 +244,9 @@ export function stoppedWhy(
  * to the office's own sign-in, on the page (`GROK_SIGN_IN`). Its plan limit carries
  * an upsell link, so that one is the office's own words (`GROK_PLAN_LIMIT`).
  */
-export function endedEarly(agent: Agent, e: Record<string, unknown>): string {
-  const said = (Array.isArray(e.errors) ? e.errors : [])
-    .filter((x): x is string => typeof x === 'string')
-    .join(' ');
+export function endedEarly(agent: Agent, r: ResultFacts): string {
+  const said = r.errors.join(' ');
   if (agent === 'grok' && /^Not signed in\b/.test(said)) return GROK_SIGN_IN;
   if (agent === 'grok' && GROK_PLAN_SPENT.test(said)) return GROK_PLAN_LIMIT;
-  return `The session ended early (${String(e.subtype)})${said ? `: ${said}` : '.'}`;
+  return `The session ended early (${r.subtype})${said ? `: ${said}` : '.'}`;
 }

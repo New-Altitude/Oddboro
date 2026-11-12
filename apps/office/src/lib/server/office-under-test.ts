@@ -159,7 +159,13 @@ process.stdin.on('data', (d) => {
 });
 process.stdin.on('end', () => {
   if (!streamed) return start();
-  for (const words of late) line({ type: 'result', subtype: 'success', result: 'Then: ' + words });
+  // Late words that say "Fail now." get a failed result; any others get a reply of their own.
+  for (const words of late)
+    line(
+      words === 'Fail now.'
+        ? { type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['Failed late.'] }
+        : { type: 'result', subtype: 'success', result: 'Then: ' + words }
+    );
 });
 function start() {
   holdThen(lastLine(), answer);
@@ -169,6 +175,9 @@ function answer() {
   if (lastLine().includes('Fail now.'))
     return failNow({ type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['Failed as told.'] });
   if (lastLine().includes('Start a command and wait.')) return startCommand();
+  // Ends with an error and no result, as a tool that crashed does.
+  if (lastLine().includes('Exit with an error.'))
+    return process.stderr.write('The stand-in exited as told.\\n', () => process.exit(3));
   // Only a staff run carries --settings, so it is read only for the trigger.
   if (
     lastLine().includes('Refuse the open network') &&
@@ -227,6 +236,15 @@ function reply() {
   line({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: 'tool_use', name: 'look' } } });
   const aloud = /Think aloud: ([^.]+)\./.exec(message)?.[1];
   if (aloud) line({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: aloud } } });
+  // Claude Code sends each text block whole as well, after its streamed pieces.
+  if (aloud && lastLine().includes('Send it whole too.'))
+    line({ type: 'assistant', message: { content: [{ type: 'text', text: aloud }] } });
+  // "Plan used: 0.25" reports that share of the five-hour window, as Claude Code's rate_limit_event does.
+  const used = /Plan used: (0\\.\\d+)/.exec(lastLine())?.[1];
+  if (used) line({ type: 'rate_limit_event', rate_limit_info: { unifiedWindows: { five_hour: { utilization: Number(used) } } } });
+  // A failed result that keeps the run going, so words added after it get their own results.
+  if (lastLine().includes('Fail and go on.'))
+    return line({ type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['Failed first.'] });
   if (lastLine().includes('Succeed with an error.'))
     return line({ type: 'result', subtype: 'success', is_error: true, result: 'It went wrong.' });
   if (lastLine().includes('Succeed with no text.')) return line({ type: 'result', subtype: 'success' });
