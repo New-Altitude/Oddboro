@@ -120,12 +120,6 @@ export function defaultLogFile(): string {
   return join(state, 'oddboro', 'office.log');
 }
 
-/** The pid of the Node the shell started last, from its "started node, pid N" line. */
-export function lastNodePid(log: string): number | undefined {
-  const found = [...log.matchAll(/started node, pid (\d+)/g)].pop();
-  return found ? Number(found[1]) : undefined;
-}
-
 export function alive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -188,12 +182,65 @@ function officeNodes(): number[] {
     .map((l) => Number(l.trim().split(/\s+/)[0]));
 }
 
-/** Everything this run may have left: shells, their Node, and on Windows their WebView2. */
-export function killAll(): void {
-  for (const pid of [...shellPids(), ...officeNodes()]) {
+/**
+ * The pids a shell's own log names: each shell's "opening: pid N" and each
+ * Node's "started node, pid N", on the shell's own `oddboro:` lines only, so
+ * a page's error line can never name one.
+ */
+export function loggedPids(log: string): number[] {
+  return [...log.matchAll(/^oddboro: .*?(?:opening: pid|started node, pid) (\d+)/gm)].map((m) =>
+    Number(m[1])
+  );
+}
+
+/** The processes under `roots`, from `pid ppid` lines. */
+export function descendantsIn(out: string, roots: number[]): number[] {
+  const rows = out.split('\n').map((l) => l.trim().split(/\s+/).map(Number));
+  const found = new Set(roots);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const [pid, parent] of rows)
+      if (pid > 0 && found.has(parent) && !found.has(pid)) {
+        found.add(pid);
+        grew = true;
+      }
+  }
+  return [...found].filter((pid) => !roots.includes(pid));
+}
+
+/**
+ * What this run started and is still running: what it spawned, the pids its
+ * own log names (never the owner's log), and every process under those.
+ * Each is kept once found, so a Node whose shell quit first still counts. A
+ * pid seen gone is dropped for good, so a pid the system hands out again is
+ * never this run's. Windows lists no children: `taskkill /T` takes the tree.
+ */
+export function runPids(r: Run): number[] {
+  const log = existsSync(r.log) ? readFileSync(r.log, 'utf8') : '';
+  for (const pid of loggedPids(log)) if (!r.gone.has(pid)) r.pids.add(pid);
+  if (!WIN)
+    for (const pid of descendantsIn(sh('ps', ['-eo', 'pid=,ppid=']).out, [...r.pids]))
+      r.pids.add(pid);
+  for (const pid of r.pids)
+    if (!alive(pid)) {
+      r.pids.delete(pid);
+      r.gone.add(pid);
+    }
+  return [...r.pids];
+}
+
+/** Stops what this run started, and nothing else. */
+function killRun(r: Run): void {
+  for (const pid of runPids(r)) {
     if (WIN) sh('taskkill', ['/F', '/T', '/PID', String(pid)]);
     else sh('kill', ['-9', String(pid)]);
   }
+}
+
+/** Oddboro shells and office servers this run did not start. The run never stops them. */
+function strays(r: Run): number[] {
+  const ours = new Set(runPids(r));
+  return [...new Set([...shellPids(), ...officeNodes()])].filter((pid) => !ours.has(pid));
 }
 
 /**
@@ -234,15 +281,16 @@ export type Installed = { exe: string; dir: string; uninstall?: () => Promise<st
  * as /R (open the app when done) and /NS (no shortcuts).
  */
 export async function installWindows(file: string): Promise<Installed> {
+  const before = new Set(shellPids());
   run(resolve(file), ['/S']);
   const dir = join(process.env.LOCALAPPDATA ?? '', 'Oddboro');
   const exe = join(dir, 'oddboro.exe');
   if (!existsSync(exe)) throw new Error(`${exe} is not there after the install`);
   await sleep(3000);
-  const opened = shellPids();
+  // Only a shell the install opened, with its Node and WebView2 under it.
+  const opened = shellPids().filter((pid) => !before.has(pid));
   if (opened.length) {
-    killAll();
-    sh('taskkill', ['/F', '/IM', 'msedgewebview2.exe']);
+    for (const pid of opened) sh('taskkill', ['/F', '/T', '/PID', String(pid)]);
     throw new Error(`the silent install opened Oddboro (${opened.join(', ')}); closed it`);
   }
   const uninstall = async () => {
@@ -295,7 +343,16 @@ export function installLinux(file: string): Installed {
 }
 
 /** One run's own corner: home, log and WebView2 profile, beside its other output. */
-export type Run = { out: string; home: string; log: string; env: Record<string, string> };
+export type Run = {
+  out: string;
+  home: string;
+  log: string;
+  env: Record<string, string>;
+  /** What this run started, as `runPids` finds it. */
+  pids: Set<number>;
+  /** Pids seen gone, never counted again. */
+  gone: Set<number>;
+};
 
 export function makeRun(out: string): Run {
   mkdirSync(out, { recursive: true });
@@ -311,7 +368,7 @@ export function makeRun(out: string): Run {
   // WebView2 joins a browser already running on the same profile, so a run
   // never shares the owner's.
   if (WIN) env.WEBVIEW2_USER_DATA_FOLDER = mkdtempSync(join(tmpdir(), 'oddboro-smoke-webview-'));
-  return { out, home, log, env };
+  return { out, home, log, env, pids: new Set(), gone: new Set() };
 }
 
 /** The log the shell writes: the run's own, or for a build without ODDBORO_LOG, the usual one. */
@@ -331,6 +388,7 @@ export function launch(exe: string, r: Run): ChildProcess {
   const fd = openSync(file, 'a');
   const app = spawn(exe, [], { env: { ...process.env, ...r.env }, stdio: ['ignore', fd, fd] });
   closeSync(fd);
+  if (app.pid) r.pids.add(app.pid);
   return app;
 }
 
@@ -366,21 +424,43 @@ export async function ready(app: ChildProcess, r: Run, secs = 120): Promise<numb
 }
 
 async function allGone(r: Run): Promise<boolean> {
-  const node = lastNodePid(logText(r));
-  return (
-    !(await tcp(PORT)) && !(await tcp(DB_PORT)) && !(node && alive(node)) && !shellPids().length
-  );
+  return !(await tcp(PORT)) && !(await tcp(DB_PORT)) && !runPids(r).length;
 }
 
-/** The shell, Node and both ports gone within `secs`. */
+/** What this run started gone, and both ports closed, within `secs`. */
 export const goneWithin = (r: Run, secs: number): Promise<boolean> =>
   until('a quit', async () => ((await allGone(r)) ? true : undefined), secs).then(
     () => true,
     () => false
   );
 
-export const leftRunning = async (): Promise<string> =>
-  `port ${PORT} open: ${await tcp(PORT)}, port ${DB_PORT} open: ${await tcp(DB_PORT)}, shells: ${shellPids().join(', ') || 'none'}`;
+export const leftRunning = async (r: Run): Promise<string> =>
+  `port ${PORT} open: ${await tcp(PORT)}, port ${DB_PORT} open: ${await tcp(DB_PORT)}, this run's processes: ${runPids(r).join(', ') || 'none'}`;
+
+/**
+ * Fails when an Oddboro this run did not start is running: the next launch
+ * would hand off to it. The run names it and leaves it alone.
+ */
+function noStrays(r: Run): void {
+  const found = strays(r);
+  if (found.length)
+    throw new Error(
+      `an Oddboro this run did not start is running (pid ${found.join(', ')}). The run left it alone. Quit it, then run again`
+    );
+}
+
+/**
+ * After a quit that did not finish in time: stops what this run started, and
+ * says what it found. Anything else is named, never stopped.
+ */
+async function stopRun(r: Run, what: string): Promise<string> {
+  const left = await leftRunning(r);
+  killRun(r);
+  if (!(await goneWithin(r, 10)))
+    throw new Error(`still running after ${what} and a kill: ${await leftRunning(r)}`);
+  noStrays(r);
+  return left;
+}
 
 /**
  * Mac and Linux: SIGTERM, the shell's normal quit. Windows has no signal a
@@ -388,12 +468,18 @@ export const leftRunning = async (): Promise<string> =>
  */
 export async function quit(app: ChildProcess, r: Run): Promise<number> {
   const started = Date.now();
+  // Everything under the shell, noted while it still has its parent.
+  runPids(r);
   if (WIN) app.kill();
   else app.kill('SIGTERM');
-  if (await goneWithin(r, 15)) return Date.now() - started;
-  const left = await leftRunning();
-  killAll();
-  throw new Error(`still running 15 s after the quit (${left}); killed`);
+  if (await goneWithin(r, 15)) {
+    // Timed before the look for strays, which takes seconds on Windows.
+    const ms = Date.now() - started;
+    noStrays(r);
+    return ms;
+  }
+  const left = await stopRun(r, 'the quit');
+  throw new Error(`still running 15 s after the quit (${left}); stopped what this run started`);
 }
 
 /** The real window, from outside: its text and buttons, and a press by a button's name. */
@@ -522,15 +608,18 @@ export async function webdriverStart(exe: string, r: Run): Promise<Driven> {
     return ((await res.json()) as { value: unknown }).value;
   };
   let session = '';
+  if (driver.pid) r.pids.add(driver.pid);
   const stop = async (): Promise<string> => {
+    // Everything under tauri-driver, noted while it still has its parent.
+    runPids(r);
     if (session) await wd('DELETE', `/session/${session}`).catch(() => undefined);
     driver.kill();
     try {
-      if (await goneWithin(r, 10)) return 'closed with the WebDriver session';
-      const left = await leftRunning();
-      killAll();
-      if (await goneWithin(r, 10)) return `killed: the session left it running (${left})`;
-      throw new Error(`still running after the session and a kill: ${await leftRunning()}`);
+      if (await goneWithin(r, 10)) {
+        noStrays(r);
+        return 'closed with the WebDriver session';
+      }
+      return `killed: the session left it running (${await stopRun(r, 'the session')})`;
     } finally {
       writeFileSync(join(r.out, 'tauri-driver.log'), driverLog);
     }

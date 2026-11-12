@@ -1,16 +1,38 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { BASE, lastNodePid, pageHeaders, parseTasklist, shellsIn } from '../scripts/driver.ts';
+import {
+  BASE,
+  descendantsIn,
+  loggedPids,
+  pageHeaders,
+  parseTasklist,
+  shellsIn
+} from '../scripts/driver.ts';
 
-test("Node's pid is the last one the shell logged", () => {
+test("the run's processes are the shells and Nodes its own log names", () => {
   const log = [
+    'oddboro: 2026-11-08T06:15:40.000Z Oddboro 0.0.9 (aarch64-apple-darwin) opening: pid 90, port 4590, home /tmp/h, webview 26',
     'oddboro: 2026-11-08T06:15:40.123Z started node, pid 101',
     'Listening on http://127.0.0.1:4590',
     'oddboro: started node, pid 202',
+    'page: error opening: pid 7 started node, pid',
     'office: ready 812 ms after Node started'
   ].join('\n');
-  assert.equal(lastNodePid(log), 202);
-  assert.equal(lastNodePid('nothing started'), undefined);
+  assert.deepEqual(loggedPids(log), [90, 101, 202]);
+  assert.deepEqual(loggedPids('nothing started'), []);
+});
+
+test('the processes under a run are found down the tree, and nothing beside it', () => {
+  const out = [
+    '   1     0',
+    '  90     1',
+    ' 101    90',
+    ' 150   101',
+    ' 300     1',
+    ' 301   300'
+  ].join('\n');
+  assert.deepEqual(descendantsIn(out, [90]).sort(), [101, 150]);
+  assert.deepEqual(descendantsIn(out, [404]), []);
 });
 
 test("tasklist's CSV gives the pids, and its no-match notice none", () => {

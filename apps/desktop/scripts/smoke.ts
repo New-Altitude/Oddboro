@@ -388,6 +388,11 @@ async function smokeStage(): Promise<void> {
 
 /** The built app: installed, started, driven through its real window. */
 async function smokeApp(): Promise<void> {
+  // Before any install: the Windows installer replaces the running app.
+  if (shellPids().length)
+    throw new Error(
+      'Oddboro is already running here. Quit it first: Linux and Windows keep to one Oddboro at a time.'
+    );
   let installed: Installed | undefined;
   if (args.installed) {
     installed = await step('the app on this computer', true, () => {
@@ -475,10 +480,6 @@ async function smokeApp(): Promise<void> {
 
   const r = makeRun(OUT);
   currentRun = r;
-  if (shellPids().length)
-    throw new Error(
-      'Oddboro is already running here. Quit it first: Linux and Windows keep to one Oddboro at a time.'
-    );
   if ((await tcp(PORT)) || (await tcp(DB_PORT)))
     throw new Error(`Port ${PORT} or ${DB_PORT} is taken`);
 

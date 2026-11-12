@@ -395,7 +395,10 @@ with `/S` and UI Automation on Windows (WebView2 on GitHub's runners drops
 DevTools' argument), the `.dmg` copied to a resolved folder and
 Accessibility through System Events on a Mac (a path through a symlink stops
 the app), the AppImage under Xvfb with a GNOME keyring and WebDriver through
-`tauri-driver` on Linux. A dialog fails the run with its words.
+`tauri-driver` on Linux. A dialog fails the run with its words. A run stops
+only what it started: the processes it spawned, the shells and Nodes its own
+log names, and everything under them. Another Oddboro it finds fails the row
+with its pid, and the run leaves it running.
 
 ```sh
 node apps/desktop/scripts/smoke.ts --stage                       # the staged server, after stage.ts, with Sentry on (port 9 takes nothing)
