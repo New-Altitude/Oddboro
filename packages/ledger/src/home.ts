@@ -17,7 +17,7 @@ export const IN_APP = process.env.ODDBORO_APP === '1';
  * its children. A test once wrote the owner's real office, so under test the
  * office never falls back to ~/.oddboro or the live office's port.
  */
-const UNDER_TEST = !!process.env.NODE_TEST_CONTEXT;
+export const UNDER_TEST = !!process.env.NODE_TEST_CONTEXT;
 
 /** The owner's office: the database, staff folders, sign-ins and data. */
 const HOME = process.env.ODDBORO_HOME || (UNDER_TEST ? undefined : join(homedir(), '.oddboro'));

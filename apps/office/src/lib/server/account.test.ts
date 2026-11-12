@@ -19,24 +19,6 @@ const reads = { count: 0 };
 let storeAnswer: { ok: true } | { ok: false; problem: string } = { ok: true };
 /** When set, every write throws it, as a locked keyring's does. */
 let writeFails: Error | undefined;
-// The real module's other exports too, such as `useShellSecrets`, which the
-// office's server hooks import.
-const realSecrets = await import('@oddboro/ledger/secrets');
-mock.module('@oddboro/ledger/secrets', {
-  namedExports: {
-    ...realSecrets,
-    getSecret: (connector: string, name: string) => {
-      reads.count++;
-      return store.get(`${connector}:${name}`);
-    },
-    setSecret: (connector: string, name: string, value: string) => {
-      if (writeFails) throw writeFails;
-      store.set(`${connector}:${name}`, value);
-    },
-    deleteSecret: (connector: string, name: string) => store.delete(`${connector}:${name}`),
-    secretStore: () => storeAnswer
-  }
-});
 
 // Everything the office prints, for the check that no secret reaches a log.
 const printed: string[] = [];
@@ -71,6 +53,25 @@ Object.assign(process.env, {
   ODDBORO_LOCAL_DB: '1',
   OLLAMA_URL: 'http://127.0.0.1:9',
   ODDBORO_ACCOUNT_SITE: `${fake.origin}/`
+});
+// The real module's other exports too, such as `useShellSecrets`, which the
+// office's server hooks import. Loaded after the settings above: secrets.ts
+// loads home.ts, which reads where the office is and its ports as it loads.
+const realSecrets = await import('@oddboro/ledger/secrets');
+mock.module('@oddboro/ledger/secrets', {
+  namedExports: {
+    ...realSecrets,
+    getSecret: (connector: string, name: string) => {
+      reads.count++;
+      return store.get(`${connector}:${name}`);
+    },
+    setSecret: (connector: string, name: string, value: string) => {
+      if (writeFails) throw writeFails;
+      store.set(`${connector}:${name}`, value);
+    },
+    deleteSecret: (connector: string, name: string) => store.delete(`${connector}:${name}`),
+    secretStore: () => storeAnswer
+  }
 });
 const { startLocalDatabase } = await import('@oddboro/ledger/local-db');
 const stopDatabase = await startLocalDatabase();

@@ -14,17 +14,6 @@ import { join } from 'node:path';
 import { after, mock, test } from 'node:test';
 
 const store = new Map<string, string>();
-const realSecrets = await import('@oddboro/ledger/secrets');
-mock.module('@oddboro/ledger/secrets', {
-  namedExports: {
-    ...realSecrets,
-    getSecret: (connector: string, name: string) => store.get(`${connector}:${name}`),
-    setSecret: (connector: string, name: string, value: string) =>
-      void store.set(`${connector}:${name}`, value),
-    deleteSecret: (connector: string, name: string) => store.delete(`${connector}:${name}`),
-    secretStore: () => ({ ok: true })
-  }
-});
 
 const folder = mkdtempSync(join(tmpdir(), 'oddboro-github-'));
 const port = await new Promise<number>((done) => {
@@ -40,6 +29,19 @@ Object.assign(process.env, {
   DATABASE_URL: `postgres://postgres:postgres@127.0.0.1:${port}/postgres`,
   ODDBORO_LOCAL_DB: '1',
   OLLAMA_URL: 'http://127.0.0.1:9'
+});
+// Loaded after the settings above: secrets.ts loads home.ts, which reads
+// where the office is and its ports as it loads.
+const realSecrets = await import('@oddboro/ledger/secrets');
+mock.module('@oddboro/ledger/secrets', {
+  namedExports: {
+    ...realSecrets,
+    getSecret: (connector: string, name: string) => store.get(`${connector}:${name}`),
+    setSecret: (connector: string, name: string, value: string) =>
+      void store.set(`${connector}:${name}`, value),
+    deleteSecret: (connector: string, name: string) => store.delete(`${connector}:${name}`),
+    secretStore: () => ({ ok: true })
+  }
 });
 
 /** GitHub's own scopes list, as its MCP server gives it (fetched 2026-11-09). */

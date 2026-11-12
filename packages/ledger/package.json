@@ -26,14 +26,16 @@
     "./desk-answers": "./src/desk-answers.ts",
     "./live-tables": "./src/live-tables.ts",
     "./filters": "./src/filter-words.ts",
-    "./certificates": "./src/certificates.ts"
+    "./certificates": "./src/certificates.ts",
+    "./test-defaults": "./test/test-defaults.ts",
+    "./tools-on-path": "./test/tools-on-path.ts"
   },
   "scripts": {
     "generate": "drizzle-kit generate",
     "migrate": "node --env-file-if-exists=../../.env src/migrate.ts",
     "check-types": "tsc -p tsconfig.json",
     "lint": "prettier --check . --ignore-path ../../.prettierignore",
-    "test": "node --test --test-timeout=15000 --experimental-test-module-mocks \"test/*.test.ts\""
+    "test": "node --test --test-timeout=15000 --experimental-test-module-mocks --import ./test/test-defaults.ts \"test/*.test.ts\""
   },
   "devDependencies": {
     "drizzle-kit": "^0.31.11"
