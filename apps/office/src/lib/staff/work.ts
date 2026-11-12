@@ -50,7 +50,7 @@ type FileTool = 'Read' | 'Glob' | 'Grep' | 'Edit' | 'Write';
  * owner reads a tool's name from, on the In progress tab and in chat ("Mira
  * is reading files"), so each starts with a verb ending in -ing. Each tool's
  * reader gives the floor Claude Code's names (codex.ts, gemini.ts,
- * `streamTools` in cli.ts for Grok).
+ * `streamTools` in claude.ts for Grok).
  */
 const TOOL_WORDS: Record<string, string> = {
   Read: 'Reading files',

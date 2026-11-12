@@ -1,8 +1,7 @@
 // What a staffer's run does by the coding tool it runs on, apart from Claude
 // Code's own arguments, which run() in staff.ts builds: how a run on Grok,
-// Codex or Gemini starts (grok.ts, codex.ts, gemini.ts), the tools a line of
-// Claude Code's stream names (Grok streams in that shape), and why a run
-// ended early. Server only.
+// Codex or Gemini starts (grok.ts, codex.ts, gemini.ts), and why a run ended
+// early. Server only.
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import {
@@ -17,7 +16,6 @@ import { configServers, type McpServer, type RunEvent, type RunImage } from './l
 import { GROK_PLAN_LIMIT, GROK_SIGN_IN, grokLaunch, grokSignedOut } from './grok.ts';
 import { codexLaunch, codexReader, codexSignedOut } from './codex.ts';
 import { geminiKeyMissing, geminiLaunch, geminiReader } from './gemini.ts';
-import { GROK_FILE_TOOLS } from '../staff/work.ts';
 
 /**
  * How one run starts: the tool's arguments, environment and input, and what
@@ -34,6 +32,8 @@ export type Launch = {
   stdin: string;
   done: () => void;
   read?: (e: Record<string, unknown>) => RunEvent[];
+  /** How words added to a run while it replies are written to its input, for a tool that takes them. */
+  turn?: (text: string) => string;
   ownGroup?: true;
 };
 
@@ -182,45 +182,6 @@ export const LAUNCHES: Record<
     };
   }
 };
-
-/**
- * Claude Code's name for a tool Grok names: a file tool by GROK_FILE_TOOLS,
- * and search_tool, which finds an MCP tool before Grok calls it, ToolSearch.
- */
-function grokTool(name: string): string {
-  if (Object.hasOwn(GROK_FILE_TOOLS, name))
-    return GROK_FILE_TOOLS[name as keyof typeof GROK_FILE_TOOLS];
-  return name === 'search_tool' ? 'ToolSearch' : name;
-}
-
-/**
- * The tools one line of Claude Code's stream names, by Claude Code's names,
- * as the floor is told them. Grok streams in the same shape with its own
- * names (`grokTool`), and calls every MCP tool through use_tool, which names
- * it as server__tool: that call shows once, from the whole message, the way
- * Claude Code names one, mcp__server__tool.
- */
-export function streamTools(agent: Agent, e: Record<string, unknown>): string[] {
-  if (e.type === 'stream_event') {
-    const ev = e.event as { type: string; content_block?: { type: string; name?: string } };
-    if (
-      ev.type !== 'content_block_start' ||
-      ev.content_block?.type !== 'tool_use' ||
-      ev.content_block.name === 'use_tool'
-    )
-      return [];
-    const name = ev.content_block.name ?? 'a tool';
-    return [agent === 'grok' ? grokTool(name) : name];
-  }
-  if (e.type !== 'assistant') return [];
-  const blocks = (e.message as { content?: unknown } | undefined)?.content;
-  return (Array.isArray(blocks) ? blocks : []).flatMap((b: unknown) => {
-    const block = b as { name?: unknown; input?: { tool_name?: unknown } };
-    return block.name === 'use_tool' && typeof block.input?.tool_name === 'string'
-      ? [`mcp__${block.input.tool_name}`]
-      : [];
-  });
-}
 
 /**
  * Grok's words when its plan has no usage left: the line its stream ends a
