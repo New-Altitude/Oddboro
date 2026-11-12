@@ -21,7 +21,7 @@ export const OUTBOUND: readonly Outbound[] = [
     calls: 1,
     to: 'A hosted connector, at the address it was saved with.',
     sends:
-      "The connector's own secrets in its headers, a request for its tools, and each call an Odd's run makes to it through the office's gateway (gateway.ts), with that call's arguments.",
+      "The connector's own secrets in its headers, a request for its tools, and each call an Odd's run makes to it through the office's gateway (gateway.ts), with that call's arguments. For LegalZoom physical mail, also the owner's mailbox list and check while they choose one mailbox in setup.",
     yes: 'The owner adding that connector, and granting the Odd it at Read only or Read and write.'
   },
   {

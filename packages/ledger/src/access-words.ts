@@ -91,3 +91,8 @@ export const switchesSaid = (s: readonly OwnSwitch[]): string =>
  */
 export const NOT_OWN_TOOLS =
   'Not for web search, reading pages or a shell: those are your own tools, and my_access says how to get them.';
+
+/** The office offers one read-only LegalZoom mailbox. */
+export const POSTAL_ID = 'legalzoom-virtual-mail';
+export const POSTAL_NAME = 'Physical mail (LegalZoom)';
+export const POSTAL_URL = 'https://api.earthclassmail.com/v2/mcp/readonly';
