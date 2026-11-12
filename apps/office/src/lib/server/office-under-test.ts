@@ -43,7 +43,10 @@ const port = await new Promise<number>((done) => {
 // Code's binary refuses that with, on stderr, and exit 1, after any hold.
 // Only the last line, since a later prompt can quote an earlier message.
 // One that says "Think aloud: <words>." on any line streams <words> as
-// text first.
+// text first. A run with --input-format stream-json starts on its first user
+// line, as Claude Code does, and keeps each user line after it, text only, in
+// "added" (Send now), answering all of them in its one result; it ends
+// when the office closes its stdin.
 // "claude auth status" says signed out at once, and "claude auth login"
 // prints its sign-in page and waits until it is stopped, as Setup's sign-in
 // waits on the owner.
@@ -84,14 +87,41 @@ if (verb === 'auth' && sub === 'login') {
   return;
 }
 let message = '';
+/** What each stream-json user line after the first said. */
+const added = [];
 /** The owner's words in a chat, or a job's instructions, which come last. */
 const lastLine = () => message.trimEnd().split('\\n').at(-1);
-process.stdin.on('data', (d) => (message += d));
+const streamed = process.argv.includes('--input-format');
+let lines = '';
+let started = false;
+const textOf = (content) => content.filter((b) => b.type === 'text').map((b) => b.text).join('\\n');
+process.stdin.on('data', (d) => {
+  if (!streamed) return void (message += d);
+  lines += d;
+  let nl;
+  while ((nl = lines.indexOf('\\n')) >= 0) {
+    const line = lines.slice(0, nl);
+    lines = lines.slice(nl + 1);
+    if (!line.trim()) continue;
+    const content = JSON.parse(line).message.content;
+    if (started) {
+      added.push(textOf(content));
+      continue;
+    }
+    // A turn with a picture comes back whole, for a test to read its blocks.
+    message = content.some((b) => b.type !== 'text') ? line : textOf(content);
+    started = true;
+    start();
+  }
+});
 process.stdin.on('end', () => {
+  if (!streamed) start();
+});
+function start() {
   const hold = /Hold until (\\/[^\\s"\\\\]+) exists/.exec(lastLine())?.[1];
   if (!hold) return answer();
   const wait = setInterval(() => fs.existsSync(hold) && (clearInterval(wait), answer()), 20);
-});
+}
 /** After any hold, so two runs can be refused at once. */
 function answer() {
   // Only a staff run carries --settings, so it is read only for the trigger.
@@ -129,6 +159,7 @@ function reply() {
     claudeSettings: settings(),
     system: fs.readFileSync(after('--append-system-prompt-file'), 'utf8'),
     message,
+    added,
     claudeMds: process.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS ?? null,
     autoMemory: process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY ?? null,
     tmpdir: process.env.CLAUDE_CODE_TMPDIR ?? null,
@@ -614,6 +645,8 @@ export type Gave = {
   env: Record<string, string>;
   system: string;
   message: string;
+  /** What a streamed Claude Code chat was given after its first message (Send now). */
+  added?: string[];
   claudeMds: string | null;
   autoMemory: string | null;
   /** The Claude Code run's CLAUDE_CODE_TMPDIR and NODE_OPTIONS, which Run commands sets. */

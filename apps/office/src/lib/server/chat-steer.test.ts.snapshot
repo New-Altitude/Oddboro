@@ -1,11 +1,4 @@
-exports[`a correction tells the lead which saved turn or work it changes, without repeating completed actions 1`] = `
-[
-  "This corrects your reply to: Prepare the room.",
-  "Keep completed work and saved files. Do not repeat an outside action already taken. Use the correction below for what remains."
-]
-`;
-
-exports[`a correction tells the lead which saved turn or work it changes, without repeating completed actions 2`] = `
+exports[`a message about work tells the lead which work it changes, and nothing else 1`] = `
 [
   "The owner is speaking to you as lead of this goal #7, \\"Plan the fair\\".",
   "Apply their words to that work. This message does not stop a background job or approve an outside action."

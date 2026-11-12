@@ -441,8 +441,8 @@ test(
     writeFileSync(
       claude,
       `#!/usr/bin/env node
-process.stdin.resume();
-process.stdin.on('end', () => {
+// A chat's stdin stays open until its result, so it fails on its first line.
+process.stdin.once('data', () => {
   process.stderr.write('Overly broad patterns like "*" are not allowed\\n');
   process.exit(1);
 });

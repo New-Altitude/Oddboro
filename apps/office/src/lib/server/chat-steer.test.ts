@@ -4,10 +4,11 @@ import { randomUUID } from 'node:crypto';
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { L, bus, folder, history, followThrough } from './office-under-test.ts';
+import { L, bus, chat, folder, history, followThrough, type Gave } from './office-under-test.ts';
 
-const { GET, POST, DELETE } = await import('../../routes/api/staff/[id]/chat/+server.ts');
+const { GET, POST, PATCH, DELETE } = await import('../../routes/api/staff/[id]/chat/+server.ts');
 const { runJob, inProgress } = await import('./staff.ts');
+const { addToReply, aboutBrief } = await import('./chat-run.ts');
 
 function request(id: string, body: object, method = 'POST') {
   return {
@@ -23,18 +24,20 @@ const state = async (id: string) =>
   (await GET({ params: { id } } as Parameters<typeof GET>[0])).json();
 const stop = async (id: string, runId: string) =>
   (await DELETE(request(id, { runId }, 'DELETE'))).json();
+const add = async (id: string, runId: string, message: string) =>
+  (await PATCH(request(id, { runId, message }, 'PATCH'))).json();
 const send = (id: string, body: object) => POST(request(id, body));
 const last = async (r: Response) =>
   JSON.parse((await r.text()).trim().split('\n\n').at(-1)!.slice(6));
+const gaveOf = (text: string): Gave => JSON.parse(text.split('\nOutcome:')[0]);
 
 test(
-  'a screenshot corrects just the selected reply, keeps completed work and starts once',
+  'Send now adds words to the running Claude Code reply in the same turn, and the run ends after its result',
   { timeout: 60_000 },
   async (t) => {
     const id = 'cleo';
-    const old = randomUUID();
     const turnId = randomUUID();
-    const ready = join(folder, 'old-reply');
+    const ready = join(folder, 'add-ready');
     const jobReady = join(folder, 'job-ready');
     const job = await L.addJob({
       staffId: id,
@@ -44,61 +47,45 @@ test(
     });
     const running = runJob(job, 'manual');
     try {
-      const stream = await send(id, { turnId: old, message: `Hold until ${ready} exists.` });
+      const stream = await send(id, { turnId, message: `Hold until ${ready} exists.` });
       await t.waitFor(() => assert.equal(L.runsGoing.size, 2), { timeout: 20_000 });
       const { reply } = await state(id);
-      assert.equal(reply.turnId, old);
-      assert.ok(L.runsGoing.has(reply.runId));
-      const task = await L.giveTask(id, {
-        title: 'Pick the room',
-        why: 'For the meeting.',
-        steps: ['Pick one.']
-      });
-      const bytes = Buffer.from(
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWZkAAAAASUVORK5CYII=',
-        'base64'
-      );
-      const correction = {
-        turnId,
-        instead: reply.runId,
-        message: 'Use the room in this picture.',
-        files: [{ name: 'room.png', data: bytes.toString('base64') }]
-      };
+      assert.equal(reply.turnId, turnId);
+      // Its tool is running, with stdin open, once the run can take words.
+      await t.waitFor(() => assert.ok(L.runsGoing.get(reply.runId)?.add), { timeout: 20_000 });
       let ends = 0;
       const count = () => ends++;
       bus.on('run-ended', count);
       t.after(() => {
         bus.off('run-ended', count);
       });
-      const next = await send(id, correction);
-      const ended = await last(stream);
-      assert.match(ended.text, /^You stopped the reply to “Hold until /);
-      assert.equal(
-        history(id).find((e) => e.turnId === old && e.from === 'staff')?.interrupted,
-        true
+      // An old window naming another run adds nothing.
+      assert.deepEqual(await add(id, randomUUID(), 'Not this.'), { added: false });
+      assert.deepEqual(await add(id, reply.runId, 'Count the blue seats too.'), { added: true });
+      const kept = history(id).filter((e) => e.turnId === turnId && e.from === 'owner');
+      assert.deepEqual(
+        kept.map((e) => [e.text, e.source?.kind]),
+        [
+          [`Hold until ${ready} exists.`, 'chat'],
+          ['Count the blue seats too.', 'added']
+        ]
       );
-      // The held line is also in the test tool's replay of the conversation.
-      // The repeat is the same accepted correction, not a third run.
-      assert.equal((await last(await send(id, correction))).type, 'error');
       writeFileSync(ready, '');
-      assert.deepEqual(await stop(id, reply.runId), { stopped: false });
-      const answer = await last(next);
+      const answer = await last(stream);
       assert.equal(answer.type, 'done', answer.message);
-      const blocks = JSON.parse(JSON.parse(answer.text.split('\nOutcome:')[0]).message).message
-        .content;
-      assert.equal(blocks[0].source.data, bytes.toString('base64'));
-      assert.ok(blocks.at(-1).text.includes(correction.message));
-      assert.equal((await L.task(task.id))?.status, 'open');
+      const gave = gaveOf(answer.text);
+      // A Claude Code chat reads stream-json, even with no picture, and got both in its one turn.
+      assert.equal(gave.args[gave.args.indexOf('--input-format') + 1], 'stream-json');
+      assert.equal(gave.message.trimEnd().split('\n').at(-1), `Hold until ${ready} exists.`);
+      assert.deepEqual(gave.added, ['Count the blue seats too.']);
+      assert.equal(history(id).filter((e) => e.turnId === turnId && e.from === 'staff').length, 1);
+      // Too late: the reply ended, so the page sends the words as the next message.
+      assert.deepEqual(await add(id, reply.runId, 'And the red ones.'), { added: false });
+      assert.equal(history(id).filter((e) => e.turnId === turnId).length, 3);
+      // The background job runs on, untouched.
       assert.equal(inProgress()[id]?.[0].about?.id, job.id);
-      assert.deepEqual(await last(await send(id, correction)), answer);
-      assert.equal(history(id).filter((e) => e.turnId === turnId).length, 2);
-      assert.deepEqual(history(id).find((e) => e.turnId === turnId)?.source, {
-        kind: 'correction',
-        id: old,
-        revision: reply.runId
-      });
       assert.equal(L.runsGoing.size, 1);
-      assert.equal(ends, 2);
+      assert.equal(ends, 1);
     } finally {
       writeFileSync(ready, '');
       writeFileSync(jobReady, '');
@@ -107,8 +94,36 @@ test(
   }
 );
 
+test('words added after the result of a Claude Code chat still end with Claude Code, and other tools never take them', async () => {
+  /** A chat on `id` that tries to add words as its tool reports its first step, just before its result. */
+  async function addAtStep(id: string) {
+    let runId = '';
+    let added: boolean | undefined;
+    let text = '';
+    await chat(id, 'Hello.', (e) => {
+      if (e.type === 'reply') runId = e.runId;
+      if (e.type === 'tool' && added === undefined) added = addToReply(id, runId, 'Also this.');
+      if (e.type === 'done') text = e.text;
+      if (e.type === 'error') text = e.message;
+    });
+    return { added, text };
+  }
+  // The stand-in had answered before the words came; the run still ends once it does.
+  const claude = await addAtStep('sam');
+  assert.equal(claude.added, true);
+  assert.equal(gaveOf(claude.text).message.trimEnd().split('\n').at(-1), 'Hello.');
+  // Grok reads its message once (`--single`), so its chat takes nothing more.
+  const grok = await addAtStep('gus');
+  assert.equal(grok.added, false, grok.text);
+  assert.equal(
+    history('gus').some((e) => e.text === 'Also this.'),
+    false
+  );
+  assert.equal(L.runsGoing.size, 0);
+});
+
 test(
-  'disconnect leaves a reply running; a correction racing completion starts after it, and Stop stands alone',
+  'disconnect leaves a reply running, and Stop stands alone and says so plainly',
   { timeout: 60_000 },
   async (t) => {
     const id = 'paige';
@@ -123,15 +138,6 @@ test(
       () => assert.ok(history(id).some((e) => e.turnId === first && e.from === 'staff')),
       { timeout: 20_000 }
     );
-    const second = randomUUID();
-    const lastTurn = await last(
-      await send(id, {
-        turnId: second,
-        instead: before.runId,
-        message: 'Count the blue seats too.'
-      })
-    );
-    assert.equal(lastTurn.type, 'done');
     assert.equal(
       history(id).some((e) => e.interrupted),
       false
@@ -142,12 +148,15 @@ test(
     const active = (await state(id)).reply;
     assert.deepEqual(await stop(id, before.runId), { stopped: false });
     assert.deepEqual(await stop(id, active.runId), { stopped: true });
-    assert.match((await last(third)).text, /^You stopped the reply to “Hold until /);
+    const stopped = (await last(third)).text;
+    assert.equal(stopped, 'You stopped this reply. Completed work and saved files remain.');
+    // The owner's message ended with a period; the line never doubles one.
+    assert.doesNotMatch(stopped, /[.!?…]["”’']?[.!?]/);
   }
 );
 
 test(
-  'a correction about a colleague’s goal goes to its lead and never stops the other work',
+  'a message about a colleague’s goal goes to its lead and never stops the other work',
   { timeout: 60_000 },
   async (t) => {
     const [goal] = await L.pg<
@@ -169,21 +178,17 @@ test(
       const about = inProgress().paige[0].about!;
       assert.equal(about.leadId, 'lead');
       assert.equal(about.title, 'Plan the fair');
-      const correction = {
+      const message = {
         turnId: randomUUID(),
         about: about.key,
         message: 'Leave room for the band.'
       };
-      await assert.rejects(async () => send('paige', correction), { status: 400 });
-      const answer = await send('lead', correction);
+      await assert.rejects(async () => send('paige', message), { status: 400 });
+      const answer = await send('lead', message);
       const result = await last(answer);
       assert.equal(result.type, 'done', result.message);
-      assert.ok(
-        JSON.parse(result.text.split('\nOutcome:')[0]).message.includes(
-          `goal #${goal.id}, "Plan the fair"`
-        )
-      );
-      assert.deepEqual(history('lead').find((e) => e.turnId === correction.turnId)?.about, about);
+      assert.ok(gaveOf(result.text).message.includes(`goal #${goal.id}, "Plan the fair"`));
+      assert.deepEqual(history('lead').find((e) => e.turnId === message.turnId)?.about, about);
       assert.equal(inProgress().paige[0].about?.key, about.key);
     } finally {
       writeFileSync(ready, '');
@@ -192,35 +197,25 @@ test(
   }
 );
 
-test('a correction tells the lead which saved turn or work it changes, without repeating completed actions', async (t) => {
-  const { correctionBrief } = await import('./chat-run.ts');
-  const old = {
+test('a message about work tells the lead which work it changes, and nothing else', (t) => {
+  const line = {
     from: 'owner' as const,
     at: '2026-01-01T00:00:00.000Z',
-    text: 'Prepare the room.',
+    text: 'Leave room for the band.',
     turnId: 'earlier'
   };
   t.assert.snapshot(
-    correctionBrief(
-      { ...old, text: 'Leave room for the band.', source: { kind: 'correction', id: 'earlier' } },
-      [old]
-    )
+    aboutBrief({
+      ...line,
+      about: {
+        key: 'goal-work',
+        kind: 'goal',
+        id: 7,
+        title: 'Plan the fair',
+        leadId: 'lead',
+        lead: 'Lena'
+      }
+    })
   );
-  t.assert.snapshot(
-    correctionBrief(
-      {
-        ...old,
-        about: {
-          key: 'goal-work',
-          kind: 'goal',
-          id: 7,
-          title: 'Plan the fair',
-          leadId: 'lead',
-          lead: 'Lena'
-        }
-      },
-      []
-    )
-  );
-  assert.deepEqual(correctionBrief(old, []), []);
+  assert.deepEqual(aboutBrief(line), []);
 });
