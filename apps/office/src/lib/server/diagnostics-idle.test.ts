@@ -25,11 +25,12 @@ const TIMERS = file('./diagnostics-idle-timers.ts');
 const office = `
 const { timers } = await import(${JSON.stringify(TIMERS)});
 await import(${JSON.stringify(file('../../instrumentation.server.ts'))});
-const { sender, throwing, traceHeader } = await import(${JSON.stringify(file('./diagnostics-harness.ts'))});
+const { page, sender, throwing, traceHeader } = await import(${JSON.stringify(file('./diagnostics-harness.ts'))});
 const hooks = await import(${JSON.stringify(file('../../hooks.server.ts'))});
 const send = sender(hooks.handle);
-await send({ route: '/api/ledger', headers: { 'sentry-trace': traceHeader() } });
-await send({ route: '/api/goals', resolve: throwing(() => new Error('T13 idle')) });
+const owner = await page();
+await send({ route: '/api/ledger', headers: { ...owner, 'sentry-trace': traceHeader() } });
+await send({ route: '/api/goals', headers: owner, resolve: throwing(() => new Error('T13 idle')) });
 await new Promise((r) => setTimeout(r, 7000));
 const before = timers().timeouts;
 await new Promise((r) => setTimeout(r, 15000));

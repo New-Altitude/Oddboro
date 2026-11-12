@@ -198,7 +198,7 @@ test('a report carries no owner name, Odd name, chat line, email or home path fr
   const staff = {
     route: '/api/staff/[id]',
     path: `/api/staff/${encodeURIComponent(OWNER)}?email=${EMAIL}`,
-    headers: { 'x-who': EMAIL }
+    headers: { ...(await page()), 'x-who': EMAIL }
   };
   await send({
     ...staff,

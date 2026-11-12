@@ -82,9 +82,13 @@ const arrived = (mark: string, from = 0) => atDoor(from).some((g) => g.body.incl
  * Made here, not at each call: a report carries the source lines around where
  * its error was made, and a caller's lines hold the marks of the reports beside it.
  */
-const fail = (mark: string, headers: Record<string, string> = {}) =>
-  // `fixedError` takes only a literal type; each mark is one the test wrote.
-  send({ route: '/api/goals', headers, resolve: throwing(() => fixedError(mark as 'mark')) });
+const fail = async (mark: string, headers: Record<string, string> = {}) =>
+  send({
+    route: '/api/goals',
+    headers: { ...(await page()), ...headers },
+    // `fixedError` takes only a literal type; each mark is one the test wrote.
+    resolve: throwing(() => fixedError(mark as 'mark'))
+  });
 
 /** Sign in through the fake, as the owner's page and New Altitude's sign-in page do. */
 async function signIn(): Promise<void> {
