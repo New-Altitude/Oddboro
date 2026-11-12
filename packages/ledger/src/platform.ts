@@ -70,7 +70,9 @@ export type Probe =
  * must see, such as the browser or a dialog asking them to confirm, and
  * hiding the command can hide that window too. `input` goes to the command's
  * stdin, which then closes, so a command that reads to the end never waits.
- * Text passed this way stays out of the process list.
+ * Text passed this way stays out of the process list. `killSignal` is what
+ * stops a command at its timeout, SIGTERM unless given: a command that
+ * ignores SIGTERM runs on, and its caller waits, until it ends by itself.
  */
 export function probe(
   cmd: string,
@@ -82,6 +84,7 @@ export function probe(
     showWindow?: true;
     input?: string;
     maxBuffer?: number;
+    killSignal?: NodeJS.Signals;
   } = {}
 ): Promise<Probe> {
   const { showWindow, input, ...options } = o;

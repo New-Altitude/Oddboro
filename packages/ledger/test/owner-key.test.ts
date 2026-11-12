@@ -94,3 +94,56 @@ test('only an exact exception route passes as an exception', () => {
   for (const path of [K.UPDATE_PATH, ...K.OWN_PROOF])
     assert.equal(K.isGatewayPath(path), false, path);
 });
+
+/** Each exception route as a request names it: the gateway's with a connector id in place of its parameter. */
+const ROUTES = K.EXCEPTION_ROUTES.map((r) => r.replace(/\[[a-z]+\]/, 'notes'));
+/** What a router may read as a separator, a step back or an empty step, in place of a `/`. */
+const SEPARATORS = ['%2f', '%5c', '\\', '//', '/./', '/../'];
+/** A step back, as written and escaped. */
+const BACK = ['..', '%2e%2e'];
+
+/**
+ * Each route rewritten so that a router could read it as another path: each of
+ * its `/` swapped for another separator, a step back after it, a step back
+ * into it, and a gateway id that is itself a step back or holds a separator.
+ */
+function rereadable(route: string): string[] {
+  const slashes = [...route.matchAll(/\//g)].map((m) => m.index);
+  const swapped = SEPARATORS.flatMap((sep) =>
+    slashes.map((at) => route.slice(0, at) + sep + route.slice(at + 1))
+  );
+  const after = BACK.flatMap((back) =>
+    ['/', ...SEPARATORS].map((sep) => `${route}${sep}${back}${sep}goals`)
+  );
+  const into = BACK.map((back) => `/goals/${back}${route}`);
+  const ids = route.startsWith(`${K.GATEWAY_PATH}/`)
+    ? [...BACK, '.', '%2e', ...SEPARATORS.map((sep) => `notes${sep}x`)].map(
+        (id) => `${K.GATEWAY_PATH}/${id}`
+      )
+    : [];
+  return [...swapped, ...after, ...into, ...ids];
+}
+
+test('no exception route passes when written so that a router could read it as another path', () => {
+  assert.equal(ROUTES.length, K.EXCEPTION_ROUTES.length);
+  for (const route of ROUTES) assert.equal(K.isExceptionPath(route), true, route);
+  const variants = ROUTES.flatMap(rereadable);
+  for (const token of ['%2e%2e', '%2f', '%5c', '\\', '//', '/./', '/../'])
+    assert.ok(
+      variants.some((v) => v.includes(token)),
+      `no variant holds ${token}`
+    );
+  assert.deepEqual(
+    variants.filter((v) => K.isExceptionPath(v)),
+    []
+  );
+});
+
+test('a route parameter matches no escape, backslash, dot or slash, so the path decodes to itself', () => {
+  const whole = new RegExp(`^${K.PARAM}$`);
+  assert.equal(whole.test('gmail-2'), true);
+  for (const c of ['%', '\\', '.', '/']) {
+    assert.equal(whole.test(c), false, c);
+    assert.equal(whole.test(`gmail${c}2`), false, c);
+  }
+});

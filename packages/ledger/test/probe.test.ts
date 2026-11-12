@@ -61,3 +61,16 @@ test('input reaches the command on stdin, then ends, so a command reading to the
     { status: 'ok', out: 'A title\nand "quoted" details', err: '' }
   );
 });
+
+test('a command that ignores SIGTERM is stopped at its time with the signal given, and timed out', async () => {
+  // A stand-in that lives 30 s, far past its time, unless something kills it.
+  const stubborn = join(folder, 'stubborn.mjs');
+  writeFileSync(stubborn, "process.on('SIGTERM', () => {}); setTimeout(() => {}, 30_000);\n");
+  const started = Date.now();
+  assert.deepEqual(
+    await probe(process.execPath, [stubborn], { timeout: 1_000, killSignal: 'SIGKILL' }),
+    { status: 'timeout' }
+  );
+  const took = Date.now() - started;
+  assert.ok(took < 15_000, `the command ran ${took} ms, past its time`);
+});
