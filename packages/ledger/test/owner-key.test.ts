@@ -4,7 +4,7 @@
 // one table of request targets. Run with `npm test -w @oddboro/ledger`.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -61,6 +61,16 @@ test('offices starting at once on a new folder all read the one key that was lin
   const onDisk = readFileSync(join(fresh, 'owner-key'), 'utf8');
   assert.deepEqual(new Set(keys), new Set([onDisk]));
   assert.deepEqual(readdirSync(fresh), ['owner-key'], 'a temp file was left beside the key');
+});
+
+test('an empty or damaged key file stops the office, and the file is left as it was', async (t) => {
+  for (const held of ['', 'not a key']) {
+    const damaged = mkdtempSync(join(tmpdir(), 'oddboro-owner-key-damaged-'));
+    t.after(() => rmSync(damaged, { recursive: true, force: true }));
+    writeFileSync(join(damaged, 'owner-key'), held);
+    await assert.rejects(keyFromAnotherProcess(damaged), /does not hold an owner key/);
+    assert.equal(readFileSync(join(damaged, 'owner-key'), 'utf8'), held);
+  }
 });
 
 test('a planted cookie of the same name does not log the owner out', () => {
