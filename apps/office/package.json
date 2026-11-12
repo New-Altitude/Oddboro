@@ -23,8 +23,7 @@
     "@oddboro/sprites": "*",
     "@oddboro/world": "*",
     "@sentry/core": "^11.10.0",
-    "@sentry/sveltekit": "^11.10.0",
-    "ws": "^8.22.2"
+    "@sentry/sveltekit": "^11.10.0"
   },
   "devDependencies": {
     "@aws-sdk/client-secrets-manager": "~3.1156.0",
@@ -48,6 +47,7 @@
     "svelte-check": "^4.7.7",
     "tailwindcss": "^4.3.3",
     "vite": "^8.3.5",
+    "ws": "^8.22.2",
     "zod": "^4.6.7"
   }
 }

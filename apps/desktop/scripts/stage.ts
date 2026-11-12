@@ -91,11 +91,14 @@ function build(): void {
  * Every third-party runtime dependency, pinned to the version installed here.
  * The office's own are bundled into its build (they sit under its
  * devDependencies), so in practice these are the workspace packages'.
+ * Optional ones count too: the ledger's terminal library, node-pty, is
+ * optional so `npm install` works where it cannot build, but the app needs it.
  */
 function dependencies(): Record<string, string> {
   const out: Record<string, string> = {};
   for (const dir of ['apps/office', ...PACKAGES.map((p) => `packages/${p}`)]) {
-    for (const name of Object.keys(readJson(join(ROOT, dir, 'package.json')).dependencies ?? {})) {
+    const pkg = readJson(join(ROOT, dir, 'package.json'));
+    for (const name of Object.keys({ ...pkg.dependencies, ...pkg.optionalDependencies })) {
       if (name.startsWith('@oddboro/')) continue;
       const local = join(ROOT, dir, 'node_modules', name, 'package.json');
       const version = readJson(

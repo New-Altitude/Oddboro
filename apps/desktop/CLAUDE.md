@@ -253,8 +253,11 @@ Every update is required. `src-tauri/src/update.rs` runs them with
   `~/.claude`.
 - `scripts/stage.ts`. Builds the office and the sprites, then lays out
   `stage/`: the office build, which bundles every third-party package the
-  office itself runs except Sentry and `ws`, the production `node_modules` that those packages,
-  the ledger, sprites and world load, at the versions installed in the repo, and those three as plain
+  office itself runs except Sentry, the production `node_modules` that Sentry,
+  the ledger, sprites and world load, at the versions installed in the repo
+  (optional ones too, so the ledger's terminal library, `node-pty`, ships, and
+  a stage that cannot install it fails; it has no Linux prebuild, so a Linux
+  stage compiles it with Python, make and a C++ compiler), and those three as plain
   JavaScript (types stripped, `.ts` imports rewritten) in
   `node_modules/@oddboro/`, with their files beside them. Packages' test
   folders (`__screenshots__`, `__tests__`) and every source map stay out, and a staged path
