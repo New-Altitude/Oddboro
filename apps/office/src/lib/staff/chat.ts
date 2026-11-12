@@ -19,7 +19,10 @@ export type ChatRef = { kind: DeskItem; id: number; title: string };
  * line is one the staffer kept, where it kept it. A `failed` line is the error a
  * chat run ended with, saved in place of its reply: the staffer never said it.
  * `inSession` on it means the run's tool named a session before it failed, so
- * that session holds the owner's line before it.
+ * that session holds the owner's line before it. A told line with `re` is the
+ * reply of the run the owner's answer on that card started (`answerInChat`);
+ * `runFailed` on it says that run failed. It is not `failed`, which marks the
+ * owner's line before it as never answered.
  */
 export type ChatEntry = {
   at: string;
@@ -37,6 +40,7 @@ export type ChatEntry = {
   told?: true;
   failed?: true;
   inSession?: true;
+  runFailed?: true;
   re?: ChatRef;
   item?: ChatRef & { status: string; note?: string | null };
   lesson?: LessonLine;

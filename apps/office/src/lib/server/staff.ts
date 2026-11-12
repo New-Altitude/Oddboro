@@ -28,6 +28,7 @@ import {
   capped,
   CHAT_STORIES_MAX,
   chatSession,
+  type ChatCard,
   claimPoke,
   clockTime,
   currentPlatform,
@@ -131,6 +132,7 @@ import {
   type Unparked,
   type UsageKind
 } from '@oddboro/ledger';
+import { flat } from '@oddboro/ledger/desk-answers';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -154,7 +156,7 @@ import {
 } from './claude.ts';
 import { keptAt, plainName } from './chat-files.ts';
 import { endedEarly, LAUNCHES, stoppedWhy, streamTools, type Launch } from './cli.ts';
-import { bus } from './events.ts';
+import { bus, emit } from './events.ts';
 import { deniedEdits, denyRules, readStaffFile } from './files.ts';
 import { firstDayOf } from './first-day.ts';
 import { followUpBrief, waitEnded } from './follow-up-brief.ts';
@@ -174,7 +176,7 @@ import { bearer } from './oauth.ts';
 import { OUTCOME_LINE, personaRun, voiced } from './persona-run.ts';
 import { catchUp, NOW, parseSession, saveSession, sectionsOf } from './resume.ts';
 import { runEnv, toolServerEnv } from './run-env-allow.ts';
-import { officeEnv } from './run-env.ts';
+import { cut, officeEnv } from './run-env.ts';
 import { sandboxPaths } from './sandbox-paths.ts';
 import { claudeSandbox, NETWORK_REFUSED, NETWORK_REFUSED_LINE } from './sandbox.ts';
 import { downtime, installsAt } from './update.ts';
@@ -1584,6 +1586,12 @@ export async function followThrough(
         '## This run',
         '',
         '{owner} is not in a chat with you.',
+        // Answered in its chat: the reply this run ends with shows there (`answerInChat`).
+        ...(f.chatCard
+          ? [
+              `They answered in your chat, so your reply at the end also shows there, under the ${f.chatCard.kind} they answered. Write it to them.`
+            ]
+          : []),
         '',
         // Here, before the kind's own brief, so every kind of run that ended a park says so.
         ...(f.unparked ? waitEnded(f.unparked) : []),
@@ -1701,6 +1709,32 @@ export async function firstDay(id: string): Promise<void> {
  */
 export function sayInChat(id: string, text: string): void {
   addToChat(id, { at: new Date().toISOString(), from: 'staff', text, told: true });
+}
+
+/** The most of a failed follow-up's reason its one chat line carries. */
+const FAILED_LINE_MAX = 300;
+
+/**
+ * The Odd's reply to an answer the owner gave on a card in its chat: what
+ * the run their answer started did, in the chat under that card (`re`), so
+ * the talk goes on where they answered. One line per run. A failed run says
+ * so in one line, shown as a failed reply is. A told line, since no run of
+ * the chat session wrote it: the next chat hears it (`chatPreface`).
+ */
+export function answerInChat(id: string, card: ChatCard, outcome: Outcome, result: string): void {
+  const failed = outcome === 'failed';
+  const why = cut(flat(result), FAILED_LINE_MAX);
+  addToChat(id, {
+    at: new Date().toISOString(),
+    from: 'staff',
+    text: failed
+      ? `Could not finish this${why ? `: ${why}` : '.'}`
+      : result.trim() || (outcome === 'waiting' ? 'It waits on you, on your desk.' : 'Done.'),
+    told: true,
+    re: card,
+    ...(failed ? { runFailed: true as const } : {})
+  });
+  emit({ type: 'change', table: 'chat' });
 }
 
 /** Deliver a due poke: a chat line from the staffer, and a notification on the Mac. */
