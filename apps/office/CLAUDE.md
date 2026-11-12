@@ -967,8 +967,13 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    not pass `readsOnly` (or `readsByRole`) as a `call` ask on the desk
    (`raiseCall`), placed as the run's own asks are (`CallPlace`: its key,
    thread, hand-off and `via`); the same call still open is not raised twice,
-   and a lesson run, with no place, is refused one. The run hears that nothing
-   changed yet. The desk shows the tool and its exact inputs, with Make this
+   and a lesson run, with no place, is refused one. Each tool that changes
+   something is listed with a required `oddboro_title` and `oddboro_why`, the
+   Odd's short title and reason for the owner, which the gateway takes out of
+   the call and the desk shows as the ask's title (after the service's name,
+   unless the office reads one from the call, as for Gmail) and under Why; a
+   call without both is refused and holds nothing. The run hears that
+   nothing changed yet. The desk shows the tool and its exact inputs, with Make this
    call: `/api/asks/[id]/call` makes that call itself (`makeCall`, once per
    ask even on a second click), then `approveCall` keeps the result and
    starts the Odd's `carry_out` run, which carries on with what it returned.

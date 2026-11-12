@@ -237,12 +237,26 @@ test("at Draft, Read and write passes reads on and holds each change for the own
   );
   const client = await connect(token);
   try {
-    // Every tool is listed, so the Odd can ask for a change at all.
-    assert.equal((await client.listTools()).tools.length, 4);
+    // Every tool is listed, so the Odd can ask for a change at all, and each
+    // that changes something asks why, for the owner's desk.
+    const listed = (await client.listTools()).tools;
+    assert.equal(listed.length, 4);
+    const asksWhy = listed.filter((t) =>
+      ['oddboro_title', 'oddboro_why'].every((k) => t.inputSchema.required?.includes(k))
+    );
+    assert.deepEqual(asksWhy.map((t) => t.name).sort(), ['capture', 'create_note', 'wipe']);
     assert.deepEqual(text(await client.callTool({ name: 'search' })), ['found, key given']);
+    // A change with no title or reason is refused, and nothing goes on the desk.
+    const bare = (await client.callTool({
+      name: 'capture',
+      arguments: { text: 'a thought', oddboro_why: 'No title.' }
+    })) as CallToolResult;
+    assert.equal(bare.isError, true);
+    assert.match(text(bare)[0], /^Nothing was held\. Call capture again with oddboro_title/);
+    const why = 'Saves the thought you had about the garden, as you asked.';
     const held = (await client.callTool({
       name: 'capture',
-      arguments: { text: 'a thought' }
+      arguments: { text: 'a thought', oddboro_title: 'Save your garden thought', oddboro_why: why }
     })) as CallToolResult;
     assert.notEqual(held.isError, true);
     assert.match(
@@ -252,7 +266,7 @@ test("at Draft, Read and write passes reads on and holds each change for the own
     // The same call again finds the one on the desk, and raises no second.
     const again = (await client.callTool({
       name: 'capture',
-      arguments: { text: 'a thought' }
+      arguments: { text: 'a thought', oddboro_title: 'Again', oddboro_why: 'Once more.' }
     })) as CallToolResult;
     assert.match(text(again)[0], /already on .*'s desk/);
   } finally {
@@ -260,9 +274,11 @@ test("at Draft, Read and write passes reads on and holds each change for the own
     await closeGateway(token);
   }
   const calls =
-    await L.pg`select id, title, call from asks where staff_id = 'dora' and kind = 'call'`;
+    await L.pg`select id, title, why, call from asks where staff_id = 'dora' and kind = 'call'`;
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].title, 'Use capture in Notes');
+  assert.equal(calls[0].title, 'Save your garden thought in Notes');
+  // The desk shows the Odd's title and reason, and the call itself carries neither.
+  assert.equal(calls[0].why, 'Saves the thought you had about the garden, as you asked.');
   assert.deepEqual(calls[0].call, {
     connector: 'notes',
     tool: 'capture',
