@@ -1,4 +1,5 @@
 //! What the shell hands the office server: its port, its home, and a real PATH.
+//! And the one thing it reads back from the office's home: the owner's key.
 
 use std::env;
 use std::path::PathBuf;
@@ -28,6 +29,14 @@ pub fn home() -> PathBuf {
 /// `ODDBORO_HOME` from the shell's own environment, or `~/.oddboro`.
 pub fn office_home() -> PathBuf {
     env::var_os("ODDBORO_HOME").map_or_else(|| home().join(".oddboro"), PathBuf::from)
+}
+
+/// The key the office asks of every request, from the file it makes in its
+/// folder as it starts. `None` when the file is missing or empty.
+pub fn owner_key() -> Option<String> {
+    let key = std::fs::read_to_string(office_home().join("owner-key")).ok()?;
+    let key = key.trim();
+    (!key.is_empty()).then(|| key.to_string())
 }
 
 /// Where Node's output goes: `~/Library/Logs/Oddboro` on a Mac, and on Linux

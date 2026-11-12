@@ -33,6 +33,10 @@ const LOADING: &str = "loading";
 /// is broken.
 const NO_NODE: &str = "Oddboro cannot find its copy of Node. Reinstall Oddboro.";
 const NO_SERVER: &str = "Oddboro cannot find the office server. Reinstall Oddboro.";
+/// The query parameter that hands the office its owner's key. The office
+/// answers with a cookie and the same address without it, so the page keeps
+/// the key and the address bar drops it.
+const OWNER_PARAM: &str = "oddboro-key";
 
 fn main() {
     // A version the updater just installed waits for the one it replaced.
@@ -261,21 +265,38 @@ fn loading(app: &AppHandle, updating: &str) {
         .build();
 }
 
-/// Opens the office in the main window, or reloads it after a restart.
+/// Opens the office in the main window, or reloads it after a restart. The
+/// key is read here, not at startup: the office makes its file as it starts,
+/// and this runs only once the office answers.
 fn open_main(app: &AppHandle, url: &Url) {
+    let opening = match env::owner_key() {
+        Some(key) => with_owner_key(url, &key),
+        None => {
+            server::note(
+                &env::log_file(),
+                "the office's folder has no owner-key file, so the office will refuse this window",
+            );
+            url.clone()
+        }
+    };
     if let Some(window) = app.get_webview_window(MAIN) {
-        let _ = window.navigate(url.clone());
+        let _ = window.navigate(opening);
         return;
     }
     let home = url.clone();
-    let built = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::External(url.clone()))
+    let new_window_home = url.clone();
+    let built = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::External(opening))
         .title("Oddboro")
         .inner_size(1280.0, 820.0)
         .min_inner_size(960.0, 600.0)
         .center()
         .on_navigation(move |to| stay_or_open(&home, to))
-        .on_new_window(|to, _| {
-            open_in_browser(&to);
+        .on_new_window(move |to, _| {
+            // The default browser lacks this window's cookie, so an office
+            // address carries the key. Read as each window opens, so it
+            // stays current across restarts.
+            let key = env::owner_key();
+            open_in_browser(&browser_url(&new_window_home, &to, key.as_deref()));
             NewWindowResponse::Deny
         })
         .build();
@@ -297,6 +318,22 @@ fn stay_or_open(home: &Url, to: &Url) -> bool {
             false
         }
         _ => true,
+    }
+}
+
+/// `url` with the owner's key added, and the rest of its query kept.
+fn with_owner_key(url: &Url, key: &str) -> Url {
+    let mut keyed = url.clone();
+    keyed.query_pairs_mut().append_pair(OWNER_PARAM, key);
+    keyed
+}
+
+/// What a new window opens in the default browser: an address on the
+/// office's own origin carries the key, and any other site never sees it.
+fn browser_url(home: &Url, to: &Url, key: Option<&str>) -> Url {
+    match key {
+        Some(key) if to.origin() == home.origin() => with_owner_key(to, key),
+        _ => to.clone(),
     }
 }
 
@@ -432,4 +469,43 @@ fn alert(app: &AppHandle, message: &str) {
 fn fail(app: &AppHandle, message: &str) {
     alert(app, message);
     app.exit(1);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn url(text: &str) -> Url {
+        Url::parse(text).expect("a test URL parses")
+    }
+
+    #[test]
+    fn the_office_opens_with_its_key_and_another_site_never_gets_it() {
+        let home = url("http://127.0.0.1:4500");
+        assert_eq!(
+            with_owner_key(&home, "k").as_str(),
+            "http://127.0.0.1:4500/?oddboro-key=k"
+        );
+        assert_eq!(
+            browser_url(
+                &home,
+                &url("http://127.0.0.1:4500/files/a?download=1#top"),
+                Some("k")
+            )
+            .as_str(),
+            "http://127.0.0.1:4500/files/a?download=1&oddboro-key=k#top"
+        );
+        for elsewhere in [
+            "https://example.com/files/a?download=1",
+            "http://127.0.0.1:4501/",
+            "http://localhost:4500/",
+            "https://127.0.0.1:4500/",
+            "mailto:owner@example.com",
+        ] {
+            let to = url(elsewhere);
+            assert_eq!(browser_url(&home, &to, Some("k")), to, "{elsewhere}");
+        }
+        let office = url("http://127.0.0.1:4500/files/a");
+        assert_eq!(browser_url(&home, &office, None), office);
+    }
 }
