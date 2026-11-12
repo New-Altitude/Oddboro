@@ -72,7 +72,8 @@ test('the Odd asks once for a staging tool, and the yes puts it on the grant', a
   });
   assert.equal(r.error, false, r.text);
   const [a] = await standingAsks();
-  assert.equal(a.title, 'Use add_event in Calendar without asking');
+  // The card's line names the tool and the service as the service names them.
+  assert.equal(a.title, 'Allow add_event in Calendar without asking');
   assert.deepEqual(a.standing, { connector: 'cal', tools: ['add_event'] });
   // The same ask again finds the one on the desk.
   const again = await ask({ connector: 'cal', tools: ['add_event'], why: 'Again.' });

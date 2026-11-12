@@ -22,9 +22,12 @@ import type { Tx } from './threads.ts';
 export const standingSaid = (tools: string[], service: string): string =>
   `${tools.join(', ')} in ${service}`;
 
-/** The ask's title, and the ledger line when the owner gives one on the Settings tab. */
+/**
+ * The ask's title, the line the desk card shows: each tool by the name the
+ * service lists and the service's name, never the Odd's words for them.
+ */
 export const standingTitle = (tools: string[], service: string): string =>
-  `Use ${standingSaid(tools, service)} without asking`;
+  `Allow ${standingSaid(tools, service)} without asking`;
 
 async function grantOf(staffId: string, connectorId: string, tx: Tx | typeof db = db) {
   const [g] = await tx
@@ -45,7 +48,7 @@ export async function standingAsked(
   staffId: string,
   req: StandingRequest,
   owner: string
-): Promise<{ problem: string } | { tools: string[] }> {
+): Promise<{ problem: string } | { tools: string[]; service: string }> {
   const g = await grantOf(staffId, req.connector);
   const c = await connector(req.connector);
   if (!g || !c)
@@ -81,7 +84,7 @@ export async function standingAsked(
     return {
       problem: `${owner} said no to ask #${no.id}, which asked for this. A no stands: keep asking for each call.`
     };
-  return { tools };
+  return { tools, service: c.name };
 }
 
 /**
@@ -153,7 +156,7 @@ async function setException(
     title:
       list === 'standing'
         ? on
-          ? `Let ${who.name} ${standingTitle([tool], c.name).replace(/^Use/, 'use')}`
+          ? `Let ${who.name} use ${said} without asking`
           : `${who.name} asks again before using ${said}`
         : on
           ? `${who.name} asks first before using ${said}, even at Act`

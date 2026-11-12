@@ -333,7 +333,7 @@ if (offered('ask_for_standing_yes'))
       if ('problem' in on) return refused(on.problem);
       const asked = await standingAsked(ME, { connector: id, tools }, OWNER);
       if ('problem' in asked) return refused(asked.problem);
-      const service = writeGrants.find((g) => g.connectorId === id)!.connector.name;
+      const { service } = asked;
       const { ask } = await raiseAsk(ME, {
         ...on,
         kind: 'standing',
