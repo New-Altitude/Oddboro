@@ -167,7 +167,7 @@ type CodexRun = {
   commands: boolean;
   /** Whether the run's commands reach the internet (`network` in its profile). */
   network: boolean;
-  /** Pictures sent with the message (an office run only), each as `--image=<file>`. */
+  /** Pictures sent with the message, each as `--image=<file>`. */
   images?: RunImage[];
   /** How hard the model thinks, as `model_reasoning_effort`: an Odd's level or an office run's. */
   effort?: Effort;

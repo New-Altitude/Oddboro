@@ -317,7 +317,14 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    with nothing in progress); it opens the info page at In progress, as
    `show: {tab: 'work'}` does. The chat stays mounted
    while the panel is open, so a
-   reply survives switching tabs or collapsing. The chat shows every ask, task
+   reply survives switching tabs or collapsing. A send first keeps the owner's
+   line in `chat.jsonl` with its source and turn ID (`keepOwnerTurn` in
+   `chat-turns.ts`). Imports and uploads share the existing `attachments`
+   folder and `ChatFile` records. Each inline import is checked before any
+   part is saved. The runner opens text and PDF files through its file tools;
+   Claude Code, Codex and Grok also receive picture bytes. Get a reply on an
+   unanswered line reuses its saved input, even after a restart. A finished
+   reply carries the same ID. Older lines need none. The chat shows every ask, task
    and report the Odd put on the desk, where it landed (`chatLog` merges
    `deliveries()` into `chat.jsonl`), with where each stands now, and every
    hand-off it gave or got (`handOffsFor`). A hand-off it gave sits on the card

@@ -86,7 +86,7 @@ export function mcpGrant(allowed: string): { server: string; tool?: string } {
   return at < 0 ? { server: name } : { server: name.slice(0, at), tool: name.slice(at + 2) };
 }
 
-/** A picture an office run sends with its message (`runAsOffice`), as a file in the run's folder. */
+/** A picture the office sends with one message, from a file it kept. */
 export type RunImage = { path: string; mediaType: string };
 
 /** What run() takes from one line of a tool's own stream (`read` on a `Launch` in cli.ts). */
@@ -103,7 +103,7 @@ export type RunEvent =
   | { type: 'error'; message: string };
 
 /** A file replaced in one step, so the tool never reads it half written. */
-export function replace(path: string, content: string, mode = 0o600): void {
+export function replace(path: string, content: string | Uint8Array, mode = 0o600): void {
   const tmp = `${path}.${process.pid}.tmp`;
   writeFileSync(tmp, content, { mode });
   renameSync(tmp, path);

@@ -20,15 +20,7 @@
 // keeps the keys and sign-ins. Hosted servers get a fresh OAuth token per run.
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import {
-  appendFileSync,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync
-} from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, sep } from 'node:path';
 import {
@@ -160,7 +152,14 @@ import type { ChatEntry, ChatEvent, ChatRef } from '../staff/chat.ts';
 import { closeGateway, openGateway } from './gateway.ts';
 import { awsReady } from './aws.ts';
 import { bearer } from './oauth.ts';
-import { apiKey, claudeAccountOf, claudeRunHome, claudeSettings, modelArgs } from './claude.ts';
+import {
+  claudeInput,
+  apiKey,
+  claudeAccountOf,
+  claudeRunHome,
+  claudeSettings,
+  modelArgs
+} from './claude.ts';
 import { notifyMac } from './notify.ts';
 import { downtime, installsAt } from './update.ts';
 import { catchUp, NOW, parseSession, saveSession, sectionsOf, sessionIdIn } from './resume.ts';
@@ -174,7 +173,10 @@ import {
   type RetoldEntry,
   type Session
 } from './chat-preface.ts';
-import { filesNow, keptAt, plainName } from './chat-files.ts';
+import { attachedFiles, filesNow, keptAt, plainName } from './chat-files.ts';
+import { chatFile, addToChat, history, keepOwnerTurn, ChatInputError } from './chat-turns.ts';
+import { replyBrief } from './chat-delivery.ts';
+export { history, keepOwnerTurn } from './chat-turns.ts';
 import { officeEnv } from './run-env.ts';
 import { runEnv, toolServerEnv } from './run-env-allow.ts';
 import { firstDayOf } from './first-day.ts';
@@ -298,19 +300,6 @@ function homeOf(id: string): string {
   return dir;
 }
 
-const chatFile = (id: string) => join(homeOf(id), OFFICE_FILES.chat);
-const addToChat = (id: string, line: ChatEntry) =>
-  appendFileSync(chatFile(id), JSON.stringify(line) + '\n');
-
-export function history(id: string): ChatEntry[] {
-  const file = chatFile(id);
-  if (!existsSync(file)) return [];
-  return readFileSync(file, 'utf8')
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as ChatEntry);
-}
-
 /** The chat as the owner sees it: what was said, and each delivery and lesson where it landed. */
 export async function chatLog(id: string): Promise<ChatEntry[]> {
   const items: ChatEntry[] = (await deliveries(id)).map(({ at, ...d }) => ({
@@ -361,66 +350,6 @@ export async function chatLog(id: string): Promise<ChatEntry[]> {
   return [...history(id), ...items, ...threads, ...handOffs, ...kept].sort((a, b) =>
     a.at.localeCompare(b.at)
   );
-}
-
-/** What the staffer needs to know about the delivery the owner is replying about. */
-async function replyBrief(
-  id: string,
-  re: Pick<ChatRef, 'kind' | 'id'>
-): Promise<{ ref: ChatRef; brief: string }> {
-  switch (re.kind) {
-    case 'ask': {
-      const a = await askById(re.id);
-      if (a?.staffId !== id) throw fixedError('No such ask from this Odd');
-      return {
-        ref: { kind: 'ask', id: a.id, title: a.title },
-        brief: [
-          `({owner} is replying about your ask #${a.id}, "${a.title}", which is ${a.status === 'open' ? 'still open' : a.status}.`,
-          `- Why: ${a.why}`,
-          `- If approved: ${a.ifApproved}`,
-          // A replaced ask holds the office's words, and this line would say the owner wrote them.
-          ...(a.reason && !askReplaced(a) ? [`- Their reason: ${a.reason}`] : []),
-          ')'
-        ].join('\n')
-      };
-    }
-    case 'task': {
-      const t = await taskById(re.id);
-      if (t?.staffId !== id) throw fixedError('No such task from this Odd');
-      return {
-        ref: { kind: 'task', id: t.id, title: t.title },
-        brief: [
-          `({owner} is replying about the task you gave them, "${t.title}", which is ${t.status === 'open' ? 'still open' : t.status}.`,
-          `- Why: ${t.why}`,
-          ...t.steps.map((st, i) => {
-            const answer = stepAnswer(st);
-            return `- Step ${i + 1}: ${st.text}${st.done ? ' (done)' : ''}${answer ? `. Their answer: ${answer}` : ''}`;
-          }),
-          ...(t.note ? [`- Their note: ${t.note}`] : []),
-          ')'
-        ].join('\n')
-      };
-    }
-    case 'report': {
-      const r = await reportById(re.id);
-      if (r?.staffId !== id) throw fixedError('No such report from this Odd');
-      return {
-        ref: { kind: 'report', id: r.id, title: r.title },
-        brief: [
-          `({owner} is replying about your report "${r.title}". If it is feedback, act on it: work inside the office now, raise_ask before changing one of your jobs, or anything outside the office ${ACT_WRITE}, and give_owner_a_task for anything only they can do.`,
-          '',
-          'The report:',
-          '',
-          r.body.slice(0, 8000),
-          ')'
-        ].join('\n')
-      };
-    }
-    default: {
-      const missed: never = re.kind;
-      throw new Error(`No reply brief for a ${String(missed)}`);
-    }
-  }
 }
 
 /** Every plugin in the owner's user settings, switched off for staff sessions. */
@@ -864,6 +793,8 @@ export type RunOpts = {
   extra?: string;
   /** The owner's own message, when this is a chat. */
   ownerSaid?: string;
+  /** The owner's text stays literal, even when it contains {owner}. */
+  literal?: string;
   /** That chat as it stood before the owner's message: `tell_lead` passes on its last exchange. */
   chatBefore?: ChatEntry[];
   /** The files the owner attached to that message, which `tell_lead` takes to the lead. */
@@ -1118,6 +1049,7 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
   function claudeArgs(): string[] {
     return [
       '-p',
+      ...(opts.images?.length ? ['--input-format', 'stream-json'] : []),
       '--output-format',
       'stream-json',
       '--verbose',
@@ -1149,7 +1081,7 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
       ...(prior ? ['--resume', prior] : ['--session-id', randomUUID()])
     ];
   }
-  const input = preface + say(message);
+  const input = preface + say(message) + (opts.literal === undefined ? '' : `\n\n${opts.literal}`);
   /**
    * The run's servers, settings and system prompt go to Claude Code in files
    * only the owner can read, in a folder no run reads, removed when the run
@@ -1176,7 +1108,14 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
   /** A Claude Code run; with commands, their temp folder and the git template in it, made now and removed when the run ends. */
   function claudeLaunch(): Launch {
     const env = staffEnv(toolDir || undefined);
-    if (!tmp) return { args: claudeArgs(), env, stdin: input, done: writeRunFiles(env) };
+    const stdin = claudeInput(
+      input,
+      opts.images?.map((i) => ({
+        mediaType: i.mediaType,
+        data: readFileSync(i.path).toString('base64')
+      }))
+    );
+    if (!tmp) return { args: claudeArgs(), env, stdin, done: writeRunFiles(env) };
     mkdirSync(tmp, { recursive: true, mode: 0o700 });
     const shell = shellEnv(tmp);
     mkdirSync(shell.GIT_TEMPLATE_DIR, { mode: 0o700 });
@@ -1187,7 +1126,7 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
     return {
       args: claudeArgs(),
       env,
-      stdin: input,
+      stdin,
       done: () => {
         dropFiles();
         rmSync(tmp, { recursive: true, force: true });
@@ -1232,7 +1171,7 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
           account,
           // Claude Code, Grok and Gemini open a picture with their file tools;
           // Codex has no such tool (`view_image` is off), so it gets them with the message.
-          ...(who.agent === 'codex' && opts.images?.length ? { images: opts.images } : {})
+          ...(opts.images?.length ? { images: opts.images } : {})
         });
   if ('refused' in launch) {
     opts.onEvent?.({ type: 'error', message: launch.refused });
@@ -1397,24 +1336,50 @@ export async function chat(
   onEvent: (e: ChatEvent) => void,
   replyTo?: Pick<ChatRef, 'kind' | 'id'>,
   /** Files the owner attached, already kept in the Odd's attachments folder (`attachedFiles`). */
-  files: (ChatFile & { path: string })[] = []
+  files: (ChatFile & { path: string })[] = [],
+  savedTurn?: ChatEntry
 ): Promise<void> {
   if (chatting.has(id)) throw new Error(`${id} is already replying`);
-  const who = await staffer(id);
-  if (!who) throw new Error(`No Odd named ${id}`);
   chatting.add(id);
-  // Stamped when sent, so what the staffer delivers while replying lands between the two.
-  const sent = new Date().toISOString();
   try {
+    const who = await staffer(id);
+    if (!who) throw new Error(`No Odd named ${id}`);
+    const owner =
+      savedTurn ??
+      (await keepOwnerTurn(
+        id,
+        {
+          turnId: randomUUID(),
+          message,
+          source: { kind: 'chat' },
+          kept: files.map(({ path: _, ...f }) => f)
+        },
+        replyTo
+      ));
+    const turnId = owner.turnId;
+    const sent = owner.at;
+    const before = history(id).filter((e) => e.turnId !== turnId);
+    files = attachedFiles(id, owner.files);
+    // The files as kept, which `tell_lead` takes to the lead.
+    const attached = files.map(({ path: _, ...f }) => f);
+    replyTo = owner.re;
+
     // A reply in the owner's own words may already be a brief. Let the
     // manager use it now. The preset path still takes just three taps.
-    const last = history(id).at(-1);
+    const last = before.at(-1);
     const asked = last?.from === 'staff' ? firstQuestionIn(last.text) : -1;
-    const attached = files.map(({ path: _, ...f }) => f);
-    const next = files.length ? undefined : nextFirstQuestion(asked, message);
+    const next =
+      owner.source?.kind === 'chat' && !files.length && !owner.re
+        ? nextFirstQuestion(asked, message)
+        : undefined;
     if (next) {
-      addToChat(id, { at: sent, from: 'owner', text: message });
-      addToChat(id, { at: new Date().toISOString(), from: 'staff', text: next, told: true });
+      addToChat(id, {
+        at: new Date().toISOString(),
+        from: 'staff',
+        text: next,
+        told: true,
+        turnId
+      });
       onEvent({ type: 'done', text: next });
       return;
     }
@@ -1430,7 +1395,7 @@ export async function chat(
         (d) => !(d.kind === re?.ref.kind && d.id === re.ref.id)
       );
       // Each owner line's files as they are now, for the lines the office retells below.
-      const past: RetoldEntry[] = history(id).map((e) =>
+      const past: RetoldEntry[] = before.map((e) =>
         e.files?.length ? { ...e, now: filesNow(id, e.files) } : e
       );
       // A new session (the Odd moved to another tool, or its session is gone)
@@ -1465,13 +1430,15 @@ export async function chat(
             ]
           : []),
         ...chatPreface(past, landed, session),
-        ...(re ? [re.brief] : []),
-        message,
-        ...(files.length ? [attachedBrief(files)] : [])
+        ...(re ? [re.brief] : [])
       ].join('\n\n');
       r = await run(who, prompt, {
         kind: 'chat',
         ownerSaid: message,
+        literal: [
+          message,
+          ...(files.length ? [attachedBrief(files).replaceAll('{owner}', await ownerName())] : [])
+        ].join('\n\n'),
         chatBefore: past,
         ownerFiles: attached,
         images: [...files, ...missed].flatMap((f: KeptFile) =>
@@ -1479,11 +1446,8 @@ export async function chat(
         ),
         sessionFile: chatSession(id),
         timeoutMs: CHAT_TIMEOUT_MS,
-        // The choices a reply ends with go to the page beside its text, as buttons.
         onEvent: (e) => {
-          if (e.type !== 'done') return onEvent(e);
-          const { text, choices } = splitChoices(e.text);
-          onEvent({ type: 'done', text, ...(choices.length ? { choices } : {}) });
+          if (e.type !== 'done') onEvent(e);
         }
       });
     } catch (err) {
@@ -1492,31 +1456,25 @@ export async function chat(
       r = { ok: false, text: err instanceof Error ? err.message : String(err) };
       onEvent({ type: 'error', message: r.text });
     }
-    // Saved however the run ended, so a reload still shows what the owner said
-    // and why no reply came. A failed run's error is never the Odd's words:
-    // the replay leaves it out, and the next chat's preface says the run failed.
-    addToChat(id, {
-      at: sent,
-      from: 'owner',
-      text: message,
-      re: re?.ref,
-      ...(attached.length ? { files: attached } : {})
-    });
+    // The owner line already exists. Only the outcome is appended here.
     const at = new Date();
     if (r.ok) {
       const { text, choices } = splitChoices(r.text);
       addToChat(id, {
         at: at.toISOString(),
         from: 'staff',
+        turnId,
         text,
         // `took`: how long the owner waited for this reply, from when they sent.
         took: at.getTime() - Date.parse(sent),
         ...(choices.length ? { choices } : {})
       });
+      onEvent({ type: 'done', text, ...(choices.length ? { choices } : {}) });
     } else
       addToChat(id, {
         at: at.toISOString(),
         from: 'staff',
+        turnId,
         text: r.text,
         failed: true,
         ...(r.saved ? { inSession: true } : {})
@@ -1524,7 +1482,29 @@ export async function chat(
     if (r.ok && re?.ref.kind === 'report') await replyToReport(re.ref.id, message);
   } finally {
     chatting.delete(id);
+    emit({ type: 'change', table: 'chat' });
   }
+}
+
+/** Answer a saved turn, or return the reply already kept for it. */
+export async function replyToOwnerTurn(
+  id: string,
+  turnId: string,
+  onEvent: (e: ChatEvent) => void
+): Promise<void> {
+  const lines = history(id);
+  const owner = lines.find((e) => e.from === 'owner' && e.turnId === turnId);
+  if (!owner) throw new ChatInputError('No saved message with that ID.');
+  const answered = lines.findLast((e) => e.from === 'staff' && e.turnId === turnId && !e.failed);
+  if (answered) {
+    onEvent({
+      type: 'done',
+      text: answered.text,
+      ...(answered.choices?.length ? { choices: answered.choices } : {})
+    });
+    return;
+  }
+  await chat(id, owner.text, onEvent, owner.re, [], owner);
 }
 
 /** Run one job in a fresh session. The staffer walks to its room while it runs. */

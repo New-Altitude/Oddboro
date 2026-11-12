@@ -254,3 +254,23 @@ function keyWorks(value: string): Promise<boolean> {
     });
   });
 }
+
+/** A message on stdin for Claude Code; pictures go in its stream-json user turn. */
+export function claudeInput(message: string, images?: { mediaType: string; data: string }[]) {
+  if (!images?.length) return message;
+  return (
+    JSON.stringify({
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [
+          ...images.map((i) => ({
+            type: 'image',
+            source: { type: 'base64', media_type: i.mediaType, data: i.data }
+          })),
+          { type: 'text', text: message }
+        ]
+      }
+    }) + '\n'
+  );
+}
