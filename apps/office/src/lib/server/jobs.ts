@@ -51,6 +51,8 @@ import { held } from './update.ts';
 // macOS stops timers while it sleeps, so the clock never waits longer than
 // this before checking the time again. Each check is one comparison per job.
 const LONGEST_WAIT_MS = 10 * 60_000;
+/** After a look that failed, as when the database did not answer, the clock looks again this soon. */
+const RETRY_MS = 30_000;
 
 const g = globalThis as unknown as {
   jobClock?: {
@@ -73,16 +75,29 @@ async function plan(): Promise<void> {
   const revision = (clock.revision = (clock.revision ?? 0) + 1);
   const now = new Date();
   let soonest = now.getTime() + LONGEST_WAIT_MS;
-  for (const next of await lookAtJobs(now)) soonest = Math.min(soonest, next);
-  for (const p of await waitingPokes()) {
-    if (p.at <= now) void deliverPoke(p);
-    else soonest = Math.min(soonest, p.at.getTime());
-  }
-  for (const t of await parkedThreads()) {
-    // A failed wake leaves the time set, so the clock's next look tries again.
-    if (t.resumeAt <= now)
-      void wakeThread(t.id).catch((e: unknown) => console.error(`Thread ${t.id} did not wake:`, e));
-    else soonest = Math.min(soonest, t.resumeAt.getTime());
+  try {
+    for (const next of await lookAtJobs(now)) soonest = Math.min(soonest, next);
+    for (const p of await waitingPokes()) {
+      if (p.at <= now) void deliverPoke(p);
+      else soonest = Math.min(soonest, p.at.getTime());
+    }
+    for (const t of await parkedThreads()) {
+      // A failed wake leaves the time set, so the clock's next look tries again.
+      if (t.resumeAt <= now)
+        void wakeThread(t.id).catch((e: unknown) =>
+          console.error(`Thread ${t.id} did not wake:`, e)
+        );
+      else soonest = Math.min(soonest, t.resumeAt.getTime());
+    }
+  } catch (e) {
+    // Unhandled, the rejection would end the office, or leave no timer set so
+    // no job ran again until a restart. What is due is unknown, so the clock
+    // looks again soon, by its one timer.
+    console.error(
+      `The office clock could not look at what is due, so it looks again in ${RETRY_MS / 1000} seconds:`,
+      e
+    );
+    soonest = Date.now() + RETRY_MS;
   }
   if (g.jobClock !== clock || clock.revision !== revision) return;
   clearTimeout(clock.timer);
@@ -251,6 +266,8 @@ export function startClock(): () => void {
   g.jobClock = { ...g.jobClock, started: true, stop, revision: 0 };
   listen();
   bus.on('event', changed);
-  void closeStaleRuns().then(plan);
+  void closeStaleRuns()
+    .catch((e: unknown) => console.error('Runs the office stopped mid-way stay marked running:', e))
+    .then(plan);
   return stop;
 }
