@@ -90,7 +90,7 @@ const TOOLS = [
   {
     id: 'log_progress',
     name: 'Log progress',
-    does: 'Says how a goal it serves is going, with one line of evidence.',
+    does: 'Says how a goal it serves or leads is going, with one line of evidence.',
     always: true
   },
   {
