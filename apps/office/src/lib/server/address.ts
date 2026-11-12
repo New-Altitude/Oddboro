@@ -1,15 +1,15 @@
 // The office's own address: https://local.oddboro.com, so nobody has to
-// remember a port. That name reaches this Mac through a public DNS record
+// remember a port. That name reaches this computer through a public DNS record
 // pointing it at 127.0.0.1; where a network's DNS drops such answers, the
-// office uses http://oddboro.localhost, which always reaches this Mac.
+// office uses http://oddboro.localhost, which always reaches this computer.
 //
 // Caddy answers on ports 80 and 443 and hands everything to the office on
-// 127.0.0.1:4500. Three cases, by what this Mac already has:
+// 127.0.0.1:4500. Three cases, by what this computer already has:
 //
 // - Nothing on port 80: the office runs its own Caddy as a login service
-//   (com.oddboro.caddy), downloading Caddy first if this Mac has none.
+//   (com.oddboro.caddy), downloading Caddy first if this computer has none.
 // - A Caddy of the owner's on port 80: the office adds its site to it through
-//   Caddy's admin API on this Mac, and touches none of the owner's files. That
+//   Caddy's admin API on this computer, and touches none of the owner's files. That
 //   Caddy forgets the site when it reloads its own config, so the office adds
 //   it again when it starts and when a page loads.
 // - Something else on port 80, or a Caddy with its admin API off: the office
@@ -111,9 +111,9 @@ export type Address = { host: string } & (
   | {
       state: 'ready';
       url: string;
-      /** Served over HTTPS with a certificate this Mac trusts. */
+      /** Served over HTTPS with a certificate this computer trusts. */
       secure: boolean;
-      /** Served over HTTPS, waiting only for this Mac to trust Caddy's authority. */
+      /** Served over HTTPS, waiting only for this computer to trust Caddy's authority. */
       canSecure: boolean;
     }
   | { state: 'own'; installed: boolean }
@@ -161,7 +161,7 @@ const admin = (path: string, init: RequestInit = {}) =>
 const put = (path: string, body: unknown) =>
   admin(path, { method: 'PUT', body: JSON.stringify(body) });
 
-/** The best name that reaches this Mac from here. */
+/** The best name that reaches this computer from here. */
 async function host(): Promise<string> {
   const r = await lookup(SECURE).catch(() => undefined);
   return r?.address === '127.0.0.1' ? SECURE : HOSTS[1];
@@ -180,7 +180,7 @@ export async function answers(url: string): Promise<boolean> {
 
 /**
  * Whether the office answers over HTTPS. Node keeps its own list of trusted
- * authorities, not the Mac's, so this checks who answers, not the certificate;
+ * authorities, not the system's, so this checks who answers, not the certificate;
  * `trusted` checks that.
  */
 function answersSecurely(name: string): Promise<boolean> {
@@ -330,7 +330,7 @@ export function port80(): Promise<Port80> {
   return system ? PORT_80[system]() : Promise.resolve(UNCHECKED);
 }
 
-/** A Caddy already on this Mac: Homebrew's or anyone's on the PATH, else the office's own. */
+/** A Caddy already on this computer: Homebrew's or anyone's on the PATH, else the office's own. */
 async function caddyBinary(): Promise<string | undefined> {
   const r = await probe(WINDOWS ? 'where.exe' : 'which', ['caddy'], WAIT);
   switch (r.status) {
@@ -426,14 +426,14 @@ async function download(): Promise<string> {
 /**
  * The office's own Caddyfile on `system`. HTTPS from Caddy's own authority
  * for the real name, plain HTTP for both names so the address works before
- * this Mac trusts that authority. The owner trusts it from the card, so Caddy
+ * this computer trusts that authority. The owner trusts it from the card, so Caddy
  * does not ask on its own.
  *
  * Only on Windows does it listen on the loopback addresses alone, so the
  * firewall never asks the owner. On a Mac a process the owner runs can bind
  * a port under 1024 only on every address (127.0.0.1 and ::1 were refused,
  * measured), so there the office's own Caddy listens on every address, and
- * what keeps an Odd's commands off this Mac is the deny list each run gets
+ * what keeps an Odd's commands off this computer is the deny list each run gets
  * (`macAddresses` in sandbox.ts). Linux was not measured, so it gets no bind
  * either.
  */

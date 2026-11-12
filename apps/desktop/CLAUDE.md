@@ -36,7 +36,11 @@ an update (`update.rs`).
    installers), WinGet's `Links` folder and `C:\Program Files\Git\cmd`.
 4. Starts Node, shows the small loading window, and asks `GET /` every half
    second for up to 90 seconds. When it answers, the main window opens the
-   office and the loading window closes. On timeout, a dialog shows the last
+   office with `?oddboro-key=<key>` added, the key read then from
+   `<home>/owner-key` (the office makes that file as it starts; the office
+   answers only its owner's key, and sends back a cookie and the same address
+   without it), and the loading window closes. With no key file the shell logs
+   it and opens the plain address, which the office refuses. On timeout, a dialog shows the last
    lines of the log and the app quits.
 5. Writes Node's stdout and stderr to `~/Library/Logs/Oddboro/office.log` on
    a Mac, `~/.local/state/oddboro/office.log` on Linux (`XDG_STATE_HOME`
@@ -77,7 +81,9 @@ an update (`update.rs`).
    so neither it nor anything it starts opens a console window.
 10. Keeps links to the office's own origin in the window. Links to any other
     origin, `mailto:` and `tel:`, and every `target="_blank"` or
-    `window.open`, open in the default browser.
+    `window.open`, open in the default browser. A new window for an address on
+    the office's own origin opens with the key added (read as it opens), since
+    the browser lacks the window's cookie. Any other site never sees the key.
 11. Reports a panic, giving up on the office (step 4's timeout, step 6's
     limit, or Node not starting) and a broken install (no Node, no server
     code), only when it found a report address and the office's `.env`
@@ -270,7 +276,9 @@ Every update is required. `src-tauri/src/update.rs` runs them with
   against nodejs.org's sums (Windows's comes as a zip, unpacked with
   Windows's own `tar`). `--smoke` starts the stage on port 4590 with a
   throwaway home and a report address on port 9 (so Sentry starts, with no yes), waits for it to answer, and checks it quits when asked
-  (SIGTERM, or a closed stdin on Windows):
+  (SIGTERM, or a closed stdin on Windows). It reads the staged office's
+  `owner-key` file, waiting while there is none, sends the key as the office's
+  cookie, and fails the smoke on a 403 or a 500 and above with its own key:
   `node apps/desktop/scripts/stage.ts --smoke`.
 - `stage/` must hold no folder symlinks. The bundler walks it without
   following them, so a linked folder never reaches the app.
