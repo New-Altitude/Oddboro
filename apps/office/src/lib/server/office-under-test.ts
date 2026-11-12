@@ -37,16 +37,20 @@ const port = await new Promise<number>((done) => {
 // call and a result that carries what the office gave the run, the variables
 // Run commands sets among it, and whether the git template folder those name
 // was there and empty as it ran (`done()` removes it after), and npm's
-// settings. A message whose last line says "Hold until <file> exists." keeps
-// the run going until it does. One whose last line says "Refuse the open
+// settings. It takes the markers every stand-in takes (`SHARED`, below). A
+// message whose last line says "Refuse the open
 // network", in a run whose sandbox opens every host, gets the words Claude
 // Code's binary refuses that with, on stderr, and exit 1, after any hold.
 // Only the last line, since a later prompt can quote an earlier message.
+// "Succeed with an error." ends on a success result that says is_error, and
+// "Succeed with no text." on a success result with no text.
 // One that says "Think aloud: <words>." on any line streams <words> as
 // text first. A run with --input-format stream-json starts on its first user
 // line, as Claude Code does, and keeps each user line after it, text only, in
-// "added" (Send now), answering all of them in its one result; it ends
-// when the office closes its stdin.
+// "added" (Send now), answering all of them in its one result. Each user line
+// after that result gets a result of its own, "Then: <words>", as the office
+// closes its stdin, as Claude Code answers words that came too late for its
+// turn; it ends then.
 // "claude auth status" says signed out at once, and "claude auth login"
 // prints its sign-in page and waits until it is stopped, as Setup's sign-in
 // waits on the owner.
@@ -60,6 +64,39 @@ mkdirSync(bin);
 export const nodeBin = join(folder, 'node-bin');
 mkdirSync(nodeBin);
 symlinkSync(process.execPath, join(nodeBin, 'node'));
+/**
+ * With this variable set, a stand-in exits 0 before it reads its input, as a
+ * tool that fails as it starts does. A variable, not words in the message: the
+ * Claude, Codex and Gemini stand-ins get the message on stdin, so they could
+ * not see a marker there without reading it.
+ */
+export const EXIT_BEFORE_READING = 'ODDBORO_STAND_IN_EXIT_BEFORE_READING';
+// What every stand-in does the same way, after its version and sign-in
+// commands. A message whose last line says "Hold until <file> exists." keeps
+// the run going until it does. Then "Fail now." says
+// "The stand-in failed as told." on stderr, sends the tool's own failed result
+// and exits 1, and "Start a command and wait." starts a node process in a
+// group of its own, writes its pid to command.pid in the run's folder, and
+// never ends. The command needs its own group: in the tool's, the stop on the
+// run's end would reach it through that group alone, so a test of the stop
+// that walks the tree would pass with no walk.
+const SHARED = `if (process.env[${JSON.stringify(EXIT_BEFORE_READING)}]) process.exit(0);
+const lastOf = (text) => text.trimEnd().split('\\n').at(-1);
+function holdThen(last, go) {
+  const hold = /Hold until (\\/[^\\s"\\\\]+) exists/.exec(last)?.[1];
+  if (!hold) return go();
+  const wait = setInterval(() => fs.existsSync(hold) && (clearInterval(wait), go()), 20);
+}
+function failNow(result) {
+  process.stderr.write('The stand-in failed as told.\\n', () =>
+    process.stdout.write(JSON.stringify(result) + '\\n', () => process.exit(1))
+  );
+}
+function startCommand() {
+  const command = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 60000)'], { detached: true, stdio: 'ignore' });
+  fs.writeFileSync('command.pid', String(command.pid));
+  setInterval(() => {}, 60_000);
+}`;
 writeFileSync(
   join(bin, 'claude'),
   `#!/usr/bin/env node
@@ -86,9 +123,14 @@ if (verb === 'auth' && sub === 'login') {
   setInterval(() => {}, 60_000);
   return;
 }
+${SHARED}
 let message = '';
-/** What each stream-json user line after the first said. */
+/** What each stream-json user line after the first said, before the result. */
 const added = [];
+/** What each user line after the result said. */
+const late = [];
+let answered = false;
+const line = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 /** The owner's words in a chat, or a job's instructions, which come last. */
 const lastLine = () => message.trimEnd().split('\\n').at(-1);
 const streamed = process.argv.includes('--input-format');
@@ -105,7 +147,7 @@ process.stdin.on('data', (d) => {
     if (!line.trim()) continue;
     const content = JSON.parse(line).message.content;
     if (started) {
-      added.push(textOf(content));
+      (answered ? late : added).push(textOf(content));
       continue;
     }
     // A turn with a picture comes back whole, for a test to read its blocks.
@@ -115,15 +157,17 @@ process.stdin.on('data', (d) => {
   }
 });
 process.stdin.on('end', () => {
-  if (!streamed) start();
+  if (!streamed) return start();
+  for (const words of late) line({ type: 'result', subtype: 'success', result: 'Then: ' + words });
 });
 function start() {
-  const hold = /Hold until (\\/[^\\s"\\\\]+) exists/.exec(lastLine())?.[1];
-  if (!hold) return answer();
-  const wait = setInterval(() => fs.existsSync(hold) && (clearInterval(wait), answer()), 20);
+  holdThen(lastLine(), answer);
 }
 /** After any hold, so two runs can be refused at once. */
 function answer() {
+  if (lastLine().includes('Fail now.'))
+    return failNow({ type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['Failed as told.'] });
+  if (lastLine().includes('Start a command and wait.')) return startCommand();
   // Only a staff run carries --settings, so it is read only for the trigger.
   if (
     lastLine().includes('Refuse the open network') &&
@@ -147,6 +191,7 @@ function emptyFolder(p) {
   }
 }
 function reply() {
+  answered = true;
   const args = process.argv.slice(2);
   const after = (flag) => args[args.indexOf(flag) + 1];
   const gave = {
@@ -173,10 +218,12 @@ function reply() {
     apiKey: process.env.ANTHROPIC_API_KEY ?? null,
     configDir: process.env.CLAUDE_CONFIG_DIR ?? null
   };
-  const line = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
   line({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: 'tool_use', name: 'look' } } });
   const aloud = /Think aloud: ([^.]+)\./.exec(message)?.[1];
   if (aloud) line({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: aloud } } });
+  if (lastLine().includes('Succeed with an error.'))
+    return line({ type: 'result', subtype: 'success', is_error: true, result: 'It went wrong.' });
+  if (lastLine().includes('Succeed with no text.')) return line({ type: 'result', subtype: 'success' });
   line({ type: 'result', subtype: 'success', result: JSON.stringify(gave) + '\\nOutcome: done' });
 }
 `
@@ -196,7 +243,8 @@ chmodSync(join(bin, 'claude'), 0o755);
 // "grok login" logs its arguments and home in logins.jsonl and its pid in
 // login.pid, prints its sign-in page, and waits for login.go in its home:
 // then it keeps a sign-in for owner@example.com and ends. "grok logout"
-// adds a dot to logouts.log.
+// adds a dot to logouts.log. Its message (`--single`) takes the markers
+// every stand-in takes (`SHARED`), with Claude Code's failed result.
 writeFileSync(
   join(bin, 'grok'),
   `#!/usr/bin/env node
@@ -246,6 +294,7 @@ if (args.some((a) => a.startsWith('- '))) {
   process.stderr.write("error: unexpected argument '- ' found");
   process.exit(2);
 }
+${SHARED}
 const after = (flag) => args[args.indexOf(flag) + 1];
 const joined = (flag) => args.find((a) => a.startsWith(flag + '='))?.slice(flag.length + 1);
 const replay = /Replay (\\/[^\\r\\n]+\\.jsonl)\\s*$/.exec(joined('--single'))?.[1];
@@ -254,33 +303,40 @@ if (replay) {
   process.stdout.write(fs.readFileSync(replay, 'utf8'));
   process.exit(0);
 }
-const agent = fs.readFileSync(after('--agent'), 'utf8');
-const profile = args.includes('--sandbox')
-  ? fs
-      .readFileSync(process.env.GROK_HOME + '/sandbox.toml', 'utf8')
-      .split(/^(?=\\[profiles\\.)/m)
-      .find((b) => b.startsWith('[profiles.' + after('--sandbox') + ']'))
-  : undefined;
-const servers = Object.assign({}, ...JSON.parse(/^mcpServers: (.*)$/m.exec(agent)[1]));
-const gave = {
-  args,
-  envNames: Object.keys(process.env).sort(),
-  grokEnv: Object.fromEntries(
-    Object.entries(process.env).filter(([k]) => /^(GROK_|XAI_|ANTHROPIC_API_KEY|TMPDIR|NODE_OPTIONS|GIT_)/.test(k))
-  ),
-  env: servers.office?.env,
-  servers,
-  home: process.env.HOME,
-  agentMode: fs.statSync(after('--agent')).mode & 0o777,
-  profile,
-  system: joined('--rules'),
-  message: joined('--single'),
-  prompt: joined('--prompt-json') && JSON.parse(joined('--prompt-json'))
-};
-const line = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
-line({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: 'tool_use', name: 'use_tool' } } });
-line({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'use_tool', input: { tool_name: 'office__raise_ask', tool_input: {} } }] } });
-line({ type: 'result', subtype: 'success', result: JSON.stringify(gave) + '\\nOutcome: done' });
+holdThen(lastOf(joined('--single') ?? ''), answer);
+function answer() {
+  const last = lastOf(joined('--single') ?? '');
+  if (last.includes('Fail now.'))
+    return failNow({ type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['Failed as told.'] });
+  if (last.includes('Start a command and wait.')) return startCommand();
+  const agent = fs.readFileSync(after('--agent'), 'utf8');
+  const profile = args.includes('--sandbox')
+    ? fs
+        .readFileSync(process.env.GROK_HOME + '/sandbox.toml', 'utf8')
+        .split(/^(?=\\[profiles\\.)/m)
+        .find((b) => b.startsWith('[profiles.' + after('--sandbox') + ']'))
+    : undefined;
+  const servers = Object.assign({}, ...JSON.parse(/^mcpServers: (.*)$/m.exec(agent)[1]));
+  const gave = {
+    args,
+    envNames: Object.keys(process.env).sort(),
+    grokEnv: Object.fromEntries(
+      Object.entries(process.env).filter(([k]) => /^(GROK_|XAI_|ANTHROPIC_API_KEY|TMPDIR|NODE_OPTIONS|GIT_)/.test(k))
+    ),
+    env: servers.office?.env,
+    servers,
+    home: process.env.HOME,
+    agentMode: fs.statSync(after('--agent')).mode & 0o777,
+    profile,
+    system: joined('--rules'),
+    message: joined('--single'),
+    prompt: joined('--prompt-json') && JSON.parse(joined('--prompt-json'))
+  };
+  const line = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+  line({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: 'tool_use', name: 'use_tool' } } });
+  line({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'use_tool', input: { tool_name: 'office__raise_ask', tool_input: {} } }] } });
+  line({ type: 'result', subtype: 'success', result: JSON.stringify(gave) + '\\nOutcome: done' });
+}
 `
 );
 chmodSync(join(bin, 'grok'), 0o755);
@@ -299,6 +355,8 @@ chmodSync(join(bin, 'grok'), 0o755);
 // pid in login.pid, prints its callback server and then its sign-in page, and
 // waits for login.go in its home: then it keeps a sign-in whose ID token
 // names owner@example.com and ends. "codex logout" adds a dot to logouts.log.
+// A launch takes the markers every stand-in takes (`SHARED`), failing with
+// turn.failed.
 writeFileSync(
   join(bin, 'codex'),
   `#!/usr/bin/env node
@@ -330,6 +388,7 @@ if (args[0] === 'logout') {
   fs.appendFileSync(home + '/logouts.log', '.');
   process.exit(0);
 }
+${SHARED}
 fs.appendFileSync(process.env.CODEX_HOME + '/launches.jsonl', JSON.stringify(args) + '\\n');
 function emptyFolder(p) {
   try {
@@ -340,7 +399,11 @@ function emptyFolder(p) {
 }
 let message = '';
 process.stdin.on('data', (d) => (message += d));
-process.stdin.on('end', () => {
+process.stdin.on('end', () => holdThen(lastOf(message), answer));
+function answer() {
+  if (lastOf(message).includes('Fail now.'))
+    return failNow({ type: 'turn.failed', error: { message: 'Failed as told.' } });
+  if (lastOf(message).includes('Start a command and wait.')) return startCommand();
   const replay = /Replay (\\/[^\\r\\n]+\\.jsonl)\\s*$/.exec(message)?.[1];
   if (replay) return process.stdout.write(fs.readFileSync(replay, 'utf8'));
   const sleeper = /Leave a sleeper at (\\/\\S+)/.exec(message)?.[1];
@@ -389,7 +452,7 @@ process.stdin.on('end', () => {
     type: 'turn.completed',
     usage: { input_tokens: 1000, cached_input_tokens: 600, cache_write_input_tokens: 100, output_tokens: 50, reasoning_output_tokens: 20 }
   });
-});
+}
 `
 );
 chmodSync(join(bin, 'codex'), 0o755);
@@ -402,7 +465,8 @@ chmodSync(join(bin, 'codex'), 0o755);
 // message in two pieces and the result's tokens. A message that ends "End in
 // error" gets a failed result instead (only at the end, since a later prompt
 // can quote an earlier message that failed). Each launch adds a dot to launches.log
-// in the Gemini home.
+// in the Gemini home. It takes the markers every stand-in takes (`SHARED`),
+// failing with its error result.
 writeFileSync(
   join(bin, 'gemini'),
   `#!/usr/bin/env node
@@ -413,12 +477,17 @@ if (process.argv[2] === '--version') {
   process.stdout.write('' + (fs.existsSync(v) ? fs.readFileSync(v, 'utf8').trim() : '0.66.0') + '\\n');
   process.exit(0);
 }
+${SHARED}
 const path = require('node:path');
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.GEMINI_CLI_HOME + '/launches.log', '.');
 let message = '';
 process.stdin.on('data', (d) => (message += d));
-process.stdin.on('end', () => {
+process.stdin.on('end', () => holdThen(lastOf(message), answer));
+function answer() {
+  if (lastOf(message).includes('Fail now.'))
+    return failNow({ type: 'result', status: 'error', error: { type: 'Error', message: 'Failed as told.' } });
+  if (lastOf(message).includes('Start a command and wait.')) return startCommand();
   const line = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
   line({ type: 'init', session_id: '0a0a0a0a-0000-4000-8000-00000000ce01', model: 'gemini-test' });
   if (message.startsWith('/'))
@@ -457,7 +526,7 @@ process.stdin.on('end', () => {
     status: 'success',
     stats: { models: { 'gemini-test': { total_tokens: 1050, input_tokens: 1000, output_tokens: 50, cached: 600, input: 400 } } }
   });
-});
+}
 `
 );
 chmodSync(join(bin, 'gemini'), 0o755);
