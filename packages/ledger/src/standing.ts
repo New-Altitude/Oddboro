@@ -16,6 +16,7 @@ import { connector } from './office-access.ts';
 import { record } from './office-ledger.ts';
 import { staffer } from './office-staff.ts';
 import { fixedError } from './errors.ts';
+import { LEVEL_NAME } from './access-words.ts';
 import type { Tx } from './threads.ts';
 
 /** Tools of a service in words: "add_event in Reclaim". */
@@ -39,10 +40,11 @@ async function grantOf(staffId: string, connectorId: string, tx: Tx | typeof db 
 
 /**
  * Why an Odd may not ask for this standing yes, or the tools it may ask for:
- * those it does not use without asking already. Refused for a service it does
- * not hold to read and write, a tool the service does not list, one that only
- * reads, and any tool the owner already said no to for this Odd, since a no
- * stands.
+ * those it does not use without asking already. Refused to an Odd not at
+ * Draft, the only level a standing yes changes anything at, for a service it
+ * does not hold to read and write, a tool the service does not list, one that
+ * only reads, and any tool the owner already said no to for this Odd, since a
+ * no stands.
  */
 export async function standingAsked(
   staffId: string,
@@ -56,6 +58,11 @@ export async function standingAsked(
   if (g.level !== 'act')
     return {
       problem: `You hold ${c.name} read only, so nothing of it waits for ${owner}. Ask for read and write with ask_for_access first, if the work needs it.`
+    };
+  const who = await staffer(staffId);
+  if (who?.permission === 'act')
+    return {
+      problem: `You are at ${LEVEL_NAME.act}, so your calls to ${c.name} already go through without asking, except the tools ${owner} set to ask first, and those keep waiting for their yes. A standing yes is only for an Odd at ${LEVEL_NAME.draft}.`
     };
   const unknown = req.tools.filter((t) => !c.tools.includes(t));
   if (unknown.length) return { problem: `${c.name} lists no tool named ${unknown.join(', ')}.` };

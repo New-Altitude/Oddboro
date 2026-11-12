@@ -146,7 +146,7 @@ test('the owner gives and takes back a standing yes on the Settings tab, and rea
   await assert.rejects(S.setStanding('cleo', 'cal', 'add_event', true), /read and write/);
 });
 
-test('at Act the owner sets a tool to ask first; the Odd hears it, cannot ask past it, and read only ends it', async () => {
+test('at Act the owner sets a tool to ask first; the Odd hears it, asks for no standing yes, cannot ask past it, and read only ends it', async () => {
   await db.update(staff).set({ permission: 'act' }).where(eq(staff.id, 'cleo'));
   await S.setAskFirst('cleo', 'cal', 'apply_changes', true);
   assert.deepEqual((await grant()).askFirst, ['apply_changes']);
@@ -160,7 +160,13 @@ test('at Act the owner sets a tool to ask first; the Odd hears it, cannot ask pa
     'Ada'
   );
   assert.match(line, /Except apply_changes: each call to that one waits for Ada's yes/);
-  // An Odd never asks to skip a tool the owner set to ask first.
+  // At Act a standing yes changes nothing, so the office refuses one.
+  const atAct = await ask({ connector: 'cal', tools: ['add_event'], why: 'Faster.' });
+  assert.equal(atAct.error, true);
+  assert.match(atAct.text, /You are at Act, so your calls to Calendar already go through/);
+  assert.deepEqual(await standingAsks(), []);
+  // Back at Draft, an Odd never asks to skip a tool the owner set to ask first.
+  await db.update(staff).set({ permission: 'draft' }).where(eq(staff.id, 'cleo'));
   const r = await ask({ connector: 'cal', tools: ['apply_changes'], why: 'Faster.' });
   assert.match(r.text, /set apply_changes in Calendar to ask first even at Act/);
   // Each list keeps its tools as the level moves; read only ends both.

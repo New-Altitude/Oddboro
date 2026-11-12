@@ -694,7 +694,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   hand-off's too, never a lesson run. A `standing` ask carries the tools in
   `asks.standing` (`StandingRequest`), raised by `ask_for_standing_yes`, which
   every Odd has (`always`) and is offered only while it holds a grant at
-  write (`withWrite` in `tools.ts`). The tool refuses a service not held at write, a tool the
+  write (`withWrite` in `tools.ts`). The tool refuses an Odd at Act, whose calls go through already, a service not held at write, a tool the
   service does not list or that only reads, tools it already has, and any
   tool the owner said no to for this Odd (`standingAsked`): a no stands.
   `raiseAsk` refuses a second open one that covers it. It takes yes or no
@@ -704,9 +704,9 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   any ask's does. The owner gives one or takes it back on the Settings tab
   (`setStanding`, one ledger line each), and lowering the grant to read only
   clears it (`setGrantLevel`). The Odd's prompt and `my_access` name the
-  tools (`STANDING` in `capabilities.ts`). A carry-out run after an approved
-  call is told to offer one once when that call only prepared a change
-  another call made real. `test/standing.test.ts` holds it, the tool included.
+  tools (`STANDING` in `capabilities.ts`). A carry-out run of an Odd at Draft
+  after a call the office made is told to offer one once when that call only
+  prepared a change another call made real (`follow-up-brief.ts` in the office). `test/standing.test.ts` holds it, the tool included.
 - Ask first is its mirror at Act (`grants.askFirst`, `setAskFirst`): the
   gateway holds each call to one of those tools as at Draft. Each list is the
   exception to its level and keeps its tools as the level moves; read only

@@ -1630,7 +1630,7 @@ export async function followThrough(
           : edit
             ? editBrief(edit.path, edit.shown)
             : [
-                ...followUpBrief(f, a, r, task, g, also),
+                ...followUpBrief(f, a, r, task, g, also, who.permission),
                 ...(serves?.handOff && giver && thread
                   ? handOffContext({
                       h: serves.handOff,
