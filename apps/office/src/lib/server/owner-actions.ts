@@ -107,6 +107,9 @@ export const OWNER_ACTIONS = {
   'PUT /api/goals/[id]': { records: 'decision' },
   'POST /api/goals/[id]/staff': { records: 'decision' },
   'DELETE /api/goals/[id]/staff': { records: 'decision' },
+  'POST /api/project-sessions': {
+    none: 'Connections, grants and instructions are kept in project_sessions and project_requests. Native terminal input never enters the office ledger.'
+  },
   'POST /api/jobs/[id]': { none: NO_ROW },
   'DELETE /api/jobs/away': { none: "Takes the jobs off the desk's While you were away card." },
   'PATCH /api/lessons/[id]': { records: 'decision' },

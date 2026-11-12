@@ -18,7 +18,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "sprites": "npm run build -w @oddboro/sprites",
-    "render": "node packages/world/scripts/render.ts"
+    "render": "node packages/world/scripts/render.ts",
+    "postinstall": "node scripts/prepare-pty.mjs"
   },
   "devDependencies": {
     "prettier": "^3.9.10",

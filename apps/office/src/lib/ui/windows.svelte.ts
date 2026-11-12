@@ -15,6 +15,7 @@ export type LessonsFilter = 'about' | 'all' | { staff: string };
 export type Win =
   | { id: 'desk'; kind: 'desk' }
   | { id: 'goals'; kind: 'goals' }
+  | { id: 'projects'; kind: 'projects'; sessionId?: string }
   | { id: 'lessons'; kind: 'lessons'; filter: LessonsFilter }
   | { id: 'ledger'; kind: 'ledger' }
   | { id: 'services'; kind: 'services' }
@@ -60,6 +61,13 @@ export function open(w: Win): void {
   wins.active = w.id;
   wins.shown = true;
   wins.raised = true;
+}
+
+/** The one Projects window, on that session. Already open, it switches to it. */
+export function openProject(sessionId: string): void {
+  const w = wins.list.find((x) => x.kind === 'projects');
+  if (w) w.sessionId = sessionId;
+  open(w ?? { id: 'projects', kind: 'projects', sessionId });
 }
 
 /** The one Lessons window, on that filter. Already open, it switches to it. */

@@ -49,6 +49,7 @@ const { MAIL_FILES_MAX } = await import('../src/mail-attachments.ts');
 const { isOffered, OFFICE_TOOLS, RIDES_WITH, STARTER_TOOLS } = await import('../src/tools.ts');
 const { MANAGER_ROLE } = await import('../src/managers.ts');
 const { HAND_OFF_LIMIT, LEADS_NONE, threadPart } = await import('../src/threads.ts');
+const { connectProject, shareProject } = await import('../src/project-sessions.ts');
 afterEach(() => oneThreadPerGoal(sql, MANAGER_ROLE));
 
 const odd = (id: string, name: string) => ({
@@ -673,6 +674,9 @@ test('every office tool refuses a key it does not take, and says which keys it d
   await db.insert(staffGoals).values({ staffId: 'all', goalId: fair.id, part: 'Everything' });
   // Gmail at any level offers propose_reply.
   await db.insert(grants).values({ staffId: 'all', connectorId: 'gmail', level: 'read' });
+  // A native conversation shared with Ada offers the project tools.
+  const project = await connectProject('claude', 'every-tool-test', '/project', 'Tests');
+  await shareProject(project.id, 'all');
   const reached = new Set<string>();
   const runs: Record<string, string>[] = [chat, { THREAD_ID: String(sale.id) }];
   for (const env of runs) {

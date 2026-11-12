@@ -13,6 +13,8 @@ export type OfficeTool = {
   always?: boolean;
   /** Offered only while the Odd holds Gmail (`mailboxes` in mcp.ts), even by `always`. */
   withGmail?: boolean;
+  /** Offered only when the owner shared a native conversation with this Odd. */
+  withProject?: boolean;
   /**
    * Offered only in a chat, where the office sets the owner's words
    * (`OWNER_SAID` in mcp.ts), even by `always`: the tool acts on what the
@@ -26,6 +28,20 @@ export type OfficeTool = {
 };
 
 const TOOLS = [
+  {
+    id: 'my_project_sessions',
+    name: 'Shared projects',
+    does: 'Reads assignments and answers in the native conversations you shared with it.',
+    always: true,
+    withProject: true
+  },
+  {
+    id: 'send_project_work',
+    name: 'Work in shared projects',
+    does: "Proposes an assignment to a shared native conversation. At Act it can send it with that conversation's permissions.",
+    always: true,
+    withProject: true
+  },
   { id: 'raise_ask', name: 'Ask you', does: 'Puts an ask on your desk.', always: true },
   { id: 'my_asks', name: 'Its asks', does: 'Sees how you decided its asks.', always: true },
   {
@@ -265,6 +281,8 @@ export const stepsToGo = (steps: Step[]): number =>
 export type ToolRun = {
   /** The Odd holds Gmail, at any level. */
   gmail: boolean;
+  /** A shared native conversation, outside a lesson-only run. */
+  project?: boolean;
   /** A chat, where the office sets the owner's words (`OWNER_SAID`). */
   chat: boolean;
   /** The Odd is the Office Manager. */
@@ -283,6 +301,7 @@ export const isOffered = (granted: readonly string[], id: string, run: ToolRun):
     hasTool(granted, id) &&
     !row?.prompt &&
     (!row?.withGmail || run.gmail) &&
+    (!row?.withProject || run.project === true) &&
     (!row?.inChat || run.chat) &&
     (!row?.notToManager || !run.manager)
   );

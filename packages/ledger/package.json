@@ -26,7 +26,8 @@
     "./desk-answers": "./src/desk-answers.ts",
     "./live-tables": "./src/live-tables.ts",
     "./filters": "./src/filter-words.ts",
-    "./certificates": "./src/certificates.ts"
+    "./certificates": "./src/certificates.ts",
+    "./project-terminal": "./src/project-terminal.ts"
   },
   "scripts": {
     "generate": "drizzle-kit generate",
@@ -47,6 +48,7 @@
     "@oddboro/sprites": "*",
     "@oddboro/world": "*",
     "drizzle-orm": "^0.45.4",
+    "node-pty": "1.1.0",
     "postgres": "^3.4.9",
     "zod": "^4.6.7"
   }

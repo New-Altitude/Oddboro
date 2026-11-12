@@ -6,6 +6,7 @@ import {
   boolean,
   check,
   doublePrecision,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -13,6 +14,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  unique,
   uuid,
   vector
 } from 'drizzle-orm/pg-core';
@@ -1104,3 +1106,72 @@ export const appUpdate = pgTable('app_update', {
   upAt: at('up_at'),
   updatedAt: at('updated_at').notNull().defaultNow()
 });
+
+// A connection belongs to one native conversation in the owner's chosen project.
+// The provider keeps its full transcript. The office keeps requests it sent there.
+export const projectSessions = pgTable(
+  'project_sessions',
+  {
+    id: text().primaryKey(),
+    agent: text().$type<'claude' | 'codex'>().notNull(),
+    nativeId: text().notNull(),
+    folder: text().notNull(),
+    title: text().notNull(),
+    staffId: text(),
+    createdAt: created()
+  },
+  (t) => [
+    foreignKey({
+      name: 'project_sessions_staff_id_fkey',
+      columns: [t.staffId],
+      foreignColumns: [staff.id]
+    }),
+    unique('project_sessions_agent_native_id_key').on(t.agent, t.nativeId),
+    check('project_sessions_agent_check', sql`${t.agent} IN ('claude', 'codex')`)
+  ]
+);
+
+export type ProjectRequestState =
+  | 'proposed'
+  | 'queued'
+  | 'authorized'
+  | 'sending'
+  | 'working'
+  | 'done'
+  | 'stopped'
+  | 'uncertain'
+  | 'failed';
+
+export const projectRequests = pgTable(
+  'project_requests',
+  {
+    id: text().primaryKey(),
+    sessionId: text().notNull(),
+    staffId: text(),
+    threadId: integer(),
+    prompt: text().notNull(),
+    file: text(),
+    state: text().$type<ProjectRequestState>().notNull(),
+    turn: text(),
+    answer: text(),
+    createdAt: created()
+  },
+  (t) => [
+    foreignKey({
+      name: 'project_requests_session_id_fkey',
+      columns: [t.sessionId],
+      foreignColumns: [projectSessions.id]
+    }),
+    foreignKey({
+      name: 'project_requests_staff_id_fkey',
+      columns: [t.staffId],
+      foreignColumns: [staff.id]
+    }),
+    foreignKey({
+      name: 'project_requests_thread_id_fkey',
+      columns: [t.threadId],
+      foreignColumns: [threads.id]
+    }),
+    index('project_requests_session').on(t.sessionId, t.createdAt)
+  ]
+);

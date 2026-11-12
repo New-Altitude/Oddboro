@@ -1,0 +1,1 @@
+- [office] **Decision (2026-11-08): the owner connects a native project session by its conversation and project.** The owner can use it in the office or share it with an Odd. A Draft request waits for the owner to take it over because the native client's tools run with the owner's permissions. See `docs/project-sessions.md`.

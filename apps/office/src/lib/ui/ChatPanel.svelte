@@ -19,6 +19,7 @@
   import { newTurnId } from '#lib/staff/chat-input.ts';
   import { call, sendFile, failure, type ApiUrl } from './api.ts';
   import ChatFiles from './ChatFiles.svelte';
+  import { open as openWindow } from './windows.svelte.ts';
   import { hideChoiceLines } from '#lib/choices.ts';
   import { hasToken, tagFor, withTokens, withoutToken, type Pending } from './chat-attach.ts';
   import {
@@ -899,6 +900,12 @@
   type MoreItem = { label: string; shown: () => boolean; run: () => void; focuses?: boolean };
   const MORE: MoreItem[] = [
     { label: 'Attach files', shown: () => true, run: () => picker?.click() },
+    {
+      label: 'Project sessions',
+      shown: () => true,
+      focuses: true,
+      run: () => openWindow({ id: 'projects', kind: 'projects' })
+    },
     {
       label: 'New goal',
       shown: () => canSetGoal,

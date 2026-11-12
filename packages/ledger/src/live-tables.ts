@@ -25,6 +25,8 @@ export type LiveTable = {
 };
 
 export const LIVE_TABLES: Record<TableName, LiveTable> = {
+  project_requests: { trigger: 'all', page: ['refresh', 'version'] },
+  project_sessions: { trigger: 'all', page: ['version'] },
   staff: { trigger: 'all', page: ['refresh'] },
   // Once the office is up, every change is the owner's own call on the page, and
   // the list that made it reads the accounts again (agent-tools.svelte.ts).

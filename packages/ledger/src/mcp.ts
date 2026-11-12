@@ -72,6 +72,7 @@ import { AGENT_NAMES, commandsOnline } from './agents.ts';
 import { currentPlatform } from './platform.ts';
 import {
   FOLDER_SAID,
+  parseLevel,
   grantWorks,
   LEVELS,
   NOT_OWN_TOOLS,
@@ -147,6 +148,7 @@ import {
 import { home, isOfficeFile, isWhereNamed } from './home.ts';
 import { trustSystemCertificates } from './certificates.ts';
 
+import { projectConnections, projectWork, requestProject } from './project-sessions.ts';
 trustSystemCertificates();
 const ME = process.env.STAFF_ID ?? '';
 const me = await staffer(ME);
@@ -178,6 +180,7 @@ const mailboxes = (await grantsFor(ME))
 /** This run, as the office tools' row conditions read it. */
 const RUN: ToolRun = {
   gmail: mailboxes.length > 0,
+  project: process.env.LESSON_RUN !== '1' && (await projectConnections(ME)).length > 0,
   chat: OWNER_SAID !== undefined,
   manager: me.role === MANAGER_ROLE
 };
@@ -705,6 +708,58 @@ const shortDay = (d: Date) =>
 const line = (r: LedgerRow) =>
   `- ${day(r.createdAt)} [${r.kind}] ${r.actor}: ${r.title}${r.reason ? ` (reason: ${r.reason})` : r.kind === 'decision' ? ' (no reason given)' : ''}`;
 
+// Connections are granted one at a time by the owner. An Odd can never
+// start a native process or type terminal keys through these tools.
+if (offered('my_project_sessions'))
+  tool(
+    'my_project_sessions',
+    {
+      description:
+        'See the project conversations the owner shared with you and the status and answers of your assignments.',
+      inputSchema: {}
+    },
+    async () => {
+      const sessions = await projectConnections(ME);
+      return json(
+        await Promise.all(
+          sessions.map(async (s) => ({
+            id: s.id,
+            title: s.title,
+            provider: s.agent,
+            work: (await projectWork(s.id))
+              .filter((r) => r.staffId === ME)
+              .map((r) => ({ id: r.id, state: r.state, answer: r.answer }))
+          }))
+        )
+      );
+    }
+  );
+if (offered('send_project_work'))
+  tool(
+    'send_project_work',
+    {
+      description:
+        'Give a shared native project session an assignment. Use a fresh UUID per assignment and reuse it on a retry. At Draft it waits for the owner to send it. Its result comes back as a report.',
+      inputSchema: {
+        session: z.string().uuid(),
+        key: z.string().uuid(),
+        prompt: z.string().trim().min(1).max(64000)
+      }
+    },
+    async (a) => {
+      if ((parseLevel(process.env.CEILING) ?? me.permission) === 'read')
+        return refused('This run can only read project work.');
+      const row = await requestProject({
+        id: a.key,
+        sessionId: a.session,
+        prompt: a.prompt,
+        staffId: ME,
+        threadId: THREAD_ID,
+        draft: (parseLevel(process.env.CEILING) ?? me.permission) !== 'act'
+      });
+      return json({ id: row.id, state: row.state });
+    }
+  );
 if (has('search_ledger'))
   tool(
     'search_ledger',

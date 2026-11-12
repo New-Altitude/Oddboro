@@ -27,6 +27,7 @@
   import GoalsPanel from '#lib/ui/GoalsPanel.svelte';
   import LessonsLibrary from '#lib/ui/LessonsLibrary.svelte';
   import Welcome from '#lib/ui/Welcome.svelte';
+  import ProjectSessions from '#lib/ui/ProjectSessions.svelte';
   import HireDrawer from '#lib/ui/HireDrawer.svelte';
   import FileViewer from '#lib/ui/FileViewer.svelte';
   import ReportView from '#lib/ui/ReportView.svelte';
@@ -193,6 +194,7 @@
     { id: 'lessons', label: 'Lessons' },
     { id: 'ledger', label: 'Ledger' },
     { id: 'services', label: 'Services' },
+    { id: 'projects', label: 'Projects' },
     { id: 'hire', label: 'Hire' },
     { id: 'office', label: 'Office' }
   ] as const;
@@ -320,7 +322,11 @@
 
   // The While you were away card counts once, however many jobs it lists.
   const deskCount = $derived(
-    desk.asks.length + desk.tasks.length + desk.reports.length + (desk.away.length ? 1 : 0)
+    desk.asks.length +
+      desk.tasks.length +
+      desk.reports.length +
+      desk.projectWork.length +
+      (desk.away.length ? 1 : 0)
   );
 
   /** Rooms a new hire can work in: any with a place to work, read or sort mail. */
@@ -641,6 +647,7 @@
     if (leftOpen && front?.kind === id) return hide();
     if (id === 'desk') return void openDesk();
     if (id === 'ledger') return open({ id: 'ledger', kind: 'ledger' });
+    if (id === 'projects') return open({ id: 'projects', kind: 'projects' });
     if (id === 'services') return open({ id: 'services', kind: 'services' });
     if (id === 'goals') return open({ id: 'goals', kind: 'goals' });
     if (id === 'lessons') return openLessons();
@@ -662,6 +669,7 @@
   function winTitle(w: Win): string {
     if (w.kind === 'desk') return 'Desk';
     if (w.kind === 'ledger') return 'Ledger';
+    if (w.kind === 'projects') return 'Project sessions';
     if (w.kind === 'services') return 'Services';
     if (w.kind === 'goals') return 'Goals';
     if (w.kind === 'lessons') return 'Lessons';
@@ -1305,6 +1313,8 @@
                 <LessonsLibrary {staff} {version} bind:filter={w.filter} />
               {:else if w.kind === 'ledger'}
                 <LedgerPanel {staff} version={ledgerVersion} />
+              {:else if w.kind === 'projects'}
+                {#key w.sessionId}<ProjectSessions {staff} sessionId={w.sessionId} />{/key}
               {:else if w.kind === 'services'}
                 <ServicesPanel {staff} {version} onstaff={select} />
               {:else if w.kind === 'setup'}

@@ -1532,8 +1532,8 @@ account.
    and span again and sends them through the office's own transport, so the
    gate applies to them too.
 6. Traces: about one in ten (`TRACE_SAMPLE_RATE`). `QUIET_ROUTES` are never
-   traced: `/api/events` stays open as long as the page, `/api/update` is the
-   shell's poll, and the relay would trace itself.
+   traced: the office and project event streams stay open, project commands carry
+   terminal input, `/api/update` is the shell's poll, and the relay would trace itself.
 7. `instrumentation.server.ts` loads before the server, so
    `src/lib/server/diagnostics.ts` and `src/lib/server/hosts.ts` import
    nothing that brings in Postgres.
@@ -1806,3 +1806,8 @@ used; `chat-sign-in.ts` reads that account. Its retry is the chat's own
 Retry reply on the saved turn, so the earlier failed reply stays in
 history. Access cards come from database deliveries, never the Odd's chat
 file.
+
+The Projects window and its local controller live in
+`src/lib/ui/ProjectSessions.svelte` and `src/lib/server/project-sessions/`.
+See [project sessions](../../docs/project-sessions.md) for native clients,
+handover and recovery.
