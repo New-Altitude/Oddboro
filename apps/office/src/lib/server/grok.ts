@@ -617,12 +617,17 @@ function renew(h: GrokHome): Promise<void> {
     const child = spawn(grokCommand() ?? 'grok', ['models', '--leader-socket', h.leader], {
       cwd: h.dir,
       env: grokEnv(h),
-      stdio: 'ignore',
-      timeout: RENEW_MS,
-      killSignal: 'SIGKILL'
+      stdio: 'ignore'
     });
-    child.on('error', () => done());
-    child.on('close', () => done());
+    // Its own timer rather than spawn's `timeout`, which a test's mock timers
+    // cannot reach, so the test need not wait the 30 seconds out.
+    const limit = setTimeout(() => child.kill('SIGKILL'), RENEW_MS);
+    const end = () => {
+      clearTimeout(limit);
+      done();
+    };
+    child.on('error', end);
+    child.on('close', end);
   }).finally(() => renewing.delete(h.dir));
   renewing.set(h.dir, next);
   return next;
