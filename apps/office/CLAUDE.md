@@ -346,7 +346,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    it on the start side: on the Desk while it waits, else a report in its own
    window (`ReportView.svelte`). A goal or plan card also takes a decision
    in chat, using the Desk's ask route and the same plan checkboxes. The
-   manager's New goal box starts empty and sets that exact title through the
+   manager's New goal box opens from the plus menu, starts empty and sets that exact title through the
    Goals route. A retry with its request id returns the goal already set. A typed
    answer to a task has one path: its response editor on the card, opened
    empty for a plain question, where Save and finish saves the words and
@@ -411,11 +411,15 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    owner attaches pictures, PDFs and text files (`ATTACHABLE` in
    `src/lib/attachments.ts`, up to 10 of 10 MB each): pasting or dropping
    one on the box puts its tag at the caret (`[Image #1]` for a pasted
-   picture, else its name, `chat-attach.ts`), the paperclip adds files to
-   the tray alone. The tray previews each with a ✕, in a column at the
-   end side over the paperclip and Send, three files tall at most
+   picture, else its name, `chat-attach.ts`), and Attach files in the plus
+   menu adds files to the tray alone. The plus button (More) beside the box
+   opens a short menu built from one list (`MORE`: label, action, where it
+   shows): Attach files, and New goal in the manager's chat. Arrow keys move
+   in it, Enter picks, Escape or a click outside closes it, and focus goes
+   back to the box after an action. The tray previews each file with a ✕, in a column at the
+   end side over the plus button and Send, three files tall at most
    (`.tray`), scrolling past that. The box is always as tall as that
-   column (`side` in `fit`), and at least as tall as the paperclip and
+   column (`side` in `fit`), and at least as tall as the plus button and
    Send (`MIN_INPUT`, 76 px), so it grows up as files are attached.
    Deleting a tag drops its file. Copied text that brings a picture of
    itself pastes as text. On Send each file goes alone to

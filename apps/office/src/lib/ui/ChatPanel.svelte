@@ -756,7 +756,7 @@
 
   // The input grows with what the owner types, up to most of the panel. Dragging
   // the bar above it sets how tall it is at least, and that height is kept.
-  // As tall as the paperclip over Send beside it (32 + 6 + 38).
+  // As tall as the plus button over Send beside it (32 + 6 + 38).
   const MIN_INPUT = 76;
   let box: HTMLTextAreaElement | undefined = $state();
   let root: HTMLDivElement | undefined = $state();
@@ -773,7 +773,7 @@
     // Measured first: the brief auto height below scrolls the list on its own.
     const pinned = list ? list.scrollHeight - list.scrollTop - list.clientHeight < 8 : false;
     box.style.blockSize = 'auto';
-    // At least as tall as the column beside it: the files, the paperclip and Send.
+    // At least as tall as the column beside it: the files, the plus button and Send.
     box.style.blockSize = `${Math.min(ceiling(), Math.max(floor, side, box.scrollHeight))}px`;
     if (pinned && list) list.scrollTop = list.scrollHeight;
   }
@@ -818,8 +818,8 @@
   }
 
   // Files the owner attaches. Pasting or dropping puts each one's tag, like
-  // [Image #1], at the caret; the paperclip adds them to the tray alone. The
-  // tray over the paperclip shows everything that will go.
+  // [Image #1], at the caret; Attach files in the plus menu adds them to the
+  // tray alone. The tray over the plus button shows everything that will go.
   let pending = $state<Pending[]>([]);
   let nextKey = 0;
   let uploading = $state(false);
@@ -831,6 +831,61 @@
   let refused = $state('');
   let dragging = $state(false);
   let picker: HTMLInputElement | undefined = $state();
+
+  // The plus menu beside the box: one list of what the owner can add, each
+  // shown where it applies. A new action is one more item here.
+  let goalOpen = $state(false);
+  const canSetGoal = $derived(profile.role === 'Office Manager' && !replyTo && decisionMode);
+  type MoreItem = { label: string; shown: () => boolean; run: () => void };
+  const MORE: MoreItem[] = [
+    { label: 'Attach files', shown: () => true, run: () => picker?.click() },
+    { label: 'New goal', shown: () => canSetGoal, run: () => (goalOpen = true) }
+  ];
+  const more = $derived(MORE.filter((m) => m.shown()));
+  let moreOpen = $state(false);
+  let moreButton: HTMLButtonElement | undefined = $state();
+  let moreMenu: HTMLDivElement | undefined = $state();
+  const moreItems = () => [...(moreMenu?.querySelectorAll<HTMLButtonElement>('button') ?? [])];
+
+  async function openMore() {
+    moreOpen = true;
+    await tick();
+    moreItems()[0]?.focus();
+  }
+  function closeMore(focus?: HTMLElement) {
+    moreOpen = false;
+    focus?.focus();
+  }
+  function pickMore(m: MoreItem) {
+    closeMore(box);
+    m.run();
+  }
+  /** Arrow keys move between the items, Escape closes; Enter picks the focused one as a button does. */
+  function moreKey(e: KeyboardEvent) {
+    const items = moreItems();
+    const at = items.indexOf(document.activeElement as HTMLButtonElement);
+    if (e.key === 'Escape') closeMore(moreButton);
+    else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      const step = e.key === 'ArrowDown' ? 1 : -1;
+      items[(at + step + items.length) % items.length]?.focus();
+    } else if (e.key === 'Home') items[0]?.focus();
+    else if (e.key === 'End') items.at(-1)?.focus();
+    else return;
+    e.preventDefault();
+  }
+  /** A click outside the menu and its button closes it. */
+  function outside(e: PointerEvent) {
+    const at = e.target as Node;
+    if (moreOpen && !moreMenu?.contains(at) && !moreButton?.contains(at)) closeMore();
+  }
+  // The menu goes with the box: it closes while the box is disabled.
+  $effect(() => {
+    if (saving) moreOpen = false;
+  });
+  // The goal field closes where New goal does not show, as it did when it went away.
+  $effect(() => {
+    if (!canSetGoal) goalOpen = false;
+  });
 
   const attachmentUrl = (f: ChatFile) =>
     `/api/staff/${profile.id}/attachments/${encodeURIComponent(f.name)}`;
@@ -1484,8 +1539,8 @@
       >
     </div>
   {/if}
-  {#if profile.role === 'Office Manager' && !replyTo && decisionMode}
-    <ChatGoal managerId={profile.id} onset={() => load(profile.id)} />
+  {#if canSetGoal}
+    <ChatGoal managerId={profile.id} onset={() => load(profile.id)} bind:open={goalOpen} />
   {/if}
   <form
     class="flex items-end gap-2 px-3 {refused ? 'pb-2' : 'pb-3'}"
@@ -1530,7 +1585,7 @@
       {onpaste}></textarea>
     <div class="flex shrink-0 flex-col gap-1.5" bind:clientHeight={side}>
       {#if pending.length}
-        <!-- What goes with the message, over the paperclip: three files tall at most, scrolling past that. -->
+        <!-- What goes with the message, over the plus button: three files tall at most, scrolling past that. -->
         <div
           class="tray -me-3 flex justify-center overflow-y-auto overscroll-contain ps-1.5 pe-1.5 pt-1.5"
           aria-label="Attached files"
@@ -1538,27 +1593,51 @@
           <ChatFiles stack files={pending} onremove={remove} />
         </div>
       {/if}
-      <button
-        type="button"
-        class="flex h-8 items-center justify-center rounded-lg text-muted hover:bg-raise hover:text-ink"
-        aria-label="Attach files"
-        title="Attach pictures, PDFs or text files"
-        onclick={() => picker?.click()}
-      >
-        <svg
-          class="size-4"
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.4"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-          ><path
-            d="M13.5 7.5 8 13a3.5 3.5 0 0 1-5-5l5.8-5.8a2.3 2.3 0 0 1 3.3 3.3L6.3 11.3a1.2 1.2 0 0 1-1.7-1.7L10 4.3"
-          /></svg
+      <div class="relative flex flex-col">
+        {#if moreOpen}
+          <div
+            bind:this={moreMenu}
+            class="absolute end-0 bottom-full z-20 mb-1 flex min-w-36 flex-col rounded-lg border border-hairline bg-panel-solid py-1"
+            role="menu"
+            aria-label="More"
+            tabindex="-1"
+            onkeydown={moreKey}
+          >
+            {#each more as m (m.label)}
+              <button
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                class="px-3 py-1.5 text-start text-sm whitespace-nowrap text-ink outline-none hover:bg-sea/15 focus:bg-sea/15"
+                onclick={() => pickMore(m)}>{m.label}</button
+              >
+            {/each}
+          </div>
+        {/if}
+        <button
+          bind:this={moreButton}
+          type="button"
+          class="flex h-8 items-center justify-center rounded-lg text-muted hover:bg-raise hover:text-ink disabled:opacity-40"
+          aria-label="More"
+          aria-haspopup="menu"
+          aria-expanded={moreOpen}
+          title="Attach files and more"
+          disabled={saving}
+          onclick={() => (moreOpen ? closeMore() : openMore())}
         >
-      </button>
+          <!-- A plus: one stroke down, one across. -->
+          <svg
+            class="size-4"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.4"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"><path d="M8 3v10" /><path d="M3 8h10" /></svg
+          >
+        </button>
+      </div>
       <button
         class="flex h-[38px] items-center justify-center gap-1.5 rounded-lg bg-sea px-3 text-sm font-medium text-night disabled:opacity-40"
         disabled={saving || (!draft.trim() && !pending.length) || uploading}
@@ -1584,6 +1663,8 @@
     <p class="px-3 pb-3 text-xs text-coral" role="alert">{refused}</p>
   {/if}
 </div>
+
+<svelte:window onpointerdown={outside} />
 
 <style>
   /* Three attached files at most (each 48px square, 2px and a 15px name under
