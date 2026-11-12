@@ -10,10 +10,10 @@
 // long enough to stop the Windows installer's builder (see LONGEST).
 //
 // It also fetches the Node binary the app carries, checked against nodejs.org's
-// published sums. `--smoke` then starts the staged office on a spare port and
-// home, and stops it once it answers.
+// published sums. `node apps/desktop/scripts/smoke.ts --stage` then checks the
+// stage as the app would run it.
 import { stagePty } from '../../../scripts/prepare-pty.mjs';
-import { execFileSync, execSync, spawn, spawnSync } from 'node:child_process';
+import { execFileSync, execSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
@@ -313,62 +313,6 @@ async function fetchNode(): Promise<void> {
   rmSync(tmp, { recursive: true, force: true });
 }
 
-/** Start the staged office on a spare port and home, and wait for it to answer. */
-async function smoke(): Promise<void> {
-  const port = 4590;
-  const home = join(tmpdir(), 'oddboro-smoke');
-  rmSync(home, { recursive: true, force: true });
-  const child = spawn(NODE_BIN, [join(STAGE, 'apps', 'office', 'build', 'index.js')], {
-    cwd: join(STAGE, 'apps', 'office'),
-    env: {
-      ...process.env,
-      PORT: String(port),
-      HOST: '127.0.0.1',
-      ORIGIN: `http://127.0.0.1:${port}`,
-      ODDBORO_PORT: String(port),
-      ODDBORO_DB_PORT: '54590',
-      ODDBORO_HOME: home,
-      ODDBORO_CODE: STAGE,
-      // As in the app: the server quits when asked, and a versioned first
-      // start in an empty home makes its folder and records the version.
-      ODDBORO_APP: '1',
-      ODDBORO_VERSION: '0.0.0-smoke',
-      // So Sentry starts in the staged server. The home is new, so the owner
-      // has not said yes and nothing is sent; port 9 would take nothing anyway.
-      ODDBORO_DIAGNOSTICS_DSN: 'http://oddboro@127.0.0.1:9/oddboro/0'
-    },
-    // A held stdin, as the app gives it: the server quits when it closes.
-    stdio: ['pipe', 'inherit', 'inherit']
-  });
-  try {
-    for (let i = 0; i < 90; i++) {
-      await new Promise((r) => setTimeout(r, 1000));
-      const ok = await fetch(`http://127.0.0.1:${port}/`, {
-        signal: AbortSignal.timeout(2000)
-      }).then(
-        (r) => r.status < 500,
-        () => false
-      );
-      if (ok) return console.log(`Smoke: the staged office answered on ${port}.`);
-      if (child.exitCode !== null) throw new Error(`The staged office exited (${child.exitCode})`);
-    }
-    throw new Error('The staged office never answered');
-  } finally {
-    // As the app asks: SIGTERM, or on Windows, which has none, by closing stdin.
-    if (WINDOWS) child.stdin?.end();
-    else child.kill('SIGTERM');
-    const quit = await new Promise((r) => {
-      child.once('exit', () => r(true));
-      setTimeout(() => r(false), 10_000);
-    });
-    if (!quit) {
-      child.kill('SIGKILL');
-      throw new Error('The staged office did not quit when asked');
-    }
-    console.log('Smoke: it quit when asked.');
-  }
-}
-
 checkOfficeDependencies();
 build();
 rmSync(STAGE, { recursive: true, force: true });
@@ -393,4 +337,3 @@ prune(STAGE);
 checkChunks(join(STAGE, 'apps', 'office', 'build', 'client'));
 await fetchNode();
 console.log(`Staged the server in ${STAGE}.`);
-if (process.argv.includes('--smoke')) await smoke();

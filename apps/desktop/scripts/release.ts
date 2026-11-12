@@ -167,12 +167,14 @@ const tauri = (argv: string[], env: Record<string, string | undefined> = {}) =>
   run(process.execPath, [CLI, ...argv], env);
 // A test build hands the office's build no token, so its source maps never go
 // to Sentry.
-const stage = () =>
+const stage = () => {
   run(
     process.execPath,
-    [join(DESKTOP, 'scripts', 'stage.ts'), '--smoke'],
+    [join(DESKTOP, 'scripts', 'stage.ts')],
     TEST ? { SENTRY_AUTH_TOKEN: undefined } : {}
   );
+  run(process.execPath, [join(DESKTOP, 'scripts', 'smoke.ts'), '--stage']);
+};
 
 /**
  * Sends the shell's debug files to Sentry, when there is a token; a test build
