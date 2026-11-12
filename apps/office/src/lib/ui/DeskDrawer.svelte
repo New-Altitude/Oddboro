@@ -11,6 +11,7 @@
     staleDraft
   } from './task-response.svelte.ts';
   import Attachments from './Attachments.svelte';
+  import PostalMailbox from './PostalMailbox.svelte';
   import AwsSignIn from './AwsSignIn.svelte';
   import AwsSecretPick from './AwsSecretPick.svelte';
   import SelectToChat from './SelectToChat.svelte';
@@ -756,7 +757,8 @@
                       </p>
                     {/if}
                   </div>
-                  {#if s.done && !tickable(s)}
+                  <!-- A chosen mailbox changes only by revoking its grants, so its step has no Undo. -->
+                  {#if s.done && !tickable(s) && s.action?.kind !== 'postal'}
                     <button
                       class="ms-auto shrink-0 text-xs text-muted underline hover:text-ink disabled:opacity-40"
                       disabled={busy}
@@ -770,6 +772,16 @@
                     disabled={busy}
                     onclick={() => hostedSignIn(t, index)}>Sign in</button
                   >
+                {:else if s.action?.kind === 'postal'}
+                  {#if s.done}
+                    {#if s.answer}<p class="mt-1.5 text-xs text-muted">{s.answer}</p>{/if}
+                  {:else}
+                    {#key t.id}<PostalMailbox
+                        taskId={t.id}
+                        {index}
+                        odd={who(t.staffId)?.name ?? 'the Odd'}
+                      />{/key}
+                  {/if}
                 {:else if s.action?.kind === 'aws'}
                   {#if s.done}
                     {#if s.answer}<p class="mt-1.5 text-xs text-muted">{s.answer}</p>{/if}

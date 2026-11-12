@@ -16,7 +16,7 @@ import {
 } from '@oddboro/ledger';
 import { readStaffFile } from '#lib/server/files.ts';
 import { workPath } from '@oddboro/ledger/work-paths';
-import { confirmTools, hostedSignIn, listTools } from '#lib/server/access.ts';
+import { confirmTools, hostedSignIn, listTools, postalSetup } from '#lib/server/access.ts';
 import {
   awsRoles,
   awsSecretKeys,
@@ -116,6 +116,15 @@ export const POST: RequestHandler = async ({ params, request }) => {
   if (!step) error(400, 'No such step');
   const action = step.action;
   try {
+    if (action?.kind === 'postal') {
+      if (t.status !== 'open' || step.done) error(400, 'This mailbox setup is closed.');
+      if (b.op === 'postal-inboxes') return json(await postalSetup(id));
+      if (b.op !== 'postal-select' || !text(b.value)) error(400, 'Choose a mailbox.');
+      const pmb = text(b.value);
+      await postalSetup(id, pmb);
+      await tickStep(id, b.index!, `PMB ${pmb}`);
+      return json({ ok: true });
+    }
     if (b.op === 'tick') await tickStep(id, b.index!);
     else if (b.op === 'untick') await untickStep(id, b.index!);
     else if (

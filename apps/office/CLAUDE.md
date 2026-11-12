@@ -944,10 +944,19 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    working. A run below the Odd's own level (a hand-off's, either side, or a
    hub's pick-up) passes its ceiling as `CEILING` the same way, so `my_access`
    says Draft and why, with a write grant read only, as the prompt does
-   (`capped`, `accessInRun`). Hosted servers sign in with
-   OAuth (`src/lib/server/oauth.ts`): the task's Sign in opens the service, it
-   returns to `/connect/callback`, the tokens go in the keychain, and each run's
-   gateway connects with a fresh access token as a header. A token is refreshed
+   (`capped`, `accessInRun`).
+   Physical mail signs in to LegalZoom's read-only endpoint. The owner chooses
+   one PMB for the office on the Desk. A run receives only list, details, and
+   scanned text. The gateway supplies the chosen PMB and checks the Odd still
+   holds the grant on each request. No setup key or inbox list reaches the Odd.
+   `postal.test.ts` exercises this with two synthetic mailboxes. The provider's
+   [tool catalog](https://api.earthclassmail.com/v2/mcp_catalog.json) names the
+   current schemas. Before release, sign in with an authorized test account,
+   select a mailbox, read a known scanned letter in chat and open its original.
+   Hosted servers sign in with OAuth (`src/lib/server/oauth.ts`): the task's
+   Sign in opens the service, it returns to `/connect/callback`, the tokens go
+   in the keychain, and each run's gateway connects with a fresh access token
+   as a header. A token is refreshed
    one at a time per sign-in (`once`), since a service may end a sign-in whose
    refresh token arrives twice. For the same reason `steadyFetch` retries only
    a request that never left this computer; one whose answer was lost is not
