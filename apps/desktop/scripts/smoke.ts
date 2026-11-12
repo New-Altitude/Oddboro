@@ -25,6 +25,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import {
   appendFileSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -93,6 +94,8 @@ const { values: args } = parseArgs({
 });
 
 const OUT = args.out ?? mkdtempSync(join(tmpdir(), 'oddboro-smoke-'));
+// Made first: a run refused before it starts still writes its results here.
+mkdirSync(OUT, { recursive: true });
 const t0 = Date.now();
 const log = (line: string) => console.log(`[${((Date.now() - t0) / 1000).toFixed(1)}s] ${line}`);
 
