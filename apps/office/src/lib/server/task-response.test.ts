@@ -17,7 +17,7 @@ test('a response to a shared list stays on its task through a correction, a fail
   const [thread] = await L.pg<{ id: number }[]>`insert into threads (title, hub_id, holder_id)
     values ('Plan the picnic', 'lead', 'lead') returning id`;
   const path = `threads/${thread.id}/paige/list.md`;
-  const file = L.home(path);
+  const file = L.home('threads', String(thread.id), 'paige', 'list.md');
   mkdirSync(dirname(file), { recursive: true });
   const list = 'Pack plates.\nPack cups.\n';
   writeFileSync(file, list);

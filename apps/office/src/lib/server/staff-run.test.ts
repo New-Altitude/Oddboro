@@ -1593,7 +1593,9 @@ test("the run a finished task starts is told where a file attached from a goal's
   assert.equal(r.outcome, 'done', r.text);
   const { message, system } = JSON.parse(r.text) as Gave;
   assert.ok(
-    `${system}\n${message}`.includes(`- Attached, with anything they filled in: ${L.home(name)}.`),
+    `${system}\n${message}`.includes(
+      `- Attached, with anything they filled in: ${L.home('threads', '4242', 'paige', 'rules.md')}.`
+    ),
     'the run is not told where the file is'
   );
 });

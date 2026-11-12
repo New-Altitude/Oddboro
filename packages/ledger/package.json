@@ -14,10 +14,12 @@
     "./goals": "./src/goal-words.ts",
     "./checks": "./src/checks.ts",
     "./platform": "./src/platform.ts",
+    "./system-words": "./src/system-words.ts",
     "./secrets": "./src/secrets.ts",
     "./env": "./src/env.ts",
     "./errors": "./src/errors.ts",
     "./home": "./src/home.ts",
+    "./owner-key": "./src/owner-key.ts",
     "./local-db": "./src/local-db.ts",
     "./upgrade": "./src/upgrade.ts",
     "./update-window": "./src/update-window.ts",
@@ -28,6 +30,7 @@
     "./filters": "./src/filter-words.ts",
     "./certificates": "./src/certificates.ts",
     "./test-defaults": "./test/test-defaults.ts",
+    "./request-targets": "./test/request-targets.ts",
     "./tools-on-path": "./test/tools-on-path.ts"
   },
   "scripts": {
