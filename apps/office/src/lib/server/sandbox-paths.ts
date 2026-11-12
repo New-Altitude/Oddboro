@@ -1,6 +1,6 @@
 // The system's own paths each tool's sandbox names, per system. Only the
-// Mac's are measured. Linux and Windows carry the same values because those
-// are what the office passes there; they are not measured, and some are Mac
+// Mac's are measured, and Grok's shut list on Linux. Linux and Windows carry
+// the Mac's other values because those are what the office passes there; they are not measured, and some are Mac
 // paths that mean nothing there. Correcting them is its own change, measured
 // on that system. A run on a system with no entry stops at `sandboxPaths()`.
 import { currentPlatform } from '@oddboro/ledger/platform';
@@ -48,7 +48,11 @@ const MAC: SandboxPaths = {
 
 export const SANDBOX_PATHS: Partial<Record<NodeJS.Platform, SandboxPaths>> = {
   darwin: MAC,
-  linux: MAC,
+  // Measured on Ubuntu 26.04 with Grok 1.0.77: Grok refuses a deny glob that
+  // matches over 4096 files, which /var/** does on any real machine, and an
+  // exact-path deny of /tmp or /var stops it starting. So Grok's profile
+  // leaves both open on Linux, and the office's file tools are the wall there.
+  linux: { ...MAC, grokShut: ['/Library'] },
   win32: MAC
 };
 

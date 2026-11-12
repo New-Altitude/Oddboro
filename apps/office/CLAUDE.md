@@ -685,7 +685,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    work it leads or is on, in the Odd's own profile), the owner's data folder, the
    folders the owner gave it and the tool server's code, writes the given
    folders it may change (`readWrite`), and
-   shuts `~/Library`, `/Library`, `/tmp` and `/var`; Windows has none. Grok
+   shuts `~/Library`, `/Library`, and on a Mac `/tmp` and `/var` (Linux leaves those two open: Grok cannot start with either shut); Windows has none. Grok
    refuses every sandbox when `/var/run/docker.sock` is a link to a path off
    its own list (OrbStack, Colima, Rancher Desktop), so then the run gets a
    home of its own in Grok's home, whose `.docker/run` leads to the socket's
@@ -715,7 +715,10 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    (`codex-tmp/<run key>`) written, instruction files and the edited file
    never, and no network, Browse the web or not (`network` in the profile,
    from `commandsOnline`: with it on, Codex's commands reached the office's own
-   API and database on this Mac). The office carries its files
+   API and database on this Mac). On Linux Codex itself mounts `.codex` and
+   `.agents` read only at the top of each write folder, so those two exact paths
+   are left to it (`SELF_SHUT`), and no run reads an `AGENTS.md`
+   (`project_doc_max_bytes`), since a shut one failed the run's start. The office carries its files
    (`FILES_VIA_OFFICE`), so with Run commands off it has no shell. On Windows
    it never has one: Codex's own sandbox opened every Odd's folder to reads,
    so a run there is in Codex's read-only mode and Run commands stays locked
