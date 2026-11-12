@@ -51,7 +51,7 @@ const whole = (s: string) =>
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim()
-    .replace(/ persona$/, '')
+    .replace(/^(new altitude )?persona | persona$/g, '')
     .split(' ')
     .filter((w, i, all) => w.length > 1 || i === 0 || i === all.length - 1)
     .join(' ');
@@ -90,10 +90,13 @@ export const hasPersonaHint = (p: Pick<HireProposal, 'name' | 'role' | 'personaS
 export const namesPersona = (p: Pick<HireProposal, 'name' | 'role' | 'personaSlug'>) =>
   !!p.personaSlug?.trim() || /\bpersona\b/i.test(`${p.name} ${p.role}`);
 
-/** The person a proposal that names a persona means, as it wrote them: its role without "Persona", or its name. */
+/** The person a proposal that names a persona means, as it wrote them: its role without "Persona" and the punctuation around it, or its name. */
 export const personaNamed = (p: Pick<HireProposal, 'name' | 'role'>) =>
   /\bpersona\b/i.test(p.role)
-    ? p.role.replace(/\s*\bpersona\b\s*/gi, ' ').trim() || p.name
+    ? p.role
+        .replace(/\b(new altitude\s+)?persona\b/gi, ' ')
+        .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}.]+$/gu, '')
+        .replace(/\s+/g, ' ') || p.name
     : p.name;
 
 /**

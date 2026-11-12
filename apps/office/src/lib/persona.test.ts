@@ -6,6 +6,7 @@ import type { HireProposal } from '@oddboro/ledger';
 import {
   hasPersonaHint,
   ordinaryFrom,
+  personaNamed,
   proposalView,
   proposedPersona,
   suggestedPersona,
@@ -181,4 +182,22 @@ test('the builder from a proposal that named a persona never carries the person'
     role: 'Mail Clerk',
     appearance: 'Tall'
   });
+});
+
+test('a role that puts "Persona" first, with a colon, still names the person', () => {
+  for (const role of [
+    'Persona: Pat Q Rivers',
+    'New Altitude Persona: Pat Q. Rivers',
+    'Pat Q. Rivers (Persona)'
+  ])
+    assert.equal(
+      proposedPersona(proposal({ name: 'Pat', role }), offers)?.slug,
+      'pat-q-rivers',
+      role
+    );
+  assert.equal(personaNamed({ name: 'Pat', role: 'Persona: Pat Q Rivers' }), 'Pat Q Rivers');
+  assert.equal(
+    personaNamed({ name: 'Pat', role: 'New Altitude Persona - Pat Q. Rivers' }),
+    'Pat Q. Rivers'
+  );
 });
