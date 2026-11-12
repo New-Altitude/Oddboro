@@ -334,7 +334,7 @@ async function access(who: StaffRow, ceiling: Level, ms: number, place?: CallPla
     if (a.level === 'act') allowed.push(`mcp__${c.id}`);
     else allowed.push(...c.readTools.map((t) => `mcp__${c.id}__${t}`));
   }
-  const { token: gate, servers: outside } = openGateway(reach, ms, place);
+  const { token: gate, servers: outside } = openGateway(reach, ms, place, who.id);
   Object.assign(servers, outside);
   return { servers, office, allowed, caps, gate };
 }

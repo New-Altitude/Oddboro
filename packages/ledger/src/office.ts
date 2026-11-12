@@ -130,6 +130,8 @@ import {
   grantWorks,
   LEVEL_LABEL,
   levelAtMost,
+  POSTAL_ID,
+  POSTAL_NAME,
   SWITCH_NAMES,
   switchesSaid,
   type FolderAccess,
@@ -2705,6 +2707,8 @@ export async function grantAccess(
   const who = await staffer(staffId);
   const named = await connector(req.connector);
   if (!who || !named) throw fixedError('No such Odd or connector');
+  if (named.id === POSTAL_ID && req.level !== 'read')
+    throw new Error('Physical mail only allows Read only access.');
   if (req.level === 'draft')
     throw new Error(`${named.name} connects to read, or to read and write`);
   if (!grantWorks(req.level, who.permission))
@@ -2712,13 +2716,32 @@ export async function grantAccess(
   if (req.another && named.config.google !== req.another)
     throw new Error(`Only Gmail and Google Drive take another account`);
   const conn = req.another ? await addGoogleAccount(req.another) : named;
-  await db
-    .insert(grants)
-    .values({ staffId, connectorId: conn.id, level: req.level, askId })
-    .onConflictDoUpdate({
-      target: [grants.staffId, grants.connectorId],
-      set: { level: req.level, askId, grantedAt: new Date() }
+  const saveGrant = (store: Tx | typeof db) =>
+    store
+      .insert(grants)
+      .values({ staffId, connectorId: conn.id, level: req.level, askId })
+      .onConflictDoUpdate({
+        target: [grants.staffId, grants.connectorId],
+        set: { level: req.level, askId, grantedAt: new Date() }
+      });
+  if (conn.id === POSTAL_ID) {
+    await db.transaction(async (tx) => {
+      const [current] = await tx
+        .select({ ready: connectors.readyAt })
+        .from(connectors)
+        .where(eq(connectors.id, conn.id))
+        .for('update');
+      if (!current?.ready) {
+        const pending = await tx
+          .select({ id: grants.staffId })
+          .from(grants)
+          .where(eq(grants.connectorId, conn.id));
+        if (pending.some((g) => g.id !== staffId))
+          throw new Error('Choose the office mailbox before granting another Odd access.');
+      }
+      await saveGrant(tx);
     });
+  } else await saveGrant(db);
   const steps = connectSteps(conn);
   if (steps.length) {
     // A further Google account not signed in yet reads as one, beside the one already there.
@@ -2920,11 +2943,21 @@ function connectSteps(conn: ConnectorRow, again = false): Step[] {
       done: false,
       action: { kind: 'secret' as const, connector: conn.id, name }
     })),
-    {
-      text: `Click Connect. The office starts ${conn.name} and lists its tools, marking the ones that only read.`,
-      done: false,
-      action: { kind: 'tools', connector: conn.id }
-    }
+    ...(conn.id === POSTAL_ID
+      ? [
+          {
+            text: 'Choose the LegalZoom mailbox this Odd can read. Access includes every recipient in that mailbox.',
+            done: false,
+            action: { kind: 'postal' as const, connector: conn.id }
+          }
+        ]
+      : [
+          {
+            text: `Click Connect. The office starts ${conn.name} and lists its tools, marking the ones that only read.`,
+            done: false,
+            action: { kind: 'tools' as const, connector: conn.id }
+          }
+        ])
   ];
 }
 
@@ -3219,12 +3252,20 @@ async function forgetConnector(id: string): Promise<{ forgot: boolean; googleTol
     await db.delete(connectors).where(eq(connectors.id, id));
     return { forgot: removed.length > 0, googleTold };
   }
-  if (removed.length) {
+  if (removed.length || id === POSTAL_ID) {
     const config = { ...c.config };
     delete config.account;
+    delete config.pmb;
     await db
       .update(connectors)
-      .set({ readyAt: null, ...(product ? { name: GOOGLE[product].name, config } : {}) })
+      .set({
+        readyAt: null,
+        ...(product
+          ? { name: GOOGLE[product].name, config }
+          : id === POSTAL_ID
+            ? { name: POSTAL_NAME, config, tools: [], readTools: [] }
+            : {})
+      })
       .where(eq(connectors.id, id));
   }
   return { forgot: removed.length > 0, googleTold };
@@ -3246,6 +3287,38 @@ async function forgetAws(c: ConnectorRow): Promise<boolean> {
   if (!all.some((k) => k.id !== c.id && isAws(k.id) && k.config.aws))
     deleteSecret(AWS_SIGN_IN.id, AWS_SIGN_IN.name);
   return true;
+}
+
+/** Save the mailbox and its read tools together, only for a current owner's setup task.
+ * Two setup cards cannot change an already connected mailbox under another Odd. */
+export async function bindPostalMailbox(
+  taskId: number,
+  pmb: string,
+  names: string[]
+): Promise<void> {
+  const [saved] = await db
+    .update(connectors)
+    .set({
+      name: `${POSTAL_NAME} · PMB ${pmb}`,
+      config: sql`jsonb_set(${connectors.config}, '{pmb}', to_jsonb(${pmb}::text))`,
+      tools: names,
+      readTools: names,
+      readyAt: new Date()
+    })
+    .where(
+      and(
+        eq(connectors.id, POSTAL_ID),
+        sql`(${connectors.config}->>'pmb' is null or ${connectors.config}->>'pmb' = ${pmb})`,
+        sql`exists (select 1 from ${tasks} t join ${grants} g on g.staff_id = t.staff_id
+      where t.id = ${taskId} and t.status = 'open' and g.connector_id = ${POSTAL_ID} and g.level = 'read'
+      and t.steps @> ${JSON.stringify([{ action: { kind: 'postal', connector: POSTAL_ID } }])}::jsonb)`
+      )
+    )
+    .returning({ id: connectors.id });
+  if (!saved)
+    throw new Error(
+      'This setup is no longer open or another mailbox is connected. Revoke its grants before changing mailboxes.'
+    );
 }
 
 export async function connectorReady(
@@ -3303,6 +3376,8 @@ export async function setGrantLevel(
   const who = await staffer(staffId);
   const conn = await connector(connectorId);
   if (!who || !conn) throw new Error('No such Odd or tool');
+  if (conn.id === POSTAL_ID && level !== 'read')
+    throw new Error('Physical mail only allows Read only access.');
   if (!grantWorks(level, who.permission))
     throw new Error(`${who.name} holds ${who.permission}, so it cannot be given ${level}`);
   const [changed] = await db
