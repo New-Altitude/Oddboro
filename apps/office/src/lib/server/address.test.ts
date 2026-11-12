@@ -1,6 +1,7 @@
 // The office's own Caddyfile (`ownCaddyfile` in address.ts) on each system,
 // the look at port 80 (`port80`), which of its commands may show a window,
-// Make it secure on a system the office does not know (`secureAddress`), and
+// what a failed Make it secure says on each system and on one the office does
+// not know (`secureAddress`), and
 // the owner's key on the office's own probe of its address (`answers`).
 // Run with `npm test -w @oddboro/office`.
 import assert from 'node:assert/strict';
@@ -255,6 +256,54 @@ test('on a system the office does not know, Make it secure runs nothing, and the
     syncBuiltinESMExports();
   }
   assert.deepEqual(started, []);
+});
+
+/** What a failed Make it secure tells the owner on each system, written out. */
+const NOT_TRUSTED: [NodeJS.Platform, string][] = [
+  ['darwin', 'The certificate was not trusted. Try again, and enter your password.'],
+  ['linux', 'The certificate was not trusted. Try again, and enter your password.'],
+  ['win32', 'The certificate was not trusted. Try again, and confirm when Windows asks.']
+];
+
+test('when Make it secure fails, the setup route tells a Mac or Linux owner to enter their password, and a Windows owner to confirm when Windows asks', async () => {
+  const started: string[] = [];
+  // Every system's trust command fails.
+  mock.method(
+    childProcess,
+    'execFile',
+    (cmd: string, _args: string[], _options: object, done: (e: Error) => void) => {
+      started.push(cmd);
+      done(Object.assign(new Error('a stand-in that fails'), { code: 1 }));
+      return {};
+    }
+  );
+  // Caddy's admin API, asked for the root certificate, answers with one.
+  mock.method(globalThis, 'fetch', async () =>
+    Response.json({ root_certificate: 'a root certificate' })
+  );
+  syncBuiltinESMExports();
+  try {
+    for (const [platform, words] of NOT_TRUSTED) {
+      const request = new Request('http://127.0.0.1/api/setup/address', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'secure' })
+      });
+      const answer = await on(platform, empty, () =>
+        // The route reads only the request, so the rest of Kit's event is left out.
+        Promise.resolve(addressRoute({ request } as Parameters<typeof addressRoute>[0])).then(
+          () => undefined,
+          (e: unknown) => e
+        )
+      );
+      assert.ok(isHttpError(answer), `${platform}: the route answered ${String(answer)}`);
+      assert.deepEqual([answer.status, answer.body.message], [502, words], platform);
+    }
+  } finally {
+    mock.restoreAll();
+    syncBuiltinESMExports();
+  }
+  // Each system's own trust command ran and failed, so each line is the failure's.
+  assert.deepEqual(started, ['osascript', 'pkexec', 'certutil.exe']);
 });
 
 test("the office's probe of its own address sends the owner's key, so the office's refusal of a keyless request does not read as an address that misses it", async () => {

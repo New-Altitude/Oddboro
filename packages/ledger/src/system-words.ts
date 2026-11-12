@@ -12,9 +12,21 @@ export type SystemWords = {
   trustAsks: string;
   /** Make it secure's button while the system asks. */
   trustWaiting: string;
+  /** What Make it secure says when the system did not trust the certificate. */
+  trustFailed: (typeof TRUST_FAILED)[keyof typeof TRUST_FAILED];
   /** Browsers to use instead of Firefox, which keeps its own list of trusted certificates. */
   notFirefox: string;
 };
+
+/**
+ * The words for a failed Make it secure, one per way a system asks. Each keeps
+ * its literal type, so the office throws it as a `fixedError`, whose message
+ * an error report may keep.
+ */
+const TRUST_FAILED = {
+  password: 'The certificate was not trusted. Try again, and enter your password.',
+  confirm: 'The certificate was not trusted. Try again, and confirm when Windows asks.'
+} as const;
 
 /** Linux's, and a system the office does not know, or not yet. */
 const COMPUTER: SystemWords = {
@@ -22,6 +34,7 @@ const COMPUTER: SystemWords = {
   label: 'This computer',
   trustAsks: "It takes your computer's password, once.",
   trustWaiting: 'Waiting for your password',
+  trustFailed: TRUST_FAILED.password,
   notFirefox: 'Chrome or Edge'
 };
 
@@ -31,6 +44,7 @@ const WORDS: Record<System, SystemWords> = {
     label: 'Your Mac',
     trustAsks: "It takes your Mac's password, once.",
     trustWaiting: 'Waiting for your password',
+    trustFailed: TRUST_FAILED.password,
     notFirefox: 'Safari or Chrome'
   },
   linux: COMPUTER,
@@ -38,7 +52,8 @@ const WORDS: Record<System, SystemWords> = {
   windows: {
     ...COMPUTER,
     trustAsks: 'Windows asks you to confirm it, once.',
-    trustWaiting: 'Waiting for you to confirm'
+    trustWaiting: 'Waiting for you to confirm',
+    trustFailed: TRUST_FAILED.confirm
   }
 };
 

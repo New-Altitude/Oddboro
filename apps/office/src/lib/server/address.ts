@@ -57,6 +57,7 @@ import {
 } from '@oddboro/ledger';
 import { writeEnv } from '@oddboro/ledger/env';
 import { fixedError } from '@oddboro/ledger/errors';
+import { systemWords } from '@oddboro/ledger/system-words';
 import { ownerCookie } from '@oddboro/ledger/owner-key';
 import type { Address } from '#lib/address.ts';
 import { HOSTS } from './hosts.ts';
@@ -592,7 +593,7 @@ export async function secureAddress(): Promise<Address> {
   if (!root) throw fixedError('Caddy has not made its certificate yet. Try again in a moment.');
   const system = currentSystem();
   if (!system || !succeeded(await TRUST_ROOT[system](root)))
-    throw fixedError('The certificate was not trusted. Try again, and enter your password.');
+    throw fixedError(systemWords(system).trustFailed);
   return address();
 }
 
