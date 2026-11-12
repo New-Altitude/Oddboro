@@ -118,7 +118,6 @@ import {
   type FollowUpRow,
   type GoalRow,
   type HandOffStep,
-  type JobRow,
   type Level,
   type ModelUsage,
   type Outcome,
@@ -126,7 +125,7 @@ import {
   type PokeRow,
   type RecentThread,
   type ReportRow,
-  type RunTrigger,
+  type CheckedFiles,
   type StaffRow,
   type TaskRow,
   type ThreadStory,
@@ -145,7 +144,7 @@ import type { ChatEntry, ChatEvent } from '../staff/chat.ts';
 import { floorTool, followUpDetail, type WorkAbout } from '../staff/work.ts';
 import type { ChatFile } from '#lib/attachments.ts';
 import { agentCommand } from './agent-sign-in.ts';
-import { awsReady } from './aws.ts';
+import { sourceReady } from './access.ts';
 import { lastExchange } from './chat-preface.ts';
 import { addToChat, history } from './chat-turns.ts';
 import {
@@ -163,7 +162,6 @@ import { bus, emit } from './events.ts';
 import { deniedEdits, denyRules, readStaffFile } from './files.ts';
 import { firstDayOf } from './first-day.ts';
 import { followUpBrief, waitEnded } from './follow-up-brief.ts';
-import { jobBrief, jobWork } from './job-brief.ts';
 import { closeGateway, openGateway } from './gateway.ts';
 import { ACT_WRITE, house, managerWork, stillOnDeskSection, whoIsHereSection } from './house.ts';
 import {
@@ -176,7 +174,6 @@ import {
   type RunImage
 } from './launch.ts';
 import { notifyMac } from './notify.ts';
-import { bearer } from './oauth.ts';
 import { OUTCOME_LINE, personaRun, voiced } from './persona-run.ts';
 import { catchUp, NOW, parseSession, saveSession, sectionsOf } from './resume.ts';
 import { runEnv, toolServerEnv } from './run-env-allow.ts';
@@ -187,6 +184,7 @@ import { downtime, installsAt } from './update.ts';
 import { tooOldLine } from './versions.ts';
 export { activeReply, addToReply, chat, replyToOwnerTurn, stopReply } from './chat-run.ts';
 export { history, keepOwnerTurn } from './chat-turns.ts';
+export { runJob } from './job-run.ts';
 export { inProgress, isBusy, runsActive, stopRuns, working } from './run-state.ts';
 
 /** The owner's data folder, which every staffer may read, whatever tool it runs on. */
@@ -327,13 +325,7 @@ async function access(who: StaffRow, ceiling: Level, ms: number, place?: CallPla
   for (const a of caps.outside) {
     if (a.heldBack) continue;
     const c = a.connector;
-    // A sign-in that ran out shows only now, as the office asks for a fresh token.
-    if (c.config.oauth && !(await bearer(c.id).catch(() => undefined))) {
-      a.heldBack = 'sign-in ran out';
-      continue;
-    }
-    // So does an AWS sign-in that ended, for AWS itself and any tool whose key is kept there.
-    if (!(await awsReady(c))) {
+    if (!(await sourceReady(c))) {
       a.heldBack = 'sign-in ran out';
       continue;
     }
@@ -341,7 +333,7 @@ async function access(who: StaffRow, ceiling: Level, ms: number, place?: CallPla
     if (a.level === 'act') allowed.push(`mcp__${c.id}`);
     else allowed.push(...c.readTools.map((t) => `mcp__${c.id}__${t}`));
   }
-  const { token: gate, servers: outside } = openGateway(reach, ms, place);
+  const { token: gate, servers: outside } = openGateway(reach, ms, place, who.id);
   Object.assign(servers, outside);
   return { servers, office, allowed, caps, gate };
 }
@@ -569,7 +561,14 @@ const listedLine = ({ thread: t, waiting, goal }: ThreadStory): RecentThread => 
  * How a run ended. `saved` means its tool named a session, which went in the
  * session file, so a later run that resumes it holds this run's message.
  */
-export type Run = { ok: boolean; text: string; saved?: true; interrupted?: true };
+export type Run = {
+  ok: boolean;
+  text: string;
+  saved?: true;
+  interrupted?: true;
+  /** A file job's check of what this run wrote (`CheckedFiles`, less the periods it started with). */
+  checked?: Omit<CheckedFiles, 'periods'>;
+};
 const stopped = (): Run => ({ ok: false, text: 'Stopped at your request.', interrupted: true });
 /** How a run ends on its stop: the owner's Stop, or the Odd leaving the office (`stopRuns`). */
 const stoppedBy = (who: StaffRow, signal?: AbortSignal): Run =>
@@ -705,6 +704,15 @@ export type RunOpts = {
   runId?: string;
   signal?: AbortSignal;
   kind: UsageKind;
+  /** A scheduled file exchange grants no right to lead or wake the work. */
+  jobFiles?: {
+    thread: number;
+    input?: string;
+    output: string;
+    record: string;
+    inputHash?: string;
+    sources?: string[];
+  };
   sessionFile?: string;
   extra?: string;
   /** The owner's own message, when this is a chat. */
@@ -864,6 +872,22 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
           via: opts.via
         }
   );
+  // A source can sign out between the check of both jobs and this run.
+  const unavailable = caps.outside.filter(
+    (a) => a.heldBack && opts.jobFiles?.sources?.includes(a.connector.id)
+  );
+  if (unavailable.length) {
+    await closeGateway(gate);
+    return {
+      ok: false,
+      text: unavailable
+        .map(
+          (a) =>
+            `${who.name} needs ${a.connector.name} for the scheduled file. Ask in ${who.name}'s chat to reconnect it (${a.heldBack}).`
+        )
+        .join('\n')
+    };
+  }
   // Prompts name the owner as {owner}: each install's staff use its own name.
   step('writing its brief');
   const owner = await ownerName();
@@ -957,7 +981,8 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
     })
   );
   // On a thread, the run writes only its own part of the thread's folder.
-  const part = opts.threadId ? threadPart(opts.threadId, who.id) : undefined;
+  const fileThread = opts.threadId ?? opts.jobFiles?.thread;
+  const part = fileThread ? threadPart(fileThread, who.id) : undefined;
   if (part) mkdirSync(part, { recursive: true });
   const writes = [dir, ...(part ? [part] : []), ...extraWrites];
   const denied = deniedEdits({
@@ -980,9 +1005,11 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
         ODDBORO_FILES: JSON.stringify({
           cwd: dir,
           reads: readsBeyond(dir, reads, extraReads, claudeDir),
+          input: opts.jobFiles?.input,
           writes,
           noWrite: denied
-        })
+        }),
+        ...(opts.jobFiles ? { ODDBORO_FILE_CHECK: JSON.stringify(opts.jobFiles) } : {})
       }
     };
     allowed.push('mcp__files');
@@ -1152,7 +1179,10 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
           key,
           staffId: who.id,
           dir,
-          reads: readsBeyond(dir, reads, extraReads, claudeDir),
+          reads: [
+            ...readsBeyond(dir, reads, extraReads, claudeDir),
+            ...(opts.jobFiles?.input ? [opts.jobFiles.input] : [])
+          ],
           part,
           writes,
           granted: extraWrites,
@@ -1386,43 +1416,6 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
       return true;
     };
   });
-}
-
-/**
- * Run one job in a fresh session. The staffer walks to its room while it runs.
- * `times` are the scheduled times the run is for: one, or a catch-up's
- * periods oldest first. Run now is for now.
- */
-export async function runJob(
-  job: JobRow,
-  trigger: RunTrigger = 'schedule',
-  times: Date[] = [new Date()]
-): Promise<Run> {
-  const who = await staffer(job.staffId);
-  if (!who) return { ok: false, text: `No Odd named ${job.staffId}` };
-  return slot(
-    who.id,
-    {
-      kind: 'job',
-      ...jobWork(job, times),
-      about: {
-        key: randomUUID(),
-        kind: 'job',
-        id: job.id,
-        title: job.name,
-        leadId: who.id,
-        lead: who.name
-      }
-    },
-    (onEvent, runId) =>
-      run(who, job.instructions, {
-        kind: 'job',
-        runId,
-        onEvent,
-        timeoutMs: JOB_TIMEOUT_MS,
-        extra: jobBrief(job, trigger, times)
-      })
-  );
 }
 
 /** What a staffer is told when it reads the owner's edit to its file, for a lesson. */

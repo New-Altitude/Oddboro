@@ -48,6 +48,8 @@ const pattern = new RegExp(`(?<![A-Za-z])(${words.map(escape).join('|')})(?![A-Z
 
 const failures: string[] = [];
 const BINARY = /\.(png|jpe?g|gif|webp|ico|woff2?|ttf|otf|mp4|m4a|mp3|zip)$/i;
+// A package's integrity hash is base64, so a short word can turn up in it by chance.
+const HASH = /^\s*"integrity": "sha\d+-[A-Za-z0-9+/=]+",?$/;
 for (const file of repoFiles()) {
   if (file.startsWith('data/')) continue;
   // A private word in a file or folder name counts too.
@@ -56,7 +58,8 @@ for (const file of repoFiles()) {
   read(file)
     .split('\n')
     .forEach((line, i) => {
-      if (pattern.test(line)) failures.push(`${file}:${i + 1} holds a private word`);
+      if (!HASH.test(line) && pattern.test(line))
+        failures.push(`${file}:${i + 1} holds a private word`);
     });
 }
 report('private', failures);

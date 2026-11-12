@@ -73,6 +73,8 @@ import { currentPlatform, currentSystem } from './platform.ts';
 import { computerWord } from './system-words.ts';
 import {
   FOLDER_SAID,
+  parseLevel,
+  POSTAL_ID,
   grantWorks,
   LEVELS,
   NOT_OWN_TOOLS,
@@ -83,6 +85,7 @@ import {
 } from './access-words.ts';
 import { handOff, type CarriedFile } from './hand-offs.ts';
 import { leavesLine, leavingRefused } from './leaving.ts';
+import { keepBugDraft } from './bug-drafts.ts';
 import { MANAGER_ROLE } from './managers.ts';
 import { parkOnTask } from './task-parking.ts';
 import {
@@ -148,6 +151,12 @@ import {
 import { home, isOfficeFile, isWhereNamed } from './home.ts';
 import { trustSystemCertificates } from './certificates.ts';
 
+import {
+  advancedMode,
+  projectConnections,
+  projectWork,
+  requestProject
+} from './project-sessions.ts';
 trustSystemCertificates();
 const ME = process.env.STAFF_ID ?? '';
 const me = await staffer(ME);
@@ -179,6 +188,11 @@ const mailboxes = (await grantsFor(ME))
 /** This run, as the office tools' row conditions read it. */
 const RUN: ToolRun = {
   gmail: mailboxes.length > 0,
+  // Project tools exist only while the owner keeps Advanced mode on.
+  project:
+    process.env.LESSON_RUN !== '1' &&
+    (await advancedMode()) &&
+    (await projectConnections(ME)).length > 0,
   chat: OWNER_SAID !== undefined,
   manager: me.role === MANAGER_ROLE
 };
@@ -310,6 +324,38 @@ async function attachable(
   return { paths: [...new Set(out)] };
 }
 
+const fileName = z
+  .string()
+  .max(240)
+  .regex(/^[\w.-]+(?:\/[\w.-]+)*$/)
+  .refine(
+    (s) => s.split('/').every((part) => part !== '.' && part !== '..'),
+    'Use a file name inside the work folder.'
+  );
+const jobFiles = z.object({
+  thread: z.number().int().positive().max(2147483647),
+  input: fileName
+    .optional()
+    .describe(
+      "A scheduled writer's result to read first, including its Odd's part, like clerk/wire.md."
+    ),
+  output: fileName.describe('The result to write inside your own part, like edition.md.'),
+  sources: z
+    .array(z.string().min(1).max(120))
+    .max(12)
+    .optional()
+    .describe(
+      'Tools needed to produce this file: connector ids or web. A checked input from another job needs no source account of its own.'
+    )
+});
+const planFiles = jobFiles.omit({ thread: true }).extend({
+  share: z
+    .boolean()
+    .optional()
+    .describe(
+      'Ask for permission to put material from the listed sources in only this result, readable by the Odds on this goal.'
+    )
+});
 const atArg = z.string().regex(SCHEDULE_RULE.oddAt);
 const scheduleArg = z.discriminatedUnion('every', [
   z.object({ every: z.literal('minutes'), n: z.number().int().min(SCHEDULE_RULE.oddMinMinutes) }),
@@ -674,6 +720,58 @@ const shortDay = (d: Date) =>
 const line = (r: LedgerRow) =>
   `- ${day(r.createdAt)} [${r.kind}] ${r.actor}: ${r.title}${r.reason ? ` (reason: ${r.reason})` : r.kind === 'decision' ? ' (no reason given)' : ''}`;
 
+// Connections are granted one at a time by the owner. An Odd can never
+// start a native process or type terminal keys through these tools.
+if (offered('my_project_sessions'))
+  tool(
+    'my_project_sessions',
+    {
+      description:
+        'See the project conversations the owner shared with you and the status and answers of your assignments.',
+      inputSchema: {}
+    },
+    async () => {
+      const sessions = await projectConnections(ME);
+      return json(
+        await Promise.all(
+          sessions.map(async (s) => ({
+            id: s.id,
+            title: s.title,
+            provider: s.agent,
+            work: (await projectWork(s.id))
+              .filter((r) => r.staffId === ME)
+              .map((r) => ({ id: r.id, state: r.state, answer: r.answer }))
+          }))
+        )
+      );
+    }
+  );
+if (offered('send_project_work'))
+  tool(
+    'send_project_work',
+    {
+      description:
+        'Give a shared native project session an assignment. Use a fresh UUID per assignment and reuse it on a retry. It waits for the owner to send it, unless the owner lets you send to that session without asking and you are at Act. Its result comes back as a report.',
+      inputSchema: {
+        session: z.string().uuid(),
+        key: z.string().uuid(),
+        prompt: z.string().trim().min(1).max(64000)
+      }
+    },
+    async (a) => {
+      if ((parseLevel(process.env.CEILING) ?? me.permission) === 'read')
+        return refused('This run can only read project work.');
+      const row = await requestProject({
+        id: a.key,
+        sessionId: a.session,
+        prompt: a.prompt,
+        staffId: ME,
+        threadId: THREAD_ID,
+        draft: (parseLevel(process.env.CEILING) ?? me.permission) !== 'act'
+      });
+      return json({ id: row.id, state: row.state });
+    }
+  );
 if (has('search_ledger'))
   tool(
     'search_ledger',
@@ -1215,6 +1313,8 @@ if (has('ask_for_access'))
       );
       if (!found.connector) return text(`${found.problem} Use find_connectors.`);
       const conn = found.connector;
+      if (conn.id === POSTAL_ID && level !== 'read')
+        return refused('Physical mail only allows Read only access.');
       const product = conn.config.google;
       if (another_account && !product)
         return refused(`another_account is only for Gmail and Google Drive.`);
@@ -1405,7 +1505,7 @@ tool(
       rows
         .map(
           (j) =>
-            `## ${j.name}\n${describeSchedule(j.schedule)}${j.enabled ? '' : ', paused'}${j.report ? `, reports to ${OWNER}` : ''}, missed runs: ${j.missed}\n\n${j.instructions}`
+            `## ${j.name}\n${describeSchedule(j.schedule)}${j.enabled ? '' : ', paused'}${j.report ? `, reports to ${OWNER}` : ''}, missed runs: ${j.missed}\n\n${j.instructions}${j.files ? `\nScheduled files: ${JSON.stringify(j.files)}` : ''}`
         )
         .join('\n\n')
     );
@@ -1516,12 +1616,15 @@ if (has('propose_goal_plan'))
                   instructions: z.string(),
                   schedule: scheduleArg,
                   report: z.boolean().optional(),
-                  missed: missedArg
+                  missed: missedArg,
+                  files: planFiles.optional()
                 })
                 .optional(),
               change_job: z
                 .object({
                   name: z.string().describe('The job name, exactly as it is now.'),
+                  new_name: z.string().trim().min(1).max(80).optional(),
+                  files: planFiles.optional(),
                   instructions: z.string().optional(),
                   schedule: scheduleArg.optional(),
                   missed: missedArg
@@ -1563,7 +1666,13 @@ if (has('propose_goal_plan'))
           staff: x.staff,
           part: x.part,
           job: x.new_job,
-          editJob: x.change_job
+          editJob: x.change_job && {
+            name: x.change_job.name,
+            newName: x.change_job.new_name,
+            instructions: x.change_job.instructions,
+            schedule: x.change_job.schedule,
+            files: x.change_job.files
+          }
         });
       }
       for (const h of a.hires ?? []) {
@@ -1729,9 +1838,16 @@ if (has('edit_my_job'))
   tool(
     'edit_my_job',
     {
-      description: `Change one of your own jobs: its steps, its schedule, whether it reports to ${OWNER}, or what it does with runs it missed. When ${OWNER} asks for a change in chat, make it at once, worded the way they asked, then tell them what changed. Outside a chat, only to carry out an ask they approved, passing its id. To propose a change, raise_ask with the exact new steps first.`,
+      description: `Change one of your own jobs: its name, steps, scheduled files, schedule, whether it reports to ${OWNER}, or what it does with runs it missed. When ${OWNER} asks for a change in chat, make it at once, worded the way they asked, then tell them what changed. Outside a chat, only to carry out an ask they approved, passing its id. To propose a change, raise_ask with the exact new steps first.`,
       inputSchema: {
         job: z.string().describe('The job name, exactly as my_jobs lists it.'),
+        new_name: z.string().trim().min(1).max(80).optional(),
+        files: jobFiles
+          .nullable()
+          .optional()
+          .describe(
+            'For recurring work on a thread you already serve. Null returns the job to independent work.'
+          ),
         instructions: z.string().optional().describe('The full new steps, numbered.'),
         schedule: scheduleArg.optional(),
         report: z.boolean().optional(),
@@ -1739,11 +1855,16 @@ if (has('edit_my_job'))
         approved_ask: approvedArg
       }
     },
-    async ({ job, instructions, schedule, report, missed, approved_ask }) => {
+    async ({ job, new_name, instructions, schedule, report, missed, files, approved_ask }) => {
       const go = await goAhead(approved_ask);
       if ('problem' in go) return text(go.problem);
-      const j = await editOwnJob(ME, job, { instructions, schedule, report, missed }, go);
-      return text(j ? `Changed "${job}".` : `You have no job named "${job}". Check my_jobs.`);
+      const j = await editOwnJob(
+        ME,
+        job,
+        { name: new_name, instructions, schedule, report, missed, files },
+        go
+      );
+      return text(j ? `Changed "${j.name}".` : `You have no job named "${job}". Check my_jobs.`);
     }
   );
 
@@ -2120,6 +2241,39 @@ if (offered('withdraw'))
     }
   );
 
+// A bug report about Oddboro, only in a chat (`inChat` on its row). The office
+// puts the draft on this run's reply when the run ends (bug-drafts.ts), and
+// the owner's File this opens it in the report form. It files nothing.
+if (offered('draft_bug_report'))
+  tool(
+    'draft_bug_report',
+    {
+      description: `Draft a bug report about Oddboro itself, when ${OWNER} asks you to report a bug in this chat. Give a short title and the details: what happened, what they expected, and anything that helps fix it, such as the error. Under your reply, ${OWNER} gets File this, which opens the report form with your draft for them to review and edit. Nothing is filed until they choose there, so tell them to click File this. A second call in the same reply replaces the first draft.`,
+      inputSchema: {
+        // The report form's limits (TITLE_LIMIT and BODY_LIMIT in the office's bug-report.ts).
+        title: z.string().trim().min(1).max(256).describe('One line that names the bug.'),
+        body: z
+          .string()
+          .trim()
+          .min(1)
+          .max(65536)
+          .describe('The details, in plain words. Markdown is fine.')
+      }
+    },
+    async ({ title, body }) => {
+      // The office sets RUN_KEY for every run; with none, no reply could carry the draft.
+      if (!RUN_KEY)
+        return {
+          ...text('Nothing was drafted. This run has no reply to put it on.'),
+          isError: true
+        };
+      keepBugDraft(ME, RUN_KEY, { title, body });
+      return text(
+        `Drafted. ${OWNER} sees a File this bug report button under your reply, which opens the draft for them to review. Nothing is filed yet.`
+      );
+    }
+  );
+
 // Leaving the office (leaving.ts). Each only in a chat, on the owner's own
 // words (`inChat` on its row in tools.ts), and each only raises an ask: the
 // Odd leaves or comes back on the owner's yes alone.
@@ -2230,7 +2384,7 @@ if (has('office_report'))
   tool(
     'office_report',
     {
-      description: `Everything the office did in a window: each Odd with its remit, its level (read, draft or act), its tool and what its own tools reach, its folders, the office tools it holds beyond the ones every Odd has, its outside tools (each with what it reaches, or why a run leaves it out), and its jobs and runs, asks open and decided, and tasks for ${OWNER} open and done. For the daily report. followUps is the work owed after ${OWNER} answered: carrying out an approved ask, reworking one they sent back, acting on their feedback on a report, or picking up after a task they finished, each with its outcome (done, failed, waiting on ${OWNER}, or null while still to do). Each run has a trigger: 'schedule' means its timer started it, 'manual' means ${OWNER} pressed Run now. Judge a job's timing by its schedule runs only; a manual run at any hour is expected. Every time is ${ZONE}, like the schedules.`,
+      description: `Everything the office did in a window: each Odd with its remit, its level (read, draft or act), its tool and what its own tools reach, its folders, the office tools it holds beyond the ones every Odd has, its outside tools (each with what it reaches, or why a run leaves it out), and its jobs and runs, asks open and decided, and tasks for ${OWNER} open and done. For the daily report. followUps is the work owed after ${OWNER} answered: carrying out an approved ask, reworking one they sent back, acting on their feedback on a report, or picking up after a task they finished, each with its outcome (done, failed, waiting on ${OWNER}, or null while still to do). Each run has a trigger: 'schedule' means its timer started it, 'manual' means ${OWNER} pressed Run now. For shared files, lastVerified records the timed file operations the office checked. A run summary alone never verifies a file, its claims, or delivery. Judge a job's timing by its schedule runs only; a manual run at any hour is expected. Every time is ${ZONE}, like the schedules.`,
       inputSchema: { hours: z.number().int().min(1).max(168).default(24) }
     },
     async ({ hours }) => {

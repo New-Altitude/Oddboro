@@ -11,6 +11,7 @@
     staleDraft
   } from './task-response.svelte.ts';
   import Attachments from './Attachments.svelte';
+  import PostalMailbox from './PostalMailbox.svelte';
   import AwsSignIn from './AwsSignIn.svelte';
   import AwsSecretPick from './AwsSecretPick.svelte';
   import SelectToChat from './SelectToChat.svelte';
@@ -21,7 +22,7 @@
   import { call } from './api.ts';
   import { AWS_GUIDES, siteLink } from '../site.ts';
   import { ago, when } from './format.ts';
-  import { openFile, wins } from './windows.svelte.ts';
+  import { openFile, openProject, wins } from './windows.svelte.ts';
   import { chatAbout, replyAbout, showInChat } from './chat-about.svelte.ts';
   import { OFFICE_TOOLS } from '@oddboro/ledger/tools';
   import { describe } from '@oddboro/ledger/time';
@@ -355,7 +356,39 @@
           {/if}
         </section>
       {/if}
-      {#if !items.length && !desk.away.length}
+      {#if desk.projectWork.length}
+        <ul class="mb-1.5 flex flex-col gap-1.5" aria-label="Project work to review">
+          {#each desk.projectWork as p (p.id)}
+            {@const from = p.staffId ? who(p.staffId) : undefined}
+            <li>
+              <button
+                class="flex w-full items-start gap-3 rounded-xl bg-raise px-3 py-2.5 text-start transition-colors hover:bg-sea/15"
+                onclick={() => openProject(p.sessionId)}
+              >
+                {#if from}
+                  <Pixel
+                    src={from.look?.portrait}
+                    frame={`${from.portrait}/default`}
+                    fallback={`${from.sprite}@${from.variant}/idle-down-0`}
+                    scale={1}
+                    label={from.name}
+                    class="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-sea-deep"
+                  />
+                {/if}
+                <span class="min-w-0 flex-1">
+                  <span class="flex items-center gap-2 text-[10px] tracking-[0.16em] uppercase">
+                    <span class="text-ember">Project work</span>
+                    <span class="text-faint">{from?.name ?? 'Office'} · {ago(p.at)}</span>
+                  </span>
+                  <span class="mt-0.5 block text-sm text-ink">{p.title}</span>
+                  <span class="mt-0.5 block truncate text-xs text-muted">{p.prompt}</span>
+                </span>
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+      {#if !items.length && !desk.away.length && !desk.projectWork.length}
         <p class="py-10 text-center text-sm text-muted">
           Desk clear. Your Odds will bring you anything that needs you.
         </p>
@@ -756,7 +789,8 @@
                       </p>
                     {/if}
                   </div>
-                  {#if s.done && !tickable(s)}
+                  <!-- A chosen mailbox changes only by revoking its grants, so its step has no Undo. -->
+                  {#if s.done && !tickable(s) && s.action?.kind !== 'postal'}
                     <button
                       class="ms-auto shrink-0 text-xs text-muted underline hover:text-ink disabled:opacity-40"
                       disabled={busy}
@@ -770,6 +804,16 @@
                     disabled={busy}
                     onclick={() => hostedSignIn(t, index)}>Sign in</button
                   >
+                {:else if s.action?.kind === 'postal'}
+                  {#if s.done}
+                    {#if s.answer}<p class="mt-1.5 text-xs text-muted">{s.answer}</p>{/if}
+                  {:else}
+                    {#key t.id}<PostalMailbox
+                        taskId={t.id}
+                        {index}
+                        odd={who(t.staffId)?.name ?? 'the Odd'}
+                      />{/key}
+                  {/if}
                 {:else if s.action?.kind === 'aws'}
                   {#if s.done}
                     {#if s.answer}<p class="mt-1.5 text-xs text-muted">{s.answer}</p>{/if}

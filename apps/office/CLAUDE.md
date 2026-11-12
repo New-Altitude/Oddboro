@@ -4,6 +4,9 @@ The floor the owner watches, and the desk they work from. SvelteKit 3 with Svelt
 runes, PixiJS for the pixel-art floor, Tailwind for the page around it, and
 Postgres through `@oddboro/ledger`. Port 4500 on 127.0.0.1, or `ODDBORO_PORT`.
 
+`npm test` builds the sprites first when `packages/sprites/dist/meta.json` is
+missing, as on a fresh clone: hiring reads it.
+
 Where a new kind of thing starts, the shared function for each job, and the
 check that catches a missed place: `docs/architecture.md`.
 
@@ -414,9 +417,33 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    picture, else its name, `chat-attach.ts`), and Attach files in the plus
    menu adds files to the tray alone. The plus button (More) beside the box
    opens a short menu built from one list (`MORE`: label, action, where it
-   shows): Attach files, and New goal in the manager's chat. Arrow keys move
-   in it, Enter picks, Escape or a click outside closes it, and focus goes
-   back to the box after an action. The tray previews each file with a ✕, in a column at the
+   shows): Attach files, New goal in the manager's chat, and Report a bug.
+   Arrow keys move in it, Enter picks, Escape or a click outside closes it,
+   and focus goes back to the box after an action. Report a bug opens a
+   review form (`src/lib/ui/BugReport.svelte`) with a title and details,
+   the only two fields that leave the office. When the chat's last Odd line
+   is a failed reply, its error starts the details (`failedReply` in
+   `src/lib/bug-report.ts`), and the owner can edit it. The form says it
+   posts publicly on GitHub and needs a GitHub account. Open draft on
+   GitHub opens the issue form at `New-Altitude/Oddboro` (`BUG_REPO`) in the
+   browser, with details too long for a link left to copy (`browserDraft`);
+   nothing is filed until the owner submits it there. When `gh` is on the
+   path, Post with GitHub CLI files it with the Mac's signed-in `gh`
+   account (`/api/staff/[id]/bug-reports`, the reviewed text on stdin, any
+   `GH_TOKEN` dropped), then adds the issue's link to the chat as a told
+   line. A post GitHub does not confirm keeps the form and links to the
+   issue list; Cancel keeps the chat as it was. The chat has no slash
+   commands: whatever the owner types goes to the Odd, a request to report
+   a bug included, and a message that names a bug tells the Odd to draft it
+   with `draft_bug_report` (`chat-run.ts`). That tool, every Odd's in a chat
+   only, keeps the title and details for its run (`keepBugDraft` in the
+   ledger's `bug-drafts.ts`); when the run ends the office takes them
+   (`takeBugDraft`, gone either way) and keeps them on the reply as `bug`
+   (`ChatEntry`). Under such a reply, a File this bug report button (styled as a chat choice) opens the same review form
+   with that title and details, editable (`formStart` in
+   `src/lib/bug-report.ts`). It never opens GitHub or posts: the owner
+   still picks Open draft on GitHub, the form's main button, or Post with
+   GitHub CLI. The tray previews each file with a ✕, in a column at the
    end side over the plus button and Send, three files tall at most
    (`.tray`), scrolling past that. The box is always as tall as that
    column (`side` in `fit`), and at least as tall as the plus button and
@@ -703,7 +730,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    (`gemini-policy.test.ts`); a message starting with `/` goes in after a line
    break, so Gemini never runs it as a command.
    A chat resumes the Odd's session without waiting for a background slot.
-   Stop reply names the run on that saved turn, and later runs hear that
+   Stop, beside "is replying…", names the run on that saved turn, and later runs hear that
    reply as stopped by the owner, not failed (`chatPreface`). Ordinary Send
    queues while a reply runs. On a Claude Code Odd the queued message offers
    Send now, and Ctrl+Enter in the box (Ctrl on every system) queues and
@@ -946,10 +973,19 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    working. A run below the Odd's own level (a hand-off's, either side, or a
    hub's pick-up) passes its ceiling as `CEILING` the same way, so `my_access`
    says Draft and why, with a write grant read only, as the prompt does
-   (`capped`, `accessInRun`). Hosted servers sign in with
-   OAuth (`src/lib/server/oauth.ts`): the task's Sign in opens the service, it
-   returns to `/connect/callback`, the tokens go in the keychain, and each run's
-   gateway connects with a fresh access token as a header. A token is refreshed
+   (`capped`, `accessInRun`).
+   Physical mail signs in to LegalZoom's read-only endpoint. The owner chooses
+   one PMB for the office on the Desk. A run receives only list, details, and
+   scanned text. The gateway supplies the chosen PMB and checks the Odd still
+   holds the grant on each request. No setup key or inbox list reaches the Odd.
+   `postal.test.ts` exercises this with two synthetic mailboxes. The provider's
+   [tool catalog](https://api.earthclassmail.com/v2/mcp_catalog.json) names the
+   current schemas. Before release, sign in with an authorized test account,
+   select a mailbox, read a known scanned letter in chat and open its original.
+   Hosted servers sign in with OAuth (`src/lib/server/oauth.ts`): the task's
+   Sign in opens the service, it returns to `/connect/callback`, the tokens go
+   in the keychain, and each run's gateway connects with a fresh access token
+   as a header. A token is refreshed
    one at a time per sign-in (`once`), since a service may end a sign-in whose
    refresh token arrives twice. For the same reason `steadyFetch` retries only
    a request that never left this computer; one whose answer was lost is not
@@ -1012,6 +1048,26 @@ pieces under 3,900 bytes a line, so no value is on a command line.
     stops timers in sleep. A run's result goes in the ledger, and on the owner's
     desk as a report when the job says so. Each run records its trigger:
     `schedule` when the timer started it, `manual` when the owner pressed Run now.
+    `job-run.ts` uses the shared runner and live slots.
+    A job with scheduled files reads its writer's checked result and writes in
+    its own part of that work. Opening the job checks the saved assignment,
+    accounts and source access without running it. The timer also checks source
+    sign-ins. The file server records the read and write; the office checks
+    the result against the file on disk. Gemini uses native file tools, so it
+    cannot verify a file job. Other jobs run as before.
+    A reader's input is its writer's file for the period the run is for
+    (`scheduledInput` in the ledger), by the writer's run, never by whether
+    the bytes changed. Before a reader runs, the clock asks `readerTurn` in
+    `jobs.ts`: while its writer still owes that period (running, due, or owed
+    and catching up), the reader owes its time instead and gets in line again
+    when the writer's run ends, so after the Mac sleeps both run in order. A
+    writer that skipped the period makes the reader skip it too, on the While
+    you were away card; one that has not written a first file yet makes it
+    skip quietly. While the writer's `catch_up` ask is open the reader waits
+    too; a yes runs both in order, and a no makes it skip those periods (a
+    change to the asks table makes waiting readers look again,
+    `readersLookAgain`). Only a writer that ran for the period and left no checked
+    file fails the reader's run.
     A thread its hub parked with `resume_at` wakes at that time: the clock
     starts the hub's `resume` follow-up. One parked on a task (`after_task`)
     wakes when that task is done or dropped, with no clock. So does a thread the usage window
@@ -1545,8 +1601,8 @@ account.
    and span again and sends them through the office's own transport, so the
    gate applies to them too.
 6. Traces: about one in ten (`TRACE_SAMPLE_RATE`). `QUIET_ROUTES` are never
-   traced: `/api/events` stays open as long as the page, `/api/update` is the
-   shell's poll, and the relay would trace itself.
+   traced: the office and project event streams stay open, project commands carry
+   terminal input, `/api/update` is the shell's poll, and the relay would trace itself.
 7. `instrumentation.server.ts` loads before the server, so
    `src/lib/server/diagnostics.ts` and `src/lib/server/hosts.ts` import
    nothing that brings in Postgres.
@@ -1741,8 +1797,9 @@ the persona's voice.
   fills the screen, and panning stops at the edge.
 - The page loads the floor's PixiJS code with `import()` as it mounts
   (`src/lib/floor/index.ts`), and the Office designer and an Odd's usage
-  charts load when opened, so the first page carries none of PixiJS or
-  layerchart. Import a floor module's values only through `index.ts`; a
+  charts load when opened, and `Markdown.svelte` loads markdown-it with the
+  first text it shows (plain text until then), so the first page carries
+  none of PixiJS, layerchart or markdown-it. Import a floor module's values only through `index.ts`; a
   type import is free.
 - Third-party packages go under `devDependencies` in `package.json`, even
   the ones the office runs: the build bundles those, and the app ships only
@@ -1819,3 +1876,30 @@ used; `chat-sign-in.ts` reads that account. Its retry is the chat's own
 Retry reply on the saved turn, so the earlier failed reply stays in
 history. Access cards come from database deliveries, never the Odd's chat
 file.
+
+The Projects window and its local controller live in
+`src/lib/ui/ProjectSessions.svelte` and `src/lib/server/project-sessions/`.
+Projects is a window in the start panel (`openProject` in
+`windows.svelte.ts`). While it is in front on a wide screen, the panel
+stretches to 8 px short of the Odd's panel, else of the Odds rail
+(`projectsReach` in `+page.svelte`, `reach` on `SidePanel.svelte`), the desk
+pill hides, and the music keeps its usual width. Its handle still drags: the
+width it leaves is Projects' own (`reachWidth`, kept beside the panel's usual
+width), from `min` up to that reach, and dragged all the way it follows the
+reach again. Another tab in front brings the usual width back. While the rail is wide
+(hovered, focused or ⌘K: `onwiden` on `OddsRail.svelte`), the panel steps
+back to the wide rail's edge, in the rail's own 200 ms, so every Odd stays in
+view. Its sessions run down the start side as a listbox; the selected one's
+terminal fills the rest, and its details fold out over the terminal. The
+terminal refits at once and sends the session its size only once it settles
+(`ProjectTerminal.svelte`).
+They sit behind Advanced mode (`owner.advanced_at`), which the owner turns on
+in Setup's Advanced section (`AdvancedSection.svelte`, `PUT
+/api/setup/advanced`) after one warning. The page holds it in `advanced` in
+`windows.svelte.ts`: off, the top bar and the chat's plus menu offer no
+Projects. Off, `/api/project-sessions` and its event stream answer 403
+(`ADVANCED_OFF`), and turning it off ends every open stream
+(`detachProjectViews`). Find existing reads Claude Code's own session files
+(`claude-sessions.ts`); the terminal loads `node-pty` only when it opens. See
+[project sessions](../../docs/project-sessions.md) for native clients,
+handover and recovery.

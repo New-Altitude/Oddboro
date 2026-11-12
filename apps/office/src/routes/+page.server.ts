@@ -1,4 +1,5 @@
 import {
+  advancedMode,
   currentSystem,
   desk,
   goalThreads,
@@ -45,6 +46,8 @@ export const load: PageServerLoad = async () => {
     /** What the header calls this computer. */
     computer: `Your ${computerWord(currentSystem())}`,
     welcomed: !first,
+    /** Whether the owner turned on Advanced mode, which shows Projects. */
+    advanced: await advancedMode(),
     diagnostics: diagnosticsState(),
     account: accountStatus()
   };

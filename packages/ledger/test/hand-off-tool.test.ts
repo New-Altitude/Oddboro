@@ -38,6 +38,7 @@ const {
   connectors,
   goals,
   grants,
+  owner,
   staff,
   tasks: tasksTable,
   threads
@@ -49,6 +50,7 @@ const { MAIL_FILES_MAX } = await import('../src/mail-attachments.ts');
 const { isOffered, OFFICE_TOOLS, RIDES_WITH, STARTER_TOOLS } = await import('../src/tools.ts');
 const { MANAGER_ROLE } = await import('../src/managers.ts');
 const { HAND_OFF_LIMIT, LEADS_NONE, threadPart } = await import('../src/threads.ts');
+const { connectProject, shareProject } = await import('../src/project-sessions.ts');
 afterEach(() => oneThreadPerGoal(sql, MANAGER_ROLE));
 
 const odd = (id: string, name: string) => ({
@@ -673,6 +675,14 @@ test('every office tool refuses a key it does not take, and says which keys it d
   await db.insert(staffGoals).values({ staffId: 'all', goalId: fair.id, part: 'Everything' });
   // Gmail at any level offers propose_reply.
   await db.insert(grants).values({ staffId: 'all', connectorId: 'gmail', level: 'read' });
+  // A native conversation shared with Ada offers the project tools, in Advanced
+  // mode. The owner row keeps the name every other test here reads.
+  await db
+    .insert(owner)
+    .values({ name: 'the owner', advancedAt: new Date() })
+    .onConflictDoUpdate({ target: owner.id, set: { advancedAt: new Date() } });
+  const project = await connectProject('claude', 'every-tool-test', '/project', 'Tests');
+  await shareProject(project.id, 'all');
   const reached = new Set<string>();
   const runs: Record<string, string>[] = [chat, { THREAD_ID: String(sale.id) }];
   for (const env of runs) {
@@ -740,13 +750,14 @@ for (const [id, holds] of Object.entries(HOLDERS))
 // The test above works out what a run gets with `isOffered`, so a condition
 // dropped from a row, or from `isOffered`, changes what it expects too. These
 // hold the rows themselves, and what `isOffered` gives for each condition.
-test('only leave_office, withdraw, tell_lead, remove_odd and bring_back_odd wait for a chat, only leave_office is kept from the manager, and only see_office shapes the prompt and is never offered, even to a chat holding it', () => {
+test('only leave_office, withdraw, tell_lead, draft_bug_report, remove_odd and bring_back_odd wait for a chat, only leave_office is kept from the manager, and only see_office shapes the prompt and is never offered, even to a chat holding it', () => {
   const where = (field: 'inChat' | 'notToManager' | 'prompt') =>
     OFFICE_TOOLS.filter((t) => t[field]).map((t) => t.id);
   assert.deepEqual(where('inChat'), [
     'leave_office',
     'withdraw',
     'tell_lead',
+    'draft_bug_report',
     'remove_odd',
     'bring_back_odd'
   ]);

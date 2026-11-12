@@ -29,6 +29,7 @@
     "./live-tables": "./src/live-tables.ts",
     "./filters": "./src/filter-words.ts",
     "./certificates": "./src/certificates.ts",
+    "./project-terminal": "./src/project-terminal.ts",
     "./test-defaults": "./test/test-defaults.ts",
     "./request-targets": "./test/request-targets.ts",
     "./tools-on-path": "./test/tools-on-path.ts"
@@ -54,5 +55,8 @@
     "drizzle-orm": "^0.45.4",
     "postgres": "^3.4.9",
     "zod": "^4.6.7"
+  },
+  "optionalDependencies": {
+    "node-pty": "1.1.0"
   }
 }

@@ -39,6 +39,7 @@
 // on this machine: no notarizing, and the app accepts an http latest.json
 // from ODDBORO_UPDATE_URL, and nothing goes to Sentry. Never ship a --test
 // build.
+import { preparePty } from '../../../scripts/prepare-pty.mjs';
 import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
@@ -247,6 +248,23 @@ function writeLatest(version: string, file: string): void {
   writeFileSync(join(OUT, 'latest.json'), JSON.stringify(latest, null, 2) + '\n');
 }
 
+/** The name can say one version and the file hold another: 0.0.6's installer was 0.0.5's (#40). */
+function checkFileVersion(file: string, version: string): void {
+  const got = read('powershell', [
+    '-NoProfile',
+    '-Command',
+    `(Get-Item -LiteralPath '${file.replace(/'/g, "''")}').VersionInfo.ProductVersion`
+  ]).trim();
+  if (got !== version && got !== `${version}.0`)
+    throw new Error(`${file} is version ${got || 'unknown'}, not ${version}`);
+}
+
+function checkBundleVersion(app: string, version: string): void {
+  const plist = join(app, 'Contents', 'Info.plist');
+  const got = read('plutil', ['-extract', 'CFBundleShortVersionString', 'raw', '-o', '-', plist]);
+  if (got.trim() !== version) throw new Error(`${app} is version ${got.trim()}, not ${version}`);
+}
+
 /** Fails when the shell's binary still names the home folder of whoever built it. */
 function checkNoHome(binary: string): void {
   if (readFileSync(binary).includes(homedir()))
@@ -316,9 +334,11 @@ function buildWindows(version: string): void {
     { RUSTFLAGS, ...SYMBOLS }
   );
   checkNoHome(join(RELEASE, 'oddboro.exe'));
+  checkFileVersion(join(RELEASE, 'oddboro.exe'), version);
   uploadDebugFiles([join(RELEASE, 'oddboro.exe'), join(RELEASE, 'oddboro.pdb')]);
   const built = join(RELEASE, 'bundle', 'nsis');
   const setup = builtFile(built, version, '-setup.exe');
+  checkFileVersion(join(built, setup), version);
 
   rmSync(OUT, { recursive: true, force: true });
   mkdirSync(OUT, { recursive: true });
@@ -338,6 +358,11 @@ function buildMac(version: string): void {
   // 1. The server, staged and smoke-tested.
   stage();
 
+  // The hardened Node sidecar loads only libraries carrying the app's team ID.
+  for (const file of preparePty(join(DESKTOP, 'stage'))) {
+    run('codesign', ['--force', '--options', 'runtime', '--timestamp', '--sign', IDENTITY, file]);
+    run('codesign', ['--verify', '--strict', file]);
+  }
   // 2. The app, signed by Tauri: the app, its Node sidecar, the hardened
   //    runtime and Entitlements.plist on both, and the updater archive.
   const configs = ['src-tauri/tauri.bundle.conf.json', 'src-tauri/tauri.release.conf.json'];
@@ -355,6 +380,7 @@ function buildMac(version: string): void {
   );
   run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', APP]);
   checkNoHome(join(APP, 'Contents/MacOS/oddboro'));
+  checkBundleVersion(APP, version);
   uploadDebugFiles([join(APP, 'Contents/MacOS/oddboro'), join(RELEASE, 'oddboro.dSYM')]);
   const node = read('codesign', [
     '-d',

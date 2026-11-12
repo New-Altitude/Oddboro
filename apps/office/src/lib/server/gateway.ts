@@ -25,6 +25,8 @@ import {
   type Tool
 } from '@modelcontextprotocol/sdk/types.js';
 import {
+  POSTAL_ID,
+  grantsFor,
   connector,
   GRANT_LABEL,
   narrowReadTools,
@@ -42,6 +44,7 @@ import { heldWordsFor, upstream } from './access.ts';
 import type { McpServer } from './launch.ts';
 import { ODD_META } from './google/http.ts';
 import { GATEWAY_PATH } from '@oddboro/ledger/owner-key';
+import { postalTools, postalArguments } from './postal.ts';
 
 /**
  * One outside tool a run holds, its connection made on first use and kept for
@@ -49,6 +52,7 @@ import { GATEWAY_PATH } from '@oddboro/ledger/owner-key';
  * `toldNoStart`: the Ledger already says it could not start in this run.
  */
 type Held = {
+  pmb?: string;
   level: Level;
   waits: boolean;
   client?: Promise<Client>;
@@ -56,7 +60,7 @@ type Held = {
   toldNoStart?: boolean;
 };
 /** `place` is where a held call lands; a run with none (a lesson run) changes nothing. */
-type GatewayRun = { held: Map<string, Held>; until: number; place?: CallPlace };
+type GatewayRun = { staffId?: string; held: Map<string, Held>; until: number; place?: CallPlace };
 
 /**
  * Runs going, by token. Each goes when its run ends, or at the latest when its
@@ -76,15 +80,22 @@ const runs: Map<string, GatewayRun> = ((
 export function openGateway(
   grants: { connector: ConnectorRow; level: Level; waits?: boolean }[],
   ms: number,
-  place?: CallPlace
+  place?: CallPlace,
+  staffId = place?.staffId
 ): { token: string; servers: Record<string, Extract<McpServer, { type: 'http' }>> } {
   const now = Date.now();
   for (const [t, r] of runs) if (r.until < now) void closeGateway(t);
   const token = randomBytes(32).toString('base64url');
   runs.set(token, {
-    held: new Map(grants.map((g) => [g.connector.id, { level: g.level, waits: !!g.waits }])),
+    held: new Map(
+      grants.map((g) => [
+        g.connector.id,
+        { pmb: g.connector.config.pmb, level: g.level, waits: !!g.waits }
+      ])
+    ),
     until: now + ms + 60_000,
-    place
+    place,
+    staffId
   });
   const servers = Object.fromEntries(
     grants.map((g) => [
@@ -189,6 +200,7 @@ function listed(c: ConnectorRow, h: Held): Promise<Tool[]> {
  */
 export async function reachable(c: ConnectorRow, h: Held): Promise<Tool[]> {
   const tools = await listed(c, h);
+  if (c.id === POSTAL_ID) return postalTools(tools).filter((t) => c.readTools.includes(t.name));
   // A tool whose own permissions only read (AWS read only's role) holds itself.
   if (h.level === 'act' || c.config.readsByRole) return tools;
   const named = tools.filter((t) => c.readTools.includes(t.name));
@@ -262,6 +274,7 @@ export async function makeCall(
 ): Promise<NonNullable<HeldCall['result']>> {
   const c = await connector(call.connector);
   if (!c) throw new Error('That service is no longer in the office');
+  if (c.id === POSTAL_ID) throw new Error('Physical mail has no approval actions.');
   const client = await upstream(c);
   try {
     const r = (await client.callTool(
@@ -287,6 +300,16 @@ export async function gateway(request: Request, id: string): Promise<Response> {
   const c = h && (await connector(id));
   if (!h || !c) return new Response('This run does not hold that tool', { status: 403 });
 
+  if (
+    id === POSTAL_ID &&
+    (!run.staffId ||
+      !c.readyAt ||
+      !c.config.pmb ||
+      c.config.pmb !== h.pmb ||
+      !(await grantsFor(run.staffId)).some((g) => g.connectorId === id && g.level === 'read'))
+  )
+    return new Response('This run no longer has access to this mailbox', { status: 403 });
+
   const server = new Server(
     { name: `oddboro-gateway-${id}`, version: '1.0.0' },
     { capabilities: { tools: {} } }
@@ -306,7 +329,14 @@ export async function gateway(request: Request, id: string): Promise<Response> {
     const client = await clientOf(c, h);
     // As long as the run itself may take: the run's own time limit ends it first.
     return (await client.callTool(
-      { name, arguments: req.params.arguments, ...forOdd(c, run.place?.staffId) },
+      {
+        name,
+        arguments:
+          id === POSTAL_ID
+            ? postalArguments(c.config.pmb!, req.params.arguments)
+            : req.params.arguments,
+        ...forOdd(c, run.place?.staffId)
+      },
       undefined,
       { timeout: Math.max(60_000, run.until - Date.now()) }
     )) as CallToolResult;

@@ -13,6 +13,8 @@ export type OfficeTool = {
   always?: boolean;
   /** Offered only while the Odd holds Gmail (`mailboxes` in mcp.ts), even by `always`. */
   withGmail?: boolean;
+  /** Offered only when the owner shared a native conversation with this Odd. */
+  withProject?: boolean;
   /**
    * Offered only in a chat, where the office sets the owner's words
    * (`OWNER_SAID` in mcp.ts), even by `always`: the tool acts on what the
@@ -26,6 +28,20 @@ export type OfficeTool = {
 };
 
 const TOOLS = [
+  {
+    id: 'my_project_sessions',
+    name: 'Shared projects',
+    does: 'Reads assignments and answers in the native conversations you shared with it.',
+    always: true,
+    withProject: true
+  },
+  {
+    id: 'send_project_work',
+    name: 'Work in shared projects',
+    does: 'Proposes an assignment to a shared native conversation. It waits for your yes, unless you let this Odd send to that session without asking.',
+    always: true,
+    withProject: true
+  },
   { id: 'raise_ask', name: 'Ask you', does: 'Puts an ask on your desk.', always: true },
   { id: 'my_asks', name: 'Its asks', does: 'Sees how you decided its asks.', always: true },
   {
@@ -97,6 +113,13 @@ const TOOLS = [
     id: 'tell_lead',
     name: 'Tell the lead',
     does: 'Passes what you tell it in chat about work another Odd leads to that Odd: your words, and what it understood you to mean.',
+    always: true,
+    inChat: true
+  },
+  {
+    id: 'draft_bug_report',
+    name: 'Draft bug reports',
+    does: 'Drafts an Oddboro bug report when you ask in chat. A File this bug report button under its reply opens the draft for you to review. Nothing is filed until you choose.',
     always: true,
     inChat: true
   },
@@ -265,6 +288,8 @@ export const stepsToGo = (steps: Step[]): number =>
 export type ToolRun = {
   /** The Odd holds Gmail, at any level. */
   gmail: boolean;
+  /** A shared native conversation, outside a lesson-only run. */
+  project?: boolean;
   /** A chat, where the office sets the owner's words (`OWNER_SAID`). */
   chat: boolean;
   /** The Odd is the Office Manager. */
@@ -283,6 +308,7 @@ export const isOffered = (granted: readonly string[], id: string, run: ToolRun):
     hasTool(granted, id) &&
     !row?.prompt &&
     (!row?.withGmail || run.gmail) &&
+    (!row?.withProject || run.project === true) &&
     (!row?.inChat || run.chat) &&
     (!row?.notToManager || !run.manager)
   );

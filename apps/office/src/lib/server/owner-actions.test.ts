@@ -292,6 +292,12 @@ const TRY: Record<Recording, (send: Send) => Promise<void>> = {
       await send({ params: { id: String(id) }, body: { path, level: 'read' } });
     }),
   'PUT /api/files': (send) => send({ body: fileOf('plan.md') }),
+  // After the welcome, which keeps the owner's row; the name stays as it was.
+  'PUT /api/setup/advanced': async (send) => {
+    await L.setOwnerName(await L.ownerName());
+    await send({ body: { on: true } });
+    await send({ body: { on: false } });
+  },
   'POST /api/goals': (send) => send({ body: { title: 'Grow the garden' } }),
   'PUT /api/goals/[id]': async (send) =>
     send({ params: { id: String(await goal('Paint the fence')) }, body: { status: 'paused' } }),

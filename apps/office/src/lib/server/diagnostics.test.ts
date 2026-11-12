@@ -304,13 +304,19 @@ test('the server never adds trace headers to a request it makes to another site'
   assert.ok(names.includes('GET /api/connectors'), names.join(', '));
 });
 
-test('the event stream, the shell updates and the relay are never traced', async () => {
+test('event streams, terminal input, shell updates and the relay are never traced', async () => {
   await answer('{"answer":"yes"}');
   const from = door.got.length;
   const routes = fileURLToPath(new URL('../../routes', import.meta.url));
   // Named here, not read from `QUIET_ROUTES`, so a route dropped from that
   // list fails this test.
-  const quiet = ['/api/events', '/api/update', '/api/diagnostics/envelope'];
+  const quiet = [
+    '/api/events',
+    '/api/project-sessions',
+    '/api/project-sessions/[id]/events',
+    '/api/update',
+    '/api/diagnostics/envelope'
+  ];
   for (const id of quiet) {
     assert.ok(existsSync(join(routes, id, '+server.ts')), id);
     await send({ route: id, headers: { ...PAGE, 'sentry-trace': traceHeader() } });

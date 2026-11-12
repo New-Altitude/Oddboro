@@ -8,6 +8,8 @@ import { db } from './db.ts';
 import { fixedError } from './errors.ts';
 import {
   addJob,
+  fileJobs,
+  refuseFileCycle,
   approveAsk,
   ask,
   editOwnJob,
@@ -32,7 +34,8 @@ import {
   type GoalHealth,
   type GoalPlanItem,
   type GoalStatus,
-  type InChat
+  type InChat,
+  type JobFiles
 } from './schema.ts';
 import { MANAGER_ROLE, goalReview } from './managers.ts';
 import { HORIZONS } from './goal-words.ts';
@@ -423,6 +426,31 @@ export async function approvePlan(
     .filter(Boolean)
     .join('\n');
 
+  const files = (f?: Omit<JobFiles, 'thread'>) => {
+    if (!f) return undefined;
+    if (!a.threadId) throw new Error('This plan has no work folder.');
+    return { ...f, thread: a.threadId };
+  };
+  // Refuse the whole plan, before any part of it, if its files make a ring.
+  let after = await fileJobs();
+  picked.forEach((item, i) => {
+    if (item.kind !== 'assign') return;
+    if (item.job?.files)
+      after.push({
+        id: -1 - i,
+        name: item.job.name,
+        staffId: item.staff,
+        files: files(item.job.files)!
+      });
+    const edit = item.editJob;
+    if (edit?.files)
+      after = after.map((j) =>
+        j.staffId === item.staff && j.name === edit.name
+          ? { ...j, name: edit.newName ?? j.name, files: files(edit.files)! }
+          : j
+      );
+  });
+  refuseFileCycle(after);
   const hires: AskRow[] = [];
   const approved = await approveAsk(askId, note, {
     link: async (_, tx) => {
@@ -432,15 +460,18 @@ export async function approvePlan(
     carryOut: async () => {
       for (const item of picked) {
         if (item.kind === 'assign') {
-          if (item.job) await addJob({ staffId: item.staff, ...item.job });
+          if (item.job)
+            await addJob({ staffId: item.staff, ...item.job, files: files(item.job.files) });
           if (item.editJob)
             await editOwnJob(
               item.staff,
               item.editJob.name,
               {
+                name: item.editJob.newName,
                 instructions: item.editJob.instructions,
                 schedule: item.editJob.schedule,
-                missed: item.editJob.missed
+                missed: item.editJob.missed,
+                files: files(item.editJob.files)
               },
               { askId }
             );

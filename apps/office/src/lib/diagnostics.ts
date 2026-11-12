@@ -89,12 +89,15 @@ export const DATA_COLLECTION = {
 } satisfies DataCollection;
 
 /**
- * Never traced. The event stream stays open for as long as the page does. The
+ * Never traced. The event streams stay open with the page or terminal, and
+ * the terminal posts each input to its command route. The
  * shell asks for updates every 30 seconds, so a trace there would send
  * reports while the owner is away. The relay would trace itself in a loop.
  */
 export const QUIET_ROUTES: ReadonlySet<string> = new Set<RouteId>([
   '/api/events',
+  '/api/project-sessions',
+  '/api/project-sessions/[id]/events',
   '/api/update',
   '/api/diagnostics/envelope'
 ]);
@@ -149,12 +152,15 @@ export const ROUTE_IDS = {
   '/api/personas': true,
   '/api/personas/[slug]': true,
   '/api/pokes/[id]': true,
+  '/api/project-sessions': true,
+  '/api/project-sessions/[id]/events': true,
   '/api/reports/[id]': true,
   '/api/rooms': true,
   '/api/services': true,
   '/api/services/[id]': true,
   '/api/setup': true,
   '/api/setup/address': true,
+  '/api/setup/advanced': true,
   '/api/setup/claude': true,
   '/api/setup/notify': true,
   '/api/staff': true,
@@ -165,6 +171,7 @@ export const ROUTE_IDS = {
   '/api/staff/[id]/description': true,
   '/api/staff/[id]/attachments': true,
   '/api/staff/[id]/attachments/[name]': true,
+  '/api/staff/[id]/bug-reports': true,
   '/api/staff/[id]/jobs': true,
   '/api/staff/[id]/lessons': true,
   '/api/staff/[id]/look': true,

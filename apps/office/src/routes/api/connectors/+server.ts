@@ -1,19 +1,27 @@
 // Tools a staffer could be given: the office catalog, plus the public MCP
 // Registry when there is a search.
 import { json } from '@sveltejs/kit';
-import { catalog, GOOGLE, searchRegistry } from '@oddboro/ledger';
+import { BUILT_IN, catalog, GOOGLE, POSTAL_ID, searchRegistry } from '@oddboro/ledger';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ url }) => {
   const q = url.searchParams.get('q')?.trim() ?? '';
-  const own = (await catalog()).map((c) => ({
+  const saved = await catalog();
+  const own = [
+    ...saved,
+    ...BUILT_IN.filter((b) => b.id === POSTAL_ID && !saved.some((c) => c.id === b.id)).map((b) => ({
+      ...b,
+      config: b.config ?? {},
+      readyAt: null
+    }))
+  ].map((c) => ({
     id: c.id,
     name: c.name,
     description: c.description,
     kind: c.kind,
     ready: !!c.readyAt,
     /** A hosted server named by its address, so the owner picks how it lets the office in. */
-    byAddress: c.kind === 'http' && !c.registry,
+    byAddress: c.id !== POSTAL_ID && c.kind === 'http' && !c.registry,
     keyHeader: c.config.oauth ? undefined : c.config.headers?.[0],
     /** A Google connector's product, its plain name and signed-in address, so the owner can add another account. */
     google: c.config.google

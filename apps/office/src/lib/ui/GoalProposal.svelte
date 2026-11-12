@@ -81,9 +81,18 @@
                 {/if}
               </span>
             {:else}
+              {@const files = item.job?.files ?? item.editJob?.files}
               <span class="text-sm text-ink"
                 >{staff.find((p) => p.id === item.staff)?.name ?? item.staff} takes it on</span
               >
+              {#if files}
+                <span
+                  >In this goal’s folder: {files.input ? `read ${files.input}, then ` : ''}write {item.staff}/{files.output}.{files
+                    .sources?.length
+                    ? ` ${files.share ? 'Allow everyone on this goal to read this file with material from' : 'Needs'} ${files.sources.join(', ')}.`
+                    : ''}</span
+                >
+              {/if}
               <span>{item.part}</span>
               {#if item.job}
                 <span class="text-muted"
@@ -92,7 +101,9 @@
               {/if}
               {#if item.editJob}
                 <span class="text-muted"
-                  >Changes its job "{item.editJob.name}"{item.editJob.schedule
+                  >Changes its job "{item.editJob.name}"{item.editJob.newName
+                    ? ` to "${item.editJob.newName}"`
+                    : ''}{item.editJob.schedule
                     ? ` to ${describe(item.editJob.schedule).toLowerCase()}`
                     : ''}</span
                 >

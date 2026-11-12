@@ -6,6 +6,7 @@ import {
   boolean,
   check,
   doublePrecision,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -13,6 +14,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  unique,
   uuid,
   vector
 } from 'drizzle-orm/pg-core';
@@ -219,6 +221,17 @@ export type HireProposal = {
   goal?: { id: number; part: string };
 };
 
+/** Files a recurring job exchanges on one piece of work. Names start inside the thread. */
+export type JobFiles = {
+  thread: number;
+  input?: string;
+  output: string;
+  /** The source tools whose contents the output shares. */
+  sources?: string[];
+  /** The owner approved putting those sources in this output on this work. */
+  share?: boolean;
+};
+
 /** A new job for a staffer. */
 export type NewJob = {
   name: string;
@@ -226,6 +239,7 @@ export type NewJob = {
   schedule: Schedule;
   report?: boolean;
   missed?: MissedRuns;
+  files?: Omit<JobFiles, 'thread'>;
 };
 
 /** One piece of a goal plan. The owner ticks the ones to go ahead with. */
@@ -239,7 +253,14 @@ export type GoalPlanItem =
       /** A new job for it. */
       job?: NewJob;
       /** A change to one of its jobs, by name. */
-      editJob?: { name: string; instructions?: string; schedule?: Schedule; missed?: MissedRuns };
+      editJob?: {
+        name: string;
+        newName?: string;
+        instructions?: string;
+        schedule?: Schedule;
+        missed?: MissedRuns;
+        files?: Omit<JobFiles, 'thread'>;
+      };
     };
 
 /** How the office meets one goal. */
@@ -372,6 +393,7 @@ export type StepAction =
   | { kind: 'secret'; connector: string; name: string }
   | { kind: 'oauth'; connector: string }
   | { kind: 'aws'; connector: string }
+  | { kind: 'postal'; connector: string }
   | { kind: 'choice'; options: string[] }
   | { kind: 'tools'; connector: string };
 /** Steps that share a `key` tick together, e.g. the two steps of one sign-in. */
@@ -598,6 +620,8 @@ export type ConnectorConfig = {
    * nothing else (AWS read only's role), so a Read only grant reaches them all.
    */
   readsByRole?: boolean;
+  /** The one LegalZoom mailbox the owner selected for this office. */
+  pmb?: string;
   /**
    * Environment variables or headers whose value the office fetches from the
    * owner's AWS Secrets Manager when a run first uses the tool, in place of a
@@ -680,6 +704,8 @@ export const jobs = pgTable('jobs', {
   name: text().notNull(),
   instructions: text().notNull(),
   schedule: jsonb().$type<Schedule>().notNull(),
+  files: jsonb().$type<JobFiles>(),
+  changedAt: created('changed_at'),
   /** The result goes on the owner's desk as a report. */
   report: boolean().notNull().default(false),
   enabled: boolean().notNull().default(true),
@@ -877,6 +903,22 @@ export type RunStatus = 'running' | 'done' | 'failed';
 /** Why a run started: its schedule came due, or the owner pressed Run now. */
 export type RunTrigger = 'schedule' | 'manual';
 
+/**
+ * A file job's run, as only the office records it. `periods` are the scheduled
+ * times the run is for, ISO, oldest first, set as it starts. `sha256` is set
+ * only once the office's file tools saw the run write `output` (the writer's
+ * part and file name) with those exact bytes. A run with periods and no
+ * digest left no checked file for them. A reader's run also names the input
+ * it read and the writer's run that wrote it.
+ */
+export type CheckedFiles = {
+  periods: string[];
+  output: string;
+  sha256?: string;
+  input?: string;
+  inputRun?: number;
+};
+
 export const runs = pgTable('runs', {
   id: id(),
   jobId: integer()
@@ -888,6 +930,8 @@ export const runs = pgTable('runs', {
   status: text().$type<RunStatus>().notNull().default('running'),
   trigger: text().$type<RunTrigger>().notNull().default('schedule'),
   summary: text(),
+  /** A file job's run, as the office checked it (`CheckedFiles`). Null for other jobs. */
+  checkedFiles: jsonb().$type<CheckedFiles>(),
   startedAt: created('started_at'),
   finishedAt: at('finished_at')
 });
@@ -942,6 +986,11 @@ export const owner = pgTable('owner', {
   name: text().notNull(),
   /** When the owner finished the welcome. Until then the office opens on it. */
   welcomedAt: at('welcomed_at'),
+  /**
+   * When the owner said yes to Advanced mode in Setup. Null while it is off.
+   * Project sessions, which run outside Oddboro's limits, exist only while it is on.
+   */
+  advancedAt: at('advanced_at'),
   updatedAt: at('updated_at').notNull().defaultNow()
 });
 
@@ -1065,3 +1114,83 @@ export const appUpdate = pgTable('app_update', {
   upAt: at('up_at'),
   updatedAt: at('updated_at').notNull().defaultNow()
 });
+
+// A connection belongs to one native conversation in the owner's chosen project.
+// The provider keeps its full transcript. The office keeps requests it sent there.
+export const projectSessions = pgTable(
+  'project_sessions',
+  {
+    id: text().primaryKey(),
+    agent: text().$type<'claude' | 'codex'>().notNull(),
+    nativeId: text().notNull(),
+    folder: text().notNull(),
+    title: text().notNull(),
+    staffId: text(),
+    /**
+     * The Odd the owner lets send work here without asking: only the one the
+     * session is shared with. Null, the default, means every assignment waits
+     * for the owner's Take over and send.
+     */
+    sendsUnasked: text(),
+    createdAt: created()
+  },
+  (t) => [
+    foreignKey({
+      name: 'project_sessions_staff_id_fkey',
+      columns: [t.staffId],
+      foreignColumns: [staff.id]
+    }),
+    foreignKey({
+      name: 'project_sessions_sends_unasked_fkey',
+      columns: [t.sendsUnasked],
+      foreignColumns: [staff.id]
+    }),
+    unique('project_sessions_agent_native_id_key').on(t.agent, t.nativeId),
+    check('project_sessions_agent_check', sql`${t.agent} IN ('claude', 'codex')`)
+  ]
+);
+
+export type ProjectRequestState =
+  | 'proposed'
+  | 'queued'
+  | 'authorized'
+  | 'sending'
+  | 'working'
+  | 'done'
+  | 'stopped'
+  | 'uncertain'
+  | 'failed';
+
+export const projectRequests = pgTable(
+  'project_requests',
+  {
+    id: text().primaryKey(),
+    sessionId: text().notNull(),
+    staffId: text(),
+    threadId: integer(),
+    prompt: text().notNull(),
+    file: text(),
+    state: text().$type<ProjectRequestState>().notNull(),
+    turn: text(),
+    answer: text(),
+    createdAt: created()
+  },
+  (t) => [
+    foreignKey({
+      name: 'project_requests_session_id_fkey',
+      columns: [t.sessionId],
+      foreignColumns: [projectSessions.id]
+    }),
+    foreignKey({
+      name: 'project_requests_staff_id_fkey',
+      columns: [t.staffId],
+      foreignColumns: [staff.id]
+    }),
+    foreignKey({
+      name: 'project_requests_thread_id_fkey',
+      columns: [t.threadId],
+      foreignColumns: [threads.id]
+    }),
+    index('project_requests_session').on(t.sessionId, t.createdAt)
+  ]
+);
