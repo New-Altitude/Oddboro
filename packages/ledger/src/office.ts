@@ -117,7 +117,14 @@ import {
 import { MANAGER_ROLE } from './managers.ts';
 import { currentPlatform } from './platform.ts';
 import { bringBack, leavingRefused, removeOdd } from './leaving.ts';
-import { awayJobs, ON_TIME_MS, oweCatchUp, type AwayJob } from './missed-runs.ts';
+import {
+  awayJobs,
+  catchUpAsks,
+  ON_TIME_MS,
+  oweCatchUp,
+  type AwayJob,
+  type CatchUpAsk
+} from './missed-runs.ts';
 import {
   GRANT_LABEL,
   grantWorks,
@@ -3792,11 +3799,55 @@ export async function addJob(
   },
   q: Db = db
 ): Promise<JobRow> {
+  if (j.files) refuseFileCycle([...(await fileJobs(q)), { ...j, id: 0, files: j.files }]);
   const [row] = await q
     .insert(jobs)
     .values({ ...j, nextRunAt: nextRun(j.schedule, new Date()) })
     .returning();
   return row;
+}
+
+/** A job as the file check sees it: what it reads and what it writes. */
+export type FileJob = Pick<JobRow, 'id' | 'name' | 'staffId' | 'files'>;
+
+/** Every job, by what it reads and writes, for `refuseFileCycle`. */
+export function fileJobs(q: Db = db): Promise<FileJob[]> {
+  return q
+    .select({ id: jobs.id, name: jobs.name, staffId: jobs.staffId, files: jobs.files })
+    .from(jobs);
+}
+
+/**
+ * A ring of jobs on one thread where each reads the next one's file, as the
+ * owner reads it, or nothing. A reader waits for its writer's period, so in
+ * a ring every job would wait for another and none would run.
+ */
+export function fileCycle(list: FileJob[]): string | undefined {
+  const writers = new Map(
+    list.flatMap((j) => (j.files ? [[`${j.files.thread}:${j.staffId}/${j.files.output}`, j]] : []))
+  );
+  const writerOf = (j: FileJob) =>
+    j.files?.input ? writers.get(`${j.files.thread}:${j.files.input}`) : undefined;
+  for (const first of list) {
+    const chain: FileJob[] = [];
+    let at: FileJob | undefined = first;
+    while (at?.files?.input && !chain.includes(at)) {
+      chain.push(at);
+      at = writerOf(at);
+    }
+    if (!at || !chain.includes(at)) continue;
+    const ring = chain.slice(chain.indexOf(at));
+    const reads = ring.map(
+      (j) => `"${j.name}" reads ${j.files!.input} from "${writerOf(j)!.name}"`
+    );
+    return `These jobs would each wait for another's file, so none would run: ${reads.join(', ')}. Change one job's files.`;
+  }
+}
+
+/** Refuse a change to jobs' files that would leave them in a ring (`fileCycle`). */
+export function refuseFileCycle(after: FileJob[]): void {
+  const ring = fileCycle(after);
+  if (ring) throw new Error(ring);
 }
 
 export async function updateJob(
@@ -3806,6 +3857,12 @@ export async function updateJob(
   >,
   expectedFiles?: JobFiles
 ): Promise<void> {
+  if (patch.files)
+    refuseFileCycle(
+      (await fileJobs()).map((j) =>
+        j.id === id ? { ...j, name: patch.name ?? j.name, files: patch.files! } : j
+      )
+    );
   const schedule = patch.schedule ?? (patch.enabled ? (await job(id))?.schedule : undefined);
   const rows = await db
     .update(jobs)
@@ -3963,6 +4020,8 @@ export async function claimScheduledRun(j: JobRow, now: Date): Promise<RunRow | 
  * - `problem`: the writer ran for that period and left no checked file, or
  *   the job's files are not set up. The reader's run fails with it.
  * `busy` says the writer runs now, before its run is in the ledger.
+ * `asked` are the writer's catch_up asks: an open one's times are owed until
+ * the owner answers, and a refused one's were skipped.
  */
 export type ScheduledInput =
   | { run: number; sha256: string }
@@ -3975,7 +4034,8 @@ export function scheduledInput(
   jobs: JobRow[],
   writerRuns: RunRow[],
   at: Date,
-  busy: (jobId: number) => boolean = () => false
+  busy: (jobId: number) => boolean = () => false,
+  asked: CatchUpAsk[] = []
 ): ScheduledInput | undefined {
   if (!j.files?.input) return undefined;
   const input = j.files.input;
@@ -4006,6 +4066,22 @@ export function scheduledInput(
       const period = new Date(p);
       if (period <= at && (!best || period > best.period)) best = { run: r, period };
     }
+  // A missed time the writer's catch_up ask names, newer than that period.
+  const askedFor = (open: boolean) =>
+    asked.some(
+      (a) =>
+        a.open === open &&
+        a.times.some((t) => new Date(t) <= at && (!best || new Date(t) > best.period))
+    );
+  if (askedFor(true))
+    return {
+      wait: `Waiting for your answer on filling "${w.name}"'s missed periods, then for its ${input}.`
+    };
+  if (askedFor(false))
+    return {
+      skip: `You said no to filling "${w.name}"'s missed periods, so "${j.name}" skips this period too.`,
+      away: true
+    };
   const skipped = w.skippedAt && w.skippedAt <= at && (!best || w.skippedAt > best.period);
   if (skipped)
     return {
@@ -4070,7 +4146,8 @@ export async function inputFor(
     [j, ...on.filter((o) => o.id !== j.id)],
     w ? await fileRuns(w) : [],
     at,
-    busy
+    busy,
+    w ? await catchUpAsks(w.id) : []
   );
 }
 
@@ -4236,7 +4313,8 @@ export async function officeActivity(since: Date) {
         .filter((j) => j.files?.input)
         .map(async (j) => {
           const w = writerOf(j, allJobs);
-          return [j.id, scheduledInput(j, allJobs, w ? await fileRuns(w) : [], now)] as const;
+          const [ran, asked] = w ? await Promise.all([fileRuns(w), catchUpAsks(w.id)]) : [[], []];
+          return [j.id, scheduledInput(j, allJobs, ran, now, undefined, asked)] as const;
         })
     )
   );

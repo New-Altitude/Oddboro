@@ -2,8 +2,9 @@
 // clock with made-up times, as missed-runs.test.ts drives it. The reader takes
 // the writer's file for the period it runs for, by the writer's run for that
 // period, even when the bytes did not change. A writer still catching up makes
-// the reader wait and run after it; a skipped writer makes it skip quietly; a
-// writer that ran and wrote nothing makes the reader's run fail. The stand-in
+// the reader wait and run after it, as does a catch-up waiting for the owner's
+// yes; a skipped writer, or a no, makes it skip quietly; a writer that ran
+// and wrote nothing makes the reader's run fail. The stand-in
 // Claude Code makes the file calls each job's steps name, over the office's
 // own file server. Run with `npm test -w @oddboro/office`.
 import assert from 'node:assert/strict';
@@ -107,16 +108,17 @@ async function pair(
 
 /**
  * The clock's look at `now`, then every run it started or put in line, to its
- * end: no run of these jobs going, and none of them owing a run.
+ * end: no run of these jobs going, and, when `settled`, none of them owing a
+ * run.
  */
-async function look(now: Date, ...jobs: JobRow[]): Promise<void> {
+async function look(now: Date, jobs: JobRow[], settled = true): Promise<void> {
   await lookAtJobs(now);
   const ids = jobs.map((j) => j.id);
   for (let i = 0; i < 1000; i++) {
     await lineDone();
     const busy = await L.pg`
       select id from runs where status = 'running' and job_id in ${L.pg(ids)}
-      union all select id from jobs where owed is not null and id in ${L.pg(ids)}`;
+      union all select id from jobs where owed is not null and ${settled} and id in ${L.pg(ids)}`;
     if (!busy.length) return lineDone();
     await new Promise((r) => setTimeout(r, 20));
   }
@@ -132,7 +134,7 @@ test("a reader takes its writer's file for its own period, even when the bytes d
     { writer: 'latest', reader: 'latest' },
     first
   );
-  await look(new Date(), writer, reader);
+  await look(new Date(), [writer, reader]);
   const [w1] = await runsOf(writer.id);
   const [r1] = await runsOf(reader.id);
   assert.equal(w1.status, 'done', w1.summary);
@@ -143,7 +145,7 @@ test("a reader takes its writer's file for its own period, even when the bytes d
   // The next period: the writer writes the very same words.
   const second = new Date(Math.max(Date.now() - 2_000, first.getTime() + 1_000));
   for (const j of [writer, reader]) await L.setNextRun(j.id, second);
-  await look(new Date(), writer, reader);
+  await look(new Date(), [writer, reader]);
   const [, w2] = await runsOf(writer.id);
   const [, r2] = await runsOf(reader.id);
   assert.equal(w2.status, 'done', w2.summary);
@@ -168,7 +170,7 @@ test('a writer catching up makes its reader wait, then both run in order', async
   );
   const due = new Date(now.getTime() - 5_000);
   await L.setNextRun(reader.id, due);
-  await look(now, writer, reader);
+  await look(now, [writer, reader]);
   const [w] = await runsOf(writer.id);
   const [r] = await runsOf(reader.id);
   assert.equal(w.status, 'done', w.summary);
@@ -180,7 +182,9 @@ test('a writer catching up makes its reader wait, then both run in order', async
   assert.equal((await runsOf(reader.id)).length, 1, 'the reader failed or ran twice');
   assert.equal((await L.job(reader.id))!.owed, null);
   assert.equal(
-    (await L.desk()).reports.filter((p) => p.title.startsWith('Blocked')).length,
+    (await L.desk()).reports.filter((p) =>
+      [writer.name, reader.name].some((n) => p.title === `Blocked: ${n}`)
+    ).length,
     0,
     'a false alarm reached the desk'
   );
@@ -197,14 +201,16 @@ test('a writer that skipped its period makes its reader skip it quietly, on the 
     { writer: 'latest', reader: 'record' },
     first
   );
-  await look(now, writer, reader);
+  await look(now, [writer, reader]);
   assert.equal((await runsOf(writer.id)).length, 0);
   assert.equal((await runsOf(reader.id)).length, 0, 'the reader ran without its file');
   assert.equal((await L.job(reader.id))!.owed, null);
   const away = (await L.desk()).away.map((j) => j.id);
   assert.ok(away.includes(writer.id) && away.includes(reader.id), away.join());
   assert.equal(
-    (await L.desk()).reports.filter((p) => p.title.startsWith('Blocked')).length,
+    (await L.desk()).reports.filter((p) =>
+      [writer.name, reader.name].some((n) => p.title === `Blocked: ${n}`)
+    ).length,
     0,
     'a false alarm reached the desk'
   );
@@ -222,7 +228,7 @@ test("a writer that ran and wrote nothing fails its reader's run", async () => {
   mkdirSync(join(wire, '..'), { recursive: true });
   writeFileSync(wire, 'Old wire');
   await L.updateJob(writer.id, { instructions: 'NOTHING' });
-  await look(new Date(), writer, reader);
+  await look(new Date(), [writer, reader]);
   const [w] = await runsOf(writer.id);
   const [r] = await runsOf(reader.id);
   assert.equal(w.status, 'failed');
@@ -235,4 +241,60 @@ test("a writer that ran and wrote nothing fails its reader's run", async () => {
     /"Wire \(Writer wrote nothing\)" ran for .* and left no checked lead\/wire.md/
   );
   assert.equal(r.checked_files?.sha256, undefined);
+});
+
+/** A `record` writer 12 hours behind, which asks the owner first, and its reader due now. */
+async function askFirst(title: string) {
+  const now = new Date();
+  const pairOf = await pair(
+    title,
+    { every: 'minutes', n: 60 },
+    { writer: 'record', reader: 'latest' },
+    new Date(now.getTime() - 12 * HOUR + 60_000)
+  );
+  const due = new Date(now.getTime() - 5_000);
+  await L.setNextRun(pairOf.reader.id, due);
+  await look(now, [pairOf.writer, pairOf.reader], false);
+  const { writer, reader } = pairOf;
+  assert.equal((await runsOf(writer.id)).length + (await runsOf(reader.id)).length, 0);
+  assert.ok((await L.job(reader.id))!.owed?.length, 'the reader did not wait for the answer');
+  const ask = (await L.desk()).asks.find(
+    (a) => a.kind === 'catch_up' && a.catchUp?.jobId === writer.id
+  );
+  assert.ok(ask, 'the writer did not ask to catch up');
+  return { writer, reader, due, ask };
+}
+
+test("a reader waits while its writer's catch-up waits for the owner, and follows a yes", async () => {
+  const { writer, reader, due, ask } = await askFirst('Ask then yes');
+  await L.decideAsk(ask.id, 'approve', null);
+  await look(new Date(), [writer, reader]);
+  const [w] = await runsOf(writer.id);
+  const [r] = await runsOf(reader.id);
+  assert.equal(w.status, 'done', w.summary);
+  assert.equal(w.checked_files?.periods.length, 12);
+  assert.equal(r.status, 'done', r.summary);
+  assert.deepEqual(r.checked_files?.periods, [due.toISOString()]);
+  assert.equal(r.checked_files?.inputRun, w.id);
+  assert.ok(r.started_at >= w.finished_at!, 'the reader ran before its writer caught up');
+});
+
+test("after a no to its writer's catch-up, a reader skips those periods quietly", async () => {
+  const { writer, reader, ask } = await askFirst('Ask then no');
+  await L.decideAsk(ask.id, 'deny', 'Not needed.');
+  await look(new Date(), [writer, reader]);
+  assert.equal((await runsOf(writer.id)).length, 0);
+  assert.equal((await runsOf(reader.id)).length, 0, 'the reader ran without its file');
+  assert.equal((await L.job(reader.id))!.owed, null);
+  const desk = await L.desk();
+  assert.ok(
+    desk.away.some((j) => j.id === reader.id),
+    'the skip is not on the desk'
+  );
+  assert.equal(
+    desk.reports.filter((p) => [writer.name, reader.name].some((n) => p.title === `Blocked: ${n}`))
+      .length,
+    0,
+    'a false alarm reached the desk'
+  );
 });

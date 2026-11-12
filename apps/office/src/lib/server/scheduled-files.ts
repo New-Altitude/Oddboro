@@ -16,6 +16,7 @@ import {
   heldTools,
   lacking,
   modelSection,
+  catchUpAsks,
   fileRuns,
   scheduledInput,
   writerOf,
@@ -128,7 +129,14 @@ export async function scheduledFiles(
   }
   const writer = writerOf(job, peers);
   const found = files.input
-    ? scheduledInput(job, jobs, writer ? await fileRuns(writer) : [], at)
+    ? scheduledInput(
+        job,
+        jobs,
+        writer ? await fileRuns(writer) : [],
+        at,
+        undefined,
+        writer ? await catchUpAsks(writer.id) : []
+      )
     : undefined;
   const source = found && 'run' in found ? found : undefined;
   const waiting =

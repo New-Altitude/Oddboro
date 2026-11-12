@@ -136,6 +136,26 @@ test("a reader's input is its writer's run for the reader's period, wait, skip o
     away: false
   });
 
+  // The writer's missed periods wait for the owner's answer: wait; after a no: skip.
+  const asked = (open: boolean) => [{ times: [d2.toISOString()], open }];
+  const busyNot = () => false;
+  assert.ok(
+    'wait' in
+      O.scheduledInput(reader, [reader, writer], twoDays.slice(0, 1), d2, busyNot, asked(true))!
+  );
+  assert.deepEqual(
+    O.scheduledInput(reader, [reader, writer], twoDays.slice(0, 1), d2, busyNot, asked(false)),
+    {
+      skip: 'You said no to filling "Morning wire"\'s missed periods, so "Morning edition" skips this period too.',
+      away: true
+    }
+  );
+  // An answered ask for periods the writer has since run for changes nothing.
+  assert.deepEqual(O.scheduledInput(reader, [reader, writer], twoDays, d2, busyNot, asked(false)), {
+    run: 2,
+    sha256: 'same'
+  });
+
   // The writer ran for the period and left no checked file: the reader's run fails.
   for (const left of [run(2, [d2], 'failed'), run(2, [d2], 'done')])
     assert.match(
@@ -151,4 +171,40 @@ test("a reader's input is its writer's run for the reader's period, wait, skip o
     (input({ ...writer, enabled: false }, twoDays, d2) as { problem: string }).problem,
     /paused/
   );
+});
+
+test('jobs whose files would each wait for another, in a ring, are refused', async () => {
+  const daily = { every: 'day', at: '08:00' } as const;
+  const add = (name: string, input: string | undefined, output: string, thread = 9) =>
+    O.addJob({
+      staffId: 'writer',
+      name,
+      instructions: 'Do it.',
+      schedule: daily,
+      files: { thread, output, ...(input ? { input } : {}) }
+    });
+  const a = await add('Ring A', 'writer/c.md', 'a.md');
+  await add('Ring B', 'writer/a.md', 'b.md');
+  await assert.rejects(
+    () => add('Ring C', 'writer/b.md', 'c.md'),
+    (e: Error) =>
+      /would each wait for another's file/.test(e.message) &&
+      [
+        '"Ring A" reads writer/c.md from "Ring C"',
+        '"Ring B" reads writer/a.md from "Ring A"',
+        '"Ring C" reads writer/b.md from "Ring B"'
+      ].every((s) => e.message.includes(s))
+  );
+  // The same files on another piece of work make no ring.
+  await add('Ring C elsewhere', 'writer/b.md', 'c.md', 10);
+  // Changing a job's files into a ring, or to read its own file, is refused too.
+  await assert.rejects(
+    () => O.updateJob(a.id, { files: { thread: 9, input: 'writer/b.md', output: 'a.md' } }),
+    /"Ring A" reads writer\/b.md from "Ring B", "Ring B" reads writer\/a.md from "Ring A"/
+  );
+  await assert.rejects(
+    () => add('Reads itself', 'writer/self.md', 'self.md'),
+    /"Reads itself" reads writer\/self.md from "Reads itself"/
+  );
+  assert.equal((await O.job(a.id))!.files?.input, 'writer/c.md');
 });

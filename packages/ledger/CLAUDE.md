@@ -807,7 +807,10 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   its writer's run for the writer's newest period at or before P
   (`scheduledInput`, `inputFor`): it waits while the writer owes that period,
   skips when the writer skipped it, and fails when that run left no digest.
-  The same bytes as last period are fine. A model's summary is no proof.
+  An open `catch_up` ask of the writer counts as owed, a refused one as
+  skipped (`catchUpAsks`). The same bytes as last period are fine. A model's
+  summary is no proof. `addJob`, `updateJob` and `approvePlan` refuse files
+  that would put jobs in a ring of readers (`fileCycle`), naming each job.
 - A schedule is every n minutes, daily, weekdays, or once a week on a day
   (`{ every: 'week', day: 'Fri', at: '16:00' }`).
 - A job's `missed` says what it does with runs missed while the office was

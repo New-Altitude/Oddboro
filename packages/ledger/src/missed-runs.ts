@@ -203,6 +203,28 @@ export async function oweCatchUp(a: AskRow): Promise<void> {
   if (c) await db.transaction((tx) => addOwed(tx, c.jobId, c.times));
 }
 
+/** A job's catch_up ask, open or refused, as its readers weigh it: the missed times it names. */
+export type CatchUpAsk = { times: string[]; open: boolean };
+
+/**
+ * A job's catch_up asks still open or refused. While one is open, a reader of
+ * the job's file waits for the owner's answer; a refused one's times were
+ * skipped, so the reader skips them too.
+ */
+export async function catchUpAsks(jobId: number): Promise<CatchUpAsk[]> {
+  const rows = await db
+    .select({ catchUp: asks.catchUp, status: asks.status })
+    .from(asks)
+    .where(
+      and(
+        eq(asks.kind, 'catch_up'),
+        inArray(asks.status, ['open', 'denied']),
+        sql`(${asks.catchUp}->>'jobId')::int = ${jobId}`
+      )
+    );
+  return rows.map((r) => ({ times: r.catchUp?.times ?? [], open: r.status === 'open' }));
+}
+
 /** A job that skipped a run, as the desk's While you were away card lists it. */
 export type AwayJob = { id: number; name: string; staffId: string; skippedAt: Date };
 

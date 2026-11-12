@@ -8,6 +8,8 @@ import { db } from './db.ts';
 import { fixedError } from './errors.ts';
 import {
   addJob,
+  fileJobs,
+  refuseFileCycle,
   approveAsk,
   ask,
   editOwnJob,
@@ -429,6 +431,26 @@ export async function approvePlan(
     if (!a.threadId) throw new Error('This plan has no work folder.');
     return { ...f, thread: a.threadId };
   };
+  // Refuse the whole plan, before any part of it, if its files make a ring.
+  let after = await fileJobs();
+  picked.forEach((item, i) => {
+    if (item.kind !== 'assign') return;
+    if (item.job?.files)
+      after.push({
+        id: -1 - i,
+        name: item.job.name,
+        staffId: item.staff,
+        files: files(item.job.files)!
+      });
+    const edit = item.editJob;
+    if (edit?.files)
+      after = after.map((j) =>
+        j.staffId === item.staff && j.name === edit.name
+          ? { ...j, name: edit.newName ?? j.name, files: files(edit.files)! }
+          : j
+      );
+  });
+  refuseFileCycle(after);
   const hires: AskRow[] = [];
   const approved = await approveAsk(askId, note, {
     link: async (_, tx) => {

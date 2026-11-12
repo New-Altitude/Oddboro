@@ -1025,7 +1025,10 @@ pieces under 3,900 bytes a line, so no value is on a command line.
     when the writer's run ends, so after the Mac sleeps both run in order. A
     writer that skipped the period makes the reader skip it too, on the While
     you were away card; one that has not written a first file yet makes it
-    skip quietly. Only a writer that ran for the period and left no checked
+    skip quietly. While the writer's `catch_up` ask is open the reader waits
+    too; a yes runs both in order, and a no makes it skip those periods (a
+    change to the asks table makes waiting readers look again,
+    `readersLookAgain`). Only a writer that ran for the period and left no checked
     file fails the reader's run.
     A thread its hub parked with `resume_at` wakes at that time: the clock
     starts the hub's `resume` follow-up. One parked on a task (`after_task`)

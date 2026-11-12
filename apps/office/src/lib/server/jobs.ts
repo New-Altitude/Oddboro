@@ -19,6 +19,8 @@
 // owes that period, the reader waits: it owes its own time instead, and gets
 // in line again when the writer's run ends. When the writer skipped that
 // period, the reader skips it too, and joins the While you were away card.
+// While the writer's catch_up ask waits for the owner, the reader waits too;
+// a no makes it skip, and the asks table's change makes it look again.
 import {
   askToCatchUp,
   claimScheduledRun,
@@ -146,6 +148,11 @@ async function readersGetInLine(w: JobRow): Promise<void> {
       getInLine(r.id);
 }
 
+/** Every reader that owes a run gets in line, to look at its writer again. */
+export async function readersLookAgain(): Promise<void> {
+  for (const r of await enabledJobs()) if (r.owed?.length && r.files?.input) getInLine(r.id);
+}
+
 /**
  * Put a job's owed run in the office's one line: it starts once every run
  * ahead of it ended. When its turn comes during an update's hold, or while the
@@ -230,7 +237,11 @@ export async function runNow(id: number): Promise<void> {
 export function startClock(): () => void {
   if (g.jobClock?.stop) return g.jobClock.stop;
   const changed = (e: OfficeEvent) => {
-    if (e.type === 'change' && ['jobs', 'pokes', 'threads'].includes(e.table)) void plan();
+    if (e.type !== 'change') return;
+    if (['jobs', 'pokes', 'threads'].includes(e.table)) void plan();
+    // A no to a writer's catch_up ask changes no job: its waiting readers look again.
+    else if (e.table === 'asks')
+      void readersLookAgain().catch((e: unknown) => console.error('Readers did not look:', e));
   };
   const stop = () => {
     clearTimeout(g.jobClock?.timer);
