@@ -103,7 +103,7 @@ const TOOLS = [
   {
     id: 'draft_bug_report',
     name: 'Draft bug reports',
-    does: 'Drafts an Oddboro bug report when you ask in chat. File this under its reply opens the draft for you to review. Nothing is filed until you choose.',
+    does: 'Drafts an Oddboro bug report when you ask in chat. A File this bug report button under its reply opens the draft for you to review. Nothing is filed until you choose.',
     always: true,
     inChat: true
   },

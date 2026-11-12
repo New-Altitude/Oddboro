@@ -218,7 +218,7 @@ export async function replyToOwnerTurn(
         ...(re ? [re.brief] : []),
         ...(/\b(bug|bugs|issue tracker)\b/i.test(message)
           ? [
-              '(For an Oddboro bug, draft the report with draft_bug_report: a short title and the details. The owner gets File this under your reply, which opens the report form with your draft to review, and nothing is filed until they choose there. Tell them to click File this.)'
+              '(For an Oddboro bug, draft the report with draft_bug_report: a short title and the details. The owner gets a File this bug report button under your reply, which opens the report form with your draft to review, and nothing is filed until they choose there. Tell them to click File this bug report.)'
             ]
           : []),
         ...aboutBrief(owner)
