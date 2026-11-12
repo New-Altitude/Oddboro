@@ -352,12 +352,10 @@ async function access(who: StaffRow, ceiling: Level, ms: number, place?: CallPla
 }
 
 /**
- * Who the staffer works for, built fresh each run: the owner, the people in
- * their life, its own intake, and the goals it serves, which are the only
- * goals it sees.
+ * Who the staffer works for, built fresh each run: the owner, its own intake,
+ * and the goals it serves, which are the only goals it sees.
  */
 async function whoFor(who: StaffRow, dir: string): Promise<string> {
-  const people = join(DATA, 'people.json');
   const serving = (await goalsFor(who.id)).filter((g) => g.status === 'active');
   const goalLine = (g: (typeof serving)[number]) => {
     const latest = g.progress[0];
@@ -378,7 +376,6 @@ async function whoFor(who: StaffRow, dir: string): Promise<string> {
     '## Who you work for',
     '',
     '- {owner}. This office is theirs, and runs on their Mac.',
-    existsSync(people) && `- The people in their life are listed in ${people}, which you may read.`,
     existsSync(join(dir, 'notes', 'intake.md')) &&
       "- {owner}'s own answers from when you were hired are in notes/intake.md. Read them before your first piece of work, and again whenever you are unsure what they want.",
     serving.length

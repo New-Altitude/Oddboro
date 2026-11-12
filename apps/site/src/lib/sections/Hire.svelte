@@ -79,7 +79,7 @@
       line: 'Makes sure no birthday or anniversary sneaks up on you.',
       portrait: 'ada',
       does: [
-        'Reads the birthdays and anniversaries in your people list, which stays on your computer.',
+        'Reads the birthdays and anniversaries you give it, which stay on your computer.',
         'Pokes you in chat a week ahead, and again the day before.',
         'Drafts the note, so it is ready when you are.'
       ],

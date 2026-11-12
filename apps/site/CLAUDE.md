@@ -73,7 +73,7 @@ access its job needs, and every claim rests on the office's real rules:
 | A lowered level makes a grant above it wait                           | `access()` skips it; `setPermission`'s comment                                  |
 | At act, a write grant uses that one tool without asking; revocable    | `revoke` in `office-access.ts`; the Odd's Settings › Services in `apps/office`  |
 | An Odd pokes the owner in chat at a time it sets                      | `poke_owner` in `packages/ledger/src/mcp-people.ts`                             |
-| Every Odd reads the people list, which stays on the owner's computer  | `readable` in `staff.ts`; hard rule 9                                           |
+| Every Odd reads the owner's data folder, on the owner's computer      | `readable` in `staff.ts`                                                        |
 
 An Odd has web search only when the owner turns on Browse the web for it,
 through its tool's own search and fetch; otherwise it has file tools only.

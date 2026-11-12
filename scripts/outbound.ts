@@ -155,7 +155,7 @@ export const OUTBOUND: readonly Outbound[] = [
     calls: 1,
     to: "New Altitude's relay for reports, or the owner's own Sentry when a build from source names one.",
     sends:
-      'Error and trace reports from the server, carrying only what `diagnostics.ts` lets through (no chats, no work and no family data), with the New Altitude sign-in on those to the relay.',
+      "Error and trace reports from the server, carrying only what `diagnostics.ts` lets through (no chats, no Odds' work and nothing from the owner's files), with the New Altitude sign-in on those to the relay.",
     yes: "The owner's Diagnostics switch in Setup. With no answer, nothing is sent."
   },
   {
