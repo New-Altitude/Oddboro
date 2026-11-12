@@ -162,3 +162,15 @@ export const NOT_THE_OWNER_PAGE = `<!doctype html>
 `;
 /** What a program without the key gets on an /api/ path. */
 export const NOT_THE_OWNER_TEXT = "Only the office's own page can do that";
+
+/**
+ * The refusal of a request without the key, by the path its guard routes on:
+ * a program on an /api/ path gets a short line, and a person on a page learns
+ * how to open the office. Both guards answer with this, each in its own
+ * server's response, so the two cannot answer differently.
+ */
+export function notTheOwner(path: string): { status: 403; type: string; body: string } {
+  return path.startsWith('/api/')
+    ? { status: 403, type: 'text/plain; charset=utf-8', body: NOT_THE_OWNER_TEXT }
+    : { status: 403, type: 'text/html; charset=utf-8', body: NOT_THE_OWNER_PAGE };
+}
