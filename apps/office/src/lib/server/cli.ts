@@ -1,7 +1,6 @@
-// What a staffer's run does by the coding tool it runs on, apart from Claude
-// Code's own arguments, which run() in staff.ts builds: how a run on Grok,
-// Codex or Gemini starts (grok.ts, codex.ts, gemini.ts), and why a run ended
-// early. Server only.
+// What a run does by the coding tool it runs on: how a run on Claude Code,
+// Grok, Codex or Gemini starts (claude.ts, grok.ts, codex.ts, gemini.ts), and
+// why a run ended early. Server only.
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import {
@@ -12,6 +11,7 @@ import {
   type Effort
 } from '@oddboro/ledger';
 import { deniedEdits } from './files.ts';
+import { claudeLaunch, type ClaudeRun } from './claude.ts';
 import { configServers, type McpServer, type RunEvent, type RunImage } from './launch.ts';
 import { GROK_PLAN_LIMIT, GROK_SIGN_IN, grokLaunch, grokSignedOut } from './grok.ts';
 import { codexLaunch, codexReader, codexSignedOut } from './codex.ts';
@@ -20,8 +20,7 @@ import { geminiKeyMissing, geminiLaunch, geminiReader } from './gemini.ts';
 /**
  * How one run starts: the tool's arguments, environment and input, and what
  * to remove once it ends. `read` turns a line of a tool's own stream into
- * what the run takes from it; without one, the line is in Claude Code's
- * stream shape, which Grok's follows. `ownGroup`: the tool has a shell, whose
+ * what the run takes from it (`drive` in drive.ts). `ownGroup`: the tool has a shell, whose
  * commands may outlive it, so the run is a process group of its own, and that
  * group and the group of every process under it stop when the run ends or
  * times out (`stopGroups`).
@@ -31,13 +30,13 @@ export type Launch = {
   env: NodeJS.ProcessEnv;
   stdin: string;
   done: () => void;
-  read?: (e: Record<string, unknown>) => RunEvent[];
+  read: (e: Record<string, unknown>) => RunEvent[];
   /** How words added to a run while it replies are written to its input, for a tool that takes them. */
   turn?: (text: string) => string;
   ownGroup?: true;
 };
 
-/** What a run on Grok, Codex or Gemini needs from run(). */
+/** What a run needs, whatever its tool: an Odd's from run() in staff.ts, the office's own from runAsOffice. */
 export type CliRun = {
   /** The run's key (`runsGoing`). */
   key: string;
@@ -83,17 +82,16 @@ export type CliRun = {
 };
 
 /**
- * Each tool but Claude Code, whose arguments run() builds from its own
- * rules. Every one has an entry, so a new tool fails the type check until it
- * is handled. A tool that cannot start says why instead (`refused`), and so
+ * How a run starts on each tool. Every one has an entry, so a new tool fails
+ * the type check until it is handled. Each takes a `ClaudeRun`, whose added
+ * fields only Claude Code reads, so one call serves every tool. A tool that
+ * cannot start says why instead (`refused`), and so
  * does one handed a run its tool cannot hold, Grok or Gemini with commands
  * and Codex without, first, so a change to `commandsHow` alone fails the run
  * rather than silently dropping or adding the shell.
  */
-export const LAUNCHES: Record<
-  Exclude<Agent, 'claude'>,
-  (r: CliRun) => Promise<Launch | { refused: string }>
-> = {
+export const LAUNCHES: Record<Agent, (r: ClaudeRun) => Promise<Launch | { refused: string }>> = {
+  claude: async (r) => claudeLaunch(r),
   grok: async (r) => {
     if (r.commands) return { refused: COMMANDS_WHY.grok };
     const signedOut = await grokSignedOut(r.timeoutMs, r.account);

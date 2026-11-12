@@ -3,26 +3,31 @@
 // one row per way a run goes, and how a run and what it started stop. Run
 // with `npm test -w @oddboro/office`.
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   writeFileSync
 } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { delimiter, join } from 'node:path';
-import { test } from 'node:test';
+import { mock, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import type { Agent } from '@oddboro/ledger';
 import type { LiveRun } from '@oddboro/ledger/run-registry';
 import {
   EXIT_BEFORE_READING,
   L,
   bin,
+  chat,
   folder,
+  odd,
   onWindows,
+  setOwn,
   withEnv,
   type Gave
 } from './office-under-test.ts';
@@ -32,6 +37,9 @@ const { drive, ownsGroup, processGone } = await import('./drive.ts');
 const { LAUNCHES } = await import('./cli.ts');
 const { claudeLaunch } = await import('./claude.ts');
 const { stopGroups } = await import('./launch.ts');
+const { runAsOffice } = await import('./office-run.ts');
+const { run: runOdd } = await import('./staff.ts');
+const { NETWORK_REFUSED_LINE } = await import('./sandbox.ts');
 type RunEnd = import('./drive.ts').RunEnd;
 type Sink = import('./drive.ts').Sink;
 type Launch = import('./cli.ts').Launch;
@@ -175,7 +183,7 @@ test("a run stopped on Windows stops its tool's whole tree with taskkill", async
       stop.abort();
       return { end: await going, log };
     });
-    assert.deepEqual(end, { outcome: 'stopped' });
+    assert.deepEqual(end, { outcome: 'stopped', stderr: '' });
     assert.deepEqual(readFileSync(log, 'utf8').trim().split('\n'), [
       '/PID',
       String(child!.pid),
@@ -213,7 +221,7 @@ setInterval(() => {}, 60000);`;
     assert.ok(await until(() => existsSync(at) && readFileSync(at, 'utf8') !== ''));
     left = Number(readFileSync(at, 'utf8'));
     stop.abort();
-    assert.deepEqual(await going, { outcome: 'stopped' });
+    assert.deepEqual(await going, { outcome: 'stopped', stderr: '' });
     assert.ok(await until(() => logged.mock.callCount() > 0, 3000), 'the driver logged nothing');
     const line = String(logged.mock.calls[0]?.arguments[0]);
     assert.match(line, new RegExp(`still running: (.*, )?${left}(,|$)`), line);
@@ -224,22 +232,14 @@ setInterval(() => {}, 60000);`;
 });
 
 // The table: each way a run goes, for each tool, through `drive` with the
-// tool's own launch and stand-in. Grok has no reader yet, so it has no rows.
-type Tool = Exclude<Agent, 'grok'>;
-const TOOLS = L.AGENTS.filter((a): a is Tool => a !== 'grok');
-
-/** The launch a run on `tool` starts with: Claude Code's own, else the tool's entry in `LAUNCHES`. */
-const LAUNCH: Record<Tool, (r: CliRun) => Promise<Launch | { refused: string }>> = {
-  claude: async (r) => claudeLaunch(r),
-  codex: (r) => LAUNCHES.codex(r),
-  gemini: (r) => LAUNCHES.gemini(r)
-};
+// tool's own launch (`LAUNCHES`) and stand-in.
+const TOOLS = L.AGENTS;
 
 type Heard = Parameters<Sink['event']>[0];
 
 /** What a row's run gave its check. */
 type Ran = {
-  tool: Tool;
+  tool: Agent;
   /** The run's folder, where the stand-in runs. */
   dir: string;
   /** The run's registry entry, whose `add` the driver sets while the run takes added words. */
@@ -268,7 +268,7 @@ type Ran = {
 type Row = {
   /** What the run does, as a sentence for the test's name. */
   does: string;
-  tools: readonly Tool[];
+  tools: readonly Agent[];
   /** The message, whose last line carries the stand-in's marker, if any. `dir` is the run's folder. */
   message: string | ((dir: string) => string);
   /** Claude Code's chat launch, which keeps its input open for added words (`turn`). */
@@ -289,15 +289,18 @@ type Row = {
 };
 
 /** The reason each tool's stand-in gives for "Fail now.", as its reader reads it. */
-const FAILED_AS_TOLD: Record<Tool, Extract<RunEnd, { outcome: 'failed' }>['why']> = {
-  claude: {
-    result: {
-      subtype: 'error_during_execution',
-      isError: true,
-      text: undefined,
-      errors: ['Failed as told.']
-    }
-  },
+const CLAUDE_FAILED_AS_TOLD: Extract<RunEnd, { outcome: 'failed' }>['why'] = {
+  result: {
+    subtype: 'error_during_execution',
+    isError: true,
+    text: undefined,
+    errors: ['Failed as told.']
+  }
+};
+const FAILED_AS_TOLD: Record<Agent, Extract<RunEnd, { outcome: 'failed' }>['why']> = {
+  claude: CLAUDE_FAILED_AS_TOLD,
+  // Grok streams in Claude Code's shape.
+  grok: CLAUDE_FAILED_AS_TOLD,
   codex: { tool: 'Failed as told.' },
   gemini: { tool: 'Failed as told.' }
 };
@@ -327,6 +330,29 @@ async function commandGone(ran: Ran): Promise<void> {
   assert.ok(command, 'the stand-in started no command');
   assert.ok(await until(() => processGone(command)), `command ${command} outlived the stop`);
 }
+
+/** A live Grok chat's stream, which the Grok stand-in replays ("Replay <file>"). */
+const GROK_CHAT = fileURLToPath(new URL('./fixtures/grok-chat-1.jsonl', import.meta.url));
+/** What that stream sent: each `text_delta`'s text, in order, and its result's text. */
+const RECORDED = (() => {
+  const lines = readFileSync(GROK_CHAT, 'utf8')
+    .split('\n')
+    .filter((l) => l.trim())
+    .map(
+      (l) =>
+        JSON.parse(l) as {
+          type: string;
+          result?: string;
+          event?: { delta?: { type: string; text: string } };
+        }
+    );
+  return {
+    deltas: lines.flatMap((l) =>
+      l.event?.delta?.type === 'text_delta' ? [l.event.delta.text] : []
+    ),
+    result: lines.find((l) => l.type === 'result')?.result
+  };
+})();
 
 const ROWS: Row[] = [
   {
@@ -374,7 +400,7 @@ const ROWS: Row[] = [
     message: (dir) => `Hold until ${join(dir, 'never')} exists.`,
     deadlineIn: 1000,
     check: (end, ran) => {
-      assert.deepEqual(end, { outcome: 'timeout' });
+      assert.deepEqual(end, { outcome: 'timeout', stderr: '' });
       const late = ran.endedAt - ran.deadline;
       assert.ok(Math.abs(late) < 1000, `the run ended ${late} ms after its deadline`);
     }
@@ -385,7 +411,7 @@ const ROWS: Row[] = [
     message: 'Hello.',
     deadlineIn: -1,
     check: (end, ran) => {
-      assert.deepEqual(end, { outcome: 'timeout' });
+      assert.deepEqual(end, { outcome: 'timeout', stderr: '' });
       assert.equal(ran.started, false);
     }
   },
@@ -415,7 +441,7 @@ const ROWS: Row[] = [
     message: 'Hello.',
     before: (live) => live.stop.abort(),
     check: (end, ran) => {
-      assert.deepEqual(end, { outcome: 'stopped' });
+      assert.deepEqual(end, { outcome: 'stopped', stderr: '' });
       assert.equal(ran.started, false);
     }
   },
@@ -430,6 +456,27 @@ const ROWS: Row[] = [
       assert.deepEqual(before, [{ type: 'delta', text: 'Some words' }]);
       assert.equal(end.spoken, 'Some words');
       assert.equal(gaveOf(end.text ?? '').message, 'Think aloud: Some words.');
+    }
+  },
+  {
+    does: "a run that streams its recorded text passes each piece on before the end, which keeps the result's text and the streamed words apart",
+    tools: ['grok'],
+    message: `Replay ${GROK_CHAT}`,
+    check: (end, ran) => {
+      assert.equal(end.outcome, 'done', JSON.stringify(end));
+      assert.ok(end.outcome === 'done');
+      const deltas = ran.events.flatMap((e) => (e.type === 'delta' ? [e.text] : []));
+      const before = ran.events.slice(0, ran.heardByEnd).filter((e) => e.type === 'delta');
+      assert.equal(before.length, deltas.length, 'a piece came after the end');
+      // The reader adds a blank line where a new message starts.
+      assert.deepEqual(
+        deltas.filter((t) => t !== '\n\n'),
+        RECORDED.deltas
+      );
+      assert.equal(end.spoken, deltas.join(''));
+      assert.equal(end.spoken.length, 114);
+      assert.equal(end.text, RECORDED.result);
+      assert.equal(end.text?.length, 26);
     }
   },
   {
@@ -483,7 +530,7 @@ const ROWS: Row[] = [
 ];
 
 /** Start `tool`'s launch for the row's message through `drive`, then hand the end to the row's check. */
-async function driveRow(tool: Tool, row: Row): Promise<void> {
+async function driveRow(tool: Agent, row: Row): Promise<void> {
   const dir = mkdtempSync(join(folder, 'drive-'));
   const run: CliRun = {
     key: randomUUID(),
@@ -503,7 +550,9 @@ async function driveRow(tool: Tool, row: Row): Promise<void> {
     timeoutMs: 600_000,
     account: L.OFFICE_ACCOUNT
   };
-  const launch = row.streamed ? claudeLaunch({ ...run, streamed: true }) : await LAUNCH[tool](run);
+  const launch = row.streamed
+    ? claudeLaunch({ ...run, streamed: true })
+    : await LAUNCHES[tool](run);
   assert.ok('args' in launch, JSON.stringify(launch));
   const { read } = launch;
   assert.ok(read, `${tool}'s launch has no reader`);
@@ -568,3 +617,151 @@ async function driveRow(tool: Tool, row: Row): Promise<void> {
 for (const row of ROWS)
   for (const tool of row.tools)
     test(`${row.does}, on ${L.AGENT_NAMES[tool]}`, () => driveRow(tool, row));
+
+// How each caller words a run's end (`toolEnded` in staff.ts, `officeEnded` in
+// office-run.ts), through the stand-ins.
+
+/** The end of one chat message to Odd `id`: its reply, or its error. */
+async function chatEnd(id: string, message: string): Promise<{ done?: string; error?: string }> {
+  const end: { done?: string; error?: string } = {};
+  await chat(id, message, (e) => {
+    if (e.type === 'done') end.done = e.text;
+    if (e.type === 'error') end.error = e.message;
+  });
+  return end;
+}
+
+/** One office run on Claude Code. */
+const officeRun = (
+  message: string,
+  o: { system?: string; images?: { mediaType: string; data: string }[] } = {}
+) =>
+  withEnv({ OFFICE_AGENT: 'claude' }, () =>
+    runAsOffice(message, {
+      system: o.system ?? 'You answer.',
+      kind: 'look',
+      timeoutMs: 60_000,
+      images: o.images
+    })
+  );
+
+test("an office run whose Claude Code result says is_error replies with the result's text", async () => {
+  assert.deepEqual(await officeRun('Succeed with an error.'), { ok: true, text: 'It went wrong.' });
+});
+
+test("an Odd's chat run whose Claude Code result says is_error ends on the result's text as an error", async () => {
+  assert.deepEqual(await chatEnd('sam', 'Succeed with an error.'), { error: 'It went wrong.' });
+});
+
+test("an Odd's chat run whose result has no text replies with its streamed words, as today", async () => {
+  assert.deepEqual(await chatEnd('cleo', 'Think aloud: Joined words.\nSucceed with no text.'), {
+    done: 'Joined words'
+  });
+});
+
+test('an office run whose result has no text replies with nothing, as today', async () => {
+  assert.deepEqual(await officeRun('Think aloud: Joined words.\nSucceed with no text.'), {
+    ok: true,
+    text: ''
+  });
+});
+
+test('an office run on Claude with a picture writes nothing to disk, and its tool gets the picture', async () => {
+  const picture = { mediaType: 'image/png', data: Buffer.from('a picture').toString('base64') };
+  const runs = join(folder, 'office', 'runs');
+  const go = join(folder, `picture-go-${randomUUID()}`);
+  // On the stand-in's command line, so the test can tell once it runs.
+  const mark = randomUUID();
+  const going = officeRun(`Look.\nHold until ${go} exists.`, {
+    system: `You look, as run ${mark}.`,
+    images: [picture]
+  });
+  try {
+    const running = () => {
+      try {
+        execFileSync('pgrep', ['-f', mark]);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    // The run's workspace is ready before its tool starts.
+    assert.ok(await until(running, 10_000), 'the stand-in never started');
+    assert.deepEqual(existsSync(runs) ? readdirSync(runs) : [], []);
+  } finally {
+    writeFileSync(go, '');
+  }
+  const r = await going;
+  assert.equal(r.ok, true, r.text);
+  // A turn with a picture comes back whole from the stand-in.
+  const turn = JSON.parse(gaveOf(r.text).message) as { message: { content: unknown[] } };
+  assert.deepEqual(turn.message.content[0], {
+    type: 'image',
+    source: { type: 'base64', media_type: picture.mediaType, data: picture.data }
+  });
+  assert.deepEqual(existsSync(runs) ? readdirSync(runs) : [], []);
+});
+
+test("an Odd's run whose tool started, then hit its time limit, says so once, and never logs that its tool never started", async () => {
+  const logged: string[] = [];
+  const log = mock.method(console, 'error', (...a: unknown[]) => {
+    logged.push(a.map(String).join(' '));
+  });
+  const events: { type: string; message?: string }[] = [];
+  try {
+    const r = await runOdd(
+      (await L.staffer('lead'))!,
+      `Hold until ${join(folder, 'never-released')} exists.`,
+      { kind: 'chat', timeoutMs: 3_000, onEvent: (e) => void events.push(e) }
+    );
+    assert.equal(r.ok, false);
+    assert.match(r.text, /^No reply after /);
+    assert.deepEqual(
+      events.filter((e) => e.type === 'error'),
+      [{ type: 'error', message: r.text }]
+    );
+    assert.deepEqual(
+      logged.filter((l) => l.includes('never started')),
+      []
+    );
+  } finally {
+    log.mock.restore();
+  }
+});
+
+test(
+  'a timed-out Claude run whose tool said the network was refused gives the refusal line, and holds the network',
+  { skip: process.platform !== 'darwin' && 'Run commands runs on a Mac only' },
+  async () => {
+    await setOwn('paige', { commands: true, web: true });
+    const events: { type: string; message?: string }[] = [];
+    try {
+      const r = await runOdd((await L.staffer('paige'))!, 'Refuse the open network and wait.', {
+        kind: 'chat',
+        timeoutMs: 3_000,
+        onEvent: (e) => void events.push(e)
+      });
+      const line = NETWORK_REFUSED_LINE.unsent.replaceAll('{name}', 'Paige');
+      assert.equal(r.ok, false);
+      assert.equal(r.text, line);
+      assert.deepEqual(
+        events.filter((e) => e.type === 'error'),
+        [{ type: 'error', message: line }]
+      );
+      assert.equal(L.networkHeld(), true);
+    } finally {
+      L.resetHeldNetwork();
+      await setOwn('paige', {});
+    }
+  }
+);
+
+await L.pg`insert into staff ${L.pg([{ ...odd('cody', 'Cody'), agent: 'codex' }])}`;
+
+test("an Odd's Codex chat run replies with its last message, as today", async () => {
+  const end = await chatEnd('cody', 'Hello.');
+  // The stand-in says "Looking." first, then what it was given.
+  assert.equal(end.error, undefined, end.error);
+  assert.ok(end.done && !end.done.includes('Looking.'), end.done);
+  assert.ok(gaveOf(end.done).message.includes('Hello.'));
+});

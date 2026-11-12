@@ -119,7 +119,6 @@ import {
   type GoalRow,
   type HandOffStep,
   type Level,
-  type ModelUsage,
   type Outcome,
   type OwnTools,
   type PokeRow,
@@ -135,7 +134,7 @@ import {
 import { flat } from '@oddboro/ledger/desk-answers';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, sep } from 'node:path';
 import type { ChatEntry, ChatEvent } from '../staff/chat.ts';
@@ -145,40 +144,24 @@ import { agentCommand } from './agent-sign-in.ts';
 import { sourceReady } from './access.ts';
 import { lastExchange } from './chat-preface.ts';
 import { addToChat, history } from './chat-turns.ts';
-import {
-  claudeAccountOf,
-  claudeInput,
-  claudeRunHome,
-  modelArgs,
-  pluginsOff,
-  staffEnv,
-  streamTools,
-  userTurn
-} from './claude.ts';
+import { claudeAccountOf, claudeRunHome } from './claude.ts';
 import { keptAt, plainName } from './chat-files.ts';
-import { endedEarly, LAUNCHES, stoppedWhy, type Launch } from './cli.ts';
+import { endedEarly, LAUNCHES, stoppedWhy } from './cli.ts';
+import { drive, ownsGroup, type RunEnd, type Sink } from './drive.ts';
 import { bus, emit } from './events.ts';
 import { deniedEdits, denyRules, readStaffFile } from './files.ts';
 import { firstDayOf } from './first-day.ts';
 import { followUpBrief, waitEnded } from './follow-up-brief.ts';
 import { closeGateway, openGateway } from './gateway.ts';
 import { ACT_WRITE, house, managerWork, stillOnDeskSection, whoIsHereSection } from './house.ts';
-import {
-  configServers,
-  NOT_SIGNED_IN,
-  shellEnv,
-  SIGN_IN_WHERE,
-  stopGroups,
-  type McpServer,
-  type RunImage
-} from './launch.ts';
+import { NOT_SIGNED_IN, SIGN_IN_WHERE, type McpServer, type RunImage } from './launch.ts';
 import { notifyMac } from './notify.ts';
 import { OUTCOME_LINE, personaRun, voiced } from './persona-run.ts';
 import { catchUp, NOW, parseSession, saveSession, sectionsOf } from './resume.ts';
 import { toolServerEnv } from './run-env-allow.ts';
 import { cut, officeEnv } from './run-env.ts';
 import { sandboxPaths } from './sandbox-paths.ts';
-import { claudeSandbox, NETWORK_REFUSED, NETWORK_REFUSED_LINE } from './sandbox.ts';
+import { NETWORK_REFUSED, NETWORK_REFUSED_LINE } from './sandbox.ts';
 import { downtime, installsAt } from './update.ts';
 import { tooOldLine } from './versions.ts';
 export { activeReply, addToReply, chat, replyToOwnerTurn, stopReply } from './chat-run.ts';
@@ -1008,127 +991,7 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
   // The owner's pick for this Odd, or Medium; never below Medium for the Office Manager.
   const model = modelFor(who.agent, who.model);
   const effort = effortFor(who.agent, who.effort, who.role === MANAGER_ROLE, model);
-  /** The run's permission rules, plugins and sandbox, as Claude Code reads them from `--settings`. */
-  function runSettings(env: NodeJS.ProcessEnv) {
-    return {
-      permissions: {
-        allow: [
-          ...readable(dir, reads, extraReads, claudeDir).map((p) => `Read(${rulePath(p)}/**)`),
-          // Edit rules cover every file-writing tool; Claude Code ignores Write(path).
-          ...writes.map((w) => `Edit(${rulePath(w)}/**)`),
-          ...(own.commands ? ['Bash'] : []),
-          ...(own.web ? ['WebSearch', 'WebFetch'] : []),
-          ...allowed
-        ],
-        deny: [
-          ...unreadable(who.id, dir, reads, extraReads, claudeDir),
-          ...denied.flatMap((p) => denyRules(['Edit'], rulePath(p)))
-        ]
-      },
-      enabledPlugins: pluginsOff(),
-      ...(tmp
-        ? {
-            sandbox: claudeSandbox({
-              reads: readable(dir, reads, extraReads, claudeDir).filter(
-                (p) => p !== DATA || data.length
-              ),
-              tmp,
-              denyWrite: [...data, ...denied],
-              network: own.network,
-              env
-            })
-          }
-        : {})
-    };
-  }
-  function claudeArgs(): string[] {
-    return [
-      '-p',
-      ...(opts.images?.length || streamed ? ['--input-format', 'stream-json'] : []),
-      '--output-format',
-      'stream-json',
-      '--verbose',
-      '--include-partial-messages',
-      // With the office carrying its files, no file tool of its own; with no
-      // other tool either, an empty list, which Claude Code takes as none.
-      '--tools',
-      [
-        ...(officeFiles ? [] : ['Read,Glob,Grep,Write,Edit']),
-        ...(own.commands ? ['Bash'] : []),
-        ...(own.web ? ['WebSearch,WebFetch'] : [])
-      ].join(','),
-      '--permission-mode',
-      'dontAsk',
-      '--setting-sources',
-      'user',
-      '--strict-mcp-config',
-      '--mcp-config',
-      runFiles.mcp,
-      '--disable-slash-commands',
-      '--settings',
-      runFiles.settings,
-      ...workIn.flatMap((p) => ['--add-dir', p]),
-      // The Odd's own model, or the office's Opus or Sonnet from setup.
-      ...(model ? ['--model', model] : modelArgs()),
-      ...(effort ? ['--effort', effort] : []),
-      '--append-system-prompt-file',
-      runFiles.prompt,
-      ...(prior ? ['--resume', prior] : ['--session-id', randomUUID()])
-    ];
-  }
   const input = preface + say(message) + (opts.literal === undefined ? '' : `\n\n${opts.literal}`);
-  /**
-   * The run's servers, settings and system prompt go to Claude Code in files
-   * only the owner can read, in a folder no run reads, removed when the run
-   * ends. On the command line, any program on this computer could read the
-   * servers' tokens with `ps`, an Odd's own commands included. And the read
-   * rules grow with every folder in Claude Code's own `projects`, which on
-   * Windows passed the 32,767 characters a command line may hold.
-   */
-  const runFiles = {
-    mcp: home('mcp', `${key}.json`),
-    settings: home('mcp', `${key}.settings.json`),
-    prompt: home('mcp', `${key}.prompt.md`)
-  };
-  function writeRunFiles(env: NodeJS.ProcessEnv): () => void {
-    mkdirSync(home('mcp'), { recursive: true, mode: 0o700 });
-    const mode = { mode: 0o600 };
-    writeFileSync(runFiles.mcp, JSON.stringify({ mcpServers: configServers(servers) }), mode);
-    writeFileSync(runFiles.settings, JSON.stringify(runSettings(env)), mode);
-    writeFileSync(runFiles.prompt, system.replaceAll(NOW, time), mode);
-    return () => {
-      for (const f of Object.values(runFiles)) rmSync(f, { force: true });
-    };
-  }
-  /** A Claude Code run; with commands, their temp folder and the git template in it, made now and removed when the run ends. */
-  function claudeLaunch(): Launch {
-    const env = staffEnv(toolDir || undefined);
-    const stdin = claudeInput(
-      input,
-      opts.images?.map((i) => ({
-        mediaType: i.mediaType,
-        data: readFileSync(i.path).toString('base64')
-      })),
-      streamed
-    );
-    if (!tmp) return { args: claudeArgs(), env, stdin, done: writeRunFiles(env) };
-    mkdirSync(tmp, { recursive: true, mode: 0o700 });
-    const shell = shellEnv(tmp);
-    mkdirSync(shell.GIT_TEMPLATE_DIR, { mode: 0o700 });
-    // The office's git and npm settings (`shellEnv`). The office's own node
-    // options never reach a run (`runEnv`), so no node a command starts takes them.
-    Object.assign(env, { CLAUDE_CODE_TMPDIR: tmp, ...shell });
-    const dropFiles = writeRunFiles(env);
-    return {
-      args: claudeArgs(),
-      env,
-      stdin,
-      done: () => {
-        dropFiles();
-        rmSync(tmp, { recursive: true, force: true });
-      }
-    };
-  }
   step(`checking ${AGENT_NAMES[who.agent]}'s sign-in and version`);
   // An added Claude account nobody signed in to: say where to sign in, rather than Claude Code's own advice.
   if (who.agent === 'claude' && account !== OFFICE_ACCOUNT && !(await claudeAccountOf(account))) {
@@ -1145,37 +1008,49 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
     return { ok: false, text: tooOld };
   }
   step(`starting ${AGENT_NAMES[who.agent]}`);
-  const launch: Launch | { refused: string } =
-    who.agent === 'claude'
-      ? claudeLaunch()
-      : await LAUNCHES[who.agent]({
-          key,
-          staffId: who.id,
-          dir,
-          reads: [
-            ...readsBeyond(dir, reads, extraReads, claudeDir),
-            ...(opts.jobFiles?.input ? [opts.jobFiles.input] : [])
-          ],
-          part,
-          writes,
-          granted: extraWrites,
-          edited: opts.ownerEdit?.path,
-          system: system.replaceAll(NOW, time),
-          input,
-          resume: prior,
-          servers,
-          allowed,
-          timeoutMs: opts.timeoutMs,
-          web: own.web,
-          commands: own.commands,
-          network: own.network,
-          effort,
-          model,
-          account,
-          // Claude Code, Grok and Gemini open a picture with their file tools;
-          // Codex has no such tool (`view_image` is off), so it gets them with the message.
-          ...(opts.images?.length ? { images: opts.images } : {})
-        });
+  const allReads = readable(dir, reads, extraReads, claudeDir);
+  const launch = await LAUNCHES[who.agent]({
+    key,
+    staffId: who.id,
+    dir,
+    reads: [
+      ...readsBeyond(dir, reads, extraReads, claudeDir),
+      ...(opts.jobFiles?.input ? [opts.jobFiles.input] : [])
+    ],
+    part,
+    writes,
+    granted: extraWrites,
+    edited: opts.ownerEdit?.path,
+    system: system.replaceAll(NOW, time),
+    input,
+    resume: prior,
+    servers,
+    allowed,
+    timeoutMs: opts.timeoutMs,
+    web: own.web,
+    commands: own.commands,
+    network: own.network,
+    effort,
+    model,
+    account,
+    // Claude Code, Grok and Gemini open a picture with their file tools;
+    // Codex has no such tool (`view_image` is off), so it gets them with the message.
+    ...(opts.images?.length ? { images: opts.images } : {}),
+    // What only Claude Code reads (`ClaudeRun`).
+    toolDir,
+    streamed,
+    officeFiles,
+    tmp,
+    workIn,
+    data,
+    denied,
+    readable: allReads,
+    // Working these out lists folders, so only a run whose tool reads them does it.
+    ...(who.agent === 'claude'
+      ? { unreadable: unreadable(who.id, dir, reads, extraReads, claudeDir) }
+      : {}),
+    sandboxReads: allReads.filter((p) => p !== DATA || data.length)
+  });
   // Stopped while it got ready: `run` has ended it, so it starts nothing now.
   if (opts.signal?.aborted) {
     if (!('refused' in launch)) launch.done();
@@ -1188,207 +1063,141 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
     return { ok: false, text: launch.refused };
   }
   const tool = AGENT_NAMES[who.agent];
-  // Past its time limit while it got ready: `run` has ended it, and told the
-  // owner, so it starts nothing now.
-  if (clock.over) {
-    launch.done();
-    void closeGateway(gate);
-    console.error(
-      `${who.name}'s ${opts.kind} run was ready only after its time limit, so ${tool} never started.`
-    );
-    return noReply(opts.timeoutMs);
-  }
   step(`waiting on ${tool}`);
   clock.going = true;
-
-  return new Promise((done) => {
-    // The command the page counts as installed, such as a Grok only in xAI's
-    // install folder or an npm Claude Code on Windows; by name when there is
-    // none, so the run fails naming it.
-    const [cmd, before] = agentCommand(who.agent) ?? [who.agent, []];
-    const ownGroup = !!launch.ownGroup || currentPlatform() !== 'win32';
-    const child = spawn(cmd, [...before, ...launch.args], {
-      cwd: dir,
-      env: launch.env,
-      detached: ownGroup,
-      windowsHide: true
-    });
-    /** Stop the tool, and with a group of its own, whatever its commands left running. */
-    const stop = () => {
-      if (!ownGroup) return child.pid ? stopGroups(child.pid) : child.kill();
-      if (child.pid) stopGroups(child.pid);
-    };
-    let buffer = '';
-    let stderr = '';
-    let reply = '';
-    /** The last whole message a Codex or Gemini run sent, which is its reply. */
-    let last = '';
-    let session: string | undefined;
-    let finished = false;
-    /** The results of a streamed chat that took added words, which may answer them in a turn of their own. */
-    const results: Run[] = [];
-    let added = 0;
-    const live = runsGoing.get(key);
-    const heard = (): Run | undefined =>
-      results.length
-        ? (results.find((r) => !r.ok) ?? {
-            ok: true,
-            text: results.map((r) => r.text).join('\n\n')
-          })
-        : undefined;
-    const finish = (end: Run) => {
-      if (finished) return;
-      finished = true;
-      if (live) live.add = undefined;
-      if (!child.stdin.writableEnded) child.stdin.end();
-      // A Claude Code that refuses the open network fails this run: the owner
-      // is told plainly, and from now on this office's Claude Code runs keep
-      // their commands off the internet (`holdNetwork`).
-      const refused =
-        !end.ok &&
-        who.agent === 'claude' &&
-        own.network &&
-        NETWORK_REFUSED.test(`${end.text}\n${stderr}`);
-      if (refused)
-        void holdNetwork().catch((e: unknown) =>
-          console.error("Could not record that Odds' commands stay off the internet:", e)
-        );
-      // Keyed on the owner's message, not the kind: a new hire's hello is a
-      // chat run the owner sent nothing to.
-      const line = NETWORK_REFUSED_LINE[opts.ownerSaid === undefined ? 'unsent' : 'sent'];
-      const r = refused ? { ok: false, text: line.replaceAll('{name}', who.name) } : end;
-      clearTimeout(timer);
-      opts.signal?.removeEventListener('abort', interrupted);
-      clock.going = false;
-      // Saved however the run ended: once the tool names a session, it holds the message.
-      const saved = !!(session && opts.sessionFile);
-      // The run ends whatever a step here throws: a throw that skipped `done`
-      // left the chat "still replying" until the office restarted.
-      try {
-        launch.done();
-        void closeGateway(gate);
-        if (session && opts.sessionFile)
-          saveSession(opts.sessionFile, { sessionId: session, seen: sections, home: toolDir });
-        if (!r.interrupted)
-          opts.onEvent?.(
-            r.ok ? { type: 'done', text: r.text } : { type: 'error', message: r.text }
-          );
-      } catch (e) {
-        console.error(`${who.name}'s run ended, but tidying up after it failed:`, e);
-      } finally {
-        done(saved ? { ...r, saved } : r);
-      }
-    };
-    // What is left of the run's time limit, which started when the run was asked for.
-    const timer = setTimeout(
-      () => {
-        stop();
-        finish(heard() ?? noReply(opts.timeoutMs));
-      },
-      Math.max(0, clock.deadline - Date.now())
-    );
-    // Stop, or the Odd leaving the office (`stopRuns`), ends this run at once.
-    const interrupted = () => {
-      stop();
-      finish(stoppedBy(who, opts.signal));
-    };
-    opts.signal?.addEventListener('abort', interrupted, { once: true });
-    if (opts.signal?.aborted) interrupted();
-
-    child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (chunk: string) => {
-      buffer += chunk;
-      let nl: number;
-      while ((nl = buffer.indexOf('\n')) >= 0) {
-        const line = buffer.slice(0, nl).trim();
-        buffer = buffer.slice(nl + 1);
-        if (!line) continue;
-        let e: Record<string, unknown>;
-        try {
-          e = JSON.parse(line);
-        } catch {
-          continue;
+  // The command the page counts as installed, such as a Grok only in xAI's
+  // install folder or an npm Claude Code on Windows; by name when there is
+  // none, so the run fails naming it.
+  const [cmd, before] = agentCommand(who.agent) ?? [who.agent, []];
+  /** Codex's and Gemini's whole messages, as the chat shows them. */
+  let said = '';
+  const sink: Sink = {
+    event: (e) => {
+      switch (e.type) {
+        case 'session':
+          // The end carries it.
+          break;
+        case 'tool':
+          opts.onEvent?.({ type: 'tool', name: floorTool(e.name) });
+          break;
+        case 'delta':
+          opts.onEvent?.({ type: 'delta', text: e.text });
+          break;
+        // Only Codex's and Gemini's readers send whole messages. Claude Code's
+        // and Grok's send their text as deltas alone, so no reply shows twice.
+        case 'message': {
+          const text = (said ? '\n\n' : '') + e.text;
+          said += text;
+          opts.onEvent?.({ type: 'delta', text });
+          break;
         }
-        if (launch.read) {
-          for (const ev of launch.read(e)) {
-            if (ev.type === 'session') session = ev.id;
-            else if (ev.type === 'tool') opts.onEvent?.({ type: 'tool', name: floorTool(ev.name) });
-            else if (ev.type === 'message') {
-              const text = (reply ? '\n\n' : '') + ev.text;
-              reply += text;
-              last = ev.text;
-              opts.onEvent?.({ type: 'delta', text });
-            } else if (ev.type === 'usage')
-              void recordUsage(who.id, opts.kind, ev.usage).catch(() => {});
-            else if (ev.type === 'done') finish({ ok: true, text: last.trim() });
-            else if (ev.type === 'failed') finish({ ok: false, text: ev.message });
-            // Said again when the tool stops, if the run ends there.
-            else if (ev.type === 'error') stderr += `${ev.message}\n`;
-          }
-          continue;
-        }
-        if (typeof e.session_id === 'string') session = e.session_id;
-        if (e.type === 'rate_limit_event') void notePlan(e.rate_limit_info);
-        if (e.type === 'result' && e.modelUsage)
-          void recordUsage(who.id, opts.kind, e.modelUsage as ModelUsage).catch(() => {});
-        for (const name of streamTools(who.agent, e))
-          opts.onEvent?.({ type: 'tool', name: floorTool(name) });
-        if (e.type === 'stream_event') {
-          const ev = e.event as { type: string; delta?: { type: string; text?: string } };
-          if (
-            ev.type === 'content_block_delta' &&
-            ev.delta?.type === 'text_delta' &&
-            ev.delta.text
-          ) {
-            reply += ev.delta.text;
-            opts.onEvent?.({ type: 'delta', text: ev.delta.text });
-          } else if (ev.type === 'message_start' && reply && !reply.endsWith('\n\n')) {
-            // A new turn after a tool call: keep its text apart from the last.
-            reply += '\n\n';
-            opts.onEvent?.({ type: 'delta', text: '\n\n' });
-          }
-        } else if (e.type === 'result') {
-          const r: Run =
-            e.subtype !== 'success'
-              ? { ok: false, text: endedEarly(who.agent, e) }
-              : e.is_error === true
-                ? { ok: false, text: String(e.result ?? 'The run failed.') }
-                : { ok: true, text: String(e.result ?? reply).trim() };
-          // A streamed chat takes no more words after its result. Words added
-          // too late for this turn get a turn of their own before Claude Code
-          // ends, so a run that took any ends when Claude Code does.
-          if (!child.stdin.writableEnded) child.stdin.end();
-          if (!added) finish(r);
-          else results.push(r);
+        case 'usage':
+          void recordUsage(who.id, opts.kind, e.usage).catch(() => {});
+          break;
+        case 'plan':
+          void notePlan(e.info);
+          break;
+        default: {
+          // The type check fails here until a new kind of event has its case.
+          const unheard: never = e;
+          console.error(`${who.name}'s run has no case for ${JSON.stringify(unheard)}`);
         }
       }
-    });
-    child.stderr.setEncoding('utf8');
-    child.stderr.on('data', (c: string) => (stderr += c));
-    child.on('error', (err) =>
-      finish({ ok: false, text: `Could not start ${tool}: ${err.message}` })
+    }
+  };
+  let started = false;
+  const end = await drive(
+    () => {
+      started = true;
+      return spawn(cmd, [...before, ...launch.args], {
+        cwd: dir,
+        env: launch.env,
+        detached: ownsGroup(launch),
+        windowsHide: true
+      });
+    },
+    launch,
+    sink,
+    {
+      deadline: clock.deadline,
+      signal: opts.signal ?? new AbortController().signal,
+      live: runsGoing.get(key)
+    }
+  );
+  clock.going = false;
+  const ended = toolEnded(who, end, opts);
+  const stderr = end.outcome === 'done' ? '' : end.stderr;
+  // A Claude Code that refuses the open network fails this run: the owner
+  // is told plainly, and from now on this office's Claude Code runs keep
+  // their commands off the internet (`holdNetwork`).
+  const refused =
+    !ended.ok &&
+    who.agent === 'claude' &&
+    own.network &&
+    NETWORK_REFUSED.test(`${ended.text}\n${stderr}`);
+  if (refused)
+    void holdNetwork().catch((e: unknown) =>
+      console.error("Could not record that Odds' commands stay off the internet:", e)
     );
-    child.on('close', (code) => {
-      if (ownGroup) stop();
-      finish(
-        heard() ?? {
-          ok: false,
-          text: stoppedWhy(who.agent, code, stderr)
-        }
+  // Keyed on the owner's message, not the kind: a new hire's hello is a
+  // chat run the owner sent nothing to.
+  const line = NETWORK_REFUSED_LINE[opts.ownerSaid === undefined ? 'unsent' : 'sent'];
+  const r = refused ? { ok: false, text: line.replaceAll('{name}', who.name) } : ended;
+  // Saved however the run ended: once the tool names a session, it holds the message.
+  const kept = !!(end.session && opts.sessionFile);
+  // The run ends whatever a step here throws: a throw that skipped its end
+  // left the chat "still replying" until the office restarted.
+  try {
+    void closeGateway(gate);
+    if (end.session && opts.sessionFile)
+      saveSession(opts.sessionFile, { sessionId: end.session, seen: sections, home: toolDir });
+    // The time limit passed while it got ready, so the driver started nothing.
+    if (end.outcome === 'timeout' && !started)
+      console.error(
+        `${who.name}'s ${opts.kind} run was ready only after its time limit, so ${tool} never started.`
       );
-    });
-    // A tool that ends before it reads its input breaks the pipe; the run
-    // ends through 'close' all the same.
-    child.stdin.on('error', () => {});
-    if (!streamed || !live) return void child.stdin.end(launch.stdin);
-    child.stdin.write(launch.stdin);
-    live.add = (text) => {
-      if (finished || child.stdin.writableEnded) return false;
-      child.stdin.write(userTurn(text));
-      added++;
-      return true;
-    };
-  });
+    // `over` says `run` already told the owner the run hit its time limit, so they hear it once.
+    if (!clock.over && !r.interrupted)
+      opts.onEvent?.(r.ok ? { type: 'done', text: r.text } : { type: 'error', message: r.text });
+  } catch (e) {
+    console.error(`${who.name}'s run ended, but tidying up after it failed:`, e);
+  }
+  return kept ? { ...r, saved: true } : r;
+}
+
+/** What an Odd's run says when its tool's run ends (`drive`). */
+function toolEnded(who: StaffRow, end: RunEnd, opts: RunOpts): Run {
+  switch (end.outcome) {
+    // The result's text, else the text streamed, else the last whole message.
+    case 'done':
+      return { ok: true, text: (end.text ?? end.spoken).trim() };
+    case 'failed': {
+      const { why } = end;
+      // A result that ended early, or one that says it erred, fails the run.
+      if ('result' in why)
+        return {
+          ok: false,
+          text:
+            why.result.subtype !== 'success'
+              ? endedEarly(who.agent, why.result)
+              : (why.result.text ?? 'The run failed.')
+        };
+      if ('tool' in why) return { ok: false, text: why.tool };
+      if ('exit' in why) return { ok: false, text: stoppedWhy(who.agent, why.exit, end.stderr) };
+      return { ok: false, text: `Could not start ${AGENT_NAMES[who.agent]}: ${why.start}` };
+    }
+    case 'timeout':
+      return noReply(opts.timeoutMs);
+    // The run's signal says which: the owner's Stop, or the Odd leaving.
+    case 'stopped':
+    case 'left':
+      return stoppedBy(who, opts.signal);
+    default: {
+      // The type check fails here until a new way to end has its words.
+      const unworded: never = end;
+      return unworded;
+    }
+  }
 }
 
 /** What a staffer is told when it reads the owner's edit to its file, for a lesson. */
