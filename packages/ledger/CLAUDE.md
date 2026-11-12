@@ -788,8 +788,10 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   before the answer goes back, so the hub's run finds it. Hiring one of those
   hires answers its ask on the thread, which brings the hub back again.
 - An Odd sees only the goals it serves (`staff_goals`): `my_goals` and its
-  prompt read `goalsFor`, never `allGoals`. `log_progress` refuses a goal it
-  does not serve. `list_goals` is the Office Manager's.
+  prompt read `goalsFor`, never `allGoals`. `log_progress` takes a goal it
+  serves or whose thread it leads (`logProgress`), so the lead planning a goal
+  logs before any plan is approved, and refuses every other goal. `list_goals`
+  is the Office Manager's.
 - A schedule is every n minutes, daily, weekdays, or once a week on a day
   (`{ every: 'week', day: 'Fri', at: '16:00' }`).
 - `src/mcp.ts` registers every tool through `tool()`, never
