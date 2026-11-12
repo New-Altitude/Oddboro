@@ -90,6 +90,7 @@ import {
   type ReplyDraft,
   type LedgerKind,
   type RunTrigger,
+  type MissedRuns,
   type Schedule,
   type Step,
   type UsageKind
@@ -112,6 +113,7 @@ import {
 import { MANAGER_ROLE } from './managers.ts';
 import { currentPlatform } from './platform.ts';
 import { bringBack, leavingRefused, removeOdd } from './leaving.ts';
+import { awayJobs, oweCatchUp, type AwayJob } from './missed-runs.ts';
 import {
   GRANT_LABEL,
   grantWorks,
@@ -124,7 +126,7 @@ import {
   type OwnSwitch
 } from './access-words.ts';
 import { filterWords, sameCriteria, type GmailFilter } from './filter-words.ts';
-import { nextRun, zone } from './time.ts';
+import { MISSED_WORDS, nextRun, zone } from './time.ts';
 import {
   isGrantable,
   OFFICE_TOOLS,
@@ -1251,8 +1253,8 @@ export async function raiseAsk(
     call?: HeldCall;
     /** A remove or bring_back ask's Odd (leaving.ts). */
     odd?: string;
-    /** Every kind but these says so; `approval`, `access` and `hire` follow from access or hire, and the office raises `hand_offs` and `window` itself. */
-    kind?: Exclude<AskKind, 'approval' | 'access' | 'hire' | 'hand_offs' | 'window'>;
+    /** Every kind but these says so; `approval`, `access` and `hire` follow from access or hire, and the office raises `hand_offs`, `window` and `catch_up` itself. */
+    kind?: Exclude<AskKind, 'approval' | 'access' | 'hire' | 'hand_offs' | 'window' | 'catch_up'>;
     revises?: number;
     /** The colleague whose handed-back work the lead raised this from (`VIA`). */
     via?: string;
@@ -1277,8 +1279,8 @@ export async function raiseAsk(
     // answer an email twice, and a filter may not file the same mail twice.
     // A folder or switch ask may not repeat one from the same place. Access,
     // level and office tool asks have twins instead (`asksNoMore`), and the rest are the office's
-    // own or checked where they are made. The office raises `hand_offs` and
-    // `window` asks itself, never through here. A new kind fails the type
+    // own or checked where they are made. The office raises `hand_offs`,
+    // `window` and `catch_up` asks itself, never through here. A new kind fails the type
     // check here until it says which.
     switch (kind) {
       case 'approval':
@@ -1441,7 +1443,8 @@ const TWINS = {
   filter: null,
   call: null,
   remove: null,
-  bring_back: null
+  bring_back: null,
+  catch_up: null
 } satisfies Record<AskKind, Twin | null>;
 
 /**
@@ -1502,15 +1505,22 @@ function carriedOutBy(together: AskRow[]): AskRow[] {
 /**
  * Start the carry-outs for asks one answer settled (`carriedOutBy`).
  * `pickedUp` is the work parked on the connect task that just ended, which
- * picks up in its own run (`finishTask`).
+ * picks up in its own run (`finishTask`). `chat` goes only to the run of the
+ * ask the owner answered in chat, never a twin's.
  */
 async function carryOutTogether(
   together: AskRow[],
   pickedUp?: string[],
-  q: Db = db
+  q: Db = db,
+  chat?: InChat
 ): Promise<void> {
   for (const a of carriedOutBy(together))
-    await followUp(a.staffId, 'carry_out', { askId: a.id, note: null, pickedUp }, q);
+    await followUp(
+      a.staffId,
+      'carry_out',
+      { askId: a.id, note: null, pickedUp, ...(chat?.card.id === a.id && { chat }) },
+      q
+    );
 }
 
 /**
@@ -1716,6 +1726,7 @@ async function grantSetting(tx: Tx, claimed: AskRow): Promise<{ title?: string }
     case 'call':
     case 'remove':
     case 'bring_back':
+    case 'catch_up':
       return;
     default:
       claimed.kind satisfies never;
@@ -1738,7 +1749,8 @@ export async function giveFolder(
   path: string,
   level: FolderAccess,
   reason: string | null = null,
-  accept = false
+  accept = false,
+  inChat = false
 ): Promise<
   { given: { path: string; level: FolderAccess } } | { warning: string } | FolderNotGiven
 > {
@@ -1751,7 +1763,7 @@ export async function giveFolder(
   if ('warning' in checked) return checked;
   const given = { path: checked.real, level };
   try {
-    const done = await decide(id, 'approve', reason, { folder: { ...a.folder, given } });
+    const done = await decide(id, 'approve', reason, { folder: { ...a.folder, given }, inChat });
     if (!done) return { refused: 'You already answered this ask.', status: 409 };
   } catch (e) {
     if (e instanceof FolderRefused) return { refused: e.message, status: 400 };
@@ -1947,11 +1959,11 @@ async function decide(
       }
       // The folder went to the Odd with the claim: the work that waited on it picks up.
       case 'give_folder':
-        if (gave) await carryOutTogether([ask, ...twins]);
+        if (gave) await carryOutTogether([ask, ...twins], undefined, db, chat);
         break;
       // The switches turned on with the claim: the work that waited on them picks up.
       case 'turn_on':
-        if (turned) await carryOutTogether([ask, ...twins]);
+        if (turned) await carryOutTogether([ask, ...twins], undefined, db, chat);
         break;
       // The level or tools changed with the claim: the work that waited on them picks up.
       case 'grant_setting':
@@ -2000,6 +2012,9 @@ async function decide(
         break;
       case 'odd_returns':
         if (ask.odd) await bringBack(ask.odd, { askId: ask.id });
+        break;
+      case 'catch_up':
+        await oweCatchUp(ask);
         break;
       default:
         effect satisfies never;
@@ -3699,6 +3714,8 @@ export type Desk = {
    * (`shownFolder`), which only the server can work out.
    */
   folders: Record<number, string>;
+  /** The jobs that skipped a run while the office was off: the While you were away card. */
+  away: AwayJob[];
 };
 
 export async function desk(): Promise<Desk> {
@@ -3768,7 +3785,8 @@ export async function desk(): Promise<Desk> {
     attachments: f.map((x) => x.attachments),
     folders: Object.fromEntries(
       shown.flatMap((x) => (x.folder ? [[x.id, shownFolder(x.folder.path)]] : []))
-    )
+    ),
+    away: await awayJobs()
   };
 }
 
@@ -3818,6 +3836,9 @@ export type Delivery = {
   status: string;
   /** A saved task response opens from its chat card, including after completion. */
   responseVersion?: number;
+  folder?: FolderRequest;
+  switches?: OwnSwitch[];
+  why?: string;
   /** When the owner decided an ask or finished or dropped a task. */
   decidedAt?: Date | null;
   /** The owner's words on a decided ask or finished task. */
@@ -3834,7 +3855,10 @@ export async function deliveries(staffId: string, limit = 200): Promise<Delivery
         at: asks.createdAt,
         status: asks.status,
         decidedAt: asks.decidedAt,
-        note: asks.reason
+        note: asks.reason,
+        folder: asks.folder,
+        switches: asks.switches,
+        why: asks.why
       })
       .from(asks)
       .where(eq(asks.staffId, staffId))
@@ -3867,7 +3891,19 @@ export async function deliveries(staffId: string, limit = 200): Promise<Delivery
       .limit(limit)
   ]);
   return [
-    ...a.map((x) => ({ kind: 'ask' as const, ...x })),
+    ...a.map(({ folder, switches, why, ...x }) => ({
+      kind: 'ask' as const,
+      ...x,
+      ...(folder && {
+        folder: {
+          ...folder,
+          path: shownFolder(folder.path),
+          ...(folder.given && { given: { ...folder.given, path: shownFolder(folder.given.path) } })
+        },
+        why
+      }),
+      ...(switches && { switches, why })
+    })),
     ...t.map((x) => ({ kind: 'task' as const, ...x })),
     ...r.map(({ readAt, ...x }) => ({
       kind: 'report' as const,
@@ -3912,6 +3948,7 @@ export async function addJob(
     instructions: string;
     schedule: Schedule;
     report?: boolean;
+    missed?: MissedRuns;
   },
   q: Db = db
 ): Promise<JobRow> {
@@ -3924,7 +3961,9 @@ export async function addJob(
 
 export async function updateJob(
   id: number,
-  patch: Partial<Pick<JobRow, 'name' | 'instructions' | 'schedule' | 'enabled' | 'report'>>
+  patch: Partial<
+    Pick<JobRow, 'name' | 'instructions' | 'schedule' | 'enabled' | 'report' | 'missed'>
+  >
 ): Promise<void> {
   const [row] = await db.update(jobs).set(patch).where(eq(jobs.id, id)).returning();
   if (row && (patch.schedule || patch.enabled))
@@ -3955,7 +3994,7 @@ async function recordGoAhead(who: StaffRow, go: GoAhead, what: string): Promise<
 export async function editOwnJob(
   staffId: string,
   name: string,
-  patch: Partial<Pick<JobRow, 'instructions' | 'schedule' | 'report'>>,
+  patch: Partial<Pick<JobRow, 'instructions' | 'schedule' | 'report' | 'missed'>>,
   go: GoAhead
 ): Promise<JobRow | undefined> {
   const who = await staffer(staffId);
@@ -3974,7 +4013,8 @@ export async function editOwnJob(
       patch.instructions && `Steps:\n${patch.instructions}`,
       patch.schedule && `Schedule: ${JSON.stringify(patch.schedule)}`,
       patch.report !== undefined &&
-        `Reports to ${await ownerName()}: ${patch.report ? 'yes' : 'no'}`
+        `Reports to ${await ownerName()}: ${patch.report ? 'yes' : 'no'}`,
+      patch.missed && `Missed runs: ${MISSED_WORDS[patch.missed]}`
     ]
       .filter(Boolean)
       .join('\n\n'),

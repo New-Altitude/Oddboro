@@ -161,6 +161,7 @@ import { bus, emit } from './events.ts';
 import { deniedEdits, denyRules, readStaffFile } from './files.ts';
 import { firstDayOf } from './first-day.ts';
 import { followUpBrief, waitEnded } from './follow-up-brief.ts';
+import { jobBrief, jobWork } from './job-brief.ts';
 import { closeGateway, openGateway } from './gateway.ts';
 import { ACT_WRITE, house, managerWork, stillOnDeskSection, whoIsHereSection } from './house.ts';
 import {
@@ -251,7 +252,8 @@ export async function chatLog(id: string): Promise<ChatEntry[]> {
       )
     ];
   });
-  return [...history(id), ...items, ...threads, ...handOffs, ...kept].sort((a, b) =>
+  const messages = history(id).map(({ item: _item, ...message }) => message);
+  return [...messages, ...items, ...threads, ...handOffs, ...kept].sort((a, b) =>
     a.at.localeCompare(b.at)
   );
 }
@@ -1345,9 +1347,11 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
           }
         } else if (e.type === 'result') {
           const r: Run =
-            e.subtype === 'success'
-              ? { ok: true, text: String(e.result ?? reply).trim() }
-              : { ok: false, text: endedEarly(who.agent, e) };
+            e.subtype !== 'success'
+              ? { ok: false, text: endedEarly(who.agent, e) }
+              : e.is_error === true
+                ? { ok: false, text: String(e.result ?? 'The run failed.') }
+                : { ok: true, text: String(e.result ?? reply).trim() };
           // A streamed chat takes no more words after its result. Words added
           // too late for this turn get a turn of their own before Claude Code
           // ends, so a run that took any ends when Claude Code does.
@@ -1385,16 +1389,23 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
   });
 }
 
-/** Run one job in a fresh session. The staffer walks to its room while it runs. */
-export async function runJob(job: JobRow, trigger: RunTrigger = 'schedule'): Promise<Run> {
+/**
+ * Run one job in a fresh session. The staffer walks to its room while it runs.
+ * `times` are the scheduled times the run is for: one, or a catch-up's
+ * periods oldest first. Run now is for now.
+ */
+export async function runJob(
+  job: JobRow,
+  trigger: RunTrigger = 'schedule',
+  times: Date[] = [new Date()]
+): Promise<Run> {
   const who = await staffer(job.staffId);
   if (!who) return { ok: false, text: `No Odd named ${job.staffId}` };
   return slot(
     who.id,
     {
       kind: 'job',
-      label: job.name,
-      detail: 'Running a job',
+      ...jobWork(job, times),
       about: {
         key: randomUUID(),
         kind: 'job',
@@ -1410,7 +1421,7 @@ export async function runJob(job: JobRow, trigger: RunTrigger = 'schedule'): Pro
         runId,
         onEvent,
         timeoutMs: JOB_TIMEOUT_MS,
-        extra: `\n## This run\n\nYou are running your job "${job.name}". {owner} is not in a chat with you.${trigger === 'manual' ? ' They started this run by hand just now, so they are at their screen: send anything the job has for them now (poke_owner with in_minutes 0), whatever quiet hours you keep for them.' : ''} Do the job, then reply with what you did in a few plain lines. Your reply goes in the ledger${job.report ? ' and on their desk as a report' : ''}.\n`
+        extra: jobBrief(job, trigger, times)
       })
   );
 }

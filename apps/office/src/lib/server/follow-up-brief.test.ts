@@ -168,7 +168,7 @@ test('office tools the owner turned on tell the Odd its run has them', () => {
 
 /**
  * The tool an Odd raises each kind of ask with, or null when the office raises
- * it (a held hand-off, the usage window, a held outside call) or more than one
+ * it (a held hand-off, the usage window, a held outside call, missed job runs) or more than one
  * tool does (`leave_office` and `remove_odd`). Keyed by AskKind, so a new kind
  * fails the type check here until it names its tool.
  */
@@ -188,7 +188,8 @@ const RAISED_WITH: Record<AskKind, string | null> = {
   office_tool: 'ask_for_office_tool',
   call: null,
   remove: null,
-  bring_back: 'bring_back_odd'
+  bring_back: 'bring_back_odd',
+  catch_up: null
 };
 
 test('the rework brief names the tool each kind an Odd can rework is raised with', () => {

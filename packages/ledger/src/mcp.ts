@@ -127,7 +127,7 @@ import {
   GITHUB_ID,
   searchRegistry
 } from './registry.ts';
-import { GOAL_STATUSES, type GoalPlanItem, type HireProposal } from './schema.ts';
+import { GOAL_STATUSES, MISSED_RUNS, type GoalPlanItem, type HireProposal } from './schema.ts';
 import type { OwnSwitch as OwnSwitchName } from './access-words.ts';
 import {
   clockTime,
@@ -329,6 +329,12 @@ const scheduleArg = z.discriminatedUnion('every', [
     .object({ every: z.literal('week'), day: z.enum(WEEKDAYS), at: atArg })
     .describe('Once a week, e.g. { every: "week", day: "Fri", at: "16:00" }.')
 ]);
+const missedArg = z
+  .enum(MISSED_RUNS)
+  .optional()
+  .describe(
+    `What the job does with runs it missed while the office was off. 'latest' (the usual, for sweeps, reports and reminders): only the newest run matters. 'record': every missed period gets its own entry, filled later. Pick 'record' only when each run adds an entry to a series that must have no gaps, such as a daily count or a trend file.`
+  );
 
 /**
  * A file in this staffer's folder, as the path inside it to its real path, or
@@ -539,7 +545,8 @@ const hireFields = {
         .optional()
         .describe(
           `Put each result on ${OWNER}'s desk as a report. True when the job makes something for them to read.`
-        )
+        ),
+      missed: missedArg
     })
     .optional(),
   intake_file: z
@@ -1503,7 +1510,7 @@ tool(
       rows
         .map(
           (j) =>
-            `## ${j.name}\n${describeSchedule(j.schedule)}${j.enabled ? '' : ', paused'}${j.report ? `, reports to ${OWNER}` : ''}\n\n${j.instructions}`
+            `## ${j.name}\n${describeSchedule(j.schedule)}${j.enabled ? '' : ', paused'}${j.report ? `, reports to ${OWNER}` : ''}, missed runs: ${j.missed}\n\n${j.instructions}`
         )
         .join('\n\n')
     );
@@ -1527,7 +1534,7 @@ tool(
 tool(
   'log_progress',
   {
-    description: `Say how a goal you serve is going, once per run that moves it or shows it slipping. One line of evidence, with a number when there is one: "inbox at 14 on Friday, down from 40; a deadline pushed Tuesday's sort to Wednesday". ${OWNER}'s daily report reads these.`,
+    description: `Say how a goal you serve, or whose thread you lead, is going, once per run that moves it or shows it slipping. One line of evidence, with a number when there is one: "inbox at 14 on Friday, down from 40; a deadline pushed Tuesday's sort to Wednesday". ${OWNER}'s daily report reads these.`,
     inputSchema: {
       goal_id: z.number().int(),
       health: z
@@ -1613,14 +1620,16 @@ if (has('propose_goal_plan'))
                   name: z.string(),
                   instructions: z.string(),
                   schedule: scheduleArg,
-                  report: z.boolean().optional()
+                  report: z.boolean().optional(),
+                  missed: missedArg
                 })
                 .optional(),
               change_job: z
                 .object({
                   name: z.string().describe('The job name, exactly as it is now.'),
                   instructions: z.string().optional(),
-                  schedule: scheduleArg.optional()
+                  schedule: scheduleArg.optional(),
+                  missed: missedArg
                 })
                 .optional()
             })
@@ -1825,19 +1834,20 @@ if (has('edit_my_job'))
   tool(
     'edit_my_job',
     {
-      description: `Change one of your own jobs: its steps, its schedule, or whether it reports to ${OWNER}. When ${OWNER} asks for a change in chat, make it at once, worded the way they asked, then tell them what changed. Outside a chat, only to carry out an ask they approved, passing its id. To propose a change, raise_ask with the exact new steps first.`,
+      description: `Change one of your own jobs: its steps, its schedule, whether it reports to ${OWNER}, or what it does with runs it missed. When ${OWNER} asks for a change in chat, make it at once, worded the way they asked, then tell them what changed. Outside a chat, only to carry out an ask they approved, passing its id. To propose a change, raise_ask with the exact new steps first.`,
       inputSchema: {
         job: z.string().describe('The job name, exactly as my_jobs lists it.'),
         instructions: z.string().optional().describe('The full new steps, numbered.'),
         schedule: scheduleArg.optional(),
         report: z.boolean().optional(),
+        missed: missedArg,
         approved_ask: approvedArg
       }
     },
-    async ({ job, instructions, schedule, report, approved_ask }) => {
+    async ({ job, instructions, schedule, report, missed, approved_ask }) => {
       const go = await goAhead(approved_ask);
       if ('problem' in go) return text(go.problem);
-      const j = await editOwnJob(ME, job, { instructions, schedule, report }, go);
+      const j = await editOwnJob(ME, job, { instructions, schedule, report, missed }, go);
       return text(j ? `Changed "${job}".` : `You have no job named "${job}". Check my_jobs.`);
     }
   );

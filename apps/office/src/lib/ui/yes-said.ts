@@ -28,7 +28,8 @@ const YES_SAID: Record<AskKind, (a: AskRow, now: DeskNow) => string> = {
   office_tool: () => 'Turn on',
   call: (_, { busy }) => (busy ? 'Making the call' : 'Make this call'),
   remove: () => 'Remove',
-  bring_back: () => 'Bring back'
+  bring_back: () => 'Bring back',
+  catch_up: () => 'Approve'
 };
 
 /** The words on an ask's yes button on the Desk. */

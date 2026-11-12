@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
-  import type { HireProposal, Schedule } from '@oddboro/ledger';
+  import type { HireProposal, MissedRuns, Schedule } from '@oddboro/ledger';
   import { LEVEL_LABEL, LEVELS, type Level } from '@oddboro/ledger/access';
   import {
     AGENT_NAMES,
@@ -112,6 +112,8 @@
   let jobSchedule = $state<Schedule>({ every: 'minutes', n: 60 });
   /** Most first jobs make something for the owner to read, so this starts on. */
   let jobReport = $state(true);
+  /** What the job does with runs it missed, as the proposal said. Changed later in its Jobs section. */
+  let jobMissed = $state<MissedRuns | undefined>();
   /** Office tools from the proposal. Without one, a hire gets the starters. */
   let tools = $state<string[] | undefined>();
   let busy = $state(false);
@@ -136,6 +138,7 @@
       jobInstructions = p.job.instructions;
       jobSchedule = p.job.schedule;
       jobReport = p.job.report ?? true;
+      jobMissed = p.job.missed;
     }
     busy = true;
     call<{ content: string }>(
@@ -218,7 +221,8 @@
               name: jobName,
               instructions: jobInstructions,
               schedule: jobSchedule,
-              report: jobReport
+              report: jobReport,
+              missed: jobMissed
             }
           : undefined
       });

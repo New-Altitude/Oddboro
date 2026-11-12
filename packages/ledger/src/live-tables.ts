@@ -43,7 +43,8 @@ export const LIVE_TABLES: Record<TableName, LiveTable> = {
   ledger: { trigger: 'all', page: ['ledger'] },
   connectors: { trigger: 'all', page: ['refresh', 'version'] },
   grants: { trigger: 'all', page: ['version'] },
-  jobs: { trigger: 'all', page: ['version'] },
+  // A job that skipped a run shows on the desk (`desk().away`), so the page reads the office again.
+  jobs: { trigger: 'all', page: ['refresh', 'version'] },
   threads: { trigger: 'all', page: ['refresh', 'version'] },
   // The office's own listener starts each new follow-up (follow-ups.ts). The
   // page reads the office again, for those waiting to start under In progress.

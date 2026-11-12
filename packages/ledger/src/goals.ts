@@ -1,7 +1,8 @@
 // Goals: what the owner wants more of. The owner sets one, or approves one the
 // Office Manager heard in chat, and the manager plans it: one ask holding the
 // hires and the work staff already here take on. A staffer serves the goals it
-// is linked to, sees only those, and says how each is going.
+// is linked to, sees only those, and says how each is going, as does the Odd
+// leading a goal's thread, which plans it before anyone serves it.
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from './db.ts';
 import { fixedError } from './errors.ts';
@@ -26,6 +27,7 @@ import {
   staff,
   staffGoals,
   chatCardOf,
+  threads,
   type GoalDraft,
   type GoalHealth,
   type GoalPlanItem,
@@ -325,18 +327,29 @@ export async function stopServing(staffId: string, goalId: number): Promise<void
     });
 }
 
-/** A staffer's word on a goal it serves. */
+/**
+ * A staffer's word on a goal it serves, or on one whose thread it leads. The
+ * lead plans the goal before anyone serves it, so it logs from the start.
+ */
 export async function logProgress(
   staffId: string,
   goalId: number,
   health: GoalHealth,
   note: string
 ): Promise<ProgressRow | string> {
-  const [link] = await db
-    .select()
-    .from(staffGoals)
-    .where(and(eq(staffGoals.staffId, staffId), eq(staffGoals.goalId, goalId)));
-  if (!link) return `You do not serve goal #${goalId}. my_goals lists the ones you do.`;
+  const [[link], [lead]] = await Promise.all([
+    db
+      .select({ id: staffGoals.goalId })
+      .from(staffGoals)
+      .where(and(eq(staffGoals.staffId, staffId), eq(staffGoals.goalId, goalId))),
+    db
+      .select({ id: threads.id })
+      .from(threads)
+      .where(and(eq(threads.hubId, staffId), eq(threads.goalId, goalId)))
+      .limit(1)
+  ]);
+  if (!link && !lead)
+    return `You neither serve goal #${goalId} nor lead its thread. my_goals lists the goals you serve.`;
   const [row] = await db
     .insert(goalProgress)
     .values({ goalId, staffId, health, note: note.trim().slice(0, 500) })
@@ -424,7 +437,11 @@ export async function approvePlan(
             await editOwnJob(
               item.staff,
               item.editJob.name,
-              { instructions: item.editJob.instructions, schedule: item.editJob.schedule },
+              {
+                instructions: item.editJob.instructions,
+                schedule: item.editJob.schedule,
+                missed: item.editJob.missed
+              },
               { askId }
             );
         } else {

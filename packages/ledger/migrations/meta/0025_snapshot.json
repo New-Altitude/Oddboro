@@ -1,5 +1,5 @@
 {
-  "id": "80c51c7a-0f4a-47d3-8130-f25667504065",
+  "id": "c64d7981-08e9-49f8-9eae-9becf5a49f50",
   "prevId": "911bd40c-c7ce-4fe3-ae9e-17b179fd6e4c",
   "version": "7",
   "dialect": "postgresql",
@@ -297,21 +297,15 @@
           "primaryKey": false,
           "notNull": false
         },
-        "switches": {
-          "name": "switches",
+        "catch_up": {
+          "name": "catch_up",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
-        "level": {
-          "name": "level",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "office_tools": {
-          "name": "office_tools",
-          "type": "text[]",
+        "switches": {
+          "name": "switches",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -1162,6 +1156,25 @@
         },
         "next_run_at": {
           "name": "next_run_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "missed": {
+          "name": "missed",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'latest'"
+        },
+        "owed": {
+          "name": "owed",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "skipped_at": {
+          "name": "skipped_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false

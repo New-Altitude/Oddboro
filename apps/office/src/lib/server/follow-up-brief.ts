@@ -271,6 +271,7 @@ function carriedLinesOf(a: AskRow): string[] {
     case 'window':
     case 'remove':
     case 'bring_back':
+    case 'catch_up':
       return [];
   }
 }
@@ -407,6 +408,7 @@ function carryOutBrief(
     case 'filter':
     case 'remove':
     case 'bring_back':
+    case 'catch_up':
       return approved();
   }
 }

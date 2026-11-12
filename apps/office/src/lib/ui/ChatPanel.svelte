@@ -1,9 +1,11 @@
 <script lang="ts">
-  import { tick, untrack } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import type { Desk, AskRow, HandOffLine, PokeRow, ThreadLine } from '@oddboro/ledger';
   import { FIRST_QUESTIONS, firstQuestionIn } from '@oddboro/ledger/first-questions';
   import { clockTime } from '@oddboro/ledger/time';
+  import ChatAccessAsk from './ChatAccessAsk.svelte';
+  import ChatSignInCard from './ChatSignInCard.svelte';
   import Markdown from './Markdown.svelte';
   import TaskResponse from './TaskResponse.svelte';
   import { current, drafts, saved, type SavedResponse } from './task-response.svelte.ts';
@@ -31,7 +33,7 @@
   import { chatRequest, takeDraft, type Delivered } from './chat-about.svelte.ts';
   import type { StaffProfile } from '../staff/roster.ts';
   import { runningFor, toolWords, type Work, type WorkAbout } from '../staff/work.ts';
-  import type { ChatEntry, ChatEvent } from '../staff/chat.ts';
+  import type { ChatEntry, ChatEvent, ChatSignIn } from '../staff/chat.ts';
   import { counting, dayBreaks, fullDate, stamp, took } from './chat-lines.ts';
   import { serviceNames } from './service-names.svelte.ts';
 
@@ -243,6 +245,36 @@
   });
   let draft = $state('');
   let sending = $state(false);
+  // The office already holds the text, files and reply target under this turn id.
+  type Blocked = { turnId: string; signIn: ChatSignIn };
+  let blocked = $state<Blocked>();
+  const signInKey = () => `oddboro-chat-sign-in-${profile.id}`;
+  onMount(() => {
+    try {
+      const value = sessionStorage.getItem(signInKey());
+      if (value) blocked = JSON.parse(value);
+    } catch {
+      /* The open chat still holds the request when storage is unavailable. */
+    }
+  });
+  function hold(value?: Blocked) {
+    blocked = value;
+    try {
+      if (value) sessionStorage.setItem(signInKey(), JSON.stringify(value));
+      else sessionStorage.removeItem(signInKey());
+    } catch {
+      /* Storage is optional in the desktop window. */
+    }
+  }
+  function continueChat(turnId: string) {
+    const request = blocked?.signIn;
+    if (blocked?.turnId !== turnId || !request || sending || remoteBusy) return;
+    hold();
+    if (profile.agent === request.agent && (profile.account ?? 'office') === request.account) {
+      const line = lines.find((l) => l.from === 'owner' && l.turnId === turnId);
+      if (line) void say(line.text, line.re, line.files ?? [], line);
+    }
+  }
   let remoteBusy = $state(false);
   let active = $state<{ runId: string; turnId: string }>();
   let stopping = $state(false);
@@ -736,6 +768,7 @@
             reply.pending = false;
             reply.at = new Date().toISOString();
           } else if (ev.type === 'error') {
+            if (ev.signIn) hold({ turnId, signIn: ev.signIn });
             reply.text = ev.message;
             reply.pending = false;
             reply.failed = true;
@@ -743,6 +776,10 @@
           scrollDown();
         }
       }
+      if (reply.pending)
+        throw new Error(
+          'The connection closed before the reply arrived. Check the chat before sending again.'
+        );
     } catch (err) {
       reply.text = err instanceof Error ? err.message : String(err);
       reply.failed = true;
@@ -1165,7 +1202,7 @@
         Say hello to {profile.name}, who walks to your office while you talk.
       </p>
     {/if}
-    {#each lines as line, i (i)}
+    {#each lines as line, i (line.item ? keyOf(line.item) : i)}
       {#if breaks[i]}
         <!-- A new day in the office's time zone. -->
         <div class="flex items-center gap-2 py-1 text-[11px] text-faint">
@@ -1376,6 +1413,12 @@
               </p>
             </details>
           {/if}
+          {#if it.kind === 'ask' && (it.switches || it.folder?.given || (it.folder && it.status === 'open'))}
+            <!-- The Desk's folder and switch handlers, answered where the work stopped. -->
+            {#key it.id}
+              <ChatAccessAsk item={it} name={profile.name} onchanged={() => load(profile.id)} />
+            {/key}
+          {/if}
         </div>
         {@render meta(line, i)}
       {:else}
@@ -1420,10 +1463,19 @@
           {/if}
         </div>
         {#if retryable(line, i)}
-          <button
-            class="ms-auto text-xs text-sea hover:text-ink"
-            onclick={() => say(line.text, line.re, line.files ?? [], line)}>Retry reply</button
-          >
+          {#if blocked && blocked.turnId === line.turnId}
+            <ChatSignInCard
+              request={blocked.signIn}
+              name={profile.name}
+              onready={() => continueChat(line.turnId!)}
+              onedit={() => hold()}
+            />
+          {:else}
+            <button
+              class="ms-auto text-xs text-sea hover:text-ink"
+              onclick={() => say(line.text, line.re, line.files ?? [], line)}>Retry reply</button
+            >
+          {/if}
         {/if}
         {#if line.pending}
           <!-- What the staffer is doing, under the reply it is working on. -->

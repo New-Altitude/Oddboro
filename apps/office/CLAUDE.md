@@ -1033,6 +1033,29 @@ pieces under 3,900 bytes a line, so no value is on a command line.
     in the document editor (`src/lib/ui/JobDescription.svelte`); a save
     refuses if the description changed since the owner opened it. While an
     update is about to install it starts no scheduled job (item 17).
+    Every job run is told the time it is for and the time it is now
+    (`src/lib/server/job-brief.ts`); Run now is for the moment it is pressed. A
+    job whose time passed while the Mac slept follows `jobs.missed`
+    (`dueNow` in the ledger's `missed-runs.ts`): a `latest` job catches up once
+    if under half a period passed since its newest missed time, else skips and
+    shows on the desk's While you were away card (`desk().away`, Run now or
+    Dismiss, `/api/jobs/away`); a `record` job fills each missed period in one
+    run that lists them, or past ten raises one `catch_up` ask. Owed runs
+    (`jobs.owed`) wait in the clock's one line and start one after another; a
+    job on time never waits for it. A catch-up shows in In progress as
+    "Catching up <N> periods of <job>". The job form sets the kind ("When the
+    office was off at run time"). To try it in a running office, move a
+    job's next run into the past from the repo, with that office's database
+    port. The write wakes the clock at once.
+
+    ```sh
+    ODDBORO_DB_PORT=<port> node --input-type=module <<'EOF'
+    import { pg } from '@oddboro/ledger';
+    await pg`update jobs set next_run_at = now() - interval '2 days 45 minutes' where name = '<job>'`;
+    await pg.end();
+    EOF
+    ```
+
 12. **Hire** on the office plate opens a five-step drawer
     (`src/lib/ui/HireDrawer.svelte`). Step one makes the person's look
     (`src/lib/ui/LookStudio.svelte`), drawn or built. Drawn: the owner
@@ -1767,3 +1790,14 @@ the persona's voice.
   how an action went is built from the server's result (NEW-1709). Add a
   lint that fails on a promise nobody awaits or catches; that brings ESLint,
   a new dependency, so the change says why.
+
+## Access from chat
+
+`ChatAccessAsk.svelte` uses the Desk's folder and switch handlers, sent
+with `chat: true` so the run the answer starts replies under the card. A
+broad folder keeps its warning and needs the same Accept as the Desk. A
+failed chat can offer `ChatSignInCard.svelte` for the account that run
+used; `chat-sign-in.ts` reads that account. Its retry is the chat's own
+Retry reply on the saved turn, so the earlier failed reply stays in
+history. Access cards come from database deliveries, never the Odd's chat
+file.

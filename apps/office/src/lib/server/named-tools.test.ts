@@ -126,7 +126,8 @@ const ASK_ROWS: Record<AskKind, object[]> = {
   hand_offs: [],
   window: [],
   remove: [],
-  bring_back: []
+  bring_back: [],
+  catch_up: []
 };
 const ASKS = Object.values(ASK_ROWS).flat() as unknown as AskRow[];
 const report = { id: 3, title: 'Weekly', body: 'All well' } as ReportRow;
