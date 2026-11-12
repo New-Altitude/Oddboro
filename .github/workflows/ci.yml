@@ -80,16 +80,45 @@ jobs:
       # Each suite exits on its own, with no --test-force-exit, so a handle a
       # test leaks would hold the job to its 45 minutes. Each test step stops
       # at 10 instead; the slowest took under 3 on a runner.
+      # NODE_OPTIONS keeps spec in the log and adds scripts/test-times.ts,
+      # which writes a line as each file starts and ends, for the Test times
+      # step. Flags passed after `--` would land after the npm script's file
+      # pattern, where node --test ignores them. The reporter's path is from
+      # the workspace's folder, where the runner loads it.
       - name: Ledger tests
         timeout-minutes: 10
-        run: npx turbo run test --filter=@oddboro/ledger
+        env:
+          NODE_OPTIONS: --test-reporter=spec --test-reporter-destination=stdout --test-reporter=../../scripts/test-times.ts --test-reporter-destination=${{ runner.temp }}/test-times/ledger.jsonl
+        run: |
+          mkdir -p "$RUNNER_TEMP/test-times"
+          npx turbo run test --filter=@oddboro/ledger
 
       # The test office's stand-in AI tools are scripts that start through
       # their first line, which Windows is taken not to do.
       - name: Office tests
         if: runner.os != 'Windows'
         timeout-minutes: 10
+        env:
+          NODE_OPTIONS: --test-reporter=spec --test-reporter-destination=stdout --test-reporter=../../scripts/test-times.ts --test-reporter-destination=${{ runner.temp }}/test-times/office.jsonl
         run: npx turbo run test --filter=@oddboro/office
+
+      # Where the test time went, on the run's summary page: each suite's
+      # total, the slowest tests and files, and any file that started but
+      # never ended. It runs after a failed or timed-out test step too, and
+      # never fails the job.
+      - name: Test times
+        if: always()
+        continue-on-error: true
+        run: node scripts/test-summary.ts "$RUNNER_TEMP/test-times"
+
+      - name: Upload the test times
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-times-${{ matrix.os }}
+          path: ${{ runner.temp }}/test-times
+          if-no-files-found: ignore
 
       # A schema change with no migration makes db:generate write one. git
       # status, not git diff, so a new untracked migration counts.
