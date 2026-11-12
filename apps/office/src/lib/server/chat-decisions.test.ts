@@ -21,7 +21,7 @@ async function runFollowUp(on: { ask?: number; task?: number }) {
   const w = waiting[0];
   const f = await L.startFollowUp(w.id);
   assert.ok(f, 'the follow-up did not start');
-  const r = await followThrough(f, w.ask, w.report, w.task, w.goal);
+  const r = await followThrough(f, w.ask, w.task, w.goal);
   await endFollowUp(f, await L.workTitle(f), r.outcome, r.text, r.joined);
   return { f, r };
 }
@@ -153,7 +153,7 @@ test('finishing with a written answer commits one note and gives it to one follo
   const f = await L.startFollowUp(waiting[0].id);
   assert.equal(f?.kind, 'task_done');
   assert.equal(f?.note, note);
-  const result = await followThrough(f!, undefined, undefined, waiting[0].task);
+  const result = await followThrough(f!, undefined, waiting[0].task);
   assert.equal(result.outcome, 'done', result.text);
   assert.ok(JSON.parse(result.text).system.includes(note));
 });

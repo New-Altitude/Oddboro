@@ -881,7 +881,7 @@ export const followUps = pgTable('follow_ups', {
   threadId: integer().references(() => threads.id),
   /** On an `edited` follow-up, the file the owner edited. */
   edit: jsonb().$type<FileEdit>(),
-  /** The owner's words: their reason, what to change, their feedback, or their note on a task. */
+  /** The owner's words: their reason, what to change, their answer, or their note on a task. */
   note: text(),
   /**
    * On a `task_done` or `carry_out` follow-up, the titles of other work parked on the task,

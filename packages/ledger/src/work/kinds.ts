@@ -5,25 +5,27 @@ import { levelAtMost, type Level } from '../access-words.ts';
 
 /**
  * Work a staffer owes after the owner answers it: carry out an approved ask, rework
- * one the owner sent back, take in the reason for a no, act on their feedback on a report, pick up the work
+ * one the owner sent back, take in the reason for a no, pick up the work
  * that waited on a task the staffer gave them, or plan a goal the owner set. A
  * new hire with a job gets started without being asked by its `first_day`. A `hand_off` is
  * work a colleague handed it, and `handed_back` brings the result home. A
  * `resume` picks a thread back up for its hub: at the time the hub set, or with
- * the owner's answer when no other run follows it. An `edited` run reads the
- * owner's edit to one of the staffer's files, for a lesson.
+ * the owner's answer when no other run follows it. An `answered` run hears the
+ * owner's answer to something the staffer raised on no thread and no hand-off,
+ * when no other run carries it. An `edited` run reads the owner's edit to one
+ * of the staffer's files, for a lesson.
  */
 export const FOLLOW_UP_KINDS = [
   'carry_out',
   'rework',
   'denied',
-  'feedback',
   'task_done',
   'goal',
   'first_day',
   'hand_off',
   'handed_back',
   'resume',
+  'answered',
   'edited'
 ] as const;
 export type FollowUpKind = (typeof FOLLOW_UP_KINDS)[number];
@@ -41,32 +43,33 @@ export const SERVES_NO_THREAD: Record<FollowUpKind, boolean> = {
   carry_out: false,
   rework: false,
   denied: true,
-  feedback: false,
   task_done: false,
   goal: false,
   first_day: false,
   hand_off: false,
   handed_back: false,
   resume: false,
+  answered: false,
   edited: true
 };
 
 /**
  * Whether a follow-up's run works at Draft at most: both sides of a hand-off,
- * the hub picking its thread back up, and a run that only reads the owner's
- * reason or edit for a lesson (every kind `SERVES_NO_THREAD` marks).
+ * the hub picking its thread back up, a run reading the owner's answer to
+ * something raised on no work, and a run that only reads the owner's reason or
+ * edit for a lesson (every kind `SERVES_NO_THREAD` marks).
  */
 export const AT_DRAFT: Record<FollowUpKind, boolean> = {
   carry_out: false,
   rework: false,
   denied: true,
-  feedback: false,
   task_done: false,
   goal: false,
   first_day: false,
   hand_off: true,
   handed_back: true,
   resume: true,
+  answered: true,
   edited: true
 };
 export const atDraft = (kind: FollowUpKind): boolean => AT_DRAFT[kind];

@@ -13,15 +13,7 @@ import {
   switchesSaid,
   zoneName
 } from '@oddboro/ledger';
-import type {
-  AskRow,
-  FollowUpRow,
-  GoalRow,
-  Level,
-  ReportRow,
-  TaskRow,
-  Unparked
-} from '@oddboro/ledger';
+import type { AskRow, FollowUpRow, GoalRow, Level, TaskRow, Unparked } from '@oddboro/ledger';
 import { flat, ownerAnswers, pickedUpLine } from '@oddboro/ledger/desk-answers';
 import { workPath } from '@oddboro/ledger/work-paths';
 import { filterWords } from '@oddboro/ledger/filters';
@@ -43,7 +35,7 @@ export function waitEnded(u: Unparked): string[] {
   ];
 }
 
-/** The owner's answers a hub picks its thread up with, one a line (`answerThread`). */
+/** The owner's answers a run reads, one a line: a hub's pick-up on its thread (`answerThread`), and an `answered` run. */
 const answers = (note: string | null): string[] =>
   (note ?? '').split('\n').map((line) => `- ${line}`);
 
@@ -51,7 +43,6 @@ const answers = (note: string | null): string[] =>
 export function followUpBrief(
   f: FollowUpRow,
   a?: AskRow,
-  r?: ReportRow,
   t?: { row: TaskRow; files: string[] },
   g?: GoalRow,
   /** Twins answered with `a` whose work this carry-out does too (`standsFor`). */
@@ -65,23 +56,24 @@ export function followUpBrief(
     case 'first_day':
       return firstDayBrief();
     case 'goal':
-      return goalBrief(f, r, g);
+      return goalBrief(f, g);
     case 'task_done':
-      return taskDoneBrief(f, r, t);
+      return taskDoneBrief(f, t);
     case 'carry_out':
       return carryOutBrief(f, a, also, level);
     case 'denied':
       return deniedBrief(f, a);
     case 'rework':
       return reworkBrief(f, a);
+    case 'answered':
+      return answeredBrief(f);
     // A hand-off and a hand-back reach here only with their row or thread
     // missing, and an edit never does (`editBrief` comes first in staff.ts):
-    // each gets the feedback brief, as an older `feedback` row does.
-    case 'feedback':
+    // with nothing else to go on, each reads its note as the owner's feedback.
     case 'hand_off':
     case 'handed_back':
     case 'edited':
-      return feedbackBrief(f, r);
+      return feedbackBrief(f);
     default: {
       const missed: never = f.kind;
       throw new Error(`No brief for a ${String(missed)} follow-up`);
@@ -153,8 +145,8 @@ function firstDayBrief(): string[] {
   ];
 }
 
-function goalBrief(f: FollowUpRow, r?: ReportRow, g?: GoalRow): string[] {
-  if (!g) return feedbackBrief(f, r);
+function goalBrief(f: FollowUpRow, g?: GoalRow): string[] {
+  if (!g) return feedbackBrief(f);
   return [
     `{owner} set a new goal. Plan how the office meets it, and bring them the plan.`,
     '',
@@ -172,12 +164,8 @@ function goalBrief(f: FollowUpRow, r?: ReportRow, g?: GoalRow): string[] {
   ];
 }
 
-function taskDoneBrief(
-  f: FollowUpRow,
-  r?: ReportRow,
-  t?: { row: TaskRow; files: string[] }
-): string[] {
-  if (!t) return feedbackBrief(f, r);
+function taskDoneBrief(f: FollowUpRow, t?: { row: TaskRow; files: string[] }): string[] {
+  if (!t) return feedbackBrief(f);
   const answers = ownerAnswers(t.row.steps).map(
     (a) => `- They answered "${a.step}" with: ${a.answer}`
   );
@@ -357,15 +345,26 @@ function reworkBrief(f: FollowUpRow, a?: AskRow): string[] {
   ];
 }
 
-function feedbackBrief(f: FollowUpRow, r?: ReportRow): string[] {
+/**
+ * The owner answered something the Odd raised on no thread and no hand-off:
+ * nothing else carries the answer back, so this run hears it.
+ */
+function answeredBrief(f: FollowUpRow): string[] {
   return [
-    `{owner} read your report "${r?.title}" and gave feedback. Work out what it means, then act on it.`,
+    '{owner} answered something you raised:',
+    '',
+    ...answers(f.note),
+    '',
+    '1. If it changes what you should do, do it now.',
+    '2. Otherwise say so, and stop.'
+  ];
+}
+
+function feedbackBrief(f: FollowUpRow): string[] {
+  return [
+    '{owner} gave feedback. Work out what it means, then act on it.',
     '',
     `- Their feedback: ${f.note}`,
-    '',
-    'The report:',
-    '',
-    r?.body ?? '',
     '',
     '1. Work inside the office that they asked for, such as notes or a file in your folder, do now.',
     `2. Anything that changes one of your jobs, or something outside the office ${ACT_WRITE}: raise_ask first, one exact action per ask.`,

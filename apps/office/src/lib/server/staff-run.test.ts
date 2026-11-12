@@ -1595,7 +1595,7 @@ test("the run a finished task starts is told where a file attached from a goal's
     select id from follow_ups where task_id = ${task.id} and kind = 'task_done'`;
   const f = await L.startFollowUp(row.id);
   assert.ok(f, 'the task_done follow-up could not start');
-  const r = await followThrough(f, undefined, undefined, task);
+  const r = await followThrough(f, undefined, task);
   assert.equal(r.outcome, 'done', r.text);
   const { message, system } = JSON.parse(r.text) as Gave;
   assert.ok(
@@ -1903,7 +1903,7 @@ test("a new hire's first day and the manager's planning say how an Odd gets Run 
     insert into follow_ups (staff_id, kind, goal_id) values ('sam', 'goal', ${g.id}) returning id`;
   const f = await L.startFollowUp(row.id);
   assert.ok(f, 'the planning run could not start');
-  const r = await followThrough(f, undefined, undefined, undefined, await L.goal(g.id));
+  const r = await followThrough(f, undefined, undefined, await L.goal(g.id));
   assert.equal(r.outcome, 'done', r.text);
   const plan = JSON.parse(r.text) as Gave;
   const planText = `${plan.system}\n${plan.message}`;

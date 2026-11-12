@@ -158,13 +158,12 @@ test("a colleague's note or the office's lines never reach a run as the owner's 
   assert.deepEqual(theirs.sort(), [
     'carry_out',
     'denied',
-    'feedback',
     'first_day',
     'goal',
     'rework',
     'task_done'
   ]);
-  for (const kind of ['hand_off', 'handed_back', 'resume', 'edited'] as const)
+  for (const kind of ['hand_off', 'handed_back', 'resume', 'answered', 'edited'] as const)
     assert.equal(ownerNoteOf({ kind, note: 'a note' }), undefined, kind);
   assert.equal(ownerNoteOf({ kind: 'denied', note: null }), undefined);
 });

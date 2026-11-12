@@ -35,7 +35,7 @@ import {
   type Outcome
 } from './schema.ts';
 import { flat } from './desk-answers.ts';
-import type { AskRow, TaskRow, ReportRow } from './office.ts';
+import type { AskRow, TaskRow } from './office.ts';
 import { ofWorkingOdd, anyStaffer } from './office-staff.ts';
 import { record } from './office-ledger.ts';
 import { ask } from './office-asks.ts';
@@ -52,7 +52,6 @@ async function followUp(
   kind: FollowUpKind,
   f: {
     askId?: number;
-    reportId?: number;
     taskId?: number;
     note: string | null;
     pickedUp?: string[];
@@ -92,7 +91,7 @@ export async function startFirstDay(staffId: string): Promise<void> {
 }
 
 /**
- * Follow-ups ready to start, by id, with the ask, report, task, goal or thread
+ * Follow-ups ready to start, by id, with the ask, task, goal or thread
  * each is about. Not the rows: a run takes its row from the claim
  * (`startFollowUp`), with any answer that joined it since this list.
  */
@@ -100,7 +99,6 @@ export async function followUpsToDo(): Promise<
   {
     id: number;
     ask?: AskRow;
-    report?: ReportRow;
     task?: TaskRow;
     goal?: typeof goals.$inferSelect;
   }[]
@@ -118,9 +116,6 @@ export async function followUpsToDo(): Promise<
       return {
         id: f.id,
         ask: a,
-        report: f.reportId
-          ? (await db.select().from(reports).where(eq(reports.id, f.reportId)))[0]
-          : undefined,
         task: f.taskId
           ? (await db.select().from(tasks).where(eq(tasks.id, f.taskId)))[0]
           : undefined,
@@ -273,11 +268,6 @@ export const OUTCOME_TITLE: Record<FollowUpKind, Record<Outcome, string>> = {
     failed: 'Could not take in the no on',
     waiting: 'Waiting on {owner} after the no on'
   },
-  feedback: {
-    done: 'Acted on feedback on',
-    failed: 'Could not act on feedback on',
-    waiting: 'Waiting on {owner} after feedback on'
-  },
   task_done: {
     done: 'Picked up after',
     failed: 'Could not pick up after',
@@ -307,6 +297,11 @@ export const OUTCOME_TITLE: Record<FollowUpKind, Record<Outcome, string>> = {
     done: 'Picked back up',
     failed: 'Could not pick back up',
     waiting: 'Waiting on {owner} after picking back up'
+  },
+  answered: {
+    done: 'Acted on your answer to',
+    failed: 'Could not act on your answer to',
+    waiting: 'Waiting on {owner} after your answer to'
   },
   edited: {
     done: "Read {owner}'s edit to",
@@ -545,20 +540,20 @@ export const CUT_OFF_WORK: Record<FollowUpKind, string> = {
   carry_out: 'an ask',
   rework: 'an ask',
   denied: 'an ask',
-  feedback: 'a report',
   task_done: 'a task',
   first_day: 'getting started',
   goal: 'a goal',
   hand_off: 'the work',
   handed_back: 'the work',
   resume: 'the work',
+  answered: 'your answer',
   edited: 'a file'
 };
 
 /**
  * What the Ledger names the work a follow-up was about, whether it finished or
- * a restart cut it off: its ask's, hand-off's, file's, task's, goal's or
- * report's title. A lead picking a thread back up names its goal, or the
+ * a restart cut it off: its ask's, hand-off's, file's, task's or goal's
+ * title. A lead picking a thread back up names its goal, or the
  * thread's own title when it serves none, never the thread itself. With no
  * title left, its kind's plain words (`CUT_OFF_WORK`).
  */
@@ -582,10 +577,6 @@ async function titleOf(f: FollowUpRow): Promise<string | undefined> {
       .where(eq(threads.id, f.threadId));
     return t?.goal ?? t?.title;
   }
-  if (f.reportId)
-    return (
-      await db.select({ title: reports.title }).from(reports).where(eq(reports.id, f.reportId))
-    )[0]?.title;
   return undefined;
 }
 

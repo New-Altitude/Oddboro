@@ -7,7 +7,6 @@ import { isOnThread, type Db } from './threads.ts';
 import {
   asks,
   jobs,
-  reports,
   runs,
   staff,
   tasks,
@@ -554,7 +553,6 @@ export async function officeActivity(since: Date) {
         staff: followUps.staffId,
         kind: followUps.kind,
         ask: asks.title,
-        report: reports.title,
         task: tasks.title,
         handOff: followUps.handOff,
         thread: threads.title,
@@ -563,7 +561,6 @@ export async function officeActivity(since: Date) {
       })
       .from(followUps)
       .leftJoin(asks, eq(followUps.askId, asks.id))
-      .leftJoin(reports, eq(followUps.reportId, reports.id))
       .leftJoin(tasks, eq(followUps.taskId, tasks.id))
       .leftJoin(threads, eq(followUps.threadId, threads.id))
       .where(gte(followUps.createdAt, since))
@@ -643,14 +640,14 @@ export async function officeActivity(since: Date) {
       }))
     },
     // Work owed after the owner answered: carrying out an approved ask, reworking one
-    // the owner sent back, acting on their feedback on a report, or picking up after a
-    // task they finished. A hand_off is work a colleague handed this staffer,
-    // handed_back is the colleague's result coming home, and resume is a thread's
-    // hub picking it back up. A null outcome is still to do.
+    // the owner sent back, or picking up after a task they finished. A hand_off is
+    // work a colleague handed this staffer, handed_back is the colleague's result
+    // coming home, and resume is a thread's hub picking it back up. A null outcome
+    // is still to do.
     followUps: follow.map((f) => ({
       from: f.staff,
       kind: f.kind,
-      about: f.ask ?? f.report ?? f.task ?? f.handOff?.title ?? f.thread,
+      about: f.ask ?? f.task ?? f.handOff?.title ?? f.thread,
       ...(f.handOff ? { colleague: f.handOff.from } : {}),
       outcome: f.outcome,
       at: pt(f.at)

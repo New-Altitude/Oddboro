@@ -123,7 +123,6 @@ import {
   type OwnTools,
   type PokeRow,
   type RecentThread,
-  type ReportRow,
   type CheckedFiles,
   type StaffRow,
   type TaskRow,
@@ -1249,7 +1248,6 @@ function editBrief(path: string, shown: EditShown): string[] {
 export async function followThrough(
   f: FollowUpRow & { unparked?: Unparked },
   a?: AskRow,
-  r?: ReportRow,
   t?: TaskRow,
   g?: GoalRow
 ): Promise<{ outcome: Outcome; text: string; saw?: string; joined?: number[] }> {
@@ -1335,7 +1333,7 @@ export async function followThrough(
               ? `Plan: ${g.title}`
               : f.kind === 'first_day'
                 ? 'First day'
-                : `Feedback on ${r?.title ?? 'a report'}`));
+                : followUpDetail(f.kind, { colleague: colleague?.name })));
   const task = t ? { row: t, files: await taskFiles(t.id) } : undefined;
   // One carry-out may stand for twin asks that start no run of their own.
   const also =
@@ -1411,7 +1409,7 @@ export async function followThrough(
           : edit
             ? editBrief(edit.path, edit.shown)
             : [
-                ...followUpBrief(f, a, r, task, g, also, who.permission),
+                ...followUpBrief(f, a, task, g, also, who.permission),
                 ...(serves?.handOff && giver && thread
                   ? handOffContext({
                       h: serves.handOff,

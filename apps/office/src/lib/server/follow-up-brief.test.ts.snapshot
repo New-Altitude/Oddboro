@@ -1,3 +1,14 @@
+exports[`answered keeps the words its run receives 1`] = `
+[
+  "{owner} answered something you raised:",
+  "",
+  "- Their words",
+  "",
+  "1. If it changes what you should do, do it now.",
+  "2. Otherwise say so, and stop."
+]
+`;
+
 exports[`carry_out keeps the words its run receives 1`] = `
 [
   "{owner} approved your ask #7. Carry it out now.",
@@ -29,30 +40,9 @@ exports[`denied keeps the words its run receives 1`] = `
 
 exports[`edited keeps the words its run receives 1`] = `
 [
-  "{owner} read your report \\"Weekly\\" and gave feedback. Work out what it means, then act on it.",
+  "{owner} gave feedback. Work out what it means, then act on it.",
   "",
   "- Their feedback: Their words",
-  "",
-  "The report:",
-  "",
-  "All well",
-  "",
-  "1. Work inside the office that they asked for, such as notes or a file in your folder, do now.",
-  "2. Anything that changes one of your jobs, or something outside the office unless you hold Act and use a tool {owner} connected for you at read and write: raise_ask first, one exact action per ask.",
-  "3. Anything only they can do goes on their desk with give_owner_a_task.",
-  "4. If the feedback needs nothing done, say so."
-]
-`;
-
-exports[`feedback keeps the words its run receives 1`] = `
-[
-  "{owner} read your report \\"Weekly\\" and gave feedback. Work out what it means, then act on it.",
-  "",
-  "- Their feedback: Their words",
-  "",
-  "The report:",
-  "",
-  "All well",
   "",
   "1. Work inside the office that they asked for, such as notes or a file in your folder, do now.",
   "2. Anything that changes one of your jobs, or something outside the office unless you hold Act and use a tool {owner} connected for you at read and write: raise_ask first, one exact action per ask.",
@@ -91,13 +81,9 @@ exports[`goal keeps the words its run receives 1`] = `
 
 exports[`hand_off keeps the words its run receives 1`] = `
 [
-  "{owner} read your report \\"Weekly\\" and gave feedback. Work out what it means, then act on it.",
+  "{owner} gave feedback. Work out what it means, then act on it.",
   "",
   "- Their feedback: Their words",
-  "",
-  "The report:",
-  "",
-  "All well",
   "",
   "1. Work inside the office that they asked for, such as notes or a file in your folder, do now.",
   "2. Anything that changes one of your jobs, or something outside the office unless you hold Act and use a tool {owner} connected for you at read and write: raise_ask first, one exact action per ask.",
@@ -108,13 +94,9 @@ exports[`hand_off keeps the words its run receives 1`] = `
 
 exports[`handed_back keeps the words its run receives 1`] = `
 [
-  "{owner} read your report \\"Weekly\\" and gave feedback. Work out what it means, then act on it.",
+  "{owner} gave feedback. Work out what it means, then act on it.",
   "",
   "- Their feedback: Their words",
-  "",
-  "The report:",
-  "",
-  "All well",
   "",
   "1. Work inside the office that they asked for, such as notes or a file in your folder, do now.",
   "2. Anything that changes one of your jobs, or something outside the office unless you hold Act and use a tool {owner} connected for you at read and write: raise_ask first, one exact action per ask.",
