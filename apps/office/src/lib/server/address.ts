@@ -4,7 +4,8 @@
 // office uses http://oddboro.localhost, which always reaches this computer.
 //
 // Caddy answers on ports 80 and 443 and hands everything to the office on
-// 127.0.0.1:4500. Three cases, by what this computer already has:
+// 127.0.0.1 at its own port (`OFFICE_PORT`: 4500, or `ODDBORO_PORT`). Three
+// cases, by what this computer already has:
 //
 // - Nothing on port 80: the office runs its own Caddy as a login service
 //   (com.oddboro.caddy), downloading Caddy first if this computer has none.
@@ -13,7 +14,7 @@
 //   Caddy forgets the site when it reloads its own config, so the office adds
 //   it again when it starts and when a page loads.
 // - Something else on port 80, or a Caddy with its admin API off: the office
-//   stays at oddboro.localhost:4500, which needs nothing.
+//   stays at oddboro.localhost on its own port, which needs nothing.
 //
 // HTTPS: a browser lets only a secure page show notifications, so the office
 // serves local.oddboro.com over HTTPS with a certificate from Caddy's own

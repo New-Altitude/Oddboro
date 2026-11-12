@@ -4,39 +4,18 @@
 // NotifyHelp.svelte is compiled and rendered on the server, as the page would
 // show it. Run with `npm test -w @oddboro/office`.
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { after, test } from 'node:test';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { compile } from 'svelte/compiler';
+import { dirname, join } from 'node:path';
+import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { render } from 'svelte/server';
 import type { System } from '@oddboro/ledger/platform';
+import { compiledForServer } from './compiled-for-server.ts';
 import { browserNeeds, notifyHelp } from './notify-help.ts';
 import type NotifyHelpComponent from './NotifyHelp.svelte';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const source = join(here, 'NotifyHelp.svelte');
-const out = mkdtempSync(join(tmpdir(), 'oddboro-notify-help-'));
-after(() => rmSync(out, { recursive: true, force: true }));
-
-// The compiled module lands outside the app, so each import it makes is
-// pointed at the file it means: a relative one beside the component, a
-// package one as this test resolves it.
-const { js } = compile(readFileSync(source, 'utf8'), { generate: 'server', filename: source });
-const code = js.code.replace(/from '([^']+)'/g, (_, spec: string) => {
-  const url = spec.startsWith('.')
-    ? pathToFileURL(resolve(here, spec)).href
-    : import.meta.resolve(spec);
-  return `from '${url}'`;
-});
-writeFileSync(join(out, 'NotifyHelp.js'), code);
-// The module is that very file, compiled, so it has the component's own type.
-const NotifyHelp = (
-  (await import(pathToFileURL(join(out, 'NotifyHelp.js')).href)) as {
-    default: typeof NotifyHelpComponent;
-  }
-).default;
+const NotifyHelp = await compiledForServer<typeof NotifyHelpComponent>(
+  join(dirname(fileURLToPath(import.meta.url)), 'NotifyHelp.svelte')
+);
 
 const shown = (props: { system: System | undefined; app: boolean; canOpen: boolean }) =>
   render(NotifyHelp, { props: { ...props, onOpen: () => {}, onTest: () => {} } }).body;
