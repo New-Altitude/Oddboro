@@ -1530,8 +1530,12 @@ the persona's voice.
    its hello with `sayInChat`. An install it refuses ends that persona's
    sign-in, since nothing here would use it. Nothing is drawn.
    `staff.package` holds the slug, the version, New Altitude's disclosure
-   sentence and `quiet`; it is null for every other Odd. A granted persona
-   in an office not yet welcomed joins right after the manager. The page
+   sentence and `quiet`; it is null for every other Odd. A persona the
+   owner added in an office not yet welcomed joins right after the manager.
+   Only the owner's Add in this office, this run, hires one: a sign-in the
+   store kept from before is not a yes, since every office on this computer
+   shares the store and a reset leaves it. That persona's card shows Add,
+   which uses the kept sign-in with no page. The page
    keeps it off the floor until the manager has walked in, then it walks on
    (`firstRun` in `+page.svelte`).
 4. Hands, then voice. `run()` in `staff.ts` hands a persona Odd's chat, job
