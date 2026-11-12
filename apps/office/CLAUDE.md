@@ -4,6 +4,9 @@ The floor the owner watches, and the desk they work from. SvelteKit 3 with Svelt
 runes, PixiJS for the pixel-art floor, Tailwind for the page around it, and
 Postgres through `@oddboro/ledger`. Port 4500 on 127.0.0.1, or `ODDBORO_PORT`.
 
+`npm test` builds the sprites first when `packages/sprites/dist/meta.json` is
+missing, as on a fresh clone: hiring reads it.
+
 Where a new kind of thing starts, the shared function for each job, and the
 check that catches a missed place: `docs/architecture.md`.
 
