@@ -14,6 +14,8 @@
   import GoalProposal from './GoalProposal.svelte';
   import { approvalTarget, approveWord, yesWord } from './chat-approval.ts';
   import { chatAnswer } from './task-steps.ts';
+  import BugReport from './BugReport.svelte';
+  import { failedReply } from '../bug-report.ts';
   import Lesson from './Lesson.svelte';
   import PersonaQuiet from './PersonaQuiet.svelte';
   import { newTurnId } from '#lib/staff/chat-input.ts';
@@ -244,6 +246,8 @@
     );
   });
   let draft = $state('');
+  /** What the bug report form starts with, while it is open. */
+  let bugReport = $state<{ title?: string; body: string }>();
   let sending = $state(false);
   // The office already holds the text, files and reply target under this turn id.
   type Blocked = { turnId: string; signIn: ChatSignIn };
@@ -765,6 +769,7 @@
           else if (ev.type === 'done') {
             reply.text = ev.text;
             if (ev.choices?.length) reply.choices = ev.choices;
+            if (ev.bug) reply.bug = ev.bug;
             reply.pending = false;
             reply.at = new Date().toISOString();
           } else if (ev.type === 'error') {
@@ -908,6 +913,13 @@
         await tick();
         goal?.focus();
       }
+    },
+    // The form takes the focus; a failed reply's error starts its details.
+    {
+      label: 'Report a bug',
+      shown: () => true,
+      focuses: true,
+      run: () => (bugReport = { body: failedReply(lines) })
     }
   ];
   const more = $derived(MORE.filter((m) => m.shown()));
@@ -1131,6 +1143,18 @@
     </button>
     <span class="text-xs {p.yours ? 'text-ember' : 'text-muted'}">{p.text}</span>
     {#if opened.has(`${h.id}-card`)}{@render story(h)}{/if}
+  </div>
+{/snippet}
+
+<!-- What the Odd is doing, under the reply it is working on, with Stop beside it. -->
+{#snippet doing(extra: string)}
+  <div class="meta {extra} ms-1 me-auto flex items-center text-xs text-muted">
+    <span aria-live="polite">{profile.name} is {status ? status.toLowerCase() : 'replying'}…</span>
+    {#if active}
+      <button type="button" class="text-coral hover:text-ink" disabled={stopping} onclick={stop}
+        >Stop</button
+      >
+    {/if}
   </div>
 {/snippet}
 
@@ -1462,6 +1486,14 @@
             {line.text}
           {/if}
         </div>
+        {#if line.bug && !line.pending}
+          <!-- The Odd drafted a bug report: the form opens with it, and files nothing by itself. -->
+          <div class="ms-auto w-[85%]">
+            <button class="choice" onclick={() => (bugReport = line.bug)}
+              >File this bug report</button
+            >
+          </div>
+        {/if}
         {#if retryable(line, i)}
           {#if blocked && blocked.turnId === line.turnId}
             <ChatSignInCard
@@ -1478,15 +1510,16 @@
           {/if}
         {/if}
         {#if line.pending}
-          <!-- What the staffer is doing, under the reply it is working on. -->
-          <div class="-mt-1 ms-1 text-xs text-muted" aria-live="polite">
-            {profile.name} is {status ? status.toLowerCase() : 'replying'}…
-          </div>
+          {@render doing('-mt-1')}
         {:else}
           {@render meta(line, i)}
         {/if}
       {/if}
     {/each}
+    {#if active && !lines.some((l) => l.pending)}
+      <!-- A reply still running from before this chat opened. -->
+      {@render doing('')}
+    {/if}
     {#if waiting}
       <!-- Sent while the reply above was still coming: it goes when that reply ends. -->
       <div class="ms-auto flex max-w-[85%] flex-col items-end gap-0.5">
@@ -1625,12 +1658,6 @@
       <button aria-label="Clear work selection" onclick={() => (about = undefined)}>✕</button>
     </div>
   {/if}
-  {#if active}
-    <div class="flex items-center justify-end gap-2 px-3 pb-1.5 text-xs text-muted">
-      <button type="button" class="text-coral" disabled={stopping} onclick={stop}>Stop reply</button
-      >
-    </div>
-  {/if}
   {#if canSetGoal}
     <ChatGoal
       bind:this={goal}
@@ -1762,6 +1789,17 @@
 </div>
 
 <svelte:window onpointerdown={outside} />
+
+{#if bugReport !== undefined}
+  <BugReport
+    initial={bugReport}
+    staff={profile.id}
+    onclose={() => (bugReport = undefined)}
+    onfiled={() => {
+      if (!sending) load(profile.id);
+    }}
+  />
+{/if}
 
 <style>
   /* Three attached files at most (each 48px square, 2px and a 15px name under

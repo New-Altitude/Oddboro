@@ -693,6 +693,12 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   words, no `denied` run, a held call never made), a task through
   `withdrawTask`; anything not the Odd's or not open is left as it is.
   `test/withdraw.test.ts` holds it.
+- `draft_bug_report`, every Odd's, offered only in a chat (`OWNER_SAID`),
+  keeps a bug report's title and details for the run in the Odd's folder
+  (`keepBugDraft` in `src/bug-drafts.ts`, `OFFICE_FILES.bugDraft`). The
+  office takes it once as the chat run ends (`takeBugDraft`) and puts it on
+  the reply, where File this opens the report form. It files nothing.
+  `test/bug-drafts.test.ts` holds it.
 - An Odd leaves the office only on the owner's yes, and can come back
   (`src/leaving.ts`). `staff.left_at` marks one that left; the row and its
   history stay. `staffer()` and `roster()` find working Odds only, so a run,

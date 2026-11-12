@@ -176,6 +176,10 @@ export const OWNER_ACTIONS = {
     notAnAction:
       "Keeps a file the owner attaches in the Odd's attachments folder, as part of the chat message that names it, which the chat's own log keeps."
   },
+  'POST /api/staff/[id]/bug-reports': {
+    notAnAction:
+      "Files the owner's reviewed bug report on GitHub with their own GitHub CLI, then adds its link to the chat, which the chat's own log keeps."
+  },
   'DELETE /api/staff/[id]/chat': {
     none: 'Stops only the named reply attempt and keeps its outcome in chat.'
   },

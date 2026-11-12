@@ -11,7 +11,8 @@ import {
   home,
   OFFICE_FILE_NAMES,
   chatSession,
-  replyToReport
+  replyToReport,
+  takeBugDraft
 } from '@oddboro/ledger';
 import { reserveRun, releaseRun } from '@oddboro/ledger/run-registry';
 import { firstQuestionIn, nextFirstQuestion } from '@oddboro/ledger/first-questions';
@@ -121,7 +122,8 @@ export async function replyToOwnerTurn(
     onEvent({
       type: 'done',
       text: answered.text,
-      ...(answered.choices?.length ? { choices: answered.choices } : {})
+      ...(answered.choices?.length ? { choices: answered.choices } : {}),
+      ...(answered.bug ? { bug: answered.bug } : {})
     });
     return;
   }
@@ -214,6 +216,11 @@ export async function replyToOwnerTurn(
           : []),
         ...chatPreface(past, landed, session),
         ...(re ? [re.brief] : []),
+        ...(/\b(bug|bugs|issue tracker)\b/i.test(message)
+          ? [
+              '(For an Oddboro bug, draft the report with draft_bug_report: a short title and the details. The owner gets a File this bug report button under your reply, which opens the report form with your draft to review, and nothing is filed until they choose there. Tell them to click File this bug report.)'
+            ]
+          : []),
         ...aboutBrief(owner)
       ].join('\n\n');
       r = await run(who, prompt, {
@@ -240,6 +247,8 @@ export async function replyToOwnerTurn(
     } catch (err) {
       r = { ok: false, text: err instanceof Error ? err.message : String(err) };
     }
+    // The bug report this run drafted, taken whatever the outcome: only a reply carries it.
+    const bug = takeBugDraft(id, live.key);
     const at = new Date();
     const common = {
       at: at.toISOString(),
@@ -261,8 +270,9 @@ export async function replyToOwnerTurn(
       onEvent({ type: 'done', text });
     } else if (r.ok) {
       const { text, choices } = splitChoices(r.text);
-      addToChat(id, { ...common, text, ...(choices.length ? { choices } : {}) });
-      onEvent({ type: 'done', text, ...(choices.length ? { choices } : {}) });
+      const kept = { ...(choices.length ? { choices } : {}), ...(bug ? { bug } : {}) };
+      addToChat(id, { ...common, text, ...kept });
+      onEvent({ type: 'done', text, ...kept });
     } else {
       const signIn = usedTool
         ? undefined
