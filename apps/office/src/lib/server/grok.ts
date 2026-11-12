@@ -27,7 +27,7 @@
 // outlast it (`grokSignedOut`). Where the Mac's Docker socket is a link, the
 // run gets a home of its own so Grok's sandbox can start (`runHome`).
 // Windows has no Grok sandbox, so there the office's tools are the wall.
-import { execFile, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import {
   accessSync,
   chmodSync,
@@ -53,6 +53,7 @@ import {
   runsGoing,
   toolHome,
   currentPlatform,
+  probe,
   type Effort
 } from '@oddboro/ledger';
 import { andBelow, denyRules, instructionPaths } from './files.ts';
@@ -450,24 +451,35 @@ export function grokLaunch(r: GrokRun): GrokLaunch {
  * --json`) on the office's home and leader socket, or nothing when it cannot
  * say.
  */
-export function grokLatest(): Promise<string | undefined> {
+export async function grokLatest(): Promise<string | undefined> {
   const h = grokHome();
   grokHomeReady(h);
-  return new Promise((done) =>
-    execFile(
-      grokCommand() ?? 'grok',
-      ['update', '--check', '--json', '--leader-socket', h.leader],
-      { cwd: h.dir, env: grokEnv(h), timeout: 15_000, windowsHide: true },
-      (_e, out) => {
-        try {
-          const v = (JSON.parse(String(out)) as { latestVersion?: unknown }).latestVersion;
-          done(typeof v === 'string' && v ? v : undefined);
-        } catch {
-          done(undefined);
-        }
-      }
-    )
+  const r = await probe(
+    grokCommand() ?? 'grok',
+    ['update', '--check', '--json', '--leader-socket', h.leader],
+    { cwd: h.dir, env: grokEnv(h), timeout: 15_000 }
   );
+  let out: string;
+  switch (r.status) {
+    // Grok may exit with an error and still print its answer.
+    case 'ok':
+    case 'failed':
+      out = r.out;
+      break;
+    case 'missing':
+    case 'timeout':
+      return undefined;
+    default: {
+      const missed: never = r;
+      throw new Error(`Grok's update check came back as ${JSON.stringify(missed)}`);
+    }
+  }
+  try {
+    const v = (JSON.parse(out) as { latestVersion?: unknown }).latestVersion;
+    return typeof v === 'string' && v ? v : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

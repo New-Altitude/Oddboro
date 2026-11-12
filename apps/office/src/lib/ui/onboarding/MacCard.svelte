@@ -59,6 +59,7 @@
     | { state: 'own'; installed: boolean }
     | { state: 'shared' }
     | { state: 'blocked'; holder: string }
+    | { state: 'unchecked' }
   );
   let addr = $state<Address | undefined>();
   let addrBusy = $state(false);
@@ -148,7 +149,7 @@
     <div class="mt-2 rounded-lg bg-raise px-3 py-2 text-sm">
       <div class="flex items-center gap-3">
         <span class="min-w-0 flex-1">
-          {addr.state === 'blocked' ? `${addr.host}:4500` : addr.host}
+          {addr.state === 'blocked' || addr.state === 'unchecked' ? `${addr.host}:4500` : addr.host}
           <span class="block text-xs text-muted">
             {#if addr.state === 'ready' && addr.secure}
               The office's address on {thisComputer}, secure. No port to remember.
@@ -165,6 +166,9 @@
             {:else if addr.state === 'shared'}
               Your Caddy holds port 80. The office adds its site to it and leaves your config files
               alone.
+            {:else if addr.state === 'unchecked'}
+              The office could not check what holds port 80 on this computer, so it keeps its port
+              in the address.
             {:else}
               {addr.holder} holds port 80, so the office keeps its port in the address.
             {/if}

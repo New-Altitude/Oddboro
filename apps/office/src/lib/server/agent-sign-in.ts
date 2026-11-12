@@ -15,11 +15,10 @@
 // `GROK_HOME=<office> grok logout` removed the owner's own ~/.grok sign-in in
 // the same second. The session at xAI or OpenAI lasts until it ends or the
 // owner removes it in their account. Server only.
-import { execFile } from 'node:child_process';
 import { rmSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { OFFICE_ACCOUNT, type Agent } from '@oddboro/ledger';
-import { claudeCommand, currentPlatform, npmCommand } from '@oddboro/ledger/platform';
+import { claudeCommand, currentPlatform, npmCommand, probe } from '@oddboro/ledger/platform';
 import { claudeAccountOf, claudeHome, cleanEnv, forgetClaudeAccount } from './claude.ts';
 import { codexAccount, codexHome, codexSignIn } from './codex.ts';
 import { commandSlot, type Slot } from './command-stream.ts';
@@ -186,19 +185,27 @@ export function claudeSignIn(account: string = OFFICE_ACCOUNT): {
 export async function signOut(tool: Agent, account: string = OFFICE_ACCOUNT): Promise<void> {
   if (tool === 'claude') {
     const command = agentCommand('claude');
-    if (command)
-      await new Promise<void>((done) =>
-        execFile(
-          command[0],
-          [...command[1], 'auth', 'logout'],
-          {
-            env: { ...cleanEnv(), CLAUDE_CONFIG_DIR: claudeHome(account) },
-            timeout: 15_000,
-            windowsHide: true
-          },
-          () => done()
-        )
-      );
+    if (command) {
+      const r = await probe(command[0], [...command[1], 'auth', 'logout'], {
+        env: { ...cleanEnv(), CLAUDE_CONFIG_DIR: claudeHome(account) },
+        timeout: 15_000
+      });
+      switch (r.status) {
+        case 'ok':
+          break;
+        // The office forgets the account either way, and the page reads the
+        // sign-in again, so a logout that did not take shows as still signed in.
+        case 'failed':
+        case 'missing':
+        case 'timeout':
+          console.error(`Claude Code's sign-out of ${account} came back ${r.status}.`);
+          break;
+        default: {
+          const missed: never = r;
+          throw new Error(`Claude Code's sign-out came back as ${JSON.stringify(missed)}`);
+        }
+      }
+    }
     forgetClaudeAccount(account);
     return;
   }
