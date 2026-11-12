@@ -125,7 +125,7 @@ import {
   type PokeRow,
   type RecentThread,
   type ReportRow,
-  type RunRow,
+  type CheckedFiles,
   type StaffRow,
   type TaskRow,
   type ThreadStory,
@@ -564,7 +564,8 @@ export type Run = {
   text: string;
   saved?: true;
   interrupted?: true;
-  checkedFiles?: RunRow['checkedFiles'];
+  /** A file job's check of what this run wrote (`CheckedFiles`, less the periods it started with). */
+  checked?: Omit<CheckedFiles, 'periods'>;
 };
 const stopped = (): Run => ({ ok: false, text: 'Stopped at your request.', interrupted: true });
 /** How a run ends on its stop: the owner's Stop, or the Odd leaving the office (`stopRuns`). */

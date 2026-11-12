@@ -1017,6 +1017,16 @@ pieces under 3,900 bytes a line, so no value is on a command line.
     sign-ins. The file server records the read and write; the office checks
     the result against the file on disk. Gemini uses native file tools, so it
     cannot verify a file job. Other jobs run as before.
+    A reader's input is its writer's file for the period the run is for
+    (`scheduledInput` in the ledger), by the writer's run, never by whether
+    the bytes changed. Before a reader runs, the clock asks `readerTurn` in
+    `jobs.ts`: while its writer still owes that period (running, due, or owed
+    and catching up), the reader owes its time instead and gets in line again
+    when the writer's run ends, so after the Mac sleeps both run in order. A
+    writer that skipped the period makes the reader skip it too, on the While
+    you were away card; one that has not written a first file yet makes it
+    skip quietly. Only a writer that ran for the period and left no checked
+    file fails the reader's run.
     A thread its hub parked with `resume_at` wakes at that time: the clock
     starts the hub's `resume` follow-up. One parked on a task (`after_task`)
     wakes when that task is done or dropped, with no clock. So does a thread the usage window

@@ -1,8 +1,11 @@
-// Due times, completed runs and old files survive retries without duplicate work.
+// Due times, completed runs and old files survive retries without duplicate work,
+// and a reader job's input is its writer's run for the reader's own period.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { db, sql } from './pglite.ts';
 import { staff } from '../src/schema.ts';
+import { nextRun, runTime } from '../src/time.ts';
+import type { JobRow, RunRow } from '../src/office.ts';
 
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
 const O = await import('../src/office.ts');
@@ -58,4 +61,94 @@ test('an edited job cannot be claimed from an older clock view', async () => {
   assert.equal(await O.claimScheduledRun(due, new Date()), undefined);
   assert.equal((await O.job(job.id))!.instructions, 'Changed by owner');
   assert.equal((await sql`select id from runs where job_id = ${job.id}`).length, 0);
+});
+
+test("a reader's input is its writer's run for the reader's period, wait, skip or problem", async () => {
+  const daily = { every: 'day', at: '07:00' } as const;
+  const d1 = nextRun(daily, new Date('2026-11-02T00:00:00Z'));
+  const d2 = nextRun(daily, d1);
+  const d3 = nextRun(daily, d2);
+  const added = await O.addJob({
+    staffId: 'writer',
+    name: 'Morning wire',
+    instructions: 'Write it.',
+    schedule: daily,
+    files: { thread: 7, output: 'wire.md' }
+  });
+  const writer = { ...added, nextRunAt: d3 };
+  const reader = await O.addJob({
+    staffId: 'writer',
+    name: 'Morning edition',
+    instructions: 'Read it.',
+    schedule: daily,
+    files: { thread: 7, input: 'writer/wire.md', output: 'edition.md' }
+  });
+  const run = (id: number, periods: Date[], status = 'done', sha256?: string): RunRow => ({
+    id,
+    jobId: writer.id,
+    staffId: 'writer',
+    status: status as RunRow['status'],
+    trigger: 'schedule',
+    summary: null,
+    checkedFiles: {
+      periods: periods.map((p) => p.toISOString()),
+      output: 'writer/wire.md',
+      ...(sha256 ? { sha256 } : {})
+    },
+    startedAt: new Date(writer.changedAt.getTime() + id),
+    finishedAt: new Date(writer.changedAt.getTime() + id + 1)
+  });
+  const input = (w: JobRow, runs: RunRow[], at: Date, busy?: (id: number) => boolean) =>
+    O.scheduledInput(reader, [reader, w], runs, at, busy);
+  const twoDays = [run(1, [d1], 'done', 'same'), run(2, [d2], 'done', 'same')];
+
+  // The same bytes two days running: each period takes its own run.
+  assert.deepEqual(input(writer, twoDays, d2), { run: 2, sha256: 'same' });
+  assert.deepEqual(input(writer, twoDays, new Date(d2.getTime() - 3_600_000)), {
+    run: 1,
+    sha256: 'same'
+  });
+
+  // The writer still owes the period: due, owed, running or starting.
+  const waits = (w: JobRow, runs: RunRow[], busy?: (id: number) => boolean) =>
+    assert.ok('wait' in input(w, runs, d2, busy)!, JSON.stringify(input(w, runs, d2, busy)));
+  waits({ ...writer, nextRunAt: d2 }, twoDays.slice(0, 1));
+  waits({ ...writer, owed: [d2.toISOString()] }, twoDays.slice(0, 1));
+  waits(writer, [...twoDays.slice(0, 1), run(3, [d2], 'running')]);
+  waits(writer, twoDays.slice(0, 1), (id) => id === writer.id);
+  // A run for a later period does not hold back this one.
+  assert.deepEqual(input(writer, [...twoDays, run(3, [d3], 'running')], d2), {
+    run: 2,
+    sha256: 'same'
+  });
+
+  // The writer skipped the period, or has written none yet: the reader skips.
+  assert.deepEqual(input({ ...writer, skippedAt: d2 }, twoDays.slice(0, 1), d2), {
+    skip: `"Morning wire" skipped its run for ${runTime(d2)}, so "Morning edition" skips this period too.`,
+    away: true
+  });
+  assert.deepEqual(input(writer, twoDays.slice(0, 1), d2), {
+    skip: `"Morning wire" did not run for ${runTime(d2)}, so "Morning edition" skips this period too.`,
+    away: true
+  });
+  assert.deepEqual(input(writer, [], d2), {
+    skip: 'Waiting for "Morning wire" to write writer/wire.md for the first time.',
+    away: false
+  });
+
+  // The writer ran for the period and left no checked file: the reader's run fails.
+  for (const left of [run(2, [d2], 'failed'), run(2, [d2], 'done')])
+    assert.match(
+      (input(writer, [twoDays[0], left], d2) as { problem: string }).problem,
+      /"Morning wire" ran for .* and left no checked writer\/wire.md/
+    );
+  // A run from before the writer's last change counts for nothing.
+  assert.ok(
+    'skip' in
+      input({ ...writer, changedAt: new Date(writer.changedAt.getTime() + 10) }, twoDays, d2)!
+  );
+  assert.match(
+    (input({ ...writer, enabled: false }, twoDays, d2) as { problem: string }).problem,
+    /paused/
+  );
 });

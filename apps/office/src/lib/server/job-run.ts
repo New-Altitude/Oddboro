@@ -67,7 +67,9 @@ export async function runJob(
           ok: false,
           text: `${who.name}'s job changed before it could start. Its next run uses the new settings.`
         };
-      const f = await scheduledFiles(who, job, job.files, 'run');
+      // The input is the writer's file for the newest period this run is for.
+      const at = times.at(-1) ?? new Date();
+      const f = await scheduledFiles(who, job, job.files, 'run', at);
       if (f.blocks.length) return { ok: false, text: f.blocks.join('\n') };
       // Grok's file server runs inside its kernel sandbox. Use its existing
       // private temp folder, which its model's file tools cannot open.
@@ -92,7 +94,7 @@ export async function runJob(
         if (!r.ok) return r;
         // Another clock can finish, or the owner can withdraw the work, while
         // the model is reading. Publish a check only for the same assignment.
-        const after = await scheduledFiles(who, job, job.files, 'review');
+        const after = await scheduledFiles(who, job, job.files, 'review', at);
         if (after.blocks.length) return { ok: false, text: after.blocks.join('\n') };
         if (
           after.source?.run !== f.source?.run ||
@@ -118,7 +120,7 @@ export async function runJob(
           };
         return {
           ...r,
-          checkedFiles: {
+          checked: {
             input: job.files.input,
             inputRun: f.source?.run,
             output: `${who.id}/${job.files.output}`,

@@ -185,6 +185,7 @@ else (async () => {
     const w = await result(writer, await due(writer.id));
     assert.equal(w.status, 'done', w.summary);
     assert.equal(w.checked_files.output, 'lead/wire.md');
+    assert.equal(w.checked_files.periods.length, 1);
     assert.equal(readFileSync(wire, 'utf8'), 'Source: fixture-27');
     const r = await result(reader, await due(reader.id));
     assert.equal(r.status, 'done', r.summary);
@@ -212,15 +213,15 @@ else (async () => {
     assert.equal((await state()).state, 'blocked');
     assert.equal((await state()).lastVerified?.inputRun, w.id);
     const stale = await result(reader, await due(reader.id));
-    assert.match(stale.summary, /Wire.*no checked file for this cycle/);
-    assert.equal(stale.checked_files, null);
+    assert.match(stale.summary, /"Wire" ran for .* and left no checked lead\/wire.md/);
+    assert.equal(stale.checked_files.sha256, undefined);
     assert.equal(readFileSync(edition, 'utf8'), 'Edition: Source: fixture-27\n');
     await L.updateJob(writer.id, { instructions: 'Write the wire.' });
     assert.equal((await result(writer, await due(writer.id))).status, 'done');
     await L.updateJob(reader.id, { instructions: 'Say it is done.' });
     const empty = await result(reader, await due(reader.id));
     assert.equal(empty.status, 'failed');
-    assert.equal(empty.checked_files, null);
+    assert.equal(empty.checked_files.sha256, undefined);
     assert.match(empty.summary, /did not leave a checked result/);
     assert.equal((await state()).state, 'blocked');
     await L.updateJob(reader.id, {
@@ -249,7 +250,7 @@ else (async () => {
     await L.pg`update staff set agent = 'gemini' where id = 'paige'`;
     const native = await result(reader, await due(reader.id));
     assert.match(native.summary, /Paige needs the office file tools/);
-    assert.equal(native.checked_files, null);
+    assert.equal(native.checked_files.sha256, undefined);
     await L.pg`update staff set agent = 'claude' where id = 'paige'`;
     const g = (await L.pg`insert into goals (title) values ('Another edition') returning id`)[0].id;
     await L.pg`update threads set goal_id = ${g} where id = ${thread}`;
@@ -259,7 +260,7 @@ else (async () => {
     await L.pg`update threads set status = 'stopped', ended_at = now() where id = ${thread}`;
     const ended = await result(reader, await due(reader.id));
     assert.match(ended.summary, /still open/);
-    assert.equal(ended.checked_files, null);
+    assert.equal(ended.checked_files.sha256, undefined);
   } finally {
     stop();
   }

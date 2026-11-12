@@ -13,6 +13,12 @@
 // deliverPoke); a thread that late wakes then. While an update is about to
 // install (`held()` in update.ts) it starts no scheduled job: a due one waits
 // and runs once the app is back.
+//
+// A reader job (one whose files name an input) needs its writer's file for
+// the period it runs for (`inputFor` in the ledger). While its writer still
+// owes that period, the reader waits: it owes its own time instead, and gets
+// in line again when the writer's run ends. When the writer skipped that
+// period, the reader skips it too, and joins the While you were away card.
 import {
   askToCatchUp,
   claimScheduledRun,
@@ -21,12 +27,14 @@ import {
   dueNow,
   enabledJobs,
   finishRun,
+  inputFor,
   job as jobById,
   nextRun,
   owe,
   parkedThreads,
   setNextRun,
   skip,
+  skipOwed,
   startRun,
   takeOwed,
   waitingPokes,
@@ -54,6 +62,8 @@ const g = globalThis as unknown as {
 const running = new Set<number>();
 /** Jobs whose owed run waits in the line, so a second look adds none. */
 const inLine = new Set<number>();
+/** Jobs whose owed times the line is taking, for their readers to wait on. */
+const taking = new Set<number>();
 
 async function plan(): Promise<void> {
   const clock = g.jobClock;
@@ -93,15 +103,47 @@ export async function lookAtJobs(now: Date): Promise<number[]> {
   return later;
 }
 
-/** A due job: on time it runs now; late, its kind says what happens (`dueNow`). */
+/**
+ * A due job: on time it runs now; late, its kind says what happens
+ * (`dueNow`). A reader on time first looks at its writer (`readerTurn`).
+ */
 async function settle(j: JobRow, was: Date, now: Date): Promise<void> {
   if (running.has(j.id)) return;
   const due = dueNow(j, was, now);
   const next = nextRun(j.schedule, now);
-  if (due.do === 'run') void start(j, 'schedule');
-  else if (due.do === 'skip') await skip(j, was, due.at, next);
+  if (due.do === 'run') {
+    const turn = await readerTurn(j, was);
+    if (turn.do === 'run') void start(j, 'schedule');
+    else if (turn.do === 'skip') await skip(j, was, turn.away ? was : undefined, next);
+    else if (await owe(j, was, [was], next)) getInLine(j.id);
+  } else if (due.do === 'skip') await skip(j, was, due.at, next);
   else if (due.do === 'ask') await askToCatchUp(j, was, due.times, next);
   else if (await owe(j, was, due.times, next)) getInLine(j.id);
+  // A writer that skipped or asked first ran nothing: its waiting readers look again.
+  await readersGetInLine(j);
+}
+
+type Turn = { do: 'run' } | { do: 'wait' } | { do: 'skip'; away: boolean };
+
+/**
+ * What a reader does for the period `at`: run, wait for its writer, or skip
+ * along with it. Any other job, and a reader whose input has a problem, runs:
+ * the run itself fails with the problem.
+ */
+async function readerTurn(j: JobRow, at: Date): Promise<Turn> {
+  const input = await inputFor(j, at, (id) => running.has(id) || taking.has(id));
+  if (input && 'wait' in input) return { do: 'wait' };
+  if (input && 'skip' in input) return { do: 'skip', away: input.away };
+  return { do: 'run' };
+}
+
+/** Readers of this job's file that owe a run get in line, to look at it again. */
+async function readersGetInLine(w: JobRow): Promise<void> {
+  if (!w.files) return;
+  const output = `${w.staffId}/${w.files.output}`;
+  for (const r of await enabledJobs())
+    if (r.owed?.length && r.files?.thread === w.files.thread && r.files.input === output)
+      getInLine(r.id);
 }
 
 /**
@@ -118,15 +160,33 @@ function getInLine(id: number): void {
       if (held(new Date()) || running.has(id)) return;
       const j = await jobById(id);
       if (!j?.enabled) return;
-      const owed = await takeOwed(id);
-      if (owed.length) await start(j, 'schedule', owed);
+      // A reader goes by its newest owed period. Waiting leaves its times
+      // owed; its writer's run ending brings it back.
+      const newest = j.owed?.at(-1);
+      if (j.files?.input && newest) {
+        const turn = await readerTurn(j, new Date(newest));
+        if (turn.do === 'wait') return;
+        if (turn.do === 'skip') return skipOwed(id, new Date(newest), turn.away);
+      }
+      // Taken times are in no ledger row until the run starts: say it is busy.
+      taking.add(id);
+      try {
+        const owed = await takeOwed(id);
+        if (owed.length) await start(j, 'schedule', owed);
+      } finally {
+        taking.delete(id);
+      }
     })
     .catch((e: unknown) => console.error(`Job ${id} did not catch up:`, e))
     .finally(() => inLine.delete(id));
 }
 
-/** Resolves once every owed run in line now has ended. For tests. */
-export const lineDone = (): Promise<void> => g.jobClock?.line ?? Promise.resolve();
+/** Resolves once the line is empty, with any reader a run put back in it. For tests. */
+export async function lineDone(): Promise<void> {
+  let line: Promise<void> | undefined;
+  do await (line = g.jobClock?.line);
+  while (line !== g.jobClock?.line);
+}
 
 /**
  * Run a job. A run on time is for its scheduled time, and moves the schedule
@@ -140,19 +200,21 @@ export async function start(j: JobRow, trigger: RunTrigger, owed?: Date[]): Prom
   try {
     const now = new Date();
     const onTime = trigger === 'schedule' && !owed;
+    const times = owed ?? [onTime && j.nextRunAt ? j.nextRunAt : now];
     // On time, the run claims its due time and moves the job on in one step,
     // so two looks at once start it once.
-    const run = onTime ? await claimScheduledRun(j, now) : await startRun(j, trigger);
+    const run = onTime ? await claimScheduledRun(j, now) : await startRun(j, trigger, times);
     if (!run) return;
-    const times = owed ?? [onTime && j.nextRunAt ? j.nextRunAt : now];
     const r = await runJob(j, trigger, times).catch((e: unknown) => ({
       ok: false,
       text: e instanceof Error ? e.message : String(e),
-      checkedFiles: undefined
+      checked: undefined
     }));
-    await finishRun(run, j, r.ok, r.text, r.checkedFiles);
+    await finishRun(run, j, r.ok, r.text, r.checked);
   } finally {
     running.delete(j.id);
+    // Readers waiting on this job's file look again.
+    await readersGetInLine(j).catch((e: unknown) => console.error(`Job ${j.id}'s readers:`, e));
   }
 }
 

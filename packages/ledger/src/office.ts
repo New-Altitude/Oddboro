@@ -91,6 +91,7 @@ import {
   type HeldCall,
   type ReplyDraft,
   type LedgerKind,
+  type CheckedFiles,
   type JobFiles,
   type RunTrigger,
   type MissedRuns,
@@ -116,7 +117,7 @@ import {
 import { MANAGER_ROLE } from './managers.ts';
 import { currentPlatform } from './platform.ts';
 import { bringBack, leavingRefused, removeOdd } from './leaving.ts';
-import { awayJobs, oweCatchUp, type AwayJob } from './missed-runs.ts';
+import { awayJobs, ON_TIME_MS, oweCatchUp, type AwayJob } from './missed-runs.ts';
 import {
   GRANT_LABEL,
   grantWorks,
@@ -129,7 +130,7 @@ import {
   type OwnSwitch
 } from './access-words.ts';
 import { filterWords, sameCriteria, type GmailFilter } from './filter-words.ts';
-import { MISSED_WORDS, nextRun, zone } from './time.ts';
+import { MISSED_WORDS, nextRun, runTime, zone } from './time.ts';
 import { isGrantable, OFFICE_TOOLS, ON_BY_DEFAULT, stepsToGo, tickable, yesOrNo } from './tools.ts';
 import { HIRE_DEFAULTS } from './grantable.ts';
 import {
@@ -3929,7 +3930,7 @@ export async function setNextRun(id: number, at: Date): Promise<void> {
   await db.update(jobs).set({ nextRunAt: at }).where(eq(jobs.id, id));
 }
 
-/** Claim this due time once, even if two looks by the clock overlapped. */
+/** Claim this due time once, even if two looks by the clock overlapped. The run is for that time. */
 export async function claimScheduledRun(j: JobRow, now: Date): Promise<RunRow | undefined> {
   const dueAt = j.nextRunAt;
   if (!dueAt || dueAt > now) return undefined;
@@ -3946,13 +3947,36 @@ export async function claimScheduledRun(j: JobRow, now: Date): Promise<RunRow | 
         )
       )
       .returning({ id: jobs.id });
-    if (due) return startRun(j, 'schedule', tx);
+    if (due) return startRun(j, 'schedule', [dueAt], tx);
   });
 }
 
-/** Which timed run supplied this file. A failed, missed or superseded run
- * leaves the previous file on disk, but it cannot supply the next step. */
-export function scheduledInput(j: JobRow, jobs: JobRow[], latest: RunRow[], now: Date) {
+/**
+ * Where a reader job's input stands for the period `at`. The reader takes the
+ * file its writer's run wrote for the writer's newest period at or before
+ * `at`, by the run, never by whether the file changed: the same bytes as last
+ * period are as good as new ones. The answer is one of:
+ * - `run` and `sha256`: that run wrote the file, and the reader gets those bytes.
+ * - `wait`: the writer still owes that period (running, due, or caught up later).
+ * - `skip`: the writer skipped that period, or has not written a first one.
+ *   `away` puts the reader's skip on the desk's While you were away card.
+ * - `problem`: the writer ran for that period and left no checked file, or
+ *   the job's files are not set up. The reader's run fails with it.
+ * `busy` says the writer runs now, before its run is in the ledger.
+ */
+export type ScheduledInput =
+  | { run: number; sha256: string }
+  | { wait: string }
+  | { skip: string; away: boolean }
+  | { problem: string };
+
+export function scheduledInput(
+  j: JobRow,
+  jobs: JobRow[],
+  writerRuns: RunRow[],
+  at: Date,
+  busy: (jobId: number) => boolean = () => false
+): ScheduledInput | undefined {
   if (!j.files?.input) return undefined;
   const input = j.files.input;
   const writers = jobs.filter(
@@ -3961,25 +3985,93 @@ export function scheduledInput(j: JobRow, jobs: JobRow[], latest: RunRow[], now:
   if (writers.length !== 1 || writers[0].id === j.id)
     return { problem: `Assign one other scheduled job to write ${input}.` };
   const w = writers[0];
-  const r = latest.find((r) => r.jobId === w.id);
-  if (w.enabled && (!r || r.startedAt < w.changedAt || r.status === 'running'))
-    return {
-      pending: true,
-      problem: `Waiting for "${w.name}" to finish its scheduled file ${input}.`
-    };
+  if (!w.enabled)
+    return { problem: `"${w.name}" is paused, so nothing writes ${input}. Turn it back on.` };
+  const ran = writerRuns.filter(
+    (r) => r.jobId === w.id && r.startedAt >= w.changedAt && r.checkedFiles?.periods.length
+  );
   if (
-    !w.enabled ||
-    !r?.checkedFiles ||
-    r.status !== 'done' ||
-    r.startedAt < w.changedAt ||
-    nextRun(w.schedule, r.startedAt) <= now ||
-    !w.nextRunAt ||
-    w.nextRunAt <= now
+    busy(w.id) ||
+    ran.some(
+      (r) => r.status === 'running' && r.checkedFiles!.periods.some((p) => new Date(p) <= at)
+    ) ||
+    (w.nextRunAt && w.nextRunAt <= at) ||
+    w.owed?.some((t) => new Date(t) <= at)
   )
+    return { wait: `Waiting for "${w.name}" to write ${input} for this period.` };
+  // The writer's newest period at or before `at`, and the run that was for it.
+  let best: { run: RunRow; period: Date } | undefined;
+  for (const r of ran)
+    for (const p of r.checkedFiles!.periods) {
+      const period = new Date(p);
+      if (period <= at && (!best || period > best.period)) best = { run: r, period };
+    }
+  const skipped = w.skippedAt && w.skippedAt <= at && (!best || w.skippedAt > best.period);
+  if (skipped)
     return {
-      problem: `"${w.name}" has no checked file for this cycle. Check its last result and let its next scheduled run finish before "${j.name}".`
+      skip: `"${w.name}" skipped its run for ${runTime(w.skippedAt!)}, so "${j.name}" skips this period too.`,
+      away: true
     };
-  return { run: r.id, sha256: r.checkedFiles.sha256 };
+  if (!best)
+    return { skip: `Waiting for "${w.name}" to write ${input} for the first time.`, away: false };
+  // A time the writer's schedule had after that period, and before `at`, that
+  // it neither ran nor owes: it skipped it, or its missed periods wait for the
+  // owner's yes. A schedule in minutes counts from when each run started, so
+  // give it the clock's on-time margin.
+  const after = nextRun(w.schedule, best.period).getTime();
+  if (after + (w.schedule.every === 'minutes' ? ON_TIME_MS : 0) <= at.getTime())
+    return {
+      skip: `"${w.name}" did not run for ${runTime(new Date(after))}, so "${j.name}" skips this period too.`,
+      away: true
+    };
+  const sha256 = best.run.status === 'done' ? best.run.checkedFiles!.sha256 : undefined;
+  if (!sha256)
+    return {
+      problem: `"${w.name}" ran for ${runTime(best.period)} and left no checked ${input}. Check its last result before "${j.name}" runs again.`
+    };
+  return { run: best.run.id, sha256 };
+}
+
+/** The newest runs of a file job since it last changed, newest first: what each was for and left. */
+export function fileRuns(j: JobRow, limit = 50): Promise<RunRow[]> {
+  return db
+    .select()
+    .from(runs)
+    .where(
+      and(eq(runs.jobId, j.id), isNotNull(runs.checkedFiles), gte(runs.startedAt, j.changedAt))
+    )
+    .orderBy(desc(runs.id))
+    .limit(limit);
+}
+
+/** The job that writes this reader's input, among the jobs that are on. */
+export function writerOf(j: JobRow, on: JobRow[]): JobRow | undefined {
+  const input = j.files?.input;
+  if (!input) return undefined;
+  return on.find(
+    (w) =>
+      w.id !== j.id &&
+      w.files?.thread === j.files?.thread &&
+      `${w.staffId}/${w.files?.output}` === input
+  );
+}
+
+/** Where a reader's input stands for the period `at` (`scheduledInput`), from the ledger. */
+export async function inputFor(
+  j: JobRow,
+  at: Date,
+  busy?: (jobId: number) => boolean
+): Promise<ScheduledInput | undefined> {
+  if (!j.files?.input) return undefined;
+  const on = await enabledJobs();
+  const w = writerOf(j, on);
+  return scheduledInput(
+    j,
+    [j, ...on.filter((o) => o.id !== j.id)],
+    w ? await fileRuns(w) : [],
+    at,
+    busy
+  );
 }
 
 export function latestScheduledRuns(ids: number[], checked = false): Promise<RunRow[]> {
@@ -3990,16 +4082,33 @@ export function latestScheduledRuns(ids: number[], checked = false): Promise<Run
       and(
         inArray(runs.jobId, ids),
         eq(runs.trigger, 'schedule'),
-        checked ? isNotNull(runs.checkedFiles) : undefined
+        checked ? sql`${runs.checkedFiles}->>'sha256' is not null` : undefined
       )
     )
     .orderBy(runs.jobId, desc(runs.id));
 }
 
-export async function startRun(j: JobRow, trigger: RunTrigger, q: Db = db): Promise<RunRow> {
+/**
+ * A job's run starts, for the scheduled `times` (Run now's is now). A file
+ * job's run keeps them in `checked_files` from the start, so a run that never
+ * finishes still shows which period it left without a file.
+ */
+export async function startRun(
+  j: JobRow,
+  trigger: RunTrigger,
+  times: Date[] = [new Date()],
+  q: Db = db
+): Promise<RunRow> {
   const [row] = await q
     .insert(runs)
-    .values({ jobId: j.id, staffId: j.staffId, trigger })
+    .values({
+      jobId: j.id,
+      staffId: j.staffId,
+      trigger,
+      checkedFiles: j.files
+        ? { periods: times.map((t) => t.toISOString()), output: `${j.staffId}/${j.files.output}` }
+        : null
+    })
     .returning();
   return row;
 }
@@ -4009,8 +4118,10 @@ export async function finishRun(
   j: JobRow,
   ok: boolean,
   summary: string,
-  checkedFiles?: RunRow['checkedFiles']
+  checked?: Omit<CheckedFiles, 'periods'>
 ): Promise<void> {
+  // The periods stay as the run started; the check adds what it wrote.
+  const checkedFiles = r.checkedFiles && checked ? { ...r.checkedFiles, ...checked } : undefined;
   await db.transaction(async (tx) => {
     const [finished] = await tx
       .update(runs)
@@ -4117,6 +4228,18 @@ export async function officeActivity(since: Date) {
   const [latest, verified] = fileJobs.length
     ? await Promise.all([latestScheduledRuns(fileJobs), latestScheduledRuns(fileJobs, true)])
     : [[], []];
+  const now = new Date();
+  // Each reader's input for a run now, by the period its writer last ran for.
+  const inputs = new Map(
+    await Promise.all(
+      allJobs
+        .filter((j) => j.files?.input)
+        .map(async (j) => {
+          const w = writerOf(j, allJobs);
+          return [j.id, scheduledInput(j, allJobs, w ? await fileRuns(w) : [], now)] as const;
+        })
+    )
+  );
   return {
     since: pt(since),
     now: pt(new Date()),
@@ -4131,18 +4254,24 @@ export async function officeActivity(since: Date) {
           if (!j.files) return { ...base, state: 'configured', lastVerified: null };
           const last = latest.find((r) => r.jobId === j.id && r.startedAt >= j.changedAt);
           const checked = verified.find((r) => r.jobId === j.id && r.startedAt >= j.changedAt);
-          const source = scheduledInput(j, allJobs, latest, new Date());
+          const source = inputs.get(j.id);
+          const waiting =
+            source && ('wait' in source ? source.wait : 'skip' in source && source.skip);
           const repair =
-            last?.status === 'failed' ? last.summary : source?.pending ? null : source?.problem;
+            last?.status === 'failed'
+              ? last.summary
+              : source && 'problem' in source
+                ? source.problem
+                : undefined;
           const current =
-            !!last?.checkedFiles &&
+            !!last?.checkedFiles?.sha256 &&
             j.nextRunAt &&
-            j.nextRunAt > new Date() &&
-            (!source || source.run === last.checkedFiles.inputRun);
+            j.nextRunAt > now &&
+            (!source || ('run' in source && source.run === last.checkedFiles.inputRun));
           return {
             ...base,
             state: repair ? 'blocked' : current ? 'verified files' : 'configured',
-            ...(repair ? { repair } : source?.pending ? { waiting: source.problem } : {}),
+            ...(repair ? { repair } : waiting ? { waiting } : {}),
             lastVerified: checked ? { at: pt(checked.finishedAt), ...checked.checkedFiles } : null
           };
         }),

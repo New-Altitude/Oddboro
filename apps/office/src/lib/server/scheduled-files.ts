@@ -1,5 +1,7 @@
 // A job exchanges files only on the work the owner assigned. Check again as
 // the clock starts it, since its goal, colleagues and sources may have changed.
+// A reader's input is its writer's file for the period the run is for (`at`),
+// as `scheduledInput` in the ledger finds it.
 import { lstatSync, realpathSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -14,8 +16,9 @@ import {
   heldTools,
   lacking,
   modelSection,
-  latestScheduledRuns,
+  fileRuns,
   scheduledInput,
+  writerOf,
   roster,
   thread,
   toolNames,
@@ -34,7 +37,8 @@ export async function scheduledFiles(
   who: StaffRow,
   job: JobRow,
   files: JobFiles,
-  when: 'review' | 'run'
+  when: 'review' | 'run',
+  at = new Date()
 ) {
   const blocks = new Set<string>();
   const signIns: { name: string; request: ChatSignIn }[] = [];
@@ -122,18 +126,24 @@ export async function scheduledFiles(
         );
     }
   }
-  const source = files.input
-    ? scheduledInput(job, jobs, await latestScheduledRuns(peers.map((j) => j.id)), new Date())
+  const writer = writerOf(job, peers);
+  const found = files.input
+    ? scheduledInput(job, jobs, writer ? await fileRuns(writer) : [], at)
     : undefined;
-  const waiting = source?.pending ? source.problem : undefined;
-  if (source?.problem && (!waiting || when === 'run'))
-    blocks.add(`${who.name} needs the current input. ${source.problem}`);
+  const source = found && 'run' in found ? found : undefined;
+  const waiting =
+    found && ('wait' in found ? found.wait : 'skip' in found ? found.skip : undefined);
+  const problem = found && 'problem' in found ? found.problem : undefined;
+  // The clock holds a waiting reader back. A run that starts anyway, by hand
+  // or in a race, has no input for its period.
+  if (problem || (waiting && when === 'run'))
+    blocks.add(`${who.name} needs the current input. ${problem ?? waiting}`);
   const root = realpathSync.native(home());
   const output = join(root, 'threads', String(files.thread), who.id, files.output);
   let input: string | undefined;
   if (files.input && membership?.readers.has(who.id)) {
     input = await workFile(who.id, workName(files.thread, files.input));
-    if (!input && !source?.problem)
+    if (!input && source)
       blocks.add(
         `${who.name} needs ${files.input}. Have its writer finish the file in their part before this job runs.`
       );

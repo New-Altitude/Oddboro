@@ -898,6 +898,22 @@ export type RunStatus = 'running' | 'done' | 'failed';
 /** Why a run started: its schedule came due, or the owner pressed Run now. */
 export type RunTrigger = 'schedule' | 'manual';
 
+/**
+ * A file job's run, as only the office records it. `periods` are the scheduled
+ * times the run is for, ISO, oldest first, set as it starts. `sha256` is set
+ * only once the office's file tools saw the run write `output` (the writer's
+ * part and file name) with those exact bytes. A run with periods and no
+ * digest left no checked file for them. A reader's run also names the input
+ * it read and the writer's run that wrote it.
+ */
+export type CheckedFiles = {
+  periods: string[];
+  output: string;
+  sha256?: string;
+  input?: string;
+  inputRun?: number;
+};
+
 export const runs = pgTable('runs', {
   id: id(),
   jobId: integer()
@@ -909,13 +925,8 @@ export const runs = pgTable('runs', {
   status: text().$type<RunStatus>().notNull().default('running'),
   trigger: text().$type<RunTrigger>().notNull().default('schedule'),
   summary: text(),
-  /** Only the office records this, after its file tools observed the assigned operations. */
-  checkedFiles: jsonb().$type<{
-    input?: string;
-    inputRun?: number;
-    output: string;
-    sha256: string;
-  }>(),
+  /** A file job's run, as the office checked it (`CheckedFiles`). Null for other jobs. */
+  checkedFiles: jsonb().$type<CheckedFiles>(),
   startedAt: created('started_at'),
   finishedAt: at('finished_at')
 });
