@@ -581,7 +581,7 @@ return "missing"`);
 export type Driven = {
   page: Page;
   /** Runs a script in the page and gives back what it returns. */
-  script(body: string): Promise<unknown>;
+  script(body: string, args?: unknown[]): Promise<unknown>;
   /** Ends the session and the app, and says how; throws if anything is left running. */
   stop(): Promise<string>;
 };
@@ -650,10 +650,11 @@ export async function webdriverStart(exe: string, r: Run): Promise<Driven> {
     await stop().catch(() => undefined);
     throw e;
   }
-  const script = (body: string) =>
+  // Values go in as WebDriver arguments, never inside the code.
+  const script = (body: string, args: unknown[] = []) =>
     wd('POST', `/session/${session}/execute/async`, {
       script: `const done = arguments[arguments.length - 1]; Promise.resolve((async () => { ${body} })()).then(done, (e) => done(String(e)));`,
-      args: []
+      args
     });
   const page: Page = {
     async read() {
@@ -665,7 +666,8 @@ export async function webdriverStart(exe: string, r: Run): Promise<Driven> {
     },
     async press(name) {
       const found = await script(
-        `const b = [...document.querySelectorAll('button')].find((x) => x.textContent.trim() === ${JSON.stringify(name)} || x.getAttribute('aria-label') === ${JSON.stringify(name)}); if (!b) return 'missing'; b.click(); return 'pressed';`
+        `const name = arguments[0]; const b = [...document.querySelectorAll('button')].find((x) => x.textContent.trim() === name || x.getAttribute('aria-label') === name); if (!b) return 'missing'; b.click(); return 'pressed';`,
+        [name]
       );
       if (found !== 'pressed') throw new Error(`no button named ${name} in the page`);
     }

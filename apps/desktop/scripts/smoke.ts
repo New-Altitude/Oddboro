@@ -262,7 +262,7 @@ function report(): never {
     join(OUT, 'results.json'),
     JSON.stringify({ version: args.version, env, results }, null, 2) + '\n'
   );
-  const cell = (s: string) => s.replace(/\|/g, '\\|');
+  const cell = (s: string) => s.replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
   const summary = [
     `### Smoke: ${failed.length ? `${failed.length} required step(s) failed` : 'every required step passed'}`,
     '',
