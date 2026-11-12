@@ -42,7 +42,7 @@ export type ChatEntry = {
   inSession?: true;
   runFailed?: true;
   re?: ChatRef;
-  item?: ChatRef & { status: string; note?: string | null };
+  item?: ChatRef & { status: string; note?: string | null; responseVersion?: number };
   lesson?: LessonLine;
   /** `back` is which hand-back a reply or pick-up line shows. */
   handOff?: { line: HandOffLine; step: HandOffStep; back?: number };
