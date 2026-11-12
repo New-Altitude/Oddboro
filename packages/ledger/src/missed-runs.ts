@@ -89,9 +89,39 @@ export async function owe(j: JobRow, was: Date, times: Date[], next: Date): Prom
   });
 }
 
-/** The job skips the run it missed at `at`, which shows on the desk, and runs next at `next`. */
-export async function skip(j: JobRow, was: Date, at: Date, next: Date): Promise<boolean> {
-  return db.transaction((tx) => moveOn(tx, j, was, { nextRunAt: next, skippedAt: at }));
+/**
+ * The job skips the run it missed at `at`, which shows on the desk, and runs
+ * next at `next`. With no `at`, it skips without a word: a reader whose writer
+ * has not written a first file yet.
+ */
+export async function skip(
+  j: JobRow,
+  was: Date,
+  at: Date | undefined,
+  next: Date
+): Promise<boolean> {
+  return db.transaction((tx) =>
+    moveOn(tx, j, was, { nextRunAt: next, ...(at ? { skippedAt: at } : {}) })
+  );
+}
+
+/**
+ * A reader skips the times it owes up to `upTo`, since its writer skipped
+ * them. `away` puts it on the desk's While you were away card, at `upTo`.
+ */
+export async function skipOwed(jobId: number, upTo: Date, away: boolean): Promise<void> {
+  await db.transaction(async (tx) => {
+    const [j] = await tx
+      .select({ owed: jobs.owed })
+      .from(jobs)
+      .where(eq(jobs.id, jobId))
+      .for('update');
+    const left = (j?.owed ?? []).filter((t) => new Date(t) > upTo);
+    await tx
+      .update(jobs)
+      .set({ owed: left.length ? left : null, ...(away ? { skippedAt: upTo } : {}) })
+      .where(eq(jobs.id, jobId));
+  });
 }
 
 /** Take the times a job is owed, so only one run fills them. Oldest first. */
@@ -171,6 +201,28 @@ export async function askToCatchUp(
 export async function oweCatchUp(a: AskRow): Promise<void> {
   const c = a.catchUp;
   if (c) await db.transaction((tx) => addOwed(tx, c.jobId, c.times));
+}
+
+/** A job's catch_up ask, open or refused, as its readers weigh it: the missed times it names. */
+export type CatchUpAsk = { times: string[]; open: boolean };
+
+/**
+ * A job's catch_up asks still open or refused. While one is open, a reader of
+ * the job's file waits for the owner's answer; a refused one's times were
+ * skipped, so the reader skips them too.
+ */
+export async function catchUpAsks(jobId: number): Promise<CatchUpAsk[]> {
+  const rows = await db
+    .select({ catchUp: asks.catchUp, status: asks.status })
+    .from(asks)
+    .where(
+      and(
+        eq(asks.kind, 'catch_up'),
+        inArray(asks.status, ['open', 'denied']),
+        sql`(${asks.catchUp}->>'jobId')::int = ${jobId}`
+      )
+    );
+  return rows.map((r) => ({ times: r.catchUp?.times ?? [], open: r.status === 'open' }));
 }
 
 /** A job that skipped a run, as the desk's While you were away card lists it. */

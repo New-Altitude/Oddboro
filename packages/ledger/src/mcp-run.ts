@@ -198,6 +198,38 @@ async function attachable(
   return { paths: [...new Set(out)] };
 }
 
+const fileName = z
+  .string()
+  .max(240)
+  .regex(/^[\w.-]+(?:\/[\w.-]+)*$/)
+  .refine(
+    (s) => s.split('/').every((part) => part !== '.' && part !== '..'),
+    'Use a file name inside the work folder.'
+  );
+const jobFiles = z.object({
+  thread: z.number().int().positive().max(2147483647),
+  input: fileName
+    .optional()
+    .describe(
+      "A scheduled writer's result to read first, including its Odd's part, like clerk/wire.md."
+    ),
+  output: fileName.describe('The result to write inside your own part, like edition.md.'),
+  sources: z
+    .array(z.string().min(1).max(120))
+    .max(12)
+    .optional()
+    .describe(
+      'Tools needed to produce this file: connector ids or web. A checked input from another job needs no source account of its own.'
+    )
+});
+const planFiles = jobFiles.omit({ thread: true }).extend({
+  share: z
+    .boolean()
+    .optional()
+    .describe(
+      'Ask for permission to put material from the listed sources in only this result, readable by the Odds on this goal.'
+    )
+});
 const atArg = z.string().regex(SCHEDULE_RULE.oddAt);
 const scheduleArg = z.discriminatedUnion('every', [
   z.object({ every: z.literal('minutes'), n: z.number().int().min(SCHEDULE_RULE.oddMinMinutes) }),
@@ -588,6 +620,8 @@ export {
   revisesArg,
   attachArg,
   attachable,
+  jobFiles,
+  planFiles,
   scheduleArg,
   missedArg,
   filesForHandOff,

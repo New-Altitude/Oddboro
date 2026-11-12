@@ -27,6 +27,8 @@ import {
   revisesArg,
   attachArg,
   attachable,
+  jobFiles,
+  planFiles,
   scheduleArg,
   missedArg,
   hireFields,
@@ -52,7 +54,7 @@ tool(
       rows
         .map(
           (j) =>
-            `## ${j.name}\n${describeSchedule(j.schedule)}${j.enabled ? '' : ', paused'}${j.report ? `, reports to ${OWNER}` : ''}, missed runs: ${j.missed}\n\n${j.instructions}`
+            `## ${j.name}\n${describeSchedule(j.schedule)}${j.enabled ? '' : ', paused'}${j.report ? `, reports to ${OWNER}` : ''}, missed runs: ${j.missed}\n\n${j.instructions}${j.files ? `\nScheduled files: ${JSON.stringify(j.files)}` : ''}`
         )
         .join('\n\n')
     );
@@ -163,12 +165,15 @@ if (has('propose_goal_plan'))
                   instructions: z.string(),
                   schedule: scheduleArg,
                   report: z.boolean().optional(),
-                  missed: missedArg
+                  missed: missedArg,
+                  files: planFiles.optional()
                 })
                 .optional(),
               change_job: z
                 .object({
                   name: z.string().describe('The job name, exactly as it is now.'),
+                  new_name: z.string().trim().min(1).max(80).optional(),
+                  files: planFiles.optional(),
                   instructions: z.string().optional(),
                   schedule: scheduleArg.optional(),
                   missed: missedArg
@@ -210,7 +215,13 @@ if (has('propose_goal_plan'))
           staff: x.staff,
           part: x.part,
           job: x.new_job,
-          editJob: x.change_job
+          editJob: x.change_job && {
+            name: x.change_job.name,
+            newName: x.change_job.new_name,
+            instructions: x.change_job.instructions,
+            schedule: x.change_job.schedule,
+            files: x.change_job.files
+          }
         });
       }
       for (const h of a.hires ?? []) {
@@ -376,9 +387,16 @@ if (has('edit_my_job'))
   tool(
     'edit_my_job',
     {
-      description: `Change one of your own jobs: its steps, its schedule, whether it reports to ${OWNER}, or what it does with runs it missed. When ${OWNER} asks for a change in chat, make it at once, worded the way they asked, then tell them what changed. Outside a chat, only to carry out an ask they approved, passing its id. To propose a change, raise_ask with the exact new steps first.`,
+      description: `Change one of your own jobs: its name, steps, scheduled files, schedule, whether it reports to ${OWNER}, or what it does with runs it missed. When ${OWNER} asks for a change in chat, make it at once, worded the way they asked, then tell them what changed. Outside a chat, only to carry out an ask they approved, passing its id. To propose a change, raise_ask with the exact new steps first.`,
       inputSchema: {
         job: z.string().describe('The job name, exactly as my_jobs lists it.'),
+        new_name: z.string().trim().min(1).max(80).optional(),
+        files: jobFiles
+          .nullable()
+          .optional()
+          .describe(
+            'For recurring work on a thread you already serve. Null returns the job to independent work.'
+          ),
         instructions: z.string().optional().describe('The full new steps, numbered.'),
         schedule: scheduleArg.optional(),
         report: z.boolean().optional(),
@@ -386,11 +404,16 @@ if (has('edit_my_job'))
         approved_ask: approvedArg
       }
     },
-    async ({ job, instructions, schedule, report, missed, approved_ask }) => {
+    async ({ job, new_name, instructions, schedule, report, missed, files, approved_ask }) => {
       const go = await goAhead(approved_ask);
       if ('problem' in go) return text(go.problem);
-      const j = await editOwnJob(ME, job, { instructions, schedule, report, missed }, go);
-      return text(j ? `Changed "${job}".` : `You have no job named "${job}". Check my_jobs.`);
+      const j = await editOwnJob(
+        ME,
+        job,
+        { name: new_name, instructions, schedule, report, missed, files },
+        go
+      );
+      return text(j ? `Changed "${j.name}".` : `You have no job named "${job}". Check my_jobs.`);
     }
   );
 

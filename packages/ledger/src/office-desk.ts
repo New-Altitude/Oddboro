@@ -2,6 +2,7 @@
 import { and, asc, desc, eq, exists, gt, isNotNull, isNull, not, or } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { db } from './db.ts';
+import { type Db } from './threads.ts';
 import { asks, attachments, ledger, reports, tasks, type FolderRequest } from './schema.ts';
 import { awayJobs, type AwayJob } from './missed-runs.ts';
 import { type OwnSwitch } from './access-words.ts';
@@ -14,9 +15,15 @@ import { asksNoMore } from './office-asks.ts';
 
 // Reports
 
-export async function addReport(staffId: string, title: string, body: string, runId?: number) {
-  await db.insert(reports).values({ staffId, title, body });
-  await record({ kind: 'report', actor: staffId, title, body, runId });
+export async function addReport(
+  staffId: string,
+  title: string,
+  body: string,
+  runId?: number,
+  q: Db = db
+) {
+  await q.insert(reports).values({ staffId, title, body });
+  await record({ kind: 'report', actor: staffId, title, body, runId }, q);
 }
 
 export async function readReport(id: number): Promise<void> {
