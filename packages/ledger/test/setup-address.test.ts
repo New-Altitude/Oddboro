@@ -200,6 +200,15 @@ test('when the office says https is set up, setup opens https only once it prove
   heldNoKey(squatter);
 });
 
+test('on a computer with no IPv6 loopback, oddboro.localhost fails its proof and setup opens the proven 127.0.0.1', async () => {
+  resolve(LOCALHOST_ONLY);
+  // The office holds 127.0.0.1 alone, as it runs when [::1] cannot be bound,
+  // so the name's ::1 refuses the proof.
+  const real = await listen(office());
+  const found = await setupAddress(await ports(real.port), QUICK);
+  assert.deepEqual(found, { key: KEY, address: `http://127.0.0.1:${real.port}` });
+});
+
 test('when something else holds [::1] at the office’s port, setup opens 127.0.0.1, which the office proved, and never oddboro.localhost', async () => {
   resolve(LOCALHOST_ONLY);
   const real = await listen(office());

@@ -7,6 +7,7 @@
 
 mod diagnostics;
 mod env;
+mod proof;
 mod secrets;
 mod server;
 mod update;
@@ -136,9 +137,18 @@ fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
         ),
     );
     // The dev escape hatch: open a server that already runs, such as vite dev.
+    // It gets the key only once it proves it is the office, so it must be on
+    // this computer's loopback.
     if let Ok(url) = std::env::var("ODDBORO_SERVER_URL") {
         match Url::parse(&url) {
-            Ok(url) => open_main(app, &url),
+            Ok(url) => match proof::proven_key(&env::office_home(), &url) {
+                Some(key) => open_main(app, &url, &key),
+                None => fail(
+                    app,
+                    exit::BAD_URL,
+                    "ODDBORO_SERVER_URL did not prove it is this office. It must be an http address on 127.0.0.1, [::1] or a name for them, where the office of ODDBORO_HOME answers.",
+                ),
+            },
             Err(e) => fail(
                 app,
                 exit::BAD_URL,
@@ -202,7 +212,7 @@ fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
         log: server.log.clone(),
         show: show_updating,
     });
-    if let Err(why) = server.supervise(|| open_main(app, &url)) {
+    if let Err(why) = server.supervise(&url, |key| open_main(app, &url, key)) {
         if let Some(d) = diagnostics {
             d.gave_up(&why);
         }
@@ -300,20 +310,11 @@ fn loading(app: &AppHandle, updating: &str) {
         .build();
 }
 
-/// Opens the office in the main window, or reloads it after a restart. The
-/// key is read here, not at startup: the office makes its file as it starts,
-/// and this runs only once the office answers.
-fn open_main(app: &AppHandle, url: &Url) {
-    let opening = match env::owner_key() {
-        Some(key) => with_owner_key(url, &key),
-        None => {
-            server::note(
-                &env::log_file(),
-                "the office's folder has no owner-key file, so the office will refuse this window",
-            );
-            url.clone()
-        }
-    };
+/// Opens the office in the main window, or reloads it after a restart, with
+/// `key`, which the office at `url` has just proven it holds
+/// (`proof::proven_key`).
+fn open_main(app: &AppHandle, url: &Url, key: &str) {
+    let opening = with_owner_key(url, key);
     if let Some(window) = app.get_webview_window(MAIN) {
         let _ = window.navigate(opening);
         return;
@@ -328,10 +329,15 @@ fn open_main(app: &AppHandle, url: &Url) {
         .on_navigation(move |to| stay_or_open(&home, to))
         .on_new_window(move |to, _| {
             // The default browser lacks this window's cookie, so an office
-            // address carries the key. Read as each window opens, so it
-            // stays current across restarts.
-            let key = env::owner_key();
-            open_in_browser(&browser_url(&new_window_home, &to, key.as_deref()));
+            // address carries the key, proven as each window opens: the
+            // office may have stopped since the window opened, and something
+            // else taken its port. The proof is a request, so it runs off the
+            // window's thread.
+            let home = new_window_home.clone();
+            thread::spawn(move || {
+                let key = || proof::proven_key(&env::office_home(), &home);
+                open_in_browser(&browser_url(&home, &to, key));
+            });
             NewWindowResponse::Deny
         })
         // The window's side of a start, for the log: the page itself says it
@@ -400,11 +406,15 @@ fn without_owner_key(url: &Url) -> Url {
 }
 
 /// What a new window opens in the default browser: an address on the
-/// office's own origin carries the key, and any other site never sees it.
-fn browser_url(home: &Url, to: &Url, key: Option<&str>) -> Url {
-    match key {
-        Some(key) if to.origin() == home.origin() => with_owner_key(to, key),
-        _ => to.clone(),
+/// office's own origin carries the key `proven_key` gives, and any other site
+/// never sees it, nor is the office asked for a proof.
+fn browser_url(home: &Url, to: &Url, proven_key: impl FnOnce() -> Option<String>) -> Url {
+    if to.origin() != home.origin() {
+        return to.clone();
+    }
+    match proven_key() {
+        Some(key) => with_owner_key(to, &key),
+        None => to.clone(),
     }
 }
 
@@ -565,7 +575,7 @@ mod tests {
             browser_url(
                 &home,
                 &url("http://127.0.0.1:4500/files/a?download=1#top"),
-                Some("k")
+                || Some("k".to_string())
             )
             .as_str(),
             "http://127.0.0.1:4500/files/a?download=1&oddboro-key=k#top"
@@ -578,10 +588,12 @@ mod tests {
             "mailto:owner@example.com",
         ] {
             let to = url(elsewhere);
-            assert_eq!(browser_url(&home, &to, Some("k")), to, "{elsewhere}");
+            let asked = || panic!("{elsewhere} asked the office for a proof");
+            assert_eq!(browser_url(&home, &to, asked), to, "{elsewhere}");
         }
         let office = url("http://127.0.0.1:4500/files/a");
-        assert_eq!(browser_url(&home, &office, None), office);
+        // An office that did not prove itself gets the address alone.
+        assert_eq!(browser_url(&home, &office, || None), office);
     }
 
     #[test]

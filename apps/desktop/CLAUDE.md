@@ -34,14 +34,16 @@ an update (`update.rs`).
    `/usr/local/bin`, `~/.local/bin` and `~/.claude/local` if missing. Windows has no login shell: the app's
    own PATH, plus `%USERPROFILE%\.local\bin` (Claude Code's and uv's
    installers), WinGet's `Links` folder and `C:\Program Files\Git\cmd`.
-4. Starts Node, shows the small loading window, and asks `GET /` every half
-   second for up to 90 seconds. When it answers, the main window opens the
-   office with `?oddboro-key=<key>` added, the key read then from
-   `<home>/owner-key` (the office makes that file as it starts; the office
+4. Starts Node, shows the small loading window, and every half second for up
+   to 90 seconds asks the office to prove itself (`src-tauri/src/proof.rs`):
+   with the key read then from `<home>/owner-key`, which the office makes as it
+   starts, it sends `/api/office-proof` a fresh nonce, never the key, and
+   checks the answer is the key's HMAC for a direct request. Only then does
+   the main window open the office with `?oddboro-key=<key>` added (the office
    answers only its owner's key, and sends back a cookie and the same address
-   without it), and the loading window closes. With no key file the shell logs
-   it and opens the plain address, which the office refuses. On timeout, a dialog shows the last
-   lines of the log and the app quits.
+   without it), and the loading window closes. Any other answer, from a
+   program that took the port while Node started, is not ready. On timeout, a
+   dialog shows the last lines of the log and the app quits.
 5. Writes Node's stdout and stderr to `~/Library/Logs/Oddboro/office.log` on
    a Mac, `~/.local/state/oddboro/office.log` on Linux (`XDG_STATE_HOME`
    wins when set) and `%LOCALAPPDATA%\Oddboro\Logs\office.log` on Windows,
@@ -89,8 +91,10 @@ an update (`update.rs`).
 10. Keeps links to the office's own origin in the window. Links to any other
     origin, `mailto:` and `tel:`, and every `target="_blank"` or
     `window.open`, open in the default browser. A new window for an address on
-    the office's own origin opens with the key added (read as it opens), since
-    the browser lacks the window's cookie. Any other site never sees the key.
+    the office's own origin opens with the key added, read and proven as it
+    opens (step 4's proof), since the browser lacks the window's cookie. When
+    the proof fails it opens without the key. Any other site never sees the
+    key, and the office is not asked.
 11. Reports a panic, giving up on the office (step 4's timeout, step 6's
     limit, or Node not starting) and a broken install (no Node, no server
     code), only when it found a report address and the office's `.env`
@@ -192,7 +196,10 @@ not start or keep running, 7 no window. 0 is a quit.
   by any means, Force Quit included, so a force-quit shell never leaves Node
   running on the port.
 - `ODDBORO_SERVER_URL`, when set, skips Node and opens that URL. Use it to run
-  the shell against `vite dev`.
+  the shell against `vite dev`. It must be an http address on 127.0.0.1,
+  [::1] or a name for only those, and prove itself as in step 4 with the key
+  in `ODDBORO_HOME`; otherwise the shell quits with code 5 and opens
+  nothing.
 
 ## Updates
 
@@ -246,6 +253,9 @@ Every update is required. `src-tauri/src/update.rs` runs them with
   sending.
 - `src-tauri/src/server.rs`. Starting, watching, restarting and stopping Node.
 - `src-tauri/src/env.rs`. Port, home, log path and the login-shell PATH.
+- `src-tauri/src/proof.rs`. Whether an address is the office, proven before a
+  page with the key loads there, the same proof as
+  `packages/ledger/src/office-proof.ts` (a test checks the same known answer).
 - `src-tauri/src/secrets.rs`. The office's secrets in the Mac's Keychain, and
   the line protocol it asks with.
 - `src-tauri/src/update.rs`. Checking, downloading and installing updates,
@@ -547,8 +557,9 @@ Each line says what to do when its trigger comes.
 - `tauri` 2.12.5, `tauri-build` 2.7.4
 - `tauri-plugin-autostart` 2.7.0, `tauri-plugin-dialog` 2.8.4
 - `tauri-plugin-updater` 2.14.1, `serde_json` 1.0.154
-- `getrandom` 0.3.4, for the update token
+- `getrandom` 0.3.4, for the update token and the proof's nonce
 - `sentry` 0.49.5, and `rustls` 0.23.46 with `ring`, for error reports
+- `ring` 0.17.14, the version rustls builds, for the office's proof
 - `reqwest` 0.13.5, the client sentry sends with, named so a report can
   carry the sign-in's token
 - `libc` 0.2.191 (Mac and Linux)

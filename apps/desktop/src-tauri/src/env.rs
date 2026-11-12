@@ -26,17 +26,13 @@ pub fn home() -> PathBuf {
     env::var_os(var).map_or_else(|| PathBuf::from("/"), PathBuf::from)
 }
 
+/// The file the office keeps its owner's key in, in its folder
+/// (`OWNER_KEY_FILE` in `packages/ledger/src/owner-key.ts`).
+pub const OWNER_KEY_FILE: &str = "owner-key";
+
 /// `ODDBORO_HOME` from the shell's own environment, or `~/.oddboro`.
 pub fn office_home() -> PathBuf {
     env::var_os("ODDBORO_HOME").map_or_else(|| home().join(".oddboro"), PathBuf::from)
-}
-
-/// The key the office asks of every request, from the file it makes in its
-/// folder as it starts. `None` when the file is missing or empty.
-pub fn owner_key() -> Option<String> {
-    let key = std::fs::read_to_string(office_home().join("owner-key")).ok()?;
-    let key = key.trim();
-    (!key.is_empty()).then(|| key.to_string())
 }
 
 /// `ODDBORO_LOG` from the shell's own environment, so a test's run never
