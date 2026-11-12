@@ -136,14 +136,14 @@
         onclick={() => dialog.close()}>Cancel</button
       >
       <button
-        class="rounded-lg bg-raise px-3 py-2 disabled:opacity-40"
+        class="rounded-lg bg-sea px-3 py-2 font-medium text-night disabled:opacity-40"
         disabled={!valid || posting}
         onclick={() => window.open(browser.url, '_blank', 'noopener,noreferrer')}
         >Open draft on GitHub</button
       >
       {#if cli}
         <button
-          class="rounded-lg bg-sea px-3 py-2 font-medium text-night disabled:opacity-40"
+          class="rounded-lg bg-raise px-3 py-2 disabled:opacity-40"
           disabled={!valid || posting}
           onclick={post}
         >
