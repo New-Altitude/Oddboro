@@ -1452,7 +1452,8 @@ falling back to `oddboro.localhost` where a network's DNS drops that answer.
 The desktop app (`ODDBORO_APP`) skips all of this: it opens the office in its own
 window, onboarding shows no address step, and it never touches Caddy.
 
-Caddy takes ports 80 and 443 and hands everything to the office on 4500
+Caddy takes ports 80 and 443 and hands everything to the office on its own port
+(`OFFICE_PORT`: 4500, or `ODDBORO_PORT`)
 (`src/lib/server/address.ts`, the Address row on the first card). With nothing on
 port 80 the office runs its own Caddy as `com.oddboro.caddy`, downloading it
 from Caddy's releases (checked against the published checksum) if the Mac has
@@ -1460,12 +1461,12 @@ none. With the owner's Caddy on port 80 it adds two routes and a certificate
 policy through Caddy's admin API (127.0.0.1:2019, with an explicit origin, which
 that API wants), touches none of their files, and adds them again when the
 office starts and when a page loads (`keepAddress`). With anything else on port
-80 it stays at `:4500`; on Windows that is often http.sys, Windows' own web
+80 it stays at the office's own port; on Windows that is often http.sys, Windows' own web
 server. Port 80 is looked at with `ss` on Linux, `lsof` on a Mac and
 PowerShell on Windows, each through `probe`. A look that fails, times out or
 finds its command missing gives `unchecked`, never free, since reading it as
-free would offer a Caddy that cannot start: the address then stays at `:4500`
-and the card says it could not look. On Windows the office's own Caddy listens on 127.0.0.1 and [::1]
+free would offer a Caddy that cannot start: the address then stays at the
+office's own port and the card says it could not look. On Windows the office's own Caddy listens on 127.0.0.1 and [::1]
 only (`ownCaddyfile`), so the firewall never asks. On a Mac it listens on
 every address, since a process the owner runs can bind a port under 1024
 only there (127.0.0.1 and ::1 were refused, measured), so other machines on

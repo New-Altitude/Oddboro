@@ -36,8 +36,8 @@ is no standing yes: the gateway holds each call that changes something as
 that exact call on the owner's desk, and the office makes it only on their
 yes (decided 2026-11-07). Revoking the grant or lowering the level ends it at
 the next run. A yes counts only from the
-owner's own page: the office refuses an action any other site sends it
-(decided 2026-11-04).
+owner's own page, which carries the owner's key: the office refuses a request
+without the key, and an action any other site sends it (decided 2026-11-11).
 
 ## 5. No commits or pushes without the owner saying so.
 
