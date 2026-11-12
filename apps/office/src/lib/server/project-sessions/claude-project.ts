@@ -13,7 +13,8 @@ import {
 import { randomUUID } from 'node:crypto';
 import { home, STAFF_SERVER, type ProjectSession, type ProjectRequest } from '@oddboro/ledger';
 import { AGENT_NAMES } from '@oddboro/ledger/agents';
-import { probe } from '@oddboro/ledger/platform';
+import { currentSystem, probe } from '@oddboro/ledger/platform';
+import { computerWord } from '@oddboro/ledger/system-words';
 import { nativeCommand, nativeEnv } from './native.ts';
 import { savedClaudeSessions } from './claude-sessions.ts';
 type Active = {
@@ -29,9 +30,11 @@ type Active = {
  * What the owner reads when Claude Code cannot list a project's conversations.
  * The project-sessions route shows a thrown message as it is, so a raw error
  * from starting the command (its path, ENOENT) never reaches the owner.
+ * `missing` names the system as it is when the listing fails, not as this file
+ * loaded, since a test fakes the system after that.
  */
 export const CLAUDE_LIST_FAILED = {
-  missing: `${AGENT_NAMES.claude} is not installed on this computer.`,
+  missing: () => `${AGENT_NAMES.claude} is not installed on this ${computerWord(currentSystem())}.`,
   failed: `${AGENT_NAMES.claude} could not list this project's conversations. Try again.`
 };
 
@@ -48,7 +51,7 @@ async function claudeAgents(folder: string): Promise<string> {
     case 'ok':
       return r.out;
     case 'missing':
-      throw new Error(CLAUDE_LIST_FAILED.missing);
+      throw new Error(CLAUDE_LIST_FAILED.missing());
     case 'failed':
     case 'timeout':
       throw new Error(CLAUDE_LIST_FAILED.failed);
