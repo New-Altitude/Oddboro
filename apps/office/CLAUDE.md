@@ -317,7 +317,14 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    with nothing in progress); it opens the info page at In progress, as
    `show: {tab: 'work'}` does. The chat stays mounted
    while the panel is open, so a
-   reply survives switching tabs or collapsing. The chat shows every ask, task
+   reply survives switching tabs or collapsing. A send first keeps the owner's
+   line in `chat.jsonl` with its source and turn ID (`keepOwnerTurn` in
+   `chat-turns.ts`). Imports and uploads share the existing `attachments`
+   folder and `ChatFile` records. Each inline import is checked before any
+   part is saved. The runner opens text and PDF files through its file tools;
+   Claude Code, Codex and Grok also receive picture bytes. Get a reply on an
+   unanswered line reuses its saved input, even after a restart. A finished
+   reply carries the same ID. Older lines need none. The chat shows every ask, task
    and report the Odd put on the desk, where it landed (`chatLog` merges
    `deliveries()` into `chat.jsonl`), with where each stands now, and every
    hand-off it gave or got (`handOffsFor`). A hand-off it gave sits on the card
@@ -669,9 +676,13 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    The policy is proved against Gemini's own engine
    (`gemini-policy.test.ts`); a message starting with `/` goes in after a line
    break, so Gemini never runs it as a command.
-   A chat never waits: it resumes the
-   Odd's one chat session, so only a second chat does. Claude Code keeps a
-   session's first system prompt, so a resumed chat's message opens with the
+   A chat resumes the Odd's session without waiting for a background slot.
+   Stop reply names the run on that saved turn. Ordinary Send queues while a
+   reply runs; Correct this reply selects interruption explicitly. A
+   correction keeps its own text and files before stopping that run, then waits
+   for it to close. Closing the window just stops the stream to that window.
+   A message about a job or goal in progress goes to its lead.
+   Claude Code keeps a session's first system prompt, so a resumed chat's message opens with the
    time and each section that changed since that session last saw it, in full
    (`catchUp` in `src/lib/server/resume.ts`; `session.json` keeps what it saw).
    A chat that starts a new session (after a move to another tool, or with
@@ -696,7 +707,8 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    `give_owner_a_task`, `propose_reply` and `propose_filter` store as `via`. Jobs, follow-ups
    and drafts each start a fresh session and run side by side, up to three
    per Odd (`AT_ONCE`); the next waits for a slot. Each one is listed in
-   `inProgress` (the `Work` shape in `src/lib/staff/work.ts`) with what it
+   `inProgress()` (from `src/lib/server/run-state.ts`, derived from the
+   shared `runsGoing` registry) with what it
    is, when it started, and the tool it is using now. The list reaches the
    page with each `working` event; only work starting or ending reloads the
    card's tabs. In progress also lists each follow-up yet to start

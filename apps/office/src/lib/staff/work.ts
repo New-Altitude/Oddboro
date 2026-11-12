@@ -4,29 +4,7 @@
 // import in the browser.
 import type { FollowUpKind } from '@oddboro/ledger';
 
-export type Work = {
-  /** Unique while the office runs. A follow-up yet to start is its row's id, below zero. */
-  id: number;
-  kind: 'job' | 'follow-up' | 'draft';
-  /** The job's name or the ask's title. */
-  label: string;
-  /** What kind of work it is, in a few words: "Carrying out ask #20". */
-  detail: string;
-  /** When it started, or joined the line for a slot. */
-  since: string;
-  /** True while it waits for a free slot, or to start. */
-  queued: boolean;
-  /**
-   * A follow-up the office has yet to start: it waits for the Odd's run on
-   * the same work to end (`followUpsToStart` in the ledger).
-   */
-  toStart?: true;
-  askId?: number;
-  /** The tool the staffer is using now, as Claude Code names it. */
-  doing?: string;
-  /** Tool calls so far. */
-  steps: number;
-};
+export type { Work, WorkAbout } from '@oddboro/ledger/run-registry';
 
 /**
  * What a follow-up does, in a few words, by its kind: the line over its title

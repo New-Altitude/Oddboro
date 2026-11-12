@@ -1,5 +1,6 @@
-// Follow-up runs: adding, claiming, finishing and naming them, and the runs
-// still going.
+// Follow-up runs: adding, claiming, finishing and naming them, and holding one
+// while its Odd still runs on the thread.
+import { runsGoing } from './run-registry.ts';
 import {
   and,
   arrayOverlaps,
@@ -171,7 +172,7 @@ function waitsOnOwnRun(): SQL {
               and(
                 eq(threads.id, followUps.threadId),
                 eq(threads.hubId, followUps.staffId),
-                arrayOverlaps(threads.runs, [...runsGoing])
+                arrayOverlaps(threads.runs, [...runsGoing.keys()])
               )
             )
         )
@@ -180,15 +181,6 @@ function waitsOnOwnRun(): SQL {
   // Bracketed, since callers negate it.
   return sql`(${ne(followUps.kind, 'hand_off')} and (${held}))`;
 }
-
-/**
- * The keys of the runs going in this process. The office gives every run one,
- * and a thread it takes a hand-off on keeps it (`threads.runs`), so while it
- * goes the hub's pick-ups there wait (`waitsOnOwnRun`). Kept in memory, not
- * the database: a restart ends every run, and so every hold, and nothing
- * waits forever.
- */
-export const runsGoing = new Set<string>();
 
 /** The wait a lead's run ended as it started: the task's title, or the time it was parked until. */
 export type Unparked = { task: string } | { at: Date };

@@ -52,15 +52,19 @@ then names every other place.
   way to make that kind fail; the test then checks the error shows in
   exactly those places.
 
+## Live runs
+
+`runsGoing` in the ledger's `run-registry.ts` is the one registry. Reserve an
+entry before preparation and release it after the result is kept. Each entry
+has a stop controller and an end promise. `run-state.ts` admits background
+slots and derives the floor's work from those entries. `chat-run.ts` owns
+saved chat attempts, Stop and corrections. The job clock keeps its own due
+jobs; it never owns a second process registry.
+
 ## Later
 
 Each line says what to do when its trigger comes.
 
-- Building Stop for a run (NEW-1701), or any new kind of run: first make the
-  run registers one registry with a stop handle. Today they are `slots`,
-  `chatting` and `inProgress` in `staff.ts` and `runsGoing` in the ledger's
-  `office-follow-ups.ts`, and `runsActive` in `staff.ts` reads two of them. The job
-  clock's `running` in `jobs.ts` stays its own.
 - Building NEW-1651 or NEW-1654, whichever comes first: give each run one
   row of its own, with `runs.jobId` optional, usage pointing at the run, and
   one reader per tool of that tool's stream.

@@ -22,6 +22,7 @@
     "./upgrade": "./src/upgrade.ts",
     "./update-window": "./src/update-window.ts",
     "./work-paths": "./src/work-paths.ts",
+    "./run-registry": "./src/run-registry.ts",
     "./desk-answers": "./src/desk-answers.ts",
     "./live-tables": "./src/live-tables.ts",
     "./filters": "./src/filter-words.ts",

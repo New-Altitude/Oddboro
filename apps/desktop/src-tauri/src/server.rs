@@ -174,7 +174,7 @@ impl Server {
             // A file attached in a chat goes up alone, up to 10 MB
             // (`FILE_MAX` in the office); the server's default refuses
             // anything over 512 KB.
-            .env("BODY_SIZE_LIMIT", "11M")
+            .env("BODY_SIZE_LIMIT", "12M")
             .env("PATH", &self.path)
             .env("ODDBORO_VERSION", &self.version)
             // A pipe the shell holds open. It closes when the shell dies by

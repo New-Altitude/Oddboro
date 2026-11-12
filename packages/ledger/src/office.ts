@@ -27,6 +27,15 @@ export type GrantRow = typeof grants.$inferSelect;
 export type ConnectorRow = typeof connectors.$inferSelect;
 export type LedgerRow = Omit<typeof ledger.$inferSelect, 'embedding'>;
 
+/**
+ * The keys of the runs going in this process. The office gives every run one,
+ * and a thread it takes a hand-off on keeps it (`threads.runs`), so while it
+ * goes the hub's pick-ups there wait (`waitsOnOwnRun`). Kept in memory, not
+ * the database: a restart ends every run, and so every hold, and nothing
+ * waits forever.
+ */
+export { runsGoing, reserveRun, releaseRun } from './run-registry.ts';
+
 export {
   roster,
   staffer,
@@ -99,7 +108,6 @@ export {
   startFirstDay,
   followUpsToDo,
   followUpsToStart,
-  runsGoing,
   type Unparked,
   startFollowUp,
   OUTCOME_TITLE,
