@@ -330,7 +330,7 @@ export function claudeInput(
 /**
  * What a Claude Code run needs beyond `CliRun`, which run() in staff.ts works
  * out by an Odd's own rules. Each is optional, since the office's own run
- * (`bare`) needs only `toolDir`.
+ * (`bare`) needs only `toolDir` and its `pictures`.
  */
 export type ClaudeRun = CliRun & {
   /** The account's Claude Code folder (`CLAUDE_CONFIG_DIR`), or none for the owner's own login. */
@@ -353,6 +353,8 @@ export type ClaudeRun = CliRun & {
   unreadable?: string[];
   /** What commands read in the sandbox: `readable`, less a data folder that is not there. */
   sandboxReads?: string[];
+  /** Pictures held in memory, sent in place of `images`, so they never land on disk (the office's own run). */
+  pictures?: { mediaType: string; data: string }[];
 };
 
 /**
@@ -368,16 +370,16 @@ export type ClaudeRun = CliRun & {
  */
 export function claudeLaunch(r: ClaudeRun): Launch {
   const env = staffEnv(r.toolDir || undefined);
-  const stdin = claudeInput(
-    r.input,
+  const pictures =
+    r.pictures ??
     r.images?.map((i) => ({
       mediaType: i.mediaType,
       data: readFileSync(i.path).toString('base64')
-    })),
-    r.streamed
-  );
+    }));
+  const stdin = claudeInput(r.input, pictures, r.streamed);
   const stream = { read: claudeReader('claude'), ...(r.streamed ? { turn: userTurn } : {}) };
-  if (r.bare) return { args: officeArgs(r), env, stdin, done: () => {}, ...stream };
+  if (r.bare)
+    return { args: officeArgs(r, !!pictures?.length), env, stdin, done: () => {}, ...stream };
   const files = {
     mcp: home('mcp', `${r.key}.json`),
     settings: home('mcp', `${r.key}.settings.json`),
@@ -421,7 +423,7 @@ export function claudeLaunch(r: ClaudeRun): Launch {
   };
   const args = [
     '-p',
-    ...(r.images?.length || r.streamed ? ['--input-format', 'stream-json'] : []),
+    ...(pictures?.length || r.streamed ? ['--input-format', 'stream-json'] : []),
     '--output-format',
     'stream-json',
     '--verbose',
@@ -477,7 +479,7 @@ export function claudeLaunch(r: ClaudeRun): Launch {
  * The office's own run: no tools, no MCP server, none of the owner's
  * plugins, and no session kept, so Claude Code keeps no transcript of it.
  */
-function officeArgs(r: ClaudeRun): string[] {
+function officeArgs(r: ClaudeRun, withPictures: boolean): string[] {
   return [
     '-p',
     '--no-session-persistence',
@@ -498,7 +500,7 @@ function officeArgs(r: ClaudeRun): string[] {
     r.system,
     ...(r.effort ? ['--effort', r.effort] : []),
     ...(r.model ? ['--model', r.model] : modelArgs()),
-    ...(r.images?.length ? ['--input-format', 'stream-json'] : [])
+    ...(withPictures ? ['--input-format', 'stream-json'] : [])
   ];
 }
 

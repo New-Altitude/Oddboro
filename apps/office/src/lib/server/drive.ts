@@ -96,7 +96,7 @@ const stoppedBy = (signal: AbortSignal): RunEnd =>
  */
 export function drive(
   start: () => ChildProcessWithoutNullStreams,
-  launch: Launch & { read: NonNullable<Launch['read']> },
+  launch: Launch,
   sink: Sink,
   o: { deadline: number; signal: AbortSignal; live?: LiveRun }
 ): Promise<RunEnd> {
