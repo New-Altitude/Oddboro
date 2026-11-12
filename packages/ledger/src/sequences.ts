@@ -17,14 +17,21 @@ export function random(seed: number): () => number {
 }
 
 /**
- * What a test tells `explore`. Events are plain data: on a replay, an event
- * counts as still valid when `next` offers one that serialises the same.
+ * What a test tells `explore`. Events are plain data. `explore` picks each one
+ * from what `next` offers, with the seed's own draw. On a replay, an event
+ * counts as still valid when `next` offers one that serialises the same: by
+ * value, since `next` makes fresh events on every call.
  */
 export type Explore<S, E, R> = {
   /** A fresh state and the test's own record of what is true, built only from events. */
   start: (rnd: () => number) => { state: S; record: R };
-  /** Events valid now, from the record (never from the system's answer). */
-  next: (record: R, rnd: () => number) => E[];
+  /**
+   * Every event valid now, values included, from the record alone: never from
+   * the system's answer, and never from a random draw. A test that wants
+   * varied values lists each one. A draw here would offer other events on a
+   * replay than on the run, so the shrink would keep events it should drop.
+   */
+  next: (record: R) => E[];
   /** The system under test: production code. */
   step: (state: S, event: E) => S;
   /** The test's own record of the event. */
@@ -57,7 +64,7 @@ export function explore<S, E, R>(
     let state = fresh.state;
     const events: E[] = [];
     while (events.length < o.length) {
-      const offered = x.next(fresh.record, rnd);
+      const offered = x.next(fresh.record);
       if (offered.length === 0) break;
       const event = offered[Math.floor(rnd() * offered.length)];
       state = x.step(state, event);
@@ -118,13 +125,12 @@ function replay<S, E, R>(
   rule: string,
   events: E[]
 ): Failure<E> | undefined {
-  const rnd = random(seed);
-  const fresh = x.start(rnd);
+  const fresh = x.start(random(seed));
   let state = fresh.state;
   const kept: E[] = [];
   for (const event of events) {
     const key = JSON.stringify(event);
-    if (!x.next(fresh.record, rnd).some((e) => JSON.stringify(e) === key)) continue;
+    if (!x.next(fresh.record).some((e) => JSON.stringify(e) === key)) continue;
     state = x.step(state, event);
     x.note(fresh.record, event);
     kept.push(event);

@@ -126,6 +126,47 @@ test('shrinking keeps the rule that broke, never trading it for another', () => 
   assert.equal(rules.size, 2);
 });
 
+type Add = { add: number };
+
+test('a failure among events that carry values is shrunk to the shortest sequence', () => {
+  const seen = { longest: 0 };
+  // A total that sticks at 2, and refuses a 2 on nothing the way real code
+  // refuses an event that could not happen. Each call to `next` makes fresh
+  // events, so a replay finds them by value.
+  const x: Explore<number, Add, { sum: number }> = {
+    start: () => ({ state: 0, record: { sum: 0 } }),
+    next: (record) => (record.sum === 0 ? [{ add: 0 }, { add: 1 }] : [{ add: 0 }, { add: 2 }]),
+    step: (n, { add }) => {
+      if (add === 2 && n === 0) throw new Error('a 2 only follows a 1');
+      return Math.min(n + add, 2);
+    },
+    note: (record, { add }) => {
+      record.sum += add;
+    },
+    broken: (state, record, events) => {
+      seen.longest = Math.max(seen.longest, events.length);
+      return state === record.sum
+        ? []
+        : [
+            {
+              rule: 'the total shows what the events add up to',
+              detail: `the total shows ${state} where the events make ${record.sum}`
+            }
+          ];
+    }
+  };
+  for (let seed = 0; seed < SEEDS; seed++) {
+    assert.deepEqual(explore(x, { seeds: 1, length: 200, from: seed }), {
+      seed,
+      rule: 'the total shows what the events add up to',
+      detail: 'the total shows 2 where the events make 3',
+      events: [{ add: 1 }, { add: 2 }]
+    });
+  }
+  // Some runs failed with adds of nothing among them, so the shrink had them to cut.
+  assert.ok(seen.longest > 2, `the longest failing run had ${seen.longest} events`);
+});
+
 test('a rule that is never broken returns nothing', () => {
   const seen = { checks: 0, longest: 0 };
   assert.equal(
