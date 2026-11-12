@@ -1807,8 +1807,13 @@ Retry reply on the saved turn, so the earlier failed reply stays in
 history. Access cards come from database deliveries, never the Odd's chat
 file.
 
-The Projects window and its local controller live in
+The Projects work area and its local controller live in
 `src/lib/ui/ProjectSessions.svelte` and `src/lib/server/project-sessions/`.
+Projects is no window in the side panel: `+page.svelte` draws it as a wide
+area of its own between the start panel (or the plate) and the end side,
+from `projects` in `windows.svelte.ts` (`openProject`, `closeProjects`). Its
+sessions run down the start side as a listbox; the selected one's terminal
+fills the rest, and its details fold out over the terminal.
 They sit behind Advanced mode (`owner.advanced_at`), which the owner turns on
 in Setup's Advanced section (`AdvancedSection.svelte`, `PUT
 /api/setup/advanced`) after one warning. The page holds it in `advanced` in

@@ -34,12 +34,14 @@
   import {
     advanced,
     close,
+    closeProjects,
     deskRequest,
     open,
     openHire,
     openLessons,
     openProject,
     openReport,
+    projects,
     wins,
     type Win
   } from '#lib/ui/windows.svelte.ts';
@@ -127,9 +129,9 @@
   $effect.pre(() => {
     advanced.on = data.advanced;
   });
-  // Off, nothing offers Projects, and an open Projects window closes.
+  // Off, nothing offers Projects, and an open Projects work area closes.
   $effect(() => {
-    if (!advanced.on) for (const w of wins.list) if (w.kind === 'projects') close(w.id, true);
+    if (!advanced.on) closeProjects();
   });
   /** A new owner's first visit, from the empty lot until their manager says hello. */
   // svelte-ignore state_referenced_locally
@@ -292,6 +294,19 @@
   const rightSpace = $derived(
     (showRail && !cardOpen ? ODDS_RAIL + 16 : 0) + (cardOpen && wide ? rightWidth + 8 : 0)
   );
+  /** The office plate's width, while it stands alone at the top of the start side. */
+  let plateWidth = $state(0);
+  /**
+   * Where Projects sits: past the start panel, or the plate when no window is
+   * open, and short of the Odds rail or an Odd's panel. Narrower than 560px,
+   * it runs over the end side instead.
+   */
+  const projectsInset = $derived.by(() => {
+    if (!wide) return { start: 12, end: 12 };
+    const start = (leftOpen ? leftWidth : plateWidth) + 32;
+    const end = cardOpen ? rightWidth + 32 : showRail ? ODDS_RAIL + 32 : 16;
+    return { start, end: Math.max(16, Math.min(end, innerWidth - start - 560)) };
+  });
   /** The Odd's panel slides in from the screen's edge (the left in a right-to-left page). */
   const fromEdge = (far = 48) => ({
     x: (getComputedStyle(document.documentElement).direction === 'rtl' ? -1 : 1) * far,
@@ -656,10 +671,11 @@
 
   /** A section's button: brings its window forward, or folds the panel when it already is. */
   function toggle(id: (typeof SECTIONS)[number]['id']) {
+    // Projects is a work area of its own beside the panel, not one of its windows.
+    if (id === 'projects') return projects.open ? closeProjects() : openProject();
     if (leftOpen && front?.kind === id) return hide();
     if (id === 'desk') return void openDesk();
     if (id === 'ledger') return open({ id: 'ledger', kind: 'ledger' });
-    if (id === 'projects') return openProject();
     if (id === 'services') return open({ id: 'services', kind: 'services' });
     if (id === 'goals') return open({ id: 'goals', kind: 'goals' });
     if (id === 'lessons') return openLessons();
@@ -681,7 +697,6 @@
   function winTitle(w: Win): string {
     if (w.kind === 'desk') return 'Desk';
     if (w.kind === 'ledger') return 'Ledger';
-    if (w.kind === 'projects') return 'Project sessions';
     if (w.kind === 'services') return 'Services';
     if (w.kind === 'goals') return 'Goals';
     if (w.kind === 'lessons') return 'Lessons';
@@ -1201,12 +1216,13 @@
     <!-- The command center's buttons arrive with the office, once the first run is over. -->
     <div class="flex flex-wrap gap-1.5 {open ? 'px-3 pt-2' : 'mt-2'}" class:hidden={firstRun}>
       {#each sections as sec (sec.id)}
+        {@const pressed =
+          sec.id === 'projects' ? projects.open : leftOpen && front?.kind === sec.id}
         <button
-          class="rounded-full px-3 py-1 text-xs whitespace-nowrap {leftOpen &&
-          front?.kind === sec.id
+          class="rounded-full px-3 py-1 text-xs whitespace-nowrap {pressed
             ? 'bg-sea/25 text-ink'
             : 'bg-raise text-muted hover:text-ink'}"
-          aria-pressed={leftOpen && front?.kind === sec.id}
+          aria-pressed={pressed}
           onclick={() => toggle(sec.id)}
           >{sec.label}{#if sec.id === 'desk' && deskCount}<span class="ms-1 text-ember"
               >{deskCount}</span
@@ -1325,8 +1341,6 @@
                 <LessonsLibrary {staff} {version} bind:filter={w.filter} />
               {:else if w.kind === 'ledger'}
                 <LedgerPanel {staff} version={ledgerVersion} />
-              {:else if w.kind === 'projects'}
-                {#key w.sessionId}<ProjectSessions {staff} sessionId={w.sessionId} />{/key}
               {:else if w.kind === 'services'}
                 <ServicesPanel {staff} {version} onstaff={select} />
               {:else if w.kind === 'setup'}
@@ -1388,6 +1402,7 @@
   {:else}
     <header
       class="glass absolute start-4 top-4 rounded-2xl px-4 py-3 max-sm:start-3 max-sm:px-3 max-sm:py-2"
+      bind:clientWidth={plateWidth}
     >
       {@render plate(false)}
       <div class="mt-2 border-t border-hairline pt-2">
@@ -1476,6 +1491,21 @@
         </div>
       {/key}
     </SidePanel>
+  {/if}
+
+  <!-- Projects: a wide work area of its own, between the start panel (or the
+       office plate) and the Odds on the end side, under the desk pill. The
+       panel and its music player stay in view. On a narrow screen it covers
+       the floor. -->
+  {#if projects.open && advanced.on && !firstRun}
+    <div
+      class="glass pointer-events-auto absolute z-30 overflow-hidden rounded-2xl"
+      style="inset-block: {wide
+        ? '64px 16px'
+        : '12px'}; inset-inline: {projectsInset.start}px {projectsInset.end}px"
+    >
+      <ProjectSessions {staff} {version} ask={projects.ask} onclose={closeProjects} />
+    </div>
   {/if}
 
   {#if failed}

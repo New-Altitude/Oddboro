@@ -1,7 +1,8 @@
 // The windows open on the start side: the desk, the goals, the
 // lessons (what the office knows about the owner), the ledger, hires, the office
 // designer, the welcome and setup, files, and reports opened from a staffer's
-// chat once they have left the desk.
+// chat once they have left the desk. Projects is no window here: it opens as
+// its own wide work area beside the side panel (`projects` below).
 // Every open window stays mounted, so a drawing keeps going and a half-read
 // ask keeps its place while the owner works in another. Closing one with unsaved
 // edits, or one still drawing, waits for the owner to say so.
@@ -15,7 +16,6 @@ export type LessonsFilter = 'about' | 'all' | { staff: string };
 export type Win =
   | { id: 'desk'; kind: 'desk' }
   | { id: 'goals'; kind: 'goals' }
-  | { id: 'projects'; kind: 'projects'; sessionId?: string }
   | { id: 'lessons'; kind: 'lessons'; filter: LessonsFilter }
   | { id: 'ledger'; kind: 'ledger' }
   | { id: 'services'; kind: 'services' }
@@ -69,12 +69,24 @@ export function open(w: Win): void {
   wins.raised = true;
 }
 
-/** The one Projects window, on that session. Already open, it switches to it. */
+/**
+ * The Projects work area: open or not, and the last session asked for. `n`
+ * bumps on every ask, so asking again for the same session still brings it up.
+ */
+export const projects = $state<{ open: boolean; ask: { sessionId?: string; n: number } }>({
+  open: false,
+  ask: { n: 0 }
+});
+
+/** Open Projects, on that session when one is named. Only in Advanced mode. */
 export function openProject(sessionId?: string): void {
   if (!advanced.on) return;
-  const w = wins.list.find((x) => x.kind === 'projects');
-  if (w) w.sessionId = sessionId;
-  open(w ?? { id: 'projects', kind: 'projects', sessionId });
+  projects.open = true;
+  projects.ask = { sessionId, n: projects.ask.n + 1 };
+}
+
+export function closeProjects(): void {
+  projects.open = false;
 }
 
 /** The one Lessons window, on that filter. Already open, it switches to it. */

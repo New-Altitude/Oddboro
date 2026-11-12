@@ -2,18 +2,24 @@
   import { onMount } from 'svelte';
   import { projectApi } from './project-api.ts';
   import '@xterm/xterm/css/xterm.css';
+  // The native terminal, filling the space its parent gives it and refitting
+  // as that changes. The parent shows Take control, for this view's ID.
   let {
     id,
+    view,
+    writable = $bindable(false),
     onerror,
     onstream
   }: {
     onstream: (stream: EventSource, id: string) => void;
     id: string;
+    /** This window's terminal view: one view at a time takes the typing. */
+    view: string;
+    /** Whether this view takes the typing now. */
+    writable?: boolean;
     onerror: (text: string) => void;
   } = $props();
   let host: HTMLDivElement;
-  const view = crypto.randomUUID();
-  let writable = $state(false);
 
   onMount(() => {
     let disposed = false,
@@ -99,9 +105,4 @@
   });
 </script>
 
-{#if !writable}<button
-    class="mb-2 rounded-lg bg-raise px-2.5 py-1 text-xs hover:bg-sea/25"
-    onclick={() => projectApi('control', { id, view }).catch((e) => onerror(e.message))}
-    >Take control of terminal</button
-  >{/if}
-<div class="h-96 min-h-72 w-full overflow-hidden rounded-lg bg-night p-1" bind:this={host}></div>
+<div class="min-h-0 w-full flex-1 overflow-hidden bg-night p-1" bind:this={host}></div>
