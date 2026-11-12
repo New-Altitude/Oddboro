@@ -69,7 +69,8 @@ export type Probe =
  * window either, unless `showWindow`: some commands open a window the owner
  * must see, such as the browser or a dialog asking them to confirm, and
  * hiding the command can hide that window too. `input` goes to the command's
- * stdin, which then closes, so a command that reads to the end never waits.
+ * stdin. stdin then closes, given input or not, so a command that reads to
+ * the end never waits.
  * Text passed this way stays out of the process list. `killSignal` is what
  * stops a command at its timeout, SIGTERM unless given: a command that
  * ignores SIGTERM runs on, and its caller waits, until it ends by itself.
@@ -96,12 +97,13 @@ export function probe(
         { ...options, encoding: 'utf8', ...(showWindow ? {} : { windowsHide: true }) },
         (e, out, err) => done(e ? ended(e, out, err) : { status: 'ok', out, err })
       );
-      if (input !== undefined) {
-        // A command can exit before it reads, such as one with no sign-in. The
-        // pipe then fails, and the callback above already says how it ended.
-        child.stdin?.on('error', () => {});
-        child.stdin?.end(input);
-      }
+      // stdin always closes, with or without input, so a command that reads
+      // it sees the end at once. execFile ignores a `stdio` option, so ending
+      // its pipe is the only way. A command can exit before it reads, such as
+      // one with no sign-in. The pipe then fails, and the callback above
+      // already says how it ended.
+      child.stdin?.on('error', () => {});
+      child.stdin?.end(input);
     } catch (e) {
       // A file this system cannot run (ENOEXEC) throws here rather than in the
       // callback. Anything else thrown here is a wrong argument, so it rejects.
