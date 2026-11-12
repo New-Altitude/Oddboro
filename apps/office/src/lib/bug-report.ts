@@ -15,6 +15,19 @@ export function failedReply(lines: readonly ChatLine[]): string {
   return last && (last.failed || last.runFailed) ? last.text.trim() : '';
 }
 
+/**
+ * What the report form opens with. File this under an Odd's reply gives the
+ * title and details it drafted (`draft_bug_report`); the plus menu gives
+ * details alone, and their first line starts the title. Both stay editable.
+ */
+export function formStart(start: { title?: string; body: string }): {
+  title: string;
+  body: string;
+} {
+  const title = start.title ?? start.body.trim().split(/\r?\n/, 1)[0].slice(0, 96);
+  return { title, body: start.body };
+}
+
 /** Long or heavily encoded drafts travel by clipboard instead of an oversized URL. */
 export function browserDraft(title: string, body: string) {
   const url = new URL(`${ISSUES}/new`);

@@ -1,6 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { BODY_LIMIT, BUG_REPO, ISSUES, TITLE_LIMIT, browserDraft } from '../bug-report.ts';
+  import {
+    BODY_LIMIT,
+    BUG_REPO,
+    ISSUES,
+    TITLE_LIMIT,
+    browserDraft,
+    formStart
+  } from '../bug-report.ts';
   import { call } from './api.ts';
 
   let {
@@ -8,7 +15,12 @@
     staff,
     onclose,
     onfiled
-  }: { initial: string; staff: string; onclose: () => void; onfiled: () => void } = $props();
+  }: {
+    initial: { title?: string; body: string };
+    staff: string;
+    onclose: () => void;
+    onfiled: () => void;
+  } = $props();
   const endpoint = $derived(`/api/staff/${staff}/bug-reports` as const);
   let dialog: HTMLDialogElement;
   let title = $state('');
@@ -24,8 +36,7 @@
   const browser = $derived(browserDraft(title.trim(), body.trim()));
 
   onMount(() => {
-    body = initial;
-    title = initial.trim().split(/\r?\n/, 1)[0].slice(0, 96);
+    ({ title, body } = formStart(initial));
     dialog.showModal();
     void call<{ cli: boolean }>(endpoint)
       .then((r) => (cli = r.cli))

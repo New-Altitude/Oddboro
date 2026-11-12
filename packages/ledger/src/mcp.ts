@@ -82,6 +82,7 @@ import {
 } from './access-words.ts';
 import { handOff, type CarriedFile } from './hand-offs.ts';
 import { leavesLine, leavingRefused } from './leaving.ts';
+import { keepBugDraft } from './bug-drafts.ts';
 import { MANAGER_ROLE } from './managers.ts';
 import { parkOnTask } from './task-parking.ts';
 import {
@@ -2168,6 +2169,39 @@ if (offered('withdraw'))
         ]
           .filter(Boolean)
           .join(' ')
+      );
+    }
+  );
+
+// A bug report about Oddboro, only in a chat (`inChat` on its row). The office
+// puts the draft on this run's reply when the run ends (bug-drafts.ts), and
+// the owner's File this opens it in the report form. It files nothing.
+if (offered('draft_bug_report'))
+  tool(
+    'draft_bug_report',
+    {
+      description: `Draft a bug report about Oddboro itself, when ${OWNER} asks you to report a bug in this chat. Give a short title and the details: what happened, what they expected, and anything that helps fix it, such as the error. Under your reply, ${OWNER} gets File this, which opens the report form with your draft for them to review and edit. Nothing is filed until they choose there, so tell them to click File this. A second call in the same reply replaces the first draft.`,
+      inputSchema: {
+        // The report form's limits (TITLE_LIMIT and BODY_LIMIT in the office's bug-report.ts).
+        title: z.string().trim().min(1).max(256).describe('One line that names the bug.'),
+        body: z
+          .string()
+          .trim()
+          .min(1)
+          .max(65536)
+          .describe('The details, in plain words. Markdown is fine.')
+      }
+    },
+    async ({ title, body }) => {
+      // The office sets RUN_KEY for every run; with none, no reply could carry the draft.
+      if (!RUN_KEY)
+        return {
+          ...text('Nothing was drafted. This run has no reply to put it on.'),
+          isError: true
+        };
+      keepBugDraft(ME, RUN_KEY, { title, body });
+      return text(
+        `Drafted. ${OWNER} sees File this under your reply, which opens the draft for them to review. Nothing is filed yet.`
       );
     }
   );

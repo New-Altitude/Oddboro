@@ -431,8 +431,16 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    line. A post GitHub does not confirm keeps the form and links to the
    issue list; Cancel keeps the chat as it was. The chat has no slash
    commands: whatever the owner types goes to the Odd, a request to report
-   a bug included, and a message that names a bug tells the Odd the owner
-   files one from the plus menu (`chat-run.ts`). The tray previews each file with a ✕, in a column at the
+   a bug included, and a message that names a bug tells the Odd to draft it
+   with `draft_bug_report` (`chat-run.ts`). That tool, every Odd's in a chat
+   only, keeps the title and details for its run (`keepBugDraft` in the
+   ledger's `bug-drafts.ts`); when the run ends the office takes them
+   (`takeBugDraft`, gone either way) and keeps them on the reply as `bug`
+   (`ChatEntry`). Under such a reply, File this opens the same review form
+   with that title and details, editable (`formStart` in
+   `src/lib/bug-report.ts`). It never opens GitHub or posts: the owner
+   still picks Open draft on GitHub, the form's main button, or Post with
+   GitHub CLI. The tray previews each file with a ✕, in a column at the
    end side over the plus button and Send, three files tall at most
    (`.tray`), scrolling past that. The box is always as tall as that
    column (`side` in `fit`), and at least as tall as the plus button and
