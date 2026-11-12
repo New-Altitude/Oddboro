@@ -10,7 +10,7 @@ import { ACT_WRITE } from './house.ts';
 export async function replyBrief(
   id: string,
   re: Pick<ChatRef, 'kind' | 'id'>
-): Promise<{ ref: ChatRef; brief: string }> {
+): Promise<{ ref: ChatRef; brief: string; taskResponse?: string }> {
   switch (re.kind) {
     case 'ask': {
       const a = await askById(re.id);
@@ -32,6 +32,7 @@ export async function replyBrief(
       if (t?.staffId !== id) throw fixedError('No such task from this Odd');
       return {
         ref: { kind: 'task', id: t.id, title: t.title },
+        taskResponse: t.responseVersion ? (t.response ?? undefined) : undefined,
         brief: [
           `({owner} is replying about the task you gave them, "${t.title}", which is ${t.status === 'open' ? 'still open' : t.status}.`,
           `- Why: ${t.why}`,
@@ -65,3 +66,6 @@ export async function replyBrief(
     }
   }
 }
+
+export const savedTaskWords = (response: string): string =>
+  'The owner saved this response to the task:\n' + response;

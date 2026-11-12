@@ -32,7 +32,9 @@ export const RUN_FAILURE: Record<UsageKind, readonly Landing[]> = {
   // `desk` holds only for work that serves no hand-off: a failure of work
   // that serves one goes back to the Odd that handed it instead
   // (`finishFollowUp` in the ledger), since that Odd picks it up at once. The
-  // row cannot say so, and the test's follow-up serves none.
+  // row cannot say so, and the test's follow-up serves none. One the owner's
+  // answer in a chat started also says it failed in that chat, in one line
+  // under the card (`answerInChat`), as its own place, not a failed reply.
   'follow-up': ['desk', 'ledger'],
   // Drafting a job description in the hire window.
   draft: ['reply'],

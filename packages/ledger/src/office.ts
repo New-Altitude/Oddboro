@@ -10,6 +10,7 @@ import {
   desc,
   eq,
   exists,
+  gt,
   gte,
   inArray,
   isNotNull,
@@ -74,6 +75,7 @@ import {
   usage,
   followUps,
   goals,
+  chatCardOf,
   type AccessRequest,
   type AskKind,
   type FolderRequest,
@@ -82,6 +84,7 @@ import {
   type GoalPlan,
   type GoogleProduct,
   type HireProposal,
+  type InChat,
   type Outcome,
   type HeldCall,
   type ReplyDraft,
@@ -122,7 +125,7 @@ import {
 } from './access-words.ts';
 import { filterWords, sameCriteria, type GmailFilter } from './filter-words.ts';
 import { nextRun, zone } from './time.ts';
-import { isGrantable, OFFICE_TOOLS, ON_BY_DEFAULT, tickable, yesOrNo } from './tools.ts';
+import { isGrantable, OFFICE_TOOLS, ON_BY_DEFAULT, stepsToGo, tickable, yesOrNo } from './tools.ts';
 import { HIRE_DEFAULTS } from './grantable.ts';
 import {
   ASK_REPLACED,
@@ -1414,9 +1417,10 @@ export async function decideAsk(
   id: number,
   decision: Decision,
   reason: string | null,
-  reportWhenDone = false
+  reportWhenDone = false,
+  inChat = false
 ): Promise<boolean> {
-  return decide(id, decision, reason, { reportWhenDone });
+  return decide(id, decision, reason, { reportWhenDone, inChat });
 }
 
 /** What approving an ask means, done before the answer goes back. */
@@ -1428,6 +1432,8 @@ export type Approval = {
   link?: (ask: AskRow, tx: Tx) => Promise<void>;
   /** Done once the ask is approved, so the run the answer starts finds it. */
   carryOut?: (ask: AskRow) => Promise<void>;
+  /** The owner answered on the ask's card in its Odd's chat: the run the answer starts replies there. */
+  inChat?: boolean;
 };
 
 /**
@@ -1736,6 +1742,10 @@ async function decide(
     askId: ask.id
   });
   await o.carryOut?.(ask);
+  // Only the run this ask's own answer starts, never a twin's, replies under its card.
+  const chat: InChat | undefined = o.inChat
+    ? { staffId: ask.staffId, card: { kind: 'ask', id: ask.id, title: ask.title } }
+    : undefined;
   const owner = await ownerName();
   const said = sent
     ? `${owner} ${sent.sent?.action === 'draft' ? 'saved to Gmail drafts' : 'sent'} "${ask.title}"`
@@ -1782,11 +1792,12 @@ async function decide(
         await followUp(ask.staffId, 'carry_out', {
           askId: ask.id,
           note: ask.reason,
-          reportWhenDone: o.reportWhenDone
+          reportWhenDone: o.reportWhenDone,
+          chat
         });
         break;
       case 'rework':
-        await followUp(ask.staffId, 'rework', { askId: ask.id, note: ask.reason });
+        await followUp(ask.staffId, 'rework', { askId: ask.id, note: ask.reason, chat });
         break;
       case 'answer_window': {
         // The title asks whether to pause the work or let it carry on, so "approved" would not say which.
@@ -1805,7 +1816,8 @@ async function decide(
         else await answerBack(ask, decision, answer);
         break;
       case 'answer_back':
-        for (const a of [ask, ...twins]) await answerBack(a, decision, answer);
+        for (const a of [ask, ...twins])
+          await answerBack(a, decision, answer, a.id === ask.id ? chat : undefined);
         break;
       // A no with a reason may be a lesson: the Odd that asked reads it once. An
       // ask withdrawn because its Odd left has nobody to read it.
@@ -1852,11 +1864,13 @@ function oddMoveOf(kind: AskKind): keyof typeof LEAVING_CHECK | undefined {
 }
 
 /** No run carries out this answer: it goes back to the hand-off or thread the ask came from. */
-const answerBack = (ask: AskRow, decision: Decision, answer: string) =>
+const answerBack = (ask: AskRow, decision: Decision, answer: string, chat?: InChat) =>
   answerLater(
     { handOffId: ask.handOffId, threadId: ask.threadId, askId: ask.id },
     decision === 'deny' ? 'failed' : 'done',
-    answer
+    answer,
+    db,
+    chat
   );
 
 /**
@@ -1900,10 +1914,11 @@ async function answerLater(
   on: { handOffId: number | null; threadId: number | null; askId?: number },
   outcome: Outcome,
   answer: string,
-  q: Db = db
+  q: Db = db,
+  chat?: InChat
 ): Promise<void> {
   if (on.handOffId) await handBackLater(on.handOffId, outcome, answer, q);
-  else if (on.threadId) await answerThread(on.threadId, answer, on.askId, q);
+  else if (on.threadId) await answerThread(on.threadId, answer, on.askId, q, chat);
 }
 
 /**
@@ -1938,6 +1953,8 @@ async function followUp(
     note: string | null;
     pickedUp?: string[];
     reportWhenDone?: boolean;
+    /** The owner answered in a chat: a run in that Odd's chat replies there too. */
+    chat?: InChat;
   },
   q: Db = db
 ): Promise<void> {
@@ -1949,7 +1966,14 @@ async function followUp(
       : f.taskId
         ? await q.select({ threadId: tasks.threadId }).from(tasks).where(eq(tasks.id, f.taskId))
         : [];
-  await addFollowUp(q, { staffId, kind, ...f, threadId: on?.threadId });
+  const { chat, ...rest } = f;
+  await addFollowUp(q, {
+    staffId,
+    kind,
+    ...rest,
+    chatCard: chatCardOf(staffId, chat),
+    threadId: on?.threadId
+  });
 }
 
 /**
@@ -2239,6 +2263,7 @@ export async function recordUnreturned(u: Unreturned): Promise<void> {
  * as an ask or task. `joined` are the results this run picked up with its own
  * (`resultsToJoin`): they end with it. `stopped` is work its lead's leaving
  * stopped (`removeOdd`): the owner let the lead go, so no report says it failed.
+ * True when this call wrote the outcome, false when one was written already.
  */
 export async function finishFollowUp(
   f: FollowUpRow,
@@ -2246,7 +2271,7 @@ export async function finishFollowUp(
   outcome: Outcome,
   result: string,
   o: { joined?: number[]; stopped?: boolean } = {}
-): Promise<void> {
+): Promise<boolean> {
   const joined = o.joined ?? [];
   const title = `${OUTCOME_TITLE[f.kind][outcome].replace('{owner}', await ownerName())}: ${about}`;
   const origin = await servesHandOff(f);
@@ -2346,6 +2371,7 @@ export async function finishFollowUp(
       askId: f.askId ?? undefined
     });
   if (finished && finished.unreturned) await recordUnreturned(finished.unreturned);
+  return !!finished;
 }
 
 /**
@@ -2400,13 +2426,19 @@ function endedAs(t: TaskRow): TaskEnded {
 export const CUT_OFF_RESULT =
   'The office restarted while this was running, so it may be half done. Check it, then ask the Odd to finish it.';
 
-/** Follow-ups a restart cut off mid-run. They fail rather than run twice. */
-export async function closeStaleFollowUps(): Promise<void> {
+/**
+ * Follow-ups a restart cut off mid-run. They fail rather than run twice.
+ * Returns those this closed, so the office can say so where each began.
+ */
+export async function closeStaleFollowUps(): Promise<FollowUpRow[]> {
   const stale = await db
     .select()
     .from(followUps)
     .where(and(isNotNull(followUps.startedAt), isNull(followUps.outcome)));
-  for (const f of stale) await finishFollowUp(f, await workTitle(f), 'failed', CUT_OFF_RESULT);
+  const closed: FollowUpRow[] = [];
+  for (const f of stale)
+    if (await finishFollowUp(f, await workTitle(f), 'failed', CUT_OFF_RESULT)) closed.push(f);
+  return closed;
 }
 
 /**
@@ -3137,6 +3169,7 @@ export async function giveTask(
     title: string;
     why: string;
     steps: (string | Step)[];
+    response?: string;
     attach?: string[];
     /** Given while working on this hand-off: the owner's answer goes back to it. */
     handOffId?: number;
@@ -3166,6 +3199,7 @@ export async function giveTask(
         title: t.title,
         why: t.why,
         steps,
+        response: t.response,
         handOffId: t.handOffId,
         threadId: t.threadId,
         via: t.via,
@@ -3253,6 +3287,37 @@ export async function tickKey(key: string): Promise<void> {
         .where(eq(tasks.id, t.id));
 }
 
+export class TaskResponseConflict extends Error {}
+
+/**
+ * Start from a file attached to the task, or save the owner's edit to the
+ * version they opened. A task with no response yet takes its first at version 0.
+ */
+export async function saveTaskResponse(id: number, version: number | 'start', text: string) {
+  const start = version === 'start';
+  const next = start ? 0 : version + 1;
+  const [saved] = await db
+    .update(tasks)
+    .set({ response: text, responseVersion: next })
+    .where(
+      and(
+        eq(tasks.id, id),
+        eq(tasks.status, 'open'),
+        start ? isNull(tasks.response) : eq(tasks.responseVersion, version)
+      )
+    )
+    .returning();
+  if (saved) return saved;
+  const t = await task(id);
+  if (!t || t.status !== 'open') throw new TaskResponseConflict('This task is closed.');
+  // A retry after a lost reply returns the same version. Opening a response never resets it.
+  if (t.response !== null && (start || (t.responseVersion === next && t.response === text)))
+    return t;
+  throw new TaskResponseConflict(
+    'The response changed. Review the saved words before saving again.'
+  );
+}
+
 /**
  * What an ended task starts (`OWNER_ANSWERS`), and whether a run on the task's
  * own work picks up among it (`OWN_RUN`). `finishTask` and a failed run giving
@@ -3300,8 +3365,20 @@ async function ownRunOf(
   return { work: own?.title ?? null };
 }
 
-export async function finishTask(id: number, done: boolean, note: string | null): Promise<boolean> {
-  return db.transaction(async (q) => {
+/** The owner's words on an ended task: the response they saved when they finished it, then their note. */
+const taskAnswer = (t: TaskRow): string | null =>
+  [t.status === 'done' && t.responseVersion ? t.response : null, t.note]
+    .filter(Boolean)
+    .join('\n\n') || null;
+
+export async function finishTask(
+  id: number,
+  done: boolean,
+  note: string | null,
+  o: { inChat?: boolean; responseVersion?: number } = {}
+): Promise<boolean> {
+  const { inChat = false, responseVersion } = o;
+  const finished = await db.transaction(async (q) => {
     const [t] = await q
       .update(tasks)
       .set({ status: done ? 'done' : 'dropped', note: note || null, doneAt: new Date() })
@@ -3310,6 +3387,15 @@ export async function finishTask(id: number, done: boolean, note: string | null)
     if (!t) return false;
     const owner = await ownerName(q);
     const answers = ownerAnswers(t.steps).map((a) => `${a.step} ${a.answer}`);
+    if (done && t.response !== null) {
+      if (!t.responseVersion || responseVersion !== t.responseVersion)
+        throw new TaskResponseConflict(
+          'Review and save your response before marking this task done.'
+        );
+      if (stepsToGo(t.steps))
+        throw new TaskResponseConflict('Finish the required steps before marking this task done.');
+    }
+    const words = taskAnswer(t);
     await record(
       {
         kind: 'work',
@@ -3317,7 +3403,13 @@ export async function finishTask(id: number, done: boolean, note: string | null)
         title: `${done ? 'Done' : 'Dropped'} by ${owner}: ${t.title}`,
         // Answers first: search_ledger shows the first 400 characters, and a long why would cut them off.
         body: [...answers, t.why].join('\n'),
-        reason: t.note,
+        // Their saved response and note are their answer, or a choice they tapped when they wrote neither.
+        reason:
+          words ??
+          (ownerAnswers(t.steps)
+            .map((a) => a.answer)
+            .join('\n') ||
+            null),
         taskId: t.id
       },
       q
@@ -3327,12 +3419,18 @@ export async function finishTask(id: number, done: boolean, note: string | null)
       {
         ended: done ? 'done' : 'dropped',
         owner,
-        said: `${owner} ${done ? 'finished' : 'dropped'} "${t.title}"${t.note ? `: ${t.note}` : '.'}`
+        said: `${owner} ${done ? 'finished' : 'dropped'} "${t.title}"${words ? `: ${words}` : '.'}`
       },
-      q
+      q,
+      inChat && t.staffId
+        ? { staffId: t.staffId, card: { kind: 'task', id: t.id, title: t.title } }
+        : undefined
     );
     return true;
   });
+  if (finished || !done || !responseVersion) return finished;
+  const t = await task(id);
+  return t?.status === 'done' && t.responseVersion === responseVersion;
 }
 
 /**
@@ -3344,7 +3442,8 @@ export async function finishTask(id: number, done: boolean, note: string | null)
 async function taskEnded(
   t: TaskRow,
   how: { ended: TaskEnded; owner: string; said: string },
-  q: Db = db
+  q: Db = db,
+  chat?: InChat
 ): Promise<void> {
   const done = how.ended === 'done';
   const end = await taskEnd(t, q);
@@ -3380,11 +3479,15 @@ async function taskEnded(
       // it, such as hiring from an intake the owner just filled in.
       case 'task_done':
         if (t.staffId)
-          await followUp(t.staffId, 'task_done', { taskId: t.id, note: t.note, pickedUp }, q);
+          await followUp(t.staffId, 'task_done', { taskId: t.id, note: t.note, pickedUp, chat }, q);
         break;
       // Work on another thread that waited on this task, whoever gave it.
       case 'wake_parked':
-        await wakeOnTask(t, { ended: how.ended, owner: how.owner, ownRun }, q);
+        await wakeOnTask(
+          { ...t, note: taskAnswer(t) },
+          { ended: how.ended, owner: how.owner, ownRun },
+          q
+        );
         break;
       default:
         effect satisfies never;
@@ -3430,6 +3533,7 @@ export type Desk = {
 };
 
 export async function desk(): Promise<Desk> {
+  const later = alias(ledger, 'later');
   const [a, t, r, f, recent] = await Promise.all([
     db
       .select()
@@ -3454,13 +3558,31 @@ export async function desk(): Promise<Desk> {
       .leftJoin(tasks, eq(attachments.taskId, tasks.id))
       .where(or(eq(asks.status, 'open'), eq(tasks.status, 'open')))
       .orderBy(asc(attachments.id)),
+    // One line per decision. An answer to an ask is written last, after what
+    // its yes set in the same transaction (a goal set, an Odd serving it), so
+    // a line with a newer one on the same ask is part of that answer.
     db
       .select({ id: ledger.id, title: ledger.title, reason: ledger.reason })
       .from(ledger)
       .where(
         and(
           eq(ledger.actor, 'owner'),
-          or(eq(ledger.kind, 'decision'), isNotNull(ledger.taskId), isNotNull(ledger.askId))
+          or(eq(ledger.kind, 'decision'), isNotNull(ledger.taskId)),
+          not(
+            exists(
+              db
+                .select({ id: later.id })
+                .from(later)
+                .where(
+                  and(
+                    eq(later.askId, ledger.askId),
+                    gt(later.id, ledger.id),
+                    eq(later.actor, 'owner'),
+                    eq(later.kind, 'decision')
+                  )
+                )
+            )
+          )
         )
       )
       .orderBy(desc(ledger.createdAt), desc(ledger.id))
@@ -3525,6 +3647,8 @@ export type Delivery = {
   at: Date;
   /** open, approved, denied, revise, done, dropped, or for a report new or read. */
   status: string;
+  /** A saved task response opens from its chat card, including after completion. */
+  responseVersion?: number;
   /** When the owner decided an ask or finished or dropped a task. */
   decidedAt?: Date | null;
   /** The owner's words on a decided ask or finished task. */
@@ -3554,6 +3678,7 @@ export async function deliveries(staffId: string, limit = 200): Promise<Delivery
         at: tasks.createdAt,
         status: tasks.status,
         note: tasks.note,
+        responseVersion: tasks.responseVersion,
         decidedAt: tasks.doneAt
       })
       .from(tasks)

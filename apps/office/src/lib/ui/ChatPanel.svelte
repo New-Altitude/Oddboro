@@ -5,10 +5,13 @@
   import { FIRST_QUESTIONS, firstQuestionIn } from '@oddboro/ledger/first-questions';
   import { clockTime } from '@oddboro/ledger/time';
   import Markdown from './Markdown.svelte';
+  import TaskResponse from './TaskResponse.svelte';
+  import { current, drafts, saved, type SavedResponse } from './task-response.svelte.ts';
+  import { cardText } from './task-card.ts';
   import ChatGoal from './ChatGoal.svelte';
   import GoalProposal from './GoalProposal.svelte';
   import { approvalTarget, approveWord, yesWord } from './chat-approval.ts';
-  import { mustDo } from './task-steps.ts';
+  import { chatAnswer } from './task-steps.ts';
   import Lesson from './Lesson.svelte';
   import PersonaQuiet from './PersonaQuiet.svelte';
   import { newTurnId } from '#lib/staff/chat-input.ts';
@@ -153,7 +156,7 @@
   /** The delivery the next message replies about. */
   let replyTo = $state<Delivered | undefined>();
 
-  let intent = $state<'reply' | 'proposal' | 'answer' | 'change'>('reply');
+  let intent = $state<'reply' | 'proposal' | 'change'>('reply');
   let saving = $state(false);
   // Two plans can wait in the same chat. Each keeps its own checkboxes.
   let skipped = $state<Record<number, Record<number, boolean>>>({});
@@ -166,16 +169,28 @@
         a.id === d.id &&
         ((a.kind === 'goal' && a.goal) || (a.kind === 'plan' && a.plan))
     );
-  const question = (d: Delivered) =>
-    d.kind === 'task' &&
-    desk.tasks.find(
-      (t) =>
-        t.staffId === profile.id &&
-        t.id === d.id &&
-        !t.askId &&
-        !t.steps.some(mustDo) &&
-        !desk.attachments.some((f) => f.taskId === t.id)
-    );
+  /**
+   * An open task of this Odd's the owner answers here with one response, and
+   * how (`chatAnswer`): a tap on its choice, or its response editor.
+   */
+  const question = (d: Delivered) => {
+    if (d.kind !== 'task') return undefined;
+    const t = desk.tasks.find((t) => t.staffId === profile.id && t.id === d.id);
+    if (!t) return undefined;
+    const files = desk.attachments.filter((f) => f.taskId === t.id);
+    const how = chatAnswer({ ...t, response: current(t).response }, files.length > 0);
+    return how && { ...how, why: t.why, task: t, files };
+  };
+  /** A finished task's saved response, read when the owner opens it on its card. */
+  let unread = $state<Record<number, string>>({});
+  async function readResponse(id: number) {
+    if (saved[id]) return;
+    try {
+      saved[id] = await call<SavedResponse>(`/api/tasks/${id}`);
+    } catch (err) {
+      unread[id] = err instanceof Error ? err.message : String(err);
+    }
+  }
 
   let lines = $state<Line[]>([]);
   const waitingAsks = $derived(
@@ -368,6 +383,26 @@
     )
   );
 
+  /** Whether Open on Desk has somewhere to go: an ask or task still waiting there, or any report. */
+  const opens = (d: Delivered) =>
+    d.kind === 'report' || (d.kind === 'ask' ? desk.asks : desk.tasks).some((r) => r.id === d.id);
+
+  /** A card's words for Copy: its title, and why, steps and response while the desk holds them. */
+  function cardCopy(d: Delivered): string {
+    const a = d.kind === 'ask' ? desk.asks.find((r) => r.id === d.id) : undefined;
+    const t = d.kind === 'task' ? desk.tasks.find((r) => r.id === d.id) : undefined;
+    return cardText({
+      kind: KIND[d.kind],
+      title: d.title,
+      why: (a ?? t)?.why,
+      steps: t?.steps,
+      response:
+        d.kind === 'task'
+          ? (drafts[d.id]?.text ?? (t ? current(t).response : saved[d.id]?.response))
+          : undefined
+    });
+  }
+
   /** The line whose text was just copied, which says so for a moment. */
   let copied = $state<number | undefined>();
   let copiedTimer: ReturnType<typeof setTimeout> | undefined;
@@ -435,15 +470,25 @@
     upcoming = upcoming.filter((x) => x.id !== p.id);
   }
 
-  /** The Desk's own operations. Only a card the owner picked can supply the target. */
-  async function decide(d: Delivered, act: 'approve' | 'change' | 'answer', words = '') {
+  /**
+   * The Desk's own operations. Only a card the owner picked can supply the
+   * target. Each says it came from this chat, so the Odd's reply comes back here.
+   */
+  async function decide(d: Delivered, act: 'approve' | 'change' | 'choose', words = '') {
     if (saving || !decisionMode) return false;
     saving = true;
     refused = '';
     try {
-      if (act === 'answer') {
-        if (!question(d)) throw new Error('This task is no longer waiting for a written answer.');
-        await call(`/api/tasks/${d.id}`, { op: 'finish', done: true, note: words });
+      if (act === 'choose') {
+        const how = question(d);
+        if (!how?.choice) throw new Error('This task is no longer waiting for this answer.');
+        // A tap answers the choice as the Desk does, then finishes the task.
+        await call(`/api/tasks/${d.id}`, {
+          op: 'choose',
+          index: how.choice.index,
+          answer: words
+        });
+        await call(`/api/tasks/${d.id}`, { op: 'finish', done: true, chat: true });
       } else {
         const a = proposal(d);
         if (!a) throw new Error('This proposal is no longer open.');
@@ -452,7 +497,8 @@
         const result = await call<{ hires?: AskRow[] }>(`/api/asks/${a.id}`, {
           decision: act === 'change' ? 'iterate' : 'approve',
           reason: words,
-          picks: picks(a)
+          picks: picks(a),
+          chat: true
         });
         if (result.hires?.length) onplan(result.hires);
       }
@@ -486,8 +532,7 @@
         approveTo,
         re ? undefined : onlyProposal
       );
-      const action =
-        intent === 'change' || intent === 'answer' ? intent : approved ? 'approve' : undefined;
+      const action = intent === 'change' ? intent : approved ? 'approve' : undefined;
       const target = re ?? approved;
       if (target && action) {
         if (!(await decide(target, action, action === 'approve' ? '' : words))) return;
@@ -732,7 +777,7 @@
 
   // The input grows with what the owner types, up to most of the panel. Dragging
   // the bar above it sets how tall it is at least, and that height is kept.
-  // As tall as the paperclip over Send beside it (32 + 6 + 38).
+  // As tall as the plus button over Send beside it (32 + 6 + 38).
   const MIN_INPUT = 76;
   let box: HTMLTextAreaElement | undefined = $state();
   let root: HTMLDivElement | undefined = $state();
@@ -749,7 +794,7 @@
     // Measured first: the brief auto height below scrolls the list on its own.
     const pinned = list ? list.scrollHeight - list.scrollTop - list.clientHeight < 8 : false;
     box.style.blockSize = 'auto';
-    // At least as tall as the column beside it: the files, the paperclip and Send.
+    // At least as tall as the column beside it: the files, the plus button and Send.
     box.style.blockSize = `${Math.min(ceiling(), Math.max(floor, side, box.scrollHeight))}px`;
     if (pinned && list) list.scrollTop = list.scrollHeight;
   }
@@ -794,8 +839,8 @@
   }
 
   // Files the owner attaches. Pasting or dropping puts each one's tag, like
-  // [Image #1], at the caret; the paperclip adds them to the tray alone. The
-  // tray over the paperclip shows everything that will go.
+  // [Image #1], at the caret; Attach files in the plus menu adds them to the
+  // tray alone. The tray over the plus button shows everything that will go.
   let pending = $state<Pending[]>([]);
   let nextKey = 0;
   let uploading = $state(false);
@@ -807,6 +852,72 @@
   let refused = $state('');
   let dragging = $state(false);
   let picker: HTMLInputElement | undefined = $state();
+
+  // The plus menu beside the box: one list of what the owner can add, each
+  // shown where it applies. A new action is one more item here.
+  let goalOpen = $state(false);
+  let goal: ChatGoal | undefined = $state();
+  const canSetGoal = $derived(profile.role === 'Office Manager' && !replyTo && decisionMode);
+  /** `focuses`: the item puts the caret somewhere itself, so focus does not go back to the message box. */
+  type MoreItem = { label: string; shown: () => boolean; run: () => void; focuses?: boolean };
+  const MORE: MoreItem[] = [
+    { label: 'Attach files', shown: () => true, run: () => picker?.click() },
+    {
+      label: 'New goal',
+      shown: () => canSetGoal,
+      focuses: true,
+      run: async () => {
+        goalOpen = true;
+        await tick();
+        goal?.focus();
+      }
+    }
+  ];
+  const more = $derived(MORE.filter((m) => m.shown()));
+  let moreOpen = $state(false);
+  let moreButton: HTMLButtonElement | undefined = $state();
+  let moreMenu: HTMLDivElement | undefined = $state();
+  const moreItems = () => [...(moreMenu?.querySelectorAll<HTMLButtonElement>('button') ?? [])];
+
+  async function openMore() {
+    moreOpen = true;
+    await tick();
+    moreItems()[0]?.focus();
+  }
+  function closeMore(focus?: HTMLElement) {
+    moreOpen = false;
+    focus?.focus();
+  }
+  function pickMore(m: MoreItem) {
+    closeMore(m.focuses ? undefined : box);
+    m.run();
+  }
+  /** Arrow keys move between the items, Escape closes; Enter picks the focused one as a button does. */
+  function moreKey(e: KeyboardEvent) {
+    const items = moreItems();
+    const at = items.indexOf(document.activeElement as HTMLButtonElement);
+    if (e.key === 'Escape') closeMore(moreButton);
+    else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      const step = e.key === 'ArrowDown' ? 1 : -1;
+      items[(at + step + items.length) % items.length]?.focus();
+    } else if (e.key === 'Home') items[0]?.focus();
+    else if (e.key === 'End') items.at(-1)?.focus();
+    else return;
+    e.preventDefault();
+  }
+  /** A click outside the menu and its button closes it. */
+  function outside(e: PointerEvent) {
+    const at = e.target as Node;
+    if (moreOpen && !moreMenu?.contains(at) && !moreButton?.contains(at)) closeMore();
+  }
+  // The menu goes with the box: it closes while the box is disabled.
+  $effect(() => {
+    if (saving) moreOpen = false;
+  });
+  // The goal field closes where New goal does not show, as it did when it went away.
+  $effect(() => {
+    if (!canSetGoal) goalOpen = false;
+  });
 
   const attachmentUrl = (f: ChatFile) =>
     `/api/staff/${profile.id}/attachments/${encodeURIComponent(f.name)}`;
@@ -1011,8 +1122,8 @@
     {/if}
     <button
       class="stamp hover:text-ink"
-      aria-label={copied === i ? 'Copied' : 'Copy this message'}
-      onclick={() => copy(i, line.text)}
+      aria-label={copied === i ? 'Copied' : line.item ? 'Copy this card' : 'Copy this message'}
+      onclick={() => copy(i, line.item ? cardCopy(line.item) : line.text)}
     >
       <svg
         class="size-3"
@@ -1165,22 +1276,29 @@
           {KIND[it.kind]}
         </div>
         <div class="me-auto w-[85%]" data-item={keyOf(it)}>
-          <button
-            class="w-full rounded-2xl rounded-es-md bg-raise px-3 py-2 text-start text-sm transition-colors hover:bg-sea/15 {selected ===
+          <!-- Plain text, so the owner can select the title; Open on Desk is its own button. -->
+          <div
+            class="w-full rounded-2xl rounded-es-md bg-raise px-3 py-2 text-sm {selected ===
             keyOf(it)
               ? 'ring-1 ring-sea'
               : ''}"
-            aria-pressed={selected === keyOf(it)}
-            title={`Open this ${KIND[it.kind].toLowerCase()}`}
-            onclick={() => pick(it)}
+            aria-current={selected === keyOf(it) ? 'true' : undefined}
           >
             <span class="block font-medium break-words text-ink">{it.title}</span>
-            <span
-              class="text-xs {it.status === 'open' || it.status === 'new'
-                ? 'text-ember'
-                : 'text-muted'}">{STATUS[it.status] ?? it.status}</span
-            >
-          </button>
+            <div class="flex flex-wrap items-baseline gap-x-3 text-xs">
+              <span
+                class={it.status === 'open' || it.status === 'new' ? 'text-ember' : 'text-muted'}
+                >{STATUS[it.status] ?? it.status}</span
+              >
+              {#if opens(it)}
+                <button class="text-sea hover:text-ink" onclick={() => pick(it)}
+                  >{it.kind === 'report' && !desk.reports.some((r) => r.id === it.id)
+                    ? 'Open report'
+                    : 'Open on Desk'}</button
+                >
+              {/if}
+            </div>
+          </div>
           {#if it.note}
             <p class="mt-1 px-3 text-xs whitespace-pre-wrap text-muted">{it.note}</p>
           {/if}
@@ -1217,23 +1335,57 @@
             {:else if t}
               <div class="mt-2 px-2 text-xs text-muted">
                 <p>{t.why}</p>
-                <ol class="list-decimal ps-4">
-                  {#each t.steps as step, n (n)}<li>{step.text}</li>{/each}
-                </ol>
-                <button
-                  class="choice mt-2"
-                  disabled={saving || !decisionMode}
-                  onclick={() => reply(it, 'answer')}>Answer and finish</button
-                >
+                {#if t.steps.length}
+                  <ol class="list-decimal ps-4">
+                    {#each t.steps as step, n (n)}<li>{step.text}</li>{/each}
+                  </ol>
+                {/if}
+                {#if t.choice}
+                  <!-- A tap is the answer: it finishes the task, as the Desk's choice and Mark done would. -->
+                  <div class="mt-2 flex flex-col gap-1.5" role="group" aria-label="Choices">
+                    {#each t.choice.options as option (option)}
+                      <button
+                        class="choice"
+                        disabled={saving || !decisionMode}
+                        onclick={() => decide(it, 'choose', option)}>{option}</button
+                      >
+                    {/each}
+                  </div>
+                {:else}
+                  <!-- The one place the chat takes a typed answer to a task. -->
+                  <TaskResponse
+                    task={t.task}
+                    odd={profile.name}
+                    files={t.files}
+                    open
+                    inChat
+                    held={saving || !decisionMode}
+                    onfinish={() => load(profile.id)}
+                  />
+                {/if}
               </div>
             {/if}
+          {:else if it.kind === 'task' && it.responseVersion}
+            <details
+              class="mt-1 px-3 text-xs text-muted"
+              ontoggle={(e) => e.currentTarget.open && readResponse(it.id)}
+            >
+              <summary class="cursor-pointer text-sea">Your response</summary>
+              <p class="mt-1 whitespace-pre-wrap text-ink">
+                {saved[it.id]?.response ?? unread[it.id] ?? 'Opening'}
+              </p>
+            </details>
           {/if}
         </div>
         {@render meta(line, i)}
       {:else}
         {#if line.re}
+          <!-- The owner's line replies about a card; an Odd's told line answers what the owner said on it. -->
           <button
-            class="-mb-1 me-1 ms-auto max-w-[85%] truncate text-[10px] text-faint hover:text-ink"
+            class="-mb-1 max-w-[85%] truncate text-[10px] text-faint hover:text-ink {line.from ===
+            'owner'
+              ? 'me-1 ms-auto'
+              : 'ms-1 me-auto'}"
             title={`Open ${line.re.title}`}
             onclick={() => line.re && pick(line.re)}>↩ {line.re.title}</button
           >
@@ -1253,7 +1405,7 @@
           class="max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed break-words
           {line.from === 'owner'
             ? 'ms-auto rounded-ee-md bg-sea/25 whitespace-pre-wrap text-ink'
-            : `me-auto rounded-es-md bg-raise ${line.failed ? 'text-coral' : 'text-ink'}`}"
+            : `me-auto rounded-es-md bg-raise ${line.failed || line.runFailed ? 'text-coral' : 'text-ink'}`}"
         >
           {#if line.pending && !line.text}
             <span class="dots" aria-label="Replying"><span></span><span></span><span></span></span>
@@ -1400,11 +1552,7 @@
   {#if replyTo}
     <div class="flex items-center gap-2 px-3 pb-1.5 text-xs text-muted">
       <span class="min-w-0 flex-1 truncate"
-        >{intent === 'answer'
-          ? 'Answering'
-          : intent === 'change'
-            ? 'Asking for changes to'
-            : 'Replying about'}
+        >{intent === 'change' ? 'Asking for changes to' : 'Replying about'}
         {KIND[replyTo.kind].toLowerCase()} “{replyTo.title}”</span
       >
       <button
@@ -1431,8 +1579,13 @@
       >
     </div>
   {/if}
-  {#if profile.role === 'Office Manager' && !replyTo && decisionMode}
-    <ChatGoal managerId={profile.id} onset={() => load(profile.id)} />
+  {#if canSetGoal}
+    <ChatGoal
+      bind:this={goal}
+      managerId={profile.id}
+      onset={() => load(profile.id)}
+      bind:open={goalOpen}
+    />
   {/if}
   <form
     class="flex items-end gap-2 px-3 {refused ? 'pb-2' : 'pb-3'}"
@@ -1477,7 +1630,7 @@
       {onpaste}></textarea>
     <div class="flex shrink-0 flex-col gap-1.5" bind:clientHeight={side}>
       {#if pending.length}
-        <!-- What goes with the message, over the paperclip: three files tall at most, scrolling past that. -->
+        <!-- What goes with the message, over the plus button: three files tall at most, scrolling past that. -->
         <div
           class="tray -me-3 flex justify-center overflow-y-auto overscroll-contain ps-1.5 pe-1.5 pt-1.5"
           aria-label="Attached files"
@@ -1485,27 +1638,51 @@
           <ChatFiles stack files={pending} onremove={remove} />
         </div>
       {/if}
-      <button
-        type="button"
-        class="flex h-8 items-center justify-center rounded-lg text-muted hover:bg-raise hover:text-ink"
-        aria-label="Attach files"
-        title="Attach pictures, PDFs or text files"
-        onclick={() => picker?.click()}
-      >
-        <svg
-          class="size-4"
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.4"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-          ><path
-            d="M13.5 7.5 8 13a3.5 3.5 0 0 1-5-5l5.8-5.8a2.3 2.3 0 0 1 3.3 3.3L6.3 11.3a1.2 1.2 0 0 1-1.7-1.7L10 4.3"
-          /></svg
+      <div class="relative flex flex-col">
+        {#if moreOpen}
+          <div
+            bind:this={moreMenu}
+            class="absolute end-0 bottom-full z-20 mb-1 flex min-w-36 flex-col rounded-lg border border-hairline bg-panel-solid py-1"
+            role="menu"
+            aria-label="More"
+            tabindex="-1"
+            onkeydown={moreKey}
+          >
+            {#each more as m (m.label)}
+              <button
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                class="px-3 py-1.5 text-start text-sm whitespace-nowrap text-ink outline-none hover:bg-sea/15 focus:bg-sea/15"
+                onclick={() => pickMore(m)}>{m.label}</button
+              >
+            {/each}
+          </div>
+        {/if}
+        <button
+          bind:this={moreButton}
+          type="button"
+          class="flex h-8 items-center justify-center rounded-lg text-muted hover:bg-raise hover:text-ink disabled:opacity-40"
+          aria-label="More"
+          aria-haspopup="menu"
+          aria-expanded={moreOpen}
+          title="Attach files and more"
+          disabled={saving}
+          onclick={() => (moreOpen ? closeMore() : openMore())}
         >
-      </button>
+          <!-- A plus: one stroke down, one across. -->
+          <svg
+            class="size-4"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.4"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"><path d="M8 3v10" /><path d="M3 8h10" /></svg
+          >
+        </button>
+      </div>
       <button
         class="flex h-[38px] items-center justify-center gap-1.5 rounded-lg bg-sea px-3 text-sm font-medium text-night disabled:opacity-40"
         disabled={saving || (!draft.trim() && !pending.length) || uploading}
@@ -1523,13 +1700,7 @@
           ><path d="M14.5 1.5 1.5 6.6l5.2 2.2 2.2 5.7z" /><path d="M14.5 1.5 6.7 8.8" /><path
             d="m6.7 8.8.2 3.7 2-1.9"
           /></svg
-        >{uploading
-          ? 'Attaching'
-          : decisionMode && intent === 'answer'
-            ? 'Send answer'
-            : decisionMode && intent === 'change'
-              ? 'Send changes'
-              : 'Send'}
+        >{uploading ? 'Attaching' : decisionMode && intent === 'change' ? 'Send changes' : 'Send'}
       </button>
     </div>
   </form>
@@ -1537,6 +1708,8 @@
     <p class="px-3 pb-3 text-xs text-coral" role="alert">{refused}</p>
   {/if}
 </div>
+
+<svelte:window onpointerdown={outside} />
 
 <style>
   /* Three attached files at most (each 48px square, 2px and a 15px name under

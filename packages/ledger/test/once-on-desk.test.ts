@@ -1,14 +1,15 @@
 // An Odd puts a thing on the owner's desk once. raise_ask and
 // give_owner_a_task refuse a title the Odd already has open there (case and
 // spacing ignored), naming that item, and a raise_ask that revises it goes
-// through. The office's own tasks may repeat. `stillOnDesk` is the list every
-// run's prompt shows the Odd. Run with `npm test -w @oddboro/ledger`.
+// through. The office's own tasks may repeat, and a question with one answer
+// needs no steps. `stillOnDesk` is the list every run's prompt shows the Odd. Run with `npm test -w @oddboro/ledger`.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { eq } from 'drizzle-orm';
 import { db, toolServer } from './tool-server.ts';
 
-const { staff } = await import('../src/schema.ts');
+const { staff, tasks } = await import('../src/schema.ts');
 const { STARTER_TOOLS } = await import('../src/tools.ts');
 const { ask, giveTask, raiseAsk, stillOnDesk } = await import('../src/office.ts');
 
@@ -70,6 +71,18 @@ test('give_owner_a_task refuses a title already open; the office may repeat its 
     `Nothing went on the owner's desk. Your task #${id}, "Sign the form", is already there. Never give the same thing twice.`
   );
   await giveTask('rae', { title: 'Sign the form', why: 'w', steps: ['Sign it.'], byOffice: true });
+});
+
+test('give_owner_a_task takes a question with one answer and no steps', async () => {
+  const c = await toolServer('rae', { RUN_KEY: 'k-question' });
+  const r = await c.callTool({
+    name: 'give_owner_a_task',
+    arguments: { title: 'What hour does your studio day start?', why: 'To set the reminders.' }
+  });
+  assert.notEqual(r.isError, true, said(r));
+  const id = Number(/^Task (\d+) /.exec(said(r))?.[1]);
+  const [row] = await db.select().from(tasks).where(eq(tasks.id, id));
+  assert.deepEqual(row.steps, []);
 });
 
 test("the desk list holds an Odd's open asks and tasks, newest first, at most 15 with a count of the rest, and nothing when empty", async () => {

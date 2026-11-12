@@ -162,6 +162,20 @@
       "when": 1794450839871,
       "tag": "0022_chat_goals",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1794452241729,
+      "tag": "0023_chat_card",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794453751737,
+      "tag": "0024_task_response",
+      "breakpoints": true
     }
   ]
 }

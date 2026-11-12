@@ -835,29 +835,36 @@ if (has('give_owner_a_task'))
   tool(
     'give_owner_a_task',
     {
-      description: `Give ${OWNER}, the human operator, a task: something only they can do. Steps are numbered and each is one action, written so anyone can follow them without guessing: name the button, the place, the exact thing. When a step opens a page, give its full address (https://mail.google.com/...), which the owner clicks; when they type or paste something, put exactly that in \`backticks\`, which the owner copies with one click (In the From box, type \`dmarc@example.com\`). If they must choose, pass choices and the task ends with them, e.g. for 'Should this kind of email reach you?' pass ['Yes, keep sending these', 'No, filter these out']. When they must fill in or read a file, write it in your folder and attach it: a step says 'Answer each question in intake.md below', never where the file lives. Never write steps to connect or reconnect a tool: ask_for_access and reconnect_access give the office's own.${raisedNote}`,
+      description: `Give ${OWNER}, the human operator, a task: something only they can do. A question with one answer needs no steps: give just the title and why, and they type the answer where it arrives. Steps are numbered and each is one action, written so anyone can follow them without guessing: name the button, the place, the exact thing. When a step opens a page, give its full address (https://mail.google.com/...), which the owner clicks; when they type or paste something, put exactly that in \`backticks\`, which the owner copies with one click (In the From box, type \`dmarc@example.com\`). If they must choose, pass choices and the task ends with them, e.g. for 'Should this kind of email reach you?' pass ['Yes, keep sending these', 'No, filter these out']. When you need their words, pass response, never a file for them to fill in. Starting text in response is only for a task whose job is to edit that text, such as a draft list, and then the title names what to edit (Correct the client list). A question gets an empty response, or none, so they type the answer: never prefill it with other text you hold. Attach files they should only read. Never write steps to connect or reconnect a tool: ask_for_access and reconnect_access give the office's own.${raisedNote}`,
       inputSchema: {
         title: z.string().max(140),
         why: z.string().describe('One or two sentences on why this is theirs to do.'),
         steps: z
           .array(z.string())
-          .min(1)
           .max(12)
+          .optional()
           .describe(
-            'One action per step. No "and then". A page to open as its full address; anything to type or paste in `backticks`.'
+            'One action per step. No "and then". A page to open as its full address; anything to type or paste in `backticks`. Leave out for a question with one answer.'
+          ),
+        response: z
+          .string()
+          .max(64000)
+          .optional()
+          .describe(
+            'Starting text only when the task is to edit it, and the title says so. Empty, or left out, for a question.'
           ),
         choices: z.array(z.string()).min(2).max(4).optional(),
         attach: attachArg,
         ...raisedArgs
       }
     },
-    async ({ title, why, steps, choices, attach, ...where }) => {
+    async ({ title, why, steps, response, choices, attach, ...where }) => {
       const on = await placed(where);
       if ('problem' in on) return refused(on.problem);
       const files = await attachable(attach);
       if ('problem' in files) return text(files.problem);
       const all = [
-        ...steps.map((s) => ({ text: s, done: false })),
+        ...(steps ?? []).map((s) => ({ text: s, done: false })),
         ...(choices
           ? [
               {
@@ -872,6 +879,7 @@ if (has('give_owner_a_task'))
         title,
         why,
         steps: all,
+        response,
         attach: files.paths,
         via: VIA,
         ownerSaid: OWNER_SAID,
