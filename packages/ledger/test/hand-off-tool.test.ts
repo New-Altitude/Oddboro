@@ -38,6 +38,7 @@ const {
   connectors,
   goals,
   grants,
+  owner,
   staff,
   tasks: tasksTable,
   threads
@@ -674,7 +675,12 @@ test('every office tool refuses a key it does not take, and says which keys it d
   await db.insert(staffGoals).values({ staffId: 'all', goalId: fair.id, part: 'Everything' });
   // Gmail at any level offers propose_reply.
   await db.insert(grants).values({ staffId: 'all', connectorId: 'gmail', level: 'read' });
-  // A native conversation shared with Ada offers the project tools.
+  // A native conversation shared with Ada offers the project tools, in Advanced
+  // mode. The owner row keeps the name every other test here reads.
+  await db
+    .insert(owner)
+    .values({ name: 'the owner', advancedAt: new Date() })
+    .onConflictDoUpdate({ target: owner.id, set: { advancedAt: new Date() } });
   const project = await connectProject('claude', 'every-tool-test', '/project', 'Tests');
   await shareProject(project.id, 'all');
   const reached = new Set<string>();

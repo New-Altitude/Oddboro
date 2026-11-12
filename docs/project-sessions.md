@@ -1,5 +1,18 @@
 # Work in a native project session
 
+Project sessions need **Advanced mode**, which is off until you turn it on. While it is off, the office shows no Projects button and no **Project sessions** menu item, gives no Odd the project tools, and refuses every project request.
+
+## Turn on Advanced mode
+
+1. Click **Setup** under the office's name.
+2. Under **Advanced**, click **Turn on**.
+3. Read the warning: work sent to Claude Code or Codex runs with your permissions on this computer, outside Oddboro's limits, and can change files, run commands or reach the internet as your coding tool allows.
+4. Click **Turn on advanced mode**. **Projects** appears in the top bar.
+
+The ledger keeps your yes, with the date and the warning's words. Turning it off is a ledger line too. It takes every Odd off every session and stops project work still waiting. Open terminal views close. Work already running in Claude Code or Codex keeps running there, and the conversations stay in the native tool.
+
+## Open Projects
+
 Open **Projects** in the office's top bar, or **Project sessions** from the plus menu beside an Odd's chat box. The office opens the Codex or Claude Code installed on this computer. The native client reads its usual account, project instructions, skills, hooks and tool settings. A worktree is a separate project. The session window identifies the project by its full path and the conversation by its native ID.
 
 ## Start or connect
@@ -16,8 +29,9 @@ One office terminal view accepts typing at a time. **Take control of terminal** 
 
 1. Open the intended session. Under **Odd allowed to send work**, choose the Odd. This gives that Odd access to a native session with your project's tools and settings. Choose **Only me** to revoke the grant.
 2. In the Odd's chat, describe the project work you want. The Odd sees the sessions shared with it. It can read its request status and send an assignment. It cannot type in the terminal, approve a command or grant itself access.
-3. At Read, the Odd can look up its assignments. At Draft, the proposed instruction appears on the Desk and opens the exact session. **Take over and send** runs the displayed instruction as you, with the permissions already configured in your native session. At Act, a shared session can accept work directly. The office checks the Odd's current access again before sending.
-4. Open Projects to see the answer. Results include any file references returned by the native tool. An Odd's result also reaches its Desk report. Work assigned from an office thread queues a pickup on that same thread. Revocation cancels waiting work. Inspect an assignment that already reached the provider before stopping it.
+3. At Read, the Odd can look up its assignments. At Draft or Act, the proposed instruction appears on the Desk and opens the exact session. **Take over and send** runs the displayed instruction as you, with the permissions already configured in your native session. The office checks the Odd's current access again before sending.
+4. To let that Odd send without asking, tick **Let <Odd> send work without asking** and confirm the second warning. Only the Odd the session is shared with can have it, and only while it is at Act. Choosing another Odd, or **Only me**, clears it.
+5. Open Projects to see the answer. Results include any file references returned by the native tool. An Odd's result also reaches its Desk report. Work assigned from an office thread queues a pickup on that same thread. Revocation cancels waiting work. Inspect an assignment that already reached the provider before stopping it.
 
 During a Codex turn, **Send correction** steers that turn. **Stop** targets the turn shown when you clicked. A resolved permission request cannot authorize a later one. With Claude, a correction waits for the paired plugin to read it. The office distinguishes a pending correction from one Claude received. For a Claude interrupt, check the terminal before clearing the request. The owner can also speak directly in either terminal.
 
@@ -27,13 +41,13 @@ The office saves the instruction before submitting it. A connection failure afte
 
 ## Review the implementation
 
-| Question                                                    | Start here                                                                                                                                                                                                                                                                              |
-| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Which Odd may send this request, and what survives a crash? | `packages/ledger/src/project-sessions.ts` locks the session row when granting access or claiming the next request. One transaction completes the request and creates the Odd's delivery. The additive migration creates two tables.                                                     |
-| Which client owns this conversation?                        | `apps/office/src/lib/server/project-sessions/controller.ts` holds one runtime per office connection. The Codex adapter shares the office's authenticated loopback server with its terminal, or joins the socket chosen by the owner. Matching includes the server and native thread ID. |
-| How does work reach interactive Claude?                     | `claude-project.ts` creates a local plugin for one pairing. Its monitor announces a request ID. `packages/ledger/src/project-session-tools.ts` checks the native session ID and real project path before reading the assignment or posting a reply. It gets no database credentials.    |
-| Who can control the terminal?                               | The office's existing owner-page checks guard the command route. The event stream also checks its reader. The Odd's MCP tools expose only listing and assignment. CLI arguments are passed directly to the executable.                                                                  |
-| What does the desktop include?                              | The stage includes the local plugin, ledger helper, terminal library and native helper. The macOS release signs the helper and terminal library along with the bundled runtime.                                                                                                         |
+| Question                                                    | Start here                                                                                                                                                                                                                                                                                                                            |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Which Odd may send this request, and what survives a crash? | `packages/ledger/src/project-sessions.ts` locks the session row when granting access or claiming the next request. Both refuse while Advanced mode is off, and an Odd's request waits for the owner unless the session's `sends_unasked` names that Odd at Act. One transaction completes the request and creates the Odd's delivery. |
+| Which client owns this conversation?                        | `apps/office/src/lib/server/project-sessions/controller.ts` holds one runtime per office connection. The Codex adapter shares the office's authenticated loopback server with its terminal, or joins the socket chosen by the owner. Matching includes the server and native thread ID.                                               |
+| How does work reach interactive Claude?                     | `claude-project.ts` creates a local plugin for one pairing. Its monitor announces a request ID. `packages/ledger/src/project-session-tools.ts` checks the native session ID and real project path before reading the assignment or posting a reply. It gets no database credentials.                                                  |
+| Who can control the terminal?                               | The office's existing owner-page checks guard the command route. The event stream also checks its reader. The Odd's MCP tools expose only listing and assignment. CLI arguments are passed directly to the executable.                                                                                                                |
+| What does the desktop include?                              | The stage includes the local plugin, ledger helper, terminal library and native helper. The macOS release signs the helper and terminal library along with the bundled runtime.                                                                                                                                                       |
 
 ## Exercise a change
 
@@ -63,7 +77,9 @@ The platform workflow builds and starts the staged office and checks terminal in
 
 ## Current queue integration
 
-Migration 0027 adds the two tables after scheduled file exchange (0026).
+Migration 0027 adds the two tables after scheduled file exchange (0026). Migration 0028 adds `owner.advanced_at` (Advanced mode, null while off) and `project_sessions.sends_unasked` (the one Odd that may send without asking).
+
+**Find existing** for Claude Code reads Claude Code's own session files, `projects/<project key>/<id>.jsonl` under `CLAUDE_CONFIG_DIR` or `~/.claude` (`claude-sessions.ts`). It reads each file's two ends for the title, folder and last change, as the Agent SDK's `listSessions` did, without the SDK. The terminal library, `node-pty`, is an optional dependency that loads only when a terminal opens. When it is missing, `npm install` still succeeds and the terminal says it cannot open.
 Session and request changes use `LIVE_TABLES`. Project
 tools are declared in `OFFICE_TOOLS` and appear only for a shared conversation.
 A run uses the shared `CEILING` to remain at Draft or Read. `nativeProjectEnv`

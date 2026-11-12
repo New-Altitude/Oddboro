@@ -12,7 +12,8 @@ import {
   activeProjectRequest,
   type ProjectSession,
   type ProjectAgent,
-  type ProjectRequest
+  type ProjectRequest,
+  type ProjectStatus
 } from '@oddboro/ledger';
 import { ProjectTerminal } from './terminal.ts';
 import { startCodex, joinCodex, type CodexRpc, type RpcMessage } from './codex-rpc.ts';
@@ -73,6 +74,9 @@ type View = {
   market?: string;
 };
 type Listed = { id: string; title: string; updated: number; live: boolean; job?: string };
+/** What every project route answers while Advanced mode is off. */
+export const ADVANCED_OFF =
+  'Project sessions need advanced mode. Turn it on in Setup, under Advanced.';
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export class ProjectController {
@@ -113,6 +117,14 @@ export class ProjectController {
       account: c?.account,
       market: c?.market
     };
+  }
+  /** A session's dot in the Projects list: the stored status, or what its live connection is doing now. */
+  status(id: string, stored: ProjectStatus): ProjectStatus {
+    const c = this.sessions.get(id);
+    if (c?.questions.size) return 'waiting';
+    if (stored === 'waiting') return stored;
+    if (c?.turn || c?.request) return 'working';
+    return stored;
   }
   private codex(socket = '') {
     const existing = this.servers.get(socket);
@@ -377,7 +389,7 @@ export class ProjectController {
     const s = c.session;
     if (s.agent === 'codex') {
       const start = (await this.codex(c.socket)).terminal(s.nativeId);
-      c.terminal = new ProjectTerminal('codex', start.args, s.folder, start.env);
+      c.terminal = await ProjectTerminal.open('codex', start.args, s.folder, start.env);
     } else {
       const saved = await claudeProjects(s.folder);
       const row = saved.find((r) => r.id === s.nativeId);
@@ -390,7 +402,7 @@ export class ProjectController {
             c.plugin!,
             ...(row ? ['--resume', s.nativeId] : ['--session-id', s.nativeId])
           ];
-      c.terminal = new ProjectTerminal('claude', args, s.folder);
+      c.terminal = await ProjectTerminal.open('claude', args, s.folder);
     }
     c.terminal.events.on('exit', () => {
       c.note = 'Terminal closed. You can reopen the conversation.';
@@ -608,3 +620,9 @@ export class ProjectController {
 }
 const g = globalThis as unknown as { officeProjectController?: ProjectController };
 export const projectController = () => (g.officeProjectController ??= new ProjectController());
+/**
+ * Advanced mode went off: every open project view and terminal stream ends.
+ * The native clients and their turns keep running in the provider; nothing
+ * new reaches them, since the routes refuse and no request can be claimed.
+ */
+export const detachProjectViews = () => g.officeProjectController?.events.emit('off');

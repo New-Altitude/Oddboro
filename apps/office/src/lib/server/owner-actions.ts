@@ -153,6 +153,8 @@ export const OWNER_ACTIONS = {
   'POST /api/setup/claude': { notAnAction: SETUP },
   'DELETE /api/setup/claude': { notAnAction: SETUP },
   'POST /api/setup/notify': { notAnAction: SETUP },
+  // The owner's yes to Advanced mode's warning, and turning it off again.
+  'PUT /api/setup/advanced': { records: 'decision' },
   'PATCH /api/services/[id]': { records: 'access' },
   'POST /api/services/[id]': { none: NO_ROW },
   'POST /api/staff': { records: 'hire' },

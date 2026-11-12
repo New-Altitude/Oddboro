@@ -48,8 +48,10 @@
     "@oddboro/sprites": "*",
     "@oddboro/world": "*",
     "drizzle-orm": "^0.45.4",
-    "node-pty": "1.1.0",
     "postgres": "^3.4.9",
     "zod": "^4.6.7"
+  },
+  "optionalDependencies": {
+    "node-pty": "1.1.0"
   }
 }

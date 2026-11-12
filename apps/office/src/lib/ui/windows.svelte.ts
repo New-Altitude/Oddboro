@@ -44,6 +44,12 @@ export const wins = $state<{
 }>({ list: [], shown: false, raised: false, titles: {}, dirty: {}, busy: {} });
 
 /**
+ * Advanced mode, as this page last heard it (`+page.server.ts`, then Setup).
+ * While it is off, nothing on the page offers Projects.
+ */
+export const advanced = $state({ on: false });
+
+/**
  * An item a window wants opened on the desk, such as the task a service's
  * Change put there. The page takes it, reloads the desk and opens it.
  */
@@ -64,7 +70,8 @@ export function open(w: Win): void {
 }
 
 /** The one Projects window, on that session. Already open, it switches to it. */
-export function openProject(sessionId: string): void {
+export function openProject(sessionId?: string): void {
+  if (!advanced.on) return;
   const w = wins.list.find((x) => x.kind === 'projects');
   if (w) w.sessionId = sessionId;
   open(w ?? { id: 'projects', kind: 'projects', sessionId });

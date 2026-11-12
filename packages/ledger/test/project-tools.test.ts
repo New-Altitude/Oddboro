@@ -5,7 +5,10 @@ import { test } from 'node:test';
 import { db, toolServer } from './tool-server.ts';
 
 const { staff } = await import('../src/schema.ts');
-const { connectProject, shareProject, projectWork } = await import('../src/project-sessions.ts');
+const { connectProject, shareProject, projectWork, setAdvancedMode, letSendUnasked } =
+  await import('../src/project-sessions.ts');
+const { setOwnerName } = await import('../src/office.ts');
+await setOwnerName('Tester');
 await db.insert(staff).values({
   id: 'editor',
   name: 'Editor',
@@ -17,9 +20,21 @@ await db.insert(staff).values({
   desk: 'Review the project.'
 });
 
+const offers = async (client: Awaited<ReturnType<typeof toolServer>>) =>
+  (await client.listTools()).tools.some((t) => t.name === 'send_project_work');
+
+test('project tools exist only while advanced mode is on', async () => {
+  const s = await connectProject('claude', randomUUID(), '/fixture/off', 'Off');
+  await shareProject(s.id, 'editor');
+  assert.ok(!(await offers(await toolServer('editor', {}))));
+  assert.ok(!(await offers(await toolServer('editor', { CEILING: 'act' }))));
+  await shareProject(s.id, null);
+});
+
 test('only a shared project offers its tools, and a Draft run keeps one proposal', async () => {
+  await setAdvancedMode(true);
   const before = await toolServer('editor', {});
-  assert.ok(!(await before.listTools()).tools.some((t) => t.name === 'send_project_work'));
+  assert.ok(!(await offers(before)));
   const s = await connectProject('codex', randomUUID(), '/fixture/project', 'A project');
   await shareProject(s.id, 'editor');
   const client = await toolServer('editor', { CEILING: 'draft' });
@@ -45,8 +60,25 @@ test('only a shared project offers its tools, and a Draft run keeps one proposal
     true
   );
   const lesson = await toolServer('editor', { LESSON_RUN: '1' });
-  assert.ok(!(await lesson.listTools()).tools.some((t) => t.name === 'send_project_work'));
+  assert.ok(!(await offers(lesson)));
   await shareProject(s.id, null);
   assert.equal((await call(randomUUID())).isError, true);
   assert.equal((await projectWork(s.id)).length, 1);
+});
+
+test('a run at Act waits for the owner until the session lets that Odd send without asking', async () => {
+  const s = await connectProject('codex', randomUUID(), '/fixture/act', 'Act');
+  await shareProject(s.id, 'editor');
+  const client = await toolServer('editor', { CEILING: 'act' });
+  const send = async () => {
+    const r = await client.callTool({
+      name: 'send_project_work',
+      arguments: { session: s.id, key: randomUUID(), prompt: 'Run the tests.' }
+    });
+    const [part] = r.content as { text: string }[];
+    return (JSON.parse(part.text) as { state: string }).state;
+  };
+  assert.equal(await send(), 'proposed');
+  await letSendUnasked(s.id, 'editor');
+  assert.equal(await send(), 'queued');
 });

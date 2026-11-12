@@ -1809,5 +1809,13 @@ file.
 
 The Projects window and its local controller live in
 `src/lib/ui/ProjectSessions.svelte` and `src/lib/server/project-sessions/`.
-See [project sessions](../../docs/project-sessions.md) for native clients,
+They sit behind Advanced mode (`owner.advanced_at`), which the owner turns on
+in Setup's Advanced section (`AdvancedSection.svelte`, `PUT
+/api/setup/advanced`) after one warning. The page holds it in `advanced` in
+`windows.svelte.ts`: off, the top bar and the chat's plus menu offer no
+Projects. Off, `/api/project-sessions` and its event stream answer 403
+(`ADVANCED_OFF`), and turning it off ends every open stream
+(`detachProjectViews`). Find existing reads Claude Code's own session files
+(`claude-sessions.ts`); the terminal loads `node-pty` only when it opens. See
+[project sessions](../../docs/project-sessions.md) for native clients,
 handover and recovery.

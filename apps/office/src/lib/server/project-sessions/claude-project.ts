@@ -13,9 +13,9 @@ import {
   type FSWatcher
 } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { listSessions } from '@anthropic-ai/claude-agent-sdk';
 import { home, STAFF_SERVER, type ProjectSession, type ProjectRequest } from '@oddboro/ledger';
 import { nativeCommand, nativeEnv } from './native.ts';
+import { savedClaudeSessions } from './claude-sessions.ts';
 type Active = {
   sessionId?: string;
   id?: string;
@@ -25,24 +25,10 @@ type Active = {
   status?: string;
   waitingFor?: string;
 };
-async function savedClaudeProjects(dir: string) {
-  const rows: Awaited<ReturnType<typeof listSessions>> = [];
-  const pageSize = 100;
-  for (;;) {
-    const page = await listSessions({
-      dir,
-      includeWorktrees: false,
-      limit: pageSize,
-      offset: rows.length
-    });
-    rows.push(...page);
-    if (page.length < pageSize) return rows;
-  }
-}
 export async function claudeProjects(folder: string) {
   const [exe, prefix] = nativeCommand('claude');
   const [history, processes] = await Promise.all([
-    savedClaudeProjects(folder),
+    savedClaudeSessions(folder),
     promisify(execFile)(exe, [...prefix, 'agents', '--json', '--cwd', folder], {
       env: nativeEnv(),
       cwd: folder,
@@ -60,7 +46,7 @@ export async function claudeProjects(folder: string) {
         h.sessionId,
         {
           id: h.sessionId,
-          title: h.customTitle || h.summary,
+          title: h.title,
           updated: h.lastModified,
           live: false,
           job: ''

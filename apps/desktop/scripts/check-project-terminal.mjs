@@ -22,11 +22,12 @@ function echoInput() {
   console.log(`READY:${process.stdout.columns}x${process.stdout.rows}`);
 }
 
-function checkTerminal(stop) {
+// The terminal library loads when the first terminal opens, so opening one is async.
+async function checkTerminal(stop) {
   const { openProjectTerminal } = createRequire(join(stage, 'package.json'))(
     '@oddboro/ledger/project-terminal'
   );
-  const child = openProjectTerminal(process.execPath, [script, 'echo'], {
+  const child = await openProjectTerminal(process.execPath, [script, 'echo'], {
     cwd: stage,
     cols: 80,
     rows: 24
@@ -57,8 +58,8 @@ function checkTerminal(stop) {
 }
 
 if (process.argv[2] === 'echo') echoInput();
-else if (process.argv[2] === 'check') checkTerminal(false);
-else if (process.argv[2] === 'check-stop') checkTerminal(true);
+else if (process.argv[2] === 'check') await checkTerminal(false);
+else if (process.argv[2] === 'check-stop') await checkTerminal(true);
 else {
   const binaries = join(desktop, 'src-tauri', 'binaries');
   const runtime = readdirSync(binaries).find((name) => name.startsWith('node-'));

@@ -19,7 +19,7 @@
   import { newTurnId } from '#lib/staff/chat-input.ts';
   import { call, sendFile, failure, type ApiUrl } from './api.ts';
   import ChatFiles from './ChatFiles.svelte';
-  import { open as openWindow } from './windows.svelte.ts';
+  import { advanced, openProject } from './windows.svelte.ts';
   import { hideChoiceLines } from '#lib/choices.ts';
   import { hasToken, tagFor, withTokens, withoutToken, type Pending } from './chat-attach.ts';
   import {
@@ -902,9 +902,9 @@
     { label: 'Attach files', shown: () => true, run: () => picker?.click() },
     {
       label: 'Project sessions',
-      shown: () => true,
+      shown: () => advanced.on,
       focuses: true,
-      run: () => openWindow({ id: 'projects', kind: 'projects' })
+      run: () => openProject()
     },
     {
       label: 'New goal',

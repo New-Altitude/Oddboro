@@ -3,17 +3,32 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { db } from './pglite.ts';
 import { eq } from 'drizzle-orm';
-import { reports, staff, threads, followUps } from '../src/schema.ts';
+import {
+  ledger,
+  projectRequests,
+  projectSessions,
+  reports,
+  staff,
+  threads,
+  followUps
+} from '../src/schema.ts';
 const {
+  advancedMode,
   connectProject,
   shareProject,
+  letSendUnasked,
   requestProject,
   claimProject,
   finishProject,
-  changeProjectRequest
+  changeProjectRequest,
+  setAdvancedMode
 } = await import('../src/project-sessions.ts');
+const { setOwnerName } = await import('../src/office.ts');
+await setOwnerName('Tester');
+await setAdvancedMode(true);
 
-async function fixture(permission: 'act' | 'draft' | 'read') {
+/** An Odd at `permission` with a session shared with it. `unasked` lets it send there without asking. */
+async function fixture(permission: 'act' | 'draft' | 'read', unasked = permission === 'act') {
   const id = randomUUID();
   await db.insert(staff).values({
     id,
@@ -27,6 +42,7 @@ async function fixture(permission: 'act' | 'draft' | 'read') {
   });
   const s = await connectProject('codex', randomUUID(), '/project', 'Example');
   await shareProject(s.id, id);
+  if (unasked) await letSendUnasked(s.id, id);
   return { id: randomUUID(), staffId: id, sessionId: s.id, prompt: 'Read the project note.' };
 }
 
@@ -111,4 +127,58 @@ test('a result from earlier work stays readable after the owner ends its thread'
     (await db.select().from(threads).where(eq(threads.id, thread.id)))[0].status,
     'stopped'
   );
+});
+
+test('an Odd at Act still waits for the owner unless its session lets it send without asking', async () => {
+  const work = await fixture('act', false);
+  assert.equal((await requestProject(work)).state, 'proposed');
+  assert.equal(await claimProject(work.sessionId), undefined);
+  // The leave names one Odd, the one the session is shared with.
+  const other = await fixture('act', false);
+  await assert.rejects(letSendUnasked(work.sessionId, other.staffId), /Odd allowed to send work/);
+  await letSendUnasked(work.sessionId, work.staffId);
+  const next = { ...work, id: randomUUID() };
+  assert.equal((await requestProject(next)).state, 'queued');
+  // At Draft the same leave sends nothing: the run's ceiling still holds it.
+  assert.equal(
+    (await requestProject({ ...work, id: randomUUID(), draft: true })).state,
+    'proposed'
+  );
+  // A queued request goes back to the owner when the leave is taken back before it is claimed.
+  await letSendUnasked(work.sessionId, null);
+  assert.equal(await claimProject(work.sessionId), undefined);
+  const [row] = await db.select().from(projectRequests).where(eq(projectRequests.id, next.id));
+  assert.equal(row.state, 'proposed');
+  // Sharing with another Odd drops the leave, so the new Odd never inherits it.
+  await letSendUnasked(work.sessionId, work.staffId);
+  await shareProject(work.sessionId, other.staffId);
+  const [s] = await db.select().from(projectSessions).where(eq(projectSessions.id, work.sessionId));
+  assert.equal(s.sendsUnasked, null);
+});
+
+test('turning advanced mode off revokes every grant, stops waiting work and is a ledger line', async () => {
+  const waiting = await fixture('draft');
+  await requestProject(waiting);
+  const before = await db.select().from(ledger);
+  await setAdvancedMode(false);
+  assert.equal(await advancedMode(), false);
+  const titles = (await db.select().from(ledger))
+    .slice(before.length)
+    .map((r) => [r.kind, r.title]);
+  assert.deepEqual(titles, [['decision', 'Turned off advanced mode']]);
+  const shared = await db.select().from(projectSessions);
+  assert.ok(shared.every((s) => s.staffId === null && s.sendsUnasked === null));
+  const [row] = await db.select().from(projectRequests).where(eq(projectRequests.id, waiting.id));
+  assert.equal(row.state, 'stopped');
+  await assert.rejects(
+    requestProject({ id: randomUUID(), sessionId: waiting.sessionId, prompt: 'Owner work.' }),
+    /Advanced mode is off/
+  );
+  // Turning it off again changes nothing and writes no second line.
+  await setAdvancedMode(false);
+  assert.equal((await db.select().from(ledger)).length, before.length + 1);
+  await setAdvancedMode(true);
+  const [on] = (await db.select().from(ledger)).slice(before.length + 1);
+  assert.equal(on.title, 'Turned on advanced mode');
+  assert.match(on.body, /outside Oddboro’s limits/);
 });

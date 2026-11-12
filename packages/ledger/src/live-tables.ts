@@ -59,7 +59,7 @@ export const LIVE_TABLES: Record<TableName, LiveTable> = {
   usage: { trigger: 'all', page: ['version'] },
   owner: {
     trigger: {
-      none: "Written only by the owner's own welcome on the page (finishWelcome), never by an Odd."
+      none: "Written only by the owner's own welcome and Setup on the page (finishWelcome, setAdvancedMode), never by an Odd."
     },
     page: []
   },

@@ -1,11 +1,14 @@
 // The terminal and conversation are private to the owner's page, including reads.
+// They exist only while Advanced mode is on; turning it off ends every stream.
 import { UUID } from '#lib/server/project-sessions/native.ts';
 import { error } from '@sveltejs/kit';
+import { advancedMode } from '@oddboro/ledger';
 import { fromOwnerPage } from '#lib/server/owner-page.ts';
-import { projectController } from '#lib/server/project-sessions/controller.ts';
+import { ADVANCED_OFF, projectController } from '#lib/server/project-sessions/controller.ts';
 import type { RequestHandler } from './$types';
-export const GET: RequestHandler = ({ request, params, url }) => {
+export const GET: RequestHandler = async ({ request, params, url }) => {
   if (!fromOwnerPage(request)) error(403, 'Open the session in your office.');
+  if (!(await advancedMode())) error(403, ADVANCED_OFF);
   const c = projectController(),
     id = params.id;
   const terminal = url.searchParams.has('terminal') ? c.openTerminal(id) : undefined;
@@ -22,9 +25,14 @@ export const GET: RequestHandler = ({ request, params, url }) => {
       const state = (v: unknown) => send('session', v),
         refresh = () => send('work', true),
         bytes = (s: string) => send('output', s),
-        ended = () => send('end', true);
+        ended = () => send('end', true),
+        off = () => {
+          ended();
+          abort();
+        };
       c.events.on(id, state);
       c.events.on('list', refresh);
+      c.events.on('off', off);
       const control = () => send('control', terminal?.controls(view) ?? false);
       terminal?.take(view);
       terminal?.events.on('control', control);
@@ -36,6 +44,7 @@ export const GET: RequestHandler = ({ request, params, url }) => {
         closed = true;
         c.events.off(id, state);
         c.events.off('list', refresh);
+        c.events.off('off', off);
         terminal?.events.off('control', control);
         terminal?.release(view);
         terminal?.events.off('data', bytes);

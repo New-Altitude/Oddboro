@@ -4,9 +4,11 @@ import { EventEmitter, once } from 'node:events';
 import { openProjectTerminal } from '@oddboro/ledger/project-terminal';
 import { nativeCommand, nativeEnv } from './native.ts';
 
+type Pty = Awaited<ReturnType<typeof openProjectTerminal>>;
+
 export class ProjectTerminal {
   readonly events = new EventEmitter();
-  private child: ReturnType<typeof openProjectTerminal>;
+  private child: Pty;
   private history = '';
   private ended = false;
   private writer?: string;
@@ -37,20 +39,26 @@ export class ProjectTerminal {
   get running() {
     return !this.ended;
   }
-  constructor(
+  /** Open the native client in a terminal. The terminal library loads here, the first time. */
+  static async open(
     agent: 'codex' | 'claude',
     args: string[],
     cwd: string,
     extra: Record<string, string> = {}
   ) {
     const [exe, prefix] = nativeCommand(agent);
-    this.child = openProjectTerminal(exe, [...prefix, ...args], {
-      cwd,
-      env: { ...nativeEnv(), ...extra, TERM: 'xterm-256color' },
-      cols: 100,
-      rows: 30,
-      name: 'xterm-256color'
-    });
+    return new ProjectTerminal(
+      await openProjectTerminal(exe, [...prefix, ...args], {
+        cwd,
+        env: { ...nativeEnv(), ...extra, TERM: 'xterm-256color' },
+        cols: 100,
+        rows: 30,
+        name: 'xterm-256color'
+      })
+    );
+  }
+  private constructor(child: Pty) {
+    this.child = child;
     const stop = () => this.close();
     process.once('exit', stop);
     this.child.onData((s) => {

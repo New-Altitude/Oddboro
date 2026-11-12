@@ -4,6 +4,13 @@
 // level and the switches, and of the switches. The page imports this, so it
 // imports nothing.
 
+/**
+ * What the owner agrees to when they turn on Advanced mode in Setup. The
+ * ledger keeps these words with their yes (`setAdvancedMode`).
+ */
+export const ADVANCED_CONSENT =
+  'Advanced mode lets the office open Claude Code and Codex in your own projects. Work sent there runs with your permissions on this computer, outside Oddboro’s limits, and can change files, run commands or reach the internet as your coding tool allows.';
+
 /** The owner's permission levels, lowest first. */
 export const LEVELS = ['read', 'draft', 'act'] as const;
 export type Level = (typeof LEVELS)[number];

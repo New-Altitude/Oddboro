@@ -38,7 +38,7 @@ const TOOLS = [
   {
     id: 'send_project_work',
     name: 'Work in shared projects',
-    does: "Proposes an assignment to a shared native conversation. At Act it can send it with that conversation's permissions.",
+    does: 'Proposes an assignment to a shared native conversation. It waits for your yes, unless you let this Odd send to that session without asking.',
     always: true,
     withProject: true
   },

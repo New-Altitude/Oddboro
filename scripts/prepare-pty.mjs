@@ -1,4 +1,8 @@
 // node-pty loads a local build first, then the prebuild for this machine.
+// It is an optional dependency: after npm install it may be absent, when its
+// native build failed here. The office still runs then, without project
+// terminals, so the postinstall step below only warns. Staging and release
+// call these functions directly and still fail without it.
 import { chmodSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -56,4 +60,12 @@ export function stagePty(stage) {
   return files;
 }
 
-if (import.meta.url === pathToFileURL(resolve(process.argv[1])).href) preparePty(process.cwd());
+if (import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  try {
+    preparePty(process.cwd());
+  } catch (e) {
+    console.warn(
+      `Project terminals are unavailable on this computer: ${e instanceof Error ? e.message : e}. The rest of the office works.`
+    );
+  }
+}

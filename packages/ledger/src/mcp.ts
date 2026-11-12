@@ -148,7 +148,12 @@ import {
 import { home, isOfficeFile, isWhereNamed } from './home.ts';
 import { trustSystemCertificates } from './certificates.ts';
 
-import { projectConnections, projectWork, requestProject } from './project-sessions.ts';
+import {
+  advancedMode,
+  projectConnections,
+  projectWork,
+  requestProject
+} from './project-sessions.ts';
 trustSystemCertificates();
 const ME = process.env.STAFF_ID ?? '';
 const me = await staffer(ME);
@@ -180,7 +185,11 @@ const mailboxes = (await grantsFor(ME))
 /** This run, as the office tools' row conditions read it. */
 const RUN: ToolRun = {
   gmail: mailboxes.length > 0,
-  project: process.env.LESSON_RUN !== '1' && (await projectConnections(ME)).length > 0,
+  // Project tools exist only while the owner keeps Advanced mode on.
+  project:
+    process.env.LESSON_RUN !== '1' &&
+    (await advancedMode()) &&
+    (await projectConnections(ME)).length > 0,
   chat: OWNER_SAID !== undefined,
   manager: me.role === MANAGER_ROLE
 };
@@ -739,7 +748,7 @@ if (offered('send_project_work'))
     'send_project_work',
     {
       description:
-        'Give a shared native project session an assignment. Use a fresh UUID per assignment and reuse it on a retry. At Draft it waits for the owner to send it. Its result comes back as a report.',
+        'Give a shared native project session an assignment. Use a fresh UUID per assignment and reuse it on a retry. It waits for the owner to send it, unless the owner lets you send to that session without asking and you are at Act. Its result comes back as a report.',
       inputSchema: {
         session: z.string().uuid(),
         key: z.string().uuid(),

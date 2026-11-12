@@ -32,11 +32,13 @@
   import FileViewer from '#lib/ui/FileViewer.svelte';
   import ReportView from '#lib/ui/ReportView.svelte';
   import {
+    advanced,
     close,
     deskRequest,
     open,
     openHire,
     openLessons,
+    openProject,
     openReport,
     wins,
     type Win
@@ -121,6 +123,14 @@
   /** False until the owner finishes the welcome, which the office opens on. */
   // svelte-ignore state_referenced_locally
   let welcomed = $state(data.welcomed);
+  // Advanced mode as the server says; Setup changes it on this page as the owner answers.
+  $effect.pre(() => {
+    advanced.on = data.advanced;
+  });
+  // Off, nothing offers Projects, and an open Projects window closes.
+  $effect(() => {
+    if (!advanced.on) for (const w of wins.list) if (w.kind === 'projects') close(w.id, true);
+  });
   /** A new owner's first visit, from the empty lot until their manager says hello. */
   // svelte-ignore state_referenced_locally
   let firstRun = $state(!data.welcomed);
@@ -198,6 +208,8 @@
     { id: 'hire', label: 'Hire' },
     { id: 'office', label: 'Office' }
   ] as const;
+  /** The sections the top bar offers: Projects only in Advanced mode. */
+  const sections = $derived(SECTIONS.filter((s) => s.id !== 'projects' || advanced.on));
 
   /** Select a staffer, opening its panel if it was folded away. */
   function select(id: string | undefined) {
@@ -647,7 +659,7 @@
     if (leftOpen && front?.kind === id) return hide();
     if (id === 'desk') return void openDesk();
     if (id === 'ledger') return open({ id: 'ledger', kind: 'ledger' });
-    if (id === 'projects') return open({ id: 'projects', kind: 'projects' });
+    if (id === 'projects') return openProject();
     if (id === 'services') return open({ id: 'services', kind: 'services' });
     if (id === 'goals') return open({ id: 'goals', kind: 'goals' });
     if (id === 'lessons') return openLessons();
@@ -1188,7 +1200,7 @@
     </div>
     <!-- The command center's buttons arrive with the office, once the first run is over. -->
     <div class="flex flex-wrap gap-1.5 {open ? 'px-3 pt-2' : 'mt-2'}" class:hidden={firstRun}>
-      {#each SECTIONS as sec (sec.id)}
+      {#each sections as sec (sec.id)}
         <button
           class="rounded-full px-3 py-1 text-xs whitespace-nowrap {leftOpen &&
           front?.kind === sec.id

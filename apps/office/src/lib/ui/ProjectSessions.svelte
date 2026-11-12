@@ -38,7 +38,9 @@
     problem = $state(''),
     showTerminal = $state(false),
     handover = $state<Choice>(),
-    found = $state(false);
+    found = $state(false),
+    /** The Odd waiting on the owner's second yes to send without asking. */
+    unasked = $state<string>();
   const selectedId = $derived(selected?.id);
   const terminalVisible = $derived(showTerminal && !!view?.terminal);
   function updates(stream: EventSource, id: string) {
@@ -342,6 +344,42 @@
             >{/each}
         </select>
       </label>
+      {#if selected.staffId}
+        {@const odd = staff.find((s) => s.id === selected?.staffId)?.name ?? 'This Odd'}
+        <!-- Every assignment from an Odd waits for Take over and send, unless the owner ticks this. -->
+        <label class="tick"
+          ><input
+            type="checkbox"
+            checked={selected.sendsUnasked === selected.staffId}
+            disabled={busy}
+            onchange={(e) => {
+              const on = (e.target as HTMLInputElement).checked;
+              (e.target as HTMLInputElement).checked = !on;
+              if (on) unasked = selected?.staffId ?? undefined;
+              else void run(() => action('unasked', { staffId: null }));
+            }}
+          />Let {odd} send work without asking</label
+        >
+        {#if unasked === selected.staffId}<div
+            class="flex flex-col gap-2 rounded-lg bg-ember/10 p-2"
+            role="alertdialog"
+            aria-labelledby="unasked-warning"
+          >
+            <p id="unasked-warning" class="text-ink">
+              {odd} will send work into this session without asking you. It runs with your permissions.
+            </p>
+            <div class="flex gap-2">
+              <button
+                class="btn"
+                onclick={() =>
+                  run(async () => {
+                    await action('unasked', { staffId: unasked });
+                    unasked = undefined;
+                  })}>Let {odd} send</button
+              ><button class="btn" onclick={() => (unasked = undefined)}>Not now</button>
+            </div>
+          </div>{/if}
+      {/if}
       {#if selected.agent === 'claude' && view.market}
         <details>
           <summary class="cursor-pointer text-muted">
@@ -450,7 +488,7 @@
         {#if r.file}<p class="text-xs text-muted">Project file: {r.file}</p>{/if}
         {#if r.answer}<p class="whitespace-pre-wrap">{r.answer}</p>{/if}
         {#if r.state === 'proposed'}<p class="text-xs text-muted">
-            This will run with your native project permissions.
+            This runs with your permissions on this computer.
           </p>
           <button
             class="btn"
@@ -472,6 +510,11 @@
 </div>
 
 <style>
+  label.tick {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+  }
   label {
     display: flex;
     flex-direction: column;

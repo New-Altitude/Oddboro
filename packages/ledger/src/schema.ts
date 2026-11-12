@@ -983,6 +983,11 @@ export const owner = pgTable('owner', {
   name: text().notNull(),
   /** When the owner finished the welcome. Until then the office opens on it. */
   welcomedAt: at('welcomed_at'),
+  /**
+   * When the owner said yes to Advanced mode in Setup. Null while it is off.
+   * Project sessions, which run outside Oddboro's limits, exist only while it is on.
+   */
+  advancedAt: at('advanced_at'),
   updatedAt: at('updated_at').notNull().defaultNow()
 });
 
@@ -1118,12 +1123,23 @@ export const projectSessions = pgTable(
     folder: text().notNull(),
     title: text().notNull(),
     staffId: text(),
+    /**
+     * The Odd the owner lets send work here without asking: only the one the
+     * session is shared with. Null, the default, means every assignment waits
+     * for the owner's Take over and send.
+     */
+    sendsUnasked: text(),
     createdAt: created()
   },
   (t) => [
     foreignKey({
       name: 'project_sessions_staff_id_fkey',
       columns: [t.staffId],
+      foreignColumns: [staff.id]
+    }),
+    foreignKey({
+      name: 'project_sessions_sends_unasked_fkey',
+      columns: [t.sendsUnasked],
       foreignColumns: [staff.id]
     }),
     unique('project_sessions_agent_native_id_key').on(t.agent, t.nativeId),

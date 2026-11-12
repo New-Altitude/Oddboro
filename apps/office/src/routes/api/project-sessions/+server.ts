@@ -1,14 +1,18 @@
 import { json, error } from '@sveltejs/kit';
 import { z } from 'zod';
+// Every project action, from the owner's Projects work area. All of them
+// refuse while Advanced mode is off.
 import {
+  advancedMode,
   connection,
-  projectConnections,
+  letSendUnasked,
+  projectOverview,
   projectWork,
   requestProject,
   shareProject,
   changeProjectRequest
 } from '@oddboro/ledger';
-import { projectController } from '#lib/server/project-sessions/controller.ts';
+import { ADVANCED_OFF, projectController } from '#lib/server/project-sessions/controller.ts';
 import type { RequestHandler } from './$types';
 const id = z.string().uuid(),
   agent = z.enum(['codex', 'claude']),
@@ -31,6 +35,7 @@ const command = z.discriminatedUnion('action', [
   z.object({ action: z.literal('history'), id }),
   z.object({ action: z.literal('send'), id, key: id, prompt, file }),
   z.object({ action: z.literal('share'), id, staffId: z.string().min(1).max(100).nullable() }),
+  z.object({ action: z.literal('unasked'), id, staffId: z.string().min(1).max(100).nullable() }),
   z.object({ action: z.literal('decide'), id, key: id, approve: z.boolean() }),
   z.object({ action: z.literal('resolve'), id, key: id }),
   z.object({ action: z.literal('terminal'), id }),
@@ -56,6 +61,7 @@ const command = z.discriminatedUnion('action', [
   z.object({ action: z.literal('disconnect'), id })
 ]);
 export const POST: RequestHandler = async ({ request }) => {
+  if (!(await advancedMode())) error(403, ADVANCED_OFF);
   const data = command.safeParse(await request.json().catch(() => null));
   if (!data.success) error(400, 'Invalid project session request.');
   const a = data.data,
@@ -63,7 +69,13 @@ export const POST: RequestHandler = async ({ request }) => {
   try {
     switch (a.action) {
       case 'connections':
-        return json(await projectConnections());
+        return json(
+          (await projectOverview()).map((s) => ({
+            ...s,
+            status: c.status(s.id, s.status),
+            connected: c.view(s.id).connected
+          }))
+        );
       case 'find':
         return json(await c.list(a.agent, a.folder, a.socket));
       case 'connect':
@@ -83,6 +95,9 @@ export const POST: RequestHandler = async ({ request }) => {
         break;
       case 'share':
         await shareProject(a.id, a.staffId);
+        break;
+      case 'unasked':
+        await letSendUnasked(a.id, a.staffId);
         break;
       case 'decide':
         if (

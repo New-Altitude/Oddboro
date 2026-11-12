@@ -22,7 +22,7 @@ export const OUTBOUND: readonly Outbound[] = [
     to: 'The local Codex App Server, through authenticated loopback or the private socket the owner chose.',
     sends:
       'Native conversation requests, assignments, corrections and answers to provider permission prompts.',
-    yes: 'The owner connecting that conversation; a shared Odd sends only at Act, or after the owner takes over its exact proposal.'
+    yes: 'The owner turning on Advanced mode and connecting that conversation; a shared Odd sends only after the owner takes over its exact proposal, or at Act when the owner lets it send to that session without asking.'
   },
   {
     file: 'apps/office/src/lib/ui/ProjectSessions.svelte',
