@@ -79,6 +79,30 @@ export function proposedPersona(
 }
 
 /**
+ * Whether a proposal may name a persona: it carries a slug, says "persona",
+ * or names its hire with more than one word, as a person's whole name is.
+ * Only such a proposal waits for the offers before its window shows anything.
+ */
+export const hasPersonaHint = (p: Pick<HireProposal, 'name' | 'role' | 'personaSlug'>) =>
+  !!p.personaSlug?.trim() ||
+  /\bpersona\b/i.test(`${p.name} ${p.role}`) ||
+  whole(p.name).includes(' ');
+
+/**
+ * What a hire window opened from a proposal shows: the persona it names, the
+ * builder, or, while the offers have not answered and the proposal may name
+ * one, nothing yet, so the builder never shows only to be replaced.
+ */
+export function proposalView(
+  proposal: HireProposal | undefined,
+  offers: Offers | undefined
+): 'wait' | 'persona' | 'odd' {
+  if (!proposal) return 'odd';
+  if (!offers) return hasPersonaHint(proposal) ? 'wait' : 'odd';
+  return suggestedPersona(proposal, offers) ? 'persona' : 'odd';
+}
+
+/**
  * The persona a hire window opened from a proposal offers instead of the
  * builder: none without a proposal, or while the office has no list of offers
  * (signed out, or New Altitude did not answer).

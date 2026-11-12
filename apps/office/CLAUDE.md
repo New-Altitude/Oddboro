@@ -1712,7 +1712,11 @@ the persona's voice.
    "<Owner> added <Name>'s New Altitude persona instead of a new Odd." A
    sign-in left unfinished, an install that fails, a restart or a later Add
    without the ask leaves the proposal open. A middle initial does not count
-   in a whole name, so "Nate Jones" matches "Nate B. Jones".
+   in a whole name, so "Nate Jones" matches "Nate B. Jones". A proposal
+   that may name a persona (`hasPersonaHint`: a slug, the word persona, or a
+   name of more than one word) shows a still placeholder until the offers
+   answer, so the builder never shows only to be replaced; after five
+   seconds with no answer the builder opens and stays (`proposalView`).
 9. Who an Odd may propose. Each read of New Altitude's list
    (`readListing`) keeps the names and slugs on offer in memory
    (`persona-offered.ts`); signed out, or a list refused, keeps none, and an

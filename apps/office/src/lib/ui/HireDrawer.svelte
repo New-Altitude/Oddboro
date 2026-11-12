@@ -23,7 +23,7 @@
   import { account } from './account.svelte.ts';
   import PersonaOffer from './PersonaOffer.svelte';
   import { connect, PersonaOffers, personas as asked } from './persona-offers.svelte.ts';
-  import { suggestedPersona, withoutLikeness, type Offer } from '#lib/persona.ts';
+  import { proposalView, suggestedPersona, withoutLikeness, type Offer } from '#lib/persona.ts';
   import { call } from './api.ts';
   import { wins } from './windows.svelte.ts';
   import type { StaffProfile } from '../staff/roster.ts';
@@ -74,6 +74,19 @@
   const suggested = $derived(
     ordinary ? undefined : suggestedPersona(from?.proposal, personas.state)
   );
+  /** How long a proposal's window waits for the offers before it opens the builder. */
+  const OFFERS_WAIT_MS = 5000;
+  // Until the offers answer, a proposal that may name a persona shows a
+  // still placeholder, never the builder. If they have not answered in a few
+  // seconds, the builder opens and stays.
+  const waiting = $derived(!ordinary && proposalView(from?.proposal, personas.state) === 'wait');
+  onMount(() => {
+    if (!waiting) return;
+    const t = setTimeout(() => {
+      if (!personas.state) ordinary = true;
+    }, OFFERS_WAIT_MS);
+    return () => clearTimeout(t);
+  });
 
   /**
    * Add the persona, as Setup's Add does, on the hire grid with it picked.
@@ -363,6 +376,10 @@
         onclick={() => (path = from ? 'odd' : 'choose')}>Back</button
       >
     </footer>
+  </section>
+{:else if waiting}
+  <section class="flex h-full min-h-0 flex-col gap-3 p-3" aria-label="Hire" aria-busy="true">
+    <div class="h-28 rounded-xl bg-raise"></div>
   </section>
 {:else if suggested}
   <section

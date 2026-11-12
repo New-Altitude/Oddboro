@@ -3,7 +3,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { HireProposal } from '@oddboro/ledger';
-import { proposedPersona, suggestedPersona, withoutLikeness, type Offer } from './persona.ts';
+import {
+  hasPersonaHint,
+  proposalView,
+  proposedPersona,
+  suggestedPersona,
+  withoutLikeness,
+  type Offer
+} from './persona.ts';
 
 const offer = (slug: string, displayName: string, name: string): Offer => ({
   slug,
@@ -118,4 +125,21 @@ test('an ordinary Odd built instead keeps none of the person', () => {
     role: 'Strategy Advisor',
     appearance: ''
   });
+});
+
+test('a proposal that may name a persona waits for the offers, and any other opens the builder at once', () => {
+  assert.equal(hasPersonaHint({ name: 'Pat', role: 'Pat Q. Rivers Persona' }), true);
+  assert.equal(hasPersonaHint({ name: 'Pat Rivers', role: 'Advisor' }), true);
+  assert.equal(hasPersonaHint({ name: 'Mira', role: 'Mail Clerk', personaSlug: 'pat' }), true);
+  assert.equal(hasPersonaHint({ name: 'Mira', role: 'Mail Clerk' }), false);
+
+  const named = proposal({ name: 'Pat', role: 'Pat Q. Rivers Persona' });
+  // Not answered yet: nothing shows, so the builder never flashes.
+  assert.equal(proposalView(named, undefined), 'wait');
+  assert.equal(proposalView(named, { state: 'ok', offers }), 'persona');
+  assert.equal(proposalView(named, { state: 'out' }), 'odd');
+  assert.equal(proposalView(named, { state: 'ok', offers: [rowan] }), 'odd');
+  // No hint, or no proposal: the builder at once.
+  assert.equal(proposalView(proposal({}), undefined), 'odd');
+  assert.equal(proposalView(undefined, undefined), 'odd');
 });
