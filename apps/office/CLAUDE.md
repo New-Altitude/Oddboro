@@ -1728,8 +1728,9 @@ the persona's voice.
   fills the screen, and panning stops at the edge.
 - The page loads the floor's PixiJS code with `import()` as it mounts
   (`src/lib/floor/index.ts`), and the Office designer and an Odd's usage
-  charts load when opened, so the first page carries none of PixiJS or
-  layerchart. Import a floor module's values only through `index.ts`; a
+  charts load when opened, and `Markdown.svelte` loads markdown-it with the
+  first text it shows (plain text until then), so the first page carries
+  none of PixiJS, layerchart or markdown-it. Import a floor module's values only through `index.ts`; a
   type import is free.
 - Third-party packages go under `devDependencies` in `package.json`, even
   the ones the office runs: the build bundles those, and the app ships only
