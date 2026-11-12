@@ -12,6 +12,7 @@ import {
   tasks,
   type AskKind,
   type FolderRequest,
+  type InChat,
   type Outcome,
   type HeldCall,
   type ReplyDraft
@@ -52,9 +53,10 @@ export async function decideAsk(
   id: number,
   decision: Decision,
   reason: string | null,
-  reportWhenDone = false
+  reportWhenDone = false,
+  inChat = false
 ): Promise<boolean> {
-  return decide(id, decision, reason, { reportWhenDone });
+  return decide(id, decision, reason, { reportWhenDone, inChat });
 }
 
 /** What approving an ask means, done before the answer goes back. */
@@ -66,6 +68,8 @@ export type Approval = {
   link?: (ask: AskRow, tx: Tx) => Promise<void>;
   /** Done once the ask is approved, so the run the answer starts finds it. */
   carryOut?: (ask: AskRow) => Promise<void>;
+  /** The owner answered on the ask's card in its Odd's chat: the run the answer starts replies there. */
+  inChat?: boolean;
 };
 
 /**
@@ -374,6 +378,10 @@ async function decide(
     askId: ask.id
   });
   await o.carryOut?.(ask);
+  // Only the run this ask's own answer starts, never a twin's, replies under its card.
+  const chat: InChat | undefined = o.inChat
+    ? { staffId: ask.staffId, card: { kind: 'ask', id: ask.id, title: ask.title } }
+    : undefined;
   const owner = await ownerName();
   const said = sent
     ? `${owner} ${sent.sent?.action === 'draft' ? 'saved to Gmail drafts' : 'sent'} "${ask.title}"`
@@ -420,11 +428,12 @@ async function decide(
         await followUp(ask.staffId, 'carry_out', {
           askId: ask.id,
           note: ask.reason,
-          reportWhenDone: o.reportWhenDone
+          reportWhenDone: o.reportWhenDone,
+          chat
         });
         break;
       case 'rework':
-        await followUp(ask.staffId, 'rework', { askId: ask.id, note: ask.reason });
+        await followUp(ask.staffId, 'rework', { askId: ask.id, note: ask.reason, chat });
         break;
       case 'answer_window': {
         // The title asks whether to pause the work or let it carry on, so "approved" would not say which.
@@ -443,7 +452,8 @@ async function decide(
         else await answerBack(ask, decision, answer);
         break;
       case 'answer_back':
-        for (const a of [ask, ...twins]) await answerBack(a, decision, answer);
+        for (const a of [ask, ...twins])
+          await answerBack(a, decision, answer, a.id === ask.id ? chat : undefined);
         break;
       // A no with a reason may be a lesson: the Odd that asked reads it once. An
       // ask withdrawn because its Odd left has nobody to read it.
@@ -490,11 +500,13 @@ function oddMoveOf(kind: AskKind): keyof typeof LEAVING_CHECK | undefined {
 }
 
 /** No run carries out this answer: it goes back to the hand-off or thread the ask came from. */
-const answerBack = (ask: AskRow, decision: Decision, answer: string) =>
+const answerBack = (ask: AskRow, decision: Decision, answer: string, chat?: InChat) =>
   answerLater(
     { handOffId: ask.handOffId, threadId: ask.threadId, askId: ask.id },
     decision === 'deny' ? 'failed' : 'done',
-    answer
+    answer,
+    db,
+    chat
   );
 
 /**
@@ -538,10 +550,11 @@ async function answerLater(
   on: { handOffId: number | null; threadId: number | null; askId?: number },
   outcome: Outcome,
   answer: string,
-  q: Db = db
+  q: Db = db,
+  chat?: InChat
 ): Promise<void> {
   if (on.handOffId) await handBackLater(on.handOffId, outcome, answer, q);
-  else if (on.threadId) await answerThread(on.threadId, answer, on.askId, q);
+  else if (on.threadId) await answerThread(on.threadId, answer, on.askId, q, chat);
 }
 
 /**

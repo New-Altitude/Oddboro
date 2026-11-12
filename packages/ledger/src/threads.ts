@@ -39,7 +39,9 @@ import {
   staffGoals,
   tasks,
   threads,
+  chatCardOf,
   type HeldHandOff,
+  type InChat,
   type Outcome,
   type ThreadStatus
 } from './schema.ts';
@@ -496,7 +498,8 @@ export async function answerThread(
   id: number,
   answer: string,
   askId?: number,
-  q: Db = db
+  q: Db = db,
+  chat?: InChat
 ): Promise<void> {
   await q.transaction(async (tx) => {
     const [t] = await tx
@@ -508,6 +511,8 @@ export async function answerThread(
     // pick-up would wait for ever, or run on work its leaving stopped once it
     // came back (`removeOdd`).
     if (!t || t.leftAt) return;
+    // Answered in the hub's own chat: the pick-up replies there, under the newest card answered.
+    const chatCard = chatCardOf(t.hubId, chat);
     // Locked, so a claim cannot start it between this look and the join: the
     // claim waits, then returns the joined note, or it went first and this
     // answer writes a pick-up of its own.
@@ -528,7 +533,10 @@ export async function answerThread(
     if (waiting)
       await tx
         .update(followUps)
-        .set({ note: waiting.note ? `${waiting.note}\n${answer}` : answer })
+        .set({
+          note: waiting.note ? `${waiting.note}\n${answer}` : answer,
+          ...(chatCard ? { chatCard } : {})
+        })
         .where(eq(followUps.id, waiting.id));
     else
       await addFollowUp(tx, {
@@ -536,7 +544,8 @@ export async function answerThread(
         kind: 'resume',
         threadId: id,
         note: answer,
-        askId
+        askId,
+        chatCard
       });
   });
 }

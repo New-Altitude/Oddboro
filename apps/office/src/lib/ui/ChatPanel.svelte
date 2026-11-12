@@ -8,7 +8,7 @@
   import ChatGoal from './ChatGoal.svelte';
   import GoalProposal from './GoalProposal.svelte';
   import { approvalTarget, approveWord, yesWord } from './chat-approval.ts';
-  import { mustDo } from './task-steps.ts';
+  import { chatAnswer } from './task-steps.ts';
   import Lesson from './Lesson.svelte';
   import PersonaQuiet from './PersonaQuiet.svelte';
   import { newTurnId } from '#lib/staff/chat-input.ts';
@@ -166,16 +166,18 @@
         a.id === d.id &&
         ((a.kind === 'goal' && a.goal) || (a.kind === 'plan' && a.plan))
     );
-  const question = (d: Delivered) =>
-    d.kind === 'task' &&
-    desk.tasks.find(
-      (t) =>
-        t.staffId === profile.id &&
-        t.id === d.id &&
-        !t.askId &&
-        !t.steps.some(mustDo) &&
-        !desk.attachments.some((f) => f.taskId === t.id)
-    );
+  /** An open task of this Odd's the owner answers here with one response, and how (`chatAnswer`). */
+  const question = (d: Delivered) => {
+    if (d.kind !== 'task') return undefined;
+    const t = desk.tasks.find((t) => t.staffId === profile.id && t.id === d.id);
+    const how =
+      t &&
+      chatAnswer(
+        t,
+        desk.attachments.some((f) => f.taskId === t.id)
+      );
+    return t && how && { ...how, why: t.why };
+  };
 
   let lines = $state<Line[]>([]);
   const waitingAsks = $derived(
@@ -435,15 +437,32 @@
     upcoming = upcoming.filter((x) => x.id !== p.id);
   }
 
-  /** The Desk's own operations. Only a card the owner picked can supply the target. */
-  async function decide(d: Delivered, act: 'approve' | 'change' | 'answer', words = '') {
+  /**
+   * The Desk's own operations. Only a card the owner picked can supply the
+   * target. Each says it came from this chat, so the Odd's reply comes back here.
+   */
+  async function decide(d: Delivered, act: 'approve' | 'change' | 'answer' | 'choose', words = '') {
     if (saving || !decisionMode) return false;
     saving = true;
     refused = '';
     try {
-      if (act === 'answer') {
-        if (!question(d)) throw new Error('This task is no longer waiting for a written answer.');
-        await call(`/api/tasks/${d.id}`, { op: 'finish', done: true, note: words });
+      if (act === 'answer' || act === 'choose') {
+        const how = question(d);
+        if (!how || (act === 'choose') !== !!how.choice)
+          throw new Error('This task is no longer waiting for this answer.');
+        // A tap answers the choice as the Desk does, then finishes the task.
+        if (act === 'choose' && how.choice)
+          await call(`/api/tasks/${d.id}`, {
+            op: 'choose',
+            index: how.choice.index,
+            answer: words
+          });
+        await call(`/api/tasks/${d.id}`, {
+          op: 'finish',
+          done: true,
+          note: act === 'answer' ? words : '',
+          chat: true
+        });
       } else {
         const a = proposal(d);
         if (!a) throw new Error('This proposal is no longer open.');
@@ -452,7 +471,8 @@
         const result = await call<{ hires?: AskRow[] }>(`/api/asks/${a.id}`, {
           decision: act === 'change' ? 'iterate' : 'approve',
           reason: words,
-          picks: picks(a)
+          picks: picks(a),
+          chat: true
         });
         if (result.hires?.length) onplan(result.hires);
       }
@@ -1217,14 +1237,29 @@
             {:else if t}
               <div class="mt-2 px-2 text-xs text-muted">
                 <p>{t.why}</p>
-                <ol class="list-decimal ps-4">
-                  {#each t.steps as step, n (n)}<li>{step.text}</li>{/each}
-                </ol>
-                <button
-                  class="choice mt-2"
-                  disabled={saving || !decisionMode}
-                  onclick={() => reply(it, 'answer')}>Answer and finish</button
-                >
+                {#if t.steps.length}
+                  <ol class="list-decimal ps-4">
+                    {#each t.steps as step, n (n)}<li>{step.text}</li>{/each}
+                  </ol>
+                {/if}
+                {#if t.choice}
+                  <!-- A tap is the answer: it finishes the task, as the Desk's choice and Mark done would. -->
+                  <div class="mt-2 flex flex-col gap-1.5" role="group" aria-label="Choices">
+                    {#each t.choice.options as option (option)}
+                      <button
+                        class="choice"
+                        disabled={saving || !decisionMode}
+                        onclick={() => decide(it, 'choose', option)}>{option}</button
+                      >
+                    {/each}
+                  </div>
+                {:else}
+                  <button
+                    class="choice mt-2"
+                    disabled={saving || !decisionMode}
+                    onclick={() => reply(it, 'answer')}>Answer and finish</button
+                  >
+                {/if}
               </div>
             {/if}
           {/if}
@@ -1232,8 +1267,12 @@
         {@render meta(line, i)}
       {:else}
         {#if line.re}
+          <!-- The owner's line replies about a card; an Odd's told line answers what the owner said on it. -->
           <button
-            class="-mb-1 me-1 ms-auto max-w-[85%] truncate text-[10px] text-faint hover:text-ink"
+            class="-mb-1 max-w-[85%] truncate text-[10px] text-faint hover:text-ink {line.from ===
+            'owner'
+              ? 'me-1 ms-auto'
+              : 'ms-1 me-auto'}"
             title={`Open ${line.re.title}`}
             onclick={() => line.re && pick(line.re)}>↩ {line.re.title}</button
           >
@@ -1253,7 +1292,7 @@
           class="max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed break-words
           {line.from === 'owner'
             ? 'ms-auto rounded-ee-md bg-sea/25 whitespace-pre-wrap text-ink'
-            : `me-auto rounded-es-md bg-raise ${line.failed ? 'text-coral' : 'text-ink'}`}"
+            : `me-auto rounded-es-md bg-raise ${line.failed || line.runFailed ? 'text-coral' : 'text-ink'}`}"
         >
           {#if line.pending && !line.text}
             <span class="dots" aria-label="Replying"><span></span><span></span><span></span></span>

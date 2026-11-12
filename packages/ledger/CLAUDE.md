@@ -727,7 +727,8 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   goal's one thread (`goalThread`), whatever run raised it, and the thread
   keeps that run's key when its raiser leads it (`keepRun`).
   `approvePlan` takes the parts the owner ticked: Odds already here serve the
-  goal and get their job at once, each hire becomes its own hire ask on the
+  goal in the transaction that approves the ask and get their job at once,
+  and the answer names each Odd by name, never its id. Each hire becomes its own hire ask on the
   plan's thread, and the owner's steps a task. `approveAsk` does all that
   before the answer goes back, so the hub's run finds it. Hiring one of those
   hires answers its ask on the thread, which brings the hub back again.

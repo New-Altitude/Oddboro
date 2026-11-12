@@ -1,5 +1,6 @@
 // Reports, and the desk that lists what waits on the owner.
-import { and, asc, desc, eq, isNotNull, isNull, or } from 'drizzle-orm';
+import { and, asc, desc, eq, exists, gt, isNotNull, isNull, not, or } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { db } from './db.ts';
 import { asks, attachments, ledger, reports, tasks } from './schema.ts';
 import { type DeskItem } from './desk-answers.ts';
@@ -38,6 +39,7 @@ export type Desk = {
 };
 
 export async function desk(): Promise<Desk> {
+  const later = alias(ledger, 'later');
   const [a, t, r, f, recent] = await Promise.all([
     db
       .select()
@@ -62,13 +64,31 @@ export async function desk(): Promise<Desk> {
       .leftJoin(tasks, eq(attachments.taskId, tasks.id))
       .where(or(eq(asks.status, 'open'), eq(tasks.status, 'open')))
       .orderBy(asc(attachments.id)),
+    // One line per decision. An answer to an ask is written last, after what
+    // its yes set in the same transaction (a goal set, an Odd serving it), so
+    // a line with a newer one on the same ask is part of that answer.
     db
       .select({ id: ledger.id, title: ledger.title, reason: ledger.reason })
       .from(ledger)
       .where(
         and(
           eq(ledger.actor, 'owner'),
-          or(eq(ledger.kind, 'decision'), isNotNull(ledger.taskId), isNotNull(ledger.askId))
+          or(eq(ledger.kind, 'decision'), isNotNull(ledger.taskId)),
+          not(
+            exists(
+              db
+                .select({ id: later.id })
+                .from(later)
+                .where(
+                  and(
+                    eq(later.askId, ledger.askId),
+                    gt(later.id, ledger.id),
+                    eq(later.actor, 'owner'),
+                    eq(later.kind, 'decision')
+                  )
+                )
+            )
+          )
         )
       )
       .orderBy(desc(ledger.createdAt), desc(ledger.id))

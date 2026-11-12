@@ -3,7 +3,7 @@ import { and, asc, desc, eq } from 'drizzle-orm';
 import { db } from './db.ts';
 import { parkedWork, wakeOnTask, type TaskEnded } from './task-parking.ts';
 import { keepRun, raisedOn, type Db } from './threads.ts';
-import { attachments, tasks, threads, type Step } from './schema.ts';
+import { attachments, tasks, threads, type InChat, type Step } from './schema.ts';
 import {
   OWN_RUN,
   ownerAnswers,
@@ -190,7 +190,12 @@ async function ownRunOf(
   return { work: own?.title ?? null };
 }
 
-export async function finishTask(id: number, done: boolean, note: string | null): Promise<boolean> {
+export async function finishTask(
+  id: number,
+  done: boolean,
+  note: string | null,
+  inChat = false
+): Promise<boolean> {
   return db.transaction(async (q) => {
     const [t] = await q
       .update(tasks)
@@ -207,7 +212,13 @@ export async function finishTask(id: number, done: boolean, note: string | null)
         title: `${done ? 'Done' : 'Dropped'} by ${owner}: ${t.title}`,
         // Answers first: search_ledger shows the first 400 characters, and a long why would cut them off.
         body: [...answers, t.why].join('\n'),
-        reason: t.note,
+        // A choice the owner tapped is their answer when they wrote no note.
+        reason:
+          t.note ??
+          (ownerAnswers(t.steps)
+            .map((a) => a.answer)
+            .join('\n') ||
+            null),
         taskId: t.id
       },
       q
@@ -219,7 +230,10 @@ export async function finishTask(id: number, done: boolean, note: string | null)
         owner,
         said: `${owner} ${done ? 'finished' : 'dropped'} "${t.title}"${t.note ? `: ${t.note}` : '.'}`
       },
-      q
+      q,
+      inChat && t.staffId
+        ? { staffId: t.staffId, card: { kind: 'task', id: t.id, title: t.title } }
+        : undefined
     );
     return true;
   });
@@ -234,7 +248,8 @@ export async function finishTask(id: number, done: boolean, note: string | null)
 async function taskEnded(
   t: TaskRow,
   how: { ended: TaskEnded; owner: string; said: string },
-  q: Db = db
+  q: Db = db,
+  chat?: InChat
 ): Promise<void> {
   const done = how.ended === 'done';
   const end = await taskEnd(t, q);
@@ -270,7 +285,7 @@ async function taskEnded(
       // it, such as hiring from an intake the owner just filled in.
       case 'task_done':
         if (t.staffId)
-          await followUp(t.staffId, 'task_done', { taskId: t.id, note: t.note, pickedUp }, q);
+          await followUp(t.staffId, 'task_done', { taskId: t.id, note: t.note, pickedUp, chat }, q);
         break;
       // Work on another thread that waited on this task, whoever gave it.
       case 'wake_parked':

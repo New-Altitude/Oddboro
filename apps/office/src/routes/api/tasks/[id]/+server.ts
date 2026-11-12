@@ -1,5 +1,7 @@
 // The owner works a task: tick a step, undo one, answer a choice,
 // run a step's action, or finish it. Finishing writes the ledger row that credits the owner.
+// `chat` on a finish says the owner answered on the task's card in its Odd's
+// chat, so the run the answer starts replies there too.
 import { error, json } from '@sveltejs/kit';
 import { AWS_SECRETS_ID, connector, finishTask, task, tickStep, untickStep } from '@oddboro/ledger';
 import { confirmTools, hostedSignIn, listTools } from '#lib/server/access.ts';
@@ -28,6 +30,7 @@ type Body = {
   value?: string;
   done?: boolean;
   note?: string;
+  chat?: boolean;
   startUrl?: string;
   ssoRegion?: string;
   region?: string;
@@ -45,7 +48,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
   if (!t) error(404, 'No such task');
   const b = (await request.json().catch(() => ({}))) as Body;
   if (b.op === 'finish') {
-    const finished = await finishTask(id, b.done !== false, text(b.note) || null);
+    const finished = await finishTask(id, b.done !== false, text(b.note) || null, b.chat === true);
     if (!finished) error(409, 'This task was already answered');
     return json({ ok: true });
   }

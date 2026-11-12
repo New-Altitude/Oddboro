@@ -778,6 +778,23 @@ export type HeldHandOff = Pick<HandOff, 'from' | 'title' | 'brief' | 'files'> & 
  */
 export type FileEdit = { path: string; before: string };
 
+/**
+ * The card in its Odd's chat the owner answered from: an ask they approved
+ * or sent back there, or a task they finished there. The run their answer
+ * starts replies in that chat under it, as well as in the Ledger.
+ */
+export type ChatCard = { kind: 'ask' | 'task'; id: number; title: string };
+
+/**
+ * An answer the owner gave in a chat: the Odd whose chat it is, and the card.
+ * Only a run of that Odd's replies there (`chatCardOf`).
+ */
+export type InChat = { staffId: string; card: ChatCard };
+
+/** The card a run of `staffId` replies under, when the owner answered in its own chat. */
+export const chatCardOf = (staffId: string, chat?: InChat): ChatCard | undefined =>
+  chat?.staffId === staffId ? chat.card : undefined;
+
 export const followUps = pgTable('follow_ups', {
   id: id(),
   staffId: text()
@@ -816,6 +833,8 @@ export const followUps = pgTable('follow_ups', {
   unparkedAt: at('unparked_at'),
   /** The owner ticked "Report when done": success goes on their desk too. A failure always does. */
   reportWhenDone: boolean().notNull().default(false),
+  /** The owner answered in this Odd's chat, on this card: the run's reply goes there too. Null from the Desk. */
+  chatCard: jsonb().$type<ChatCard>(),
   createdAt: created(),
   startedAt: at('started_at'),
   outcome: text().$type<Outcome>(),

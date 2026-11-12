@@ -139,7 +139,14 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    started from `hooks.server.ts`, woken by changes to `follow_ups` and by any run ending). Its reply
    ends in an outcome line; every outcome goes in the ledger, a failure always
    goes on the desk, and a success only when the owner ticked "Report when done". A
-   restart mid-run marks it failed rather than run it twice. A proposed hire
+   restart mid-run marks it failed rather than run it twice. When the owner
+   gave the answer on a card in the Odd's own chat, the route gets `chat: true`,
+   the follow-up keeps that card (`chatCard`, set by `followUp`, `setGoal` or
+   `answerThread` in the ledger), and as the run ends `endFollowUp` adds its
+   reply to that chat as one `told` line whose `re` names the card
+   (`answerInChat` in `staff.ts`); a failed run's line says so in one line and
+   carries `runFailed`, never `failed`, which would mark the owner's line before
+   it unanswered. An answer on the Desk adds no chat line. A proposed hire
    has "Open hire window" in place of Approve; hiring from it approves it,
    copies the owner's intake into the hire's `notes/intake.md` and links it to
    the goal it was proposed for. Every hire then gets going alone (`firstDay`):
@@ -337,8 +344,12 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    in chat, using the Desk's ask route and the same plan checkboxes. The
    manager's New goal box starts empty and sets that exact title through the
    Goals route. A retry with its request id returns the goal already set. Answer and
-   finish on a plain task sends the owner's words as its closing note. Neither
-   starts a chat run. Reply under an item otherwise sends a message about
+   finish on a task sends the owner's words as its closing note, and a task
+   with choices shows them as buttons, a tap answering the choice and finishing
+   it. `chatAnswer` in `src/lib/ui/task-steps.ts` says which tasks take one
+   response in chat; one with a file, a sign-in, a secret or a tool step, or a
+   connect task, stays on the Desk. Neither starts a chat run; the follow-up
+   replies in the chat afterwards. Reply under an item otherwise sends a message about
    it: the run gets the item in full, and a reply about a report marks it read
    and goes in the ledger as the owner's feedback (`replyToReport`). A
    colleague's chat also lists the threads it works on and does not lead,

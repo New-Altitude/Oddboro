@@ -6,7 +6,9 @@
 // Approving an access ask answers with the connect task it made, if any, so the
 // desk goes straight on to it. A reply is approved only by sending it or saving
 // it (`reply/+server.ts`), a filter only by creating it (`filter/+server.ts`),
-// and a folder ask only by giving the folder (`folder/+server.ts`).
+// and a folder ask only by giving the folder (`folder/+server.ts`). `chat`
+// says the owner answered on the ask's card in its Odd's chat, so the run the
+// answer starts replies there too.
 import { error, json } from '@sveltejs/kit';
 import {
   approveGoal,
@@ -43,17 +45,19 @@ const worksOnYes = (kind: AskKind): kind is WorksOnYes => {
  */
 const APPROVAL_WORK: Record<
   WorksOnYes,
-  (a: AskRow, reason: string | null, picks: unknown) => Promise<Response>
+  (a: AskRow, reason: string | null, picks: unknown, inChat: boolean) => Promise<Response>
 > = {
-  goal: async (a, reason) => {
-    await approveGoal(a.id, reason).catch((e: Error) => error(400, e.message));
+  goal: async (a, reason, _, inChat) => {
+    await approveGoal(a.id, reason, inChat).catch((e: Error) => error(400, e.message));
     return json({ ok: true });
   },
-  plan: async (a, reason, picks) => {
+  plan: async (a, reason, picks, inChat) => {
     const ticked = Array.isArray(picks)
       ? picks.filter((p): p is number => Number.isInteger(p))
       : [];
-    const done = await approvePlan(a.id, ticked, reason).catch((e: Error) => error(400, e.message));
+    const done = await approvePlan(a.id, ticked, reason, inChat).catch((e: Error) =>
+      error(400, e.message)
+    );
     return json({ ok: true, hires: done.hires });
   }
 };
@@ -74,6 +78,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
     reason?: unknown;
     report?: unknown;
     picks?: unknown;
+    chat?: unknown;
   };
   const decision = DECISIONS.find((d) => d === body.decision);
   if (!decision) error(400, `Say ${DECISIONS.slice(0, -1).join(', ')} or ${DECISIONS.at(-1)}`);
@@ -83,12 +88,13 @@ export const POST: RequestHandler = async ({ params, request }) => {
   const yes: Yes = OWNER_ANSWERS.ask[a.kind].approve;
   if (decision === 'approve' && 'by' in yes) error(400, yes.by);
   const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 2000) : '';
+  const inChat = body.chat === true;
   if (decision === 'approve' && worksOnYes(a.kind)) {
-    return APPROVAL_WORK[a.kind](a, reason || null, body.picks);
+    return APPROVAL_WORK[a.kind](a, reason || null, body.picks, inChat);
   }
   let decided;
   try {
-    decided = await decideAsk(a.id, decision, reason || null, body.report === true);
+    decided = await decideAsk(a.id, decision, reason || null, body.report === true, inChat);
   } catch (e) {
     error(400, e instanceof Error ? e.message : String(e));
   }

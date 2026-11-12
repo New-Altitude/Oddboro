@@ -29,7 +29,9 @@ import {
   threads,
   followUps,
   goals,
+  chatCardOf,
   type FollowUpKind,
+  type InChat,
   type Outcome
 } from './schema.ts';
 import { flat } from './desk-answers.ts';
@@ -55,6 +57,8 @@ async function followUp(
     note: string | null;
     pickedUp?: string[];
     reportWhenDone?: boolean;
+    /** The owner answered in a chat: a run in that Odd's chat replies there too. */
+    chat?: InChat;
   },
   q: Db = db
 ): Promise<void> {
@@ -66,7 +70,14 @@ async function followUp(
       : f.taskId
         ? await q.select({ threadId: tasks.threadId }).from(tasks).where(eq(tasks.id, f.taskId))
         : [];
-  await addFollowUp(q, { staffId, kind, ...f, threadId: on?.threadId });
+  const { chat, ...rest } = f;
+  await addFollowUp(q, {
+    staffId,
+    kind,
+    ...rest,
+    chatCard: chatCardOf(staffId, chat),
+    threadId: on?.threadId
+  });
 }
 
 /**
@@ -347,6 +358,7 @@ export async function recordUnreturned(u: Unreturned): Promise<void> {
  * as an ask or task. `joined` are the results this run picked up with its own
  * (`resultsToJoin`): they end with it. `stopped` is work its lead's leaving
  * stopped (`removeOdd`): the owner let the lead go, so no report says it failed.
+ * True when this call wrote the outcome, false when one was written already.
  */
 export async function finishFollowUp(
   f: FollowUpRow,
@@ -354,7 +366,7 @@ export async function finishFollowUp(
   outcome: Outcome,
   result: string,
   o: { joined?: number[]; stopped?: boolean } = {}
-): Promise<void> {
+): Promise<boolean> {
   const joined = o.joined ?? [];
   const title = `${OUTCOME_TITLE[f.kind][outcome].replace('{owner}', await ownerName())}: ${about}`;
   const origin = await servesHandOff(f);
@@ -454,6 +466,7 @@ export async function finishFollowUp(
       askId: f.askId ?? undefined
     });
   if (finished && finished.unreturned) await recordUnreturned(finished.unreturned);
+  return !!finished;
 }
 
 /**
@@ -508,13 +521,19 @@ function endedAs(t: TaskRow): TaskEnded {
 export const CUT_OFF_RESULT =
   'The office restarted while this was running, so it may be half done. Check it, then ask the Odd to finish it.';
 
-/** Follow-ups a restart cut off mid-run. They fail rather than run twice. */
-export async function closeStaleFollowUps(): Promise<void> {
+/**
+ * Follow-ups a restart cut off mid-run. They fail rather than run twice.
+ * Returns those this closed, so the office can say so where each began.
+ */
+export async function closeStaleFollowUps(): Promise<FollowUpRow[]> {
   const stale = await db
     .select()
     .from(followUps)
     .where(and(isNotNull(followUps.startedAt), isNull(followUps.outcome)));
-  for (const f of stale) await finishFollowUp(f, await workTitle(f), 'failed', CUT_OFF_RESULT);
+  const closed: FollowUpRow[] = [];
+  for (const f of stale)
+    if (await finishFollowUp(f, await workTitle(f), 'failed', CUT_OFF_RESULT)) closed.push(f);
+  return closed;
 }
 
 /**
