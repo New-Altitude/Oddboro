@@ -3,10 +3,9 @@
 // the address, so each address must first prove, in this run, that the
 // office holding that key answers there (office-proof.ts). Anything else on a
 // port the office uses would otherwise be handed the key.
-import { existsSync } from 'node:fs';
-import { home, OFFICE_PORT } from './home.ts';
+import { OFFICE_PORT } from './home.ts';
 import { provesOffice, type Via } from './office-proof.ts';
-import { OWNER_COOKIE, OWNER_KEY_FILE, ownerKey } from './owner-key.ts';
+import { OWNER_COOKIE, storedOwnerKey } from './owner-key.ts';
 
 /** The office's own port, and the ports its Caddy answers http and https on. Tests move them to free ones. */
 export type Ports = { office: number; http: number; https: number };
@@ -25,15 +24,15 @@ const keyed = (key: string) => ({ cookie: `${OWNER_COOKIE}=${key}` });
 /**
  * The office's key once the office answers on its own port, or undefined when
  * it never does. The office makes its key file as it starts, before it
- * answers, so until the file is there the office is not up: setup never reads
- * the key sooner, or it would make one of its own. Then the office proves it
- * holds that key before any request carries it.
+ * answers, so until the file is there the office is not up and setup waits,
+ * making no key of its own. Then the office proves it holds that key before
+ * any request carries it.
  */
 async function officeKey(office: string, wait: Wait): Promise<string | undefined> {
   for (let i = 0; i < wait.tries; i++) {
     if (i > 0) await new Promise((r) => setTimeout(r, wait.pause));
-    if (!existsSync(home(OWNER_KEY_FILE))) continue;
-    const key = ownerKey();
+    const key = storedOwnerKey();
+    if (key === undefined) continue;
     if (!(await provesOffice(office, key, 'direct'))) continue;
     const up = await fetch(office, { headers: keyed(key) }).then(
       (r) => r.ok,
