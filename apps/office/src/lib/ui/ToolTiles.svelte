@@ -57,17 +57,19 @@
 </div>
 
 <style>
-  /* One height for every tile, the tallest's: a long name or why never makes one stand taller. */
+  /* One height for every tile, the tallest's: a long name or why never makes one stand taller.
+     Each tile stacks from the top, so the marks and names line up across a row even when a
+     narrow panel wraps one tile's name or why onto two lines. */
   .tile {
     display: flex;
     min-block-size: 6.5rem;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
     gap: 0.35rem;
     border-radius: 0.75rem;
     background: var(--color-raise);
-    padding: 0.5rem;
+    padding-block: 0.75rem;
+    padding-inline: 0.5rem;
     text-align: center;
     color: var(--color-ink);
   }

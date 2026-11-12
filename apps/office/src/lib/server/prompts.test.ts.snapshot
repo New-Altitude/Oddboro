@@ -152,6 +152,8 @@ To give one of them work, call hand_off.
 
 <message>
 
+
+
 Can you write a note?
 `;
 
@@ -1316,6 +1318,8 @@ To give one of them work, call hand_off.
 
 <message>
 
+
+
 What is on today?
 `;
 
@@ -1454,6 +1458,8 @@ To give one of them work, call hand_off.
 
 
 <message>
+
+
 
 How is the office?
 `;

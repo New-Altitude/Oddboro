@@ -9,7 +9,7 @@
 import { execFileSync } from 'node:child_process';
 import { readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { modelSection, runsGoing, type ModelUsage } from '@oddboro/ledger';
+import { currentPlatform, modelSection, runsGoing, type ModelUsage } from '@oddboro/ledger';
 import { cleanEnv } from './claude.ts';
 
 /** Where the owner signs a tool in for the office: beside the Odd's "Runs on" picker. */
@@ -86,7 +86,7 @@ export function mcpGrant(allowed: string): { server: string; tool?: string } {
   return at < 0 ? { server: name } : { server: name.slice(0, at), tool: name.slice(at + 2) };
 }
 
-/** A picture an office run sends with its message (`runAsOffice`), as a file in the run's folder. */
+/** A picture the office sends with one message, from a file it kept. */
 export type RunImage = { path: string; mediaType: string };
 
 /** What run() takes from one line of a tool's own stream (`read` on a `Launch` in cli.ts). */
@@ -103,7 +103,7 @@ export type RunEvent =
   | { type: 'error'; message: string };
 
 /** A file replaced in one step, so the tool never reads it half written. */
-export function replace(path: string, content: string, mode = 0o600): void {
+export function replace(path: string, content: string | Uint8Array, mode = 0o600): void {
   const tmp = `${path}.${process.pid}.tmp`;
   writeFileSync(tmp, content, { mode });
   renameSync(tmp, path);
@@ -198,7 +198,19 @@ export function shellEnv(temp: string): Record<string, string> {
  * process that already left the tree (its parent ended, so launchd took it)
  * is not found here.
  */
-export function stopGroups(pid: number): void {
+export function stopGroups(pid: number, signal: 'SIGTERM' | 'SIGKILL' = 'SIGTERM'): void {
+  if (currentPlatform() === 'win32') {
+    try {
+      execFileSync(
+        join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe'),
+        ['/PID', String(pid), '/T', '/F'],
+        { windowsHide: true, stdio: 'ignore' }
+      );
+    } catch {
+      // The run may already have exited.
+    }
+    return;
+  }
   const groups = new Set([pid]);
   try {
     const rows = execFileSync('ps', ['-axo', 'pid=,ppid=,pgid='], { encoding: 'utf8' })
@@ -221,7 +233,7 @@ export function stopGroups(pid: number): void {
   }
   for (const group of groups)
     try {
-      process.kill(-group, 'SIGTERM');
+      process.kill(-group, signal);
     } catch {
       // That group is gone already: nothing is left to stop.
     }

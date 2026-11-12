@@ -55,8 +55,9 @@ assert.ok(pat, 'pat was not installed');
 
 after(() => fake.close());
 
-let handsRuns = 0;
-bus.on(RUN_ENDED, () => handsRuns++);
+/** Chat attempts and runs that ended: each frees its place in the run registry. */
+let runsEnded = 0;
+bus.on(RUN_ENDED, () => runsEnded++);
 
 /** What the office sent pat's door, each turn in order. */
 const doorTurns = () =>
@@ -89,7 +90,10 @@ const body = (outcome: string, more: object = {}) => ({
 async function talk(message: string) {
   const events: { type: string; text?: string; message?: string }[] = [];
   const kept = history(pat.id).length;
-  await chat(pat.id, message, (e) => events.push(e));
+  // The reply's run id, which the page gets first for Stop, is left out.
+  await chat(pat.id, message, (e) => {
+    if (e.type !== 'reply') events.push(e);
+  });
   const added = history(pat.id).slice(kept);
   return { events, reply: added.find((m) => m.from === 'staff')?.text };
 }
@@ -100,12 +104,12 @@ const REPORT_START = '{"args":["-p"';
 test("a chat with a persona Odd runs its hands, then sends the owner's words and the report to the door, and the reply is the persona's", async () => {
   // The hello pat said at install is a line the office wrote, which the hands' run is told first.
   assert.ok(history(pat.id).some((m) => m.told));
-  const runs = handsRuns;
+  const runs = runsEnded;
   const turns = doorTurns().length;
   const { events, reply } = await talk(
     'Should we ship the fair poster on Friday? Think aloud: the hands are reading the notes.'
   );
-  assert.equal(handsRuns - runs, 1);
+  assert.equal(runsEnded - runs, 1);
   assert.equal(doorTurns().length - turns, 1);
   const { message } = lastTurn();
   assert.ok(message.length <= 4000, `${message.length} characters`);
@@ -332,11 +336,12 @@ test('when the door refuses access the owner still gets the report, the Odd goes
   assert.ok(reply?.includes(REPORT_START));
   assert.equal((await L.personaOdd('pat'))?.package?.quiet, 'access');
 
-  const runs = handsRuns;
+  const runs = runsEnded;
   const turns = doorTurns().length;
   const kept = history(pat.id).length;
   const quiet = await talk('Hello?');
-  assert.equal(handsRuns, runs);
+  // Only the chat's attempt ended: its hands never ran, so no tool step below.
+  assert.equal(runsEnded - runs, 1);
   assert.equal(doorTurns().length, turns);
   // A quiet Odd's chat ends as any failed chat does: the owner's line and the
   // quiet line stay, marked failed, so a reload shows both (NEW-1658).

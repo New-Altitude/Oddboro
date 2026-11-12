@@ -8,6 +8,10 @@ them, the lessons the owner teaches the Odds, the app's updates, and the ledger 
 Drizzle ORM over the `postgres` driver. Server only, except `./time`,
 `./tools`, `./agents`, `./access`, `./grantable`, `./goals`, `./update-window`, `./work-paths`, `./desk-answers`, `./live-tables` and `./filters`, which the page may import.
 
+`src/run-registry.ts` holds each live run, its stop handle and its work in
+progress. `reserveRun` and `releaseRun` own its lifetime; the office derives
+its slot queue and chat state from these entries. It holds no saved office data.
+
 Where a new kind of thing starts, the shared function for each job, and the
 check that catches a missed place: `docs/architecture.md`.
 

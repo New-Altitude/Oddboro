@@ -52,7 +52,7 @@ export async function sendFile<T>(url: ApiUrl, file: Blob, name: string, type: s
   return res.json() as Promise<T>;
 }
 
-async function failure(res: Response): Promise<Error> {
+export async function failure(res: Response): Promise<Error> {
   const text = await res.text();
   let message = text;
   try {

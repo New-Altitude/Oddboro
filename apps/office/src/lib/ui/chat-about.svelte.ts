@@ -1,3 +1,4 @@
+import type { WorkAbout } from '../staff/work.ts';
 // Starting a chat about something on screen, e.g. a passage in a report. The
 // page opens the staffer's chat; the chat takes the draft and puts it in its
 // message box for the owner to finish and send.
@@ -13,6 +14,7 @@ export type Delivered = ChatRef;
 
 export const chatRequest = $state<{
   staff?: string;
+  work?: WorkAbout;
   drafts: Record<string, string>;
   /** The delivery selected in a staffer's chat. */
   focus?: { staff: string; item: Delivered };

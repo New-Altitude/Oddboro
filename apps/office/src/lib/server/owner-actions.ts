@@ -171,6 +171,9 @@ export const OWNER_ACTIONS = {
     notAnAction:
       "Keeps a file the owner attaches in the Odd's attachments folder, as part of the chat message that names it, which the chat's own log keeps."
   },
+  'DELETE /api/staff/[id]/chat': {
+    none: 'Stops only the named reply attempt and keeps its outcome in chat.'
+  },
   'POST /api/staff/[id]/chat': {
     notAnAction:
       "The chat's own log keeps it; a decision in it is recorded by the tool the Odd calls."

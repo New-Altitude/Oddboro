@@ -12,7 +12,6 @@
 // removed when the run ends, pictures and all. Neither has a shell or a tool
 // that reads files: the pictures go in with the message.
 import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -22,13 +21,14 @@ import {
   officeAgent,
   ownerName,
   recordUsage,
-  runsGoing,
+  reserveRun,
+  releaseRun,
   type Agent,
   type ModelUsage,
   type UsageKind
 } from '@oddboro/ledger';
 import { notePlan, pluginsOff, staffEnv } from './staff.ts';
-import { claudeRunHome, modelArgs, spawnClaude } from './claude.ts';
+import { claudeInput, claudeRunHome, modelArgs, spawnClaude } from './claude.ts';
 import { endedEarly, LAUNCHES, stoppedWhy } from './cli.ts';
 import { SIGN_IN_WHERE, stopGroups, type RunImage } from './launch.ts';
 import { agentCommand } from './agent-sign-in.ts';
@@ -41,6 +41,7 @@ const RUNS = join(HOME, 'runs');
 export type OfficeRun = { ok: boolean; text: string };
 
 type OfficeRunOpts = {
+  runId?: string;
   system: string;
   kind: UsageKind;
   timeoutMs: number;
@@ -70,8 +71,18 @@ export async function runAsOffice(message: string, opts: OfficeRunOpts): Promise
     };
   const tooOld = await tooOldLine(agent, SIGN_IN_HERE);
   if (tooOld) return { ok: false, text: tooOld };
-  const said = { ...opts, system: say(opts.system) };
-  return agent === 'claude' ? run(say(message), said) : runOn(agent, say(message), said);
+  const live = reserveRun({ staffId: 'office', kind: opts.kind });
+  const cancel = () => live.stop.abort();
+  if (opts.signal?.aborted) cancel();
+  else opts.signal?.addEventListener('abort', cancel, { once: true });
+  try {
+    const said = { ...opts, system: say(opts.system), signal: live.stop.signal, runId: live.key };
+    if (said.signal.aborted) return { ok: false, text: STOPPED };
+    return await (agent === 'claude' ? run(say(message), said) : runOn(agent, say(message), said));
+  } finally {
+    opts.signal?.removeEventListener('abort', cancel);
+    releaseRun(live);
+  }
 }
 
 /**
@@ -100,7 +111,7 @@ async function runOn(
   opts: OfficeRunOpts
 ): Promise<OfficeRun> {
   mkdirSync(RUNS, { recursive: true, mode: 0o700 });
-  const key = `office-${randomUUID()}`;
+  const key = opts.runId!; // runAsOffice reserves the entry before launch.
   const dir = join(RUNS, key);
   mkdirSync(dir, { mode: 0o700 });
   const clear = () => rmSync(dir, { recursive: true, force: true });
@@ -138,7 +149,6 @@ async function runOn(
   }
   const tool = AGENT_NAMES[agent];
   return new Promise((done) => {
-    runsGoing.add(key);
     const [cmd, before] = agentCommand(agent) ?? [agent, []];
     const child = spawn(cmd, [...before, ...launch.args], {
       cwd: dir,
@@ -159,7 +169,6 @@ async function runOn(
       if (finished) return;
       finished = true;
       clearTimeout(timer);
-      runsGoing.delete(key);
       launch.done();
       clear();
       done(r);
@@ -304,22 +313,6 @@ async function run(message: string, opts: OfficeRunOpts): Promise<OfficeRun> {
       })
     );
     child.stdin.on('error', () => {});
-    child.stdin.end(
-      opts.images?.length
-        ? `${JSON.stringify({
-            type: 'user',
-            message: {
-              role: 'user',
-              content: [
-                ...opts.images.map((i) => ({
-                  type: 'image',
-                  source: { type: 'base64', media_type: i.mediaType, data: i.data }
-                })),
-                { type: 'text', text: message }
-              ]
-            }
-          })}\n`
-        : message
-    );
+    child.stdin.end(claudeInput(message, opts.images));
   });
 }
