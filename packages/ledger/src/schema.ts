@@ -25,6 +25,7 @@ import { HIRE_DEFAULTS } from './grantable.ts';
 import type { Agent, Effort, GrantedFolder } from './agents.ts';
 import type { FolderAccess, Level, OwnSwitch } from './access-words.ts';
 import type { GmailFilter } from './filter-words.ts';
+import type { FollowUpKind } from './work/kinds.ts';
 import type { MailAttachment } from './mail-attachments.ts';
 import type { PersonaLink } from './personas.ts';
 
@@ -801,30 +802,7 @@ export const threads = pgTable('threads', {
   endedAt: at('ended_at')
 });
 
-/**
- * Work a staffer owes after the owner answers it: carry out an approved ask, rework
- * one the owner sent back, take in the reason for a no, act on their feedback on a report, pick up the work
- * that waited on a task the staffer gave them, or plan a goal the owner set. A
- * new hire with a job gets started without being asked by its `first_day`. A `hand_off` is
- * work a colleague handed it, and `handed_back` brings the result home. A
- * `resume` picks a thread back up for its hub: at the time the hub set, or with
- * the owner's answer when no other run follows it. An `edited` run reads the
- * owner's edit to one of the staffer's files, for a lesson.
- */
-export const FOLLOW_UP_KINDS = [
-  'carry_out',
-  'rework',
-  'denied',
-  'feedback',
-  'task_done',
-  'goal',
-  'first_day',
-  'hand_off',
-  'handed_back',
-  'resume',
-  'edited'
-] as const;
-export type FollowUpKind = (typeof FOLLOW_UP_KINDS)[number];
+export { FOLLOW_UP_KINDS, type FollowUpKind } from './work/kinds.ts';
 /** `waiting` means the staffer put what it needs on the owner's desk. */
 export type Outcome = 'done' | 'failed' | 'waiting';
 
