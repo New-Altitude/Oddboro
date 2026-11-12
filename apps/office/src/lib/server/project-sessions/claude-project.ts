@@ -38,8 +38,25 @@ export const CLAUDE_LIST_FAILED = {
   failed: `${AGENT_NAMES.claude} could not list this project's conversations. Try again.`
 };
 
+/**
+ * The sessions `claude agents --json` printed, or undefined when it printed
+ * anything but a list. Entries that are not objects are left out.
+ */
+function agentList(out: string): Active[] | undefined {
+  let list: unknown;
+  try {
+    list = JSON.parse(out);
+  } catch {
+    // The caller tells the owner the listing failed; the parser's own words
+    // would show them a raw SyntaxError.
+    return undefined;
+  }
+  if (!Array.isArray(list)) return undefined;
+  return list.filter((a): a is Active => typeof a === 'object' && a !== null);
+}
+
 /** The Claude Code sessions running in `folder`, from `claude agents --json`. */
-async function claudeAgents(folder: string): Promise<string> {
+async function claudeAgents(folder: string): Promise<Active[]> {
   const [exe, prefix] = nativeCommand('claude');
   const r = await probe(exe, [...prefix, 'agents', '--json', '--cwd', folder], {
     env: nativeEnv(),
@@ -48,8 +65,11 @@ async function claudeAgents(folder: string): Promise<string> {
     maxBuffer: 4_000_000
   });
   switch (r.status) {
-    case 'ok':
-      return r.out;
+    case 'ok': {
+      const list = agentList(r.out);
+      if (!list) throw new Error(CLAUDE_LIST_FAILED.failed);
+      return list;
+    }
     case 'missing':
       throw new Error(CLAUDE_LIST_FAILED.missing());
     case 'failed':
@@ -67,7 +87,7 @@ export async function claudeProjects(folder: string) {
     savedClaudeSessions(folder),
     claudeAgents(folder)
   ]);
-  const active = (JSON.parse(processes) as Active[]).filter((a) => a.cwd === folder && a.sessionId);
+  const active = processes.filter((a) => a.cwd === folder && a.sessionId);
   const rows = new Map(
     history
       .filter((h) => !h.cwd || h.cwd === folder)
