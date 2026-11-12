@@ -511,10 +511,14 @@ test("a goal hire with a job opens its own job's work as a thread of its own", a
   assert.equal(led.goalId, null, "its own job's work opens a thread of its own");
 });
 
-test('a lead off its threads must say which thread an ask is for, and one it does not lead is refused', async () => {
+test('a lead off its threads may say which thread an ask is for, left out reads as none, and one it does not lead is refused', async () => {
   const c = await toolServer('mo', { ...chat, RUN_KEY: 'k-mo' });
   const tool = (await c.listTools()).tools.find((t) => t.name === 'raise_ask');
-  assert.ok(tool?.inputSchema.required?.includes('work'), 'it has to choose, null or a number');
+  assert.ok(tool && 'work' in (tool.inputSchema.properties ?? {}), 'a lead is offered work');
+  assert.ok(
+    !tool.inputSchema.required?.includes('work'),
+    'work may be left out, and then the ask is for none of it'
+  );
   const [lenas] = await db.select().from(threads).where(eq(threads.hubId, 'lead'));
   const wrong = await c.callTool({ name: 'raise_ask', arguments: { ...ask, work: lenas.id } });
   assert.equal(wrong.isError, true);

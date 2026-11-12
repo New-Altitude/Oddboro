@@ -473,7 +473,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   thread it leads with `continue_work` instead of opening one; such a run's
   system prompt lists its latest threads (`recentThreads`,
   `recentThreadsBrief`), and its `raise_ask` and `give_owner_a_task` take
-  `work`, the thread it leads that the item is for, or null (`notLed` refuses
+  `work`, the thread it leads that the item is for, or null or left out for none (`notLed` refuses
   one it does not lead or that is stopped). Continuing a done or failed thread reopens it with the
   same folder, history, goal and request, for a new round of work; a stopped
   one stays stopped. A round of work takes up to `HAND_OFF_LIMIT` (8)
