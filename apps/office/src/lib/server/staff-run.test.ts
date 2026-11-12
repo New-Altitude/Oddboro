@@ -24,9 +24,10 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
-import { test } from 'node:test';
+import { mock, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import type { McpServer } from './launch.ts';
+import postgres from 'postgres';
 import {
   L,
   PATCH,
@@ -235,6 +236,59 @@ test("a Grok run's agent file gives a command server and a hosted one in the sha
     { office: { ...WRITTEN.office, env: { ...WRITTEN.office.env, HOME: homedir() } } },
     { notes: WRITTEN.notes }
   ]);
+});
+
+/** Wait until `ok`. */
+async function until(ok: () => boolean | Promise<boolean>, ms = 10_000): Promise<void> {
+  const end = Date.now() + ms;
+  while (!(await ok())) {
+    if (Date.now() > end) throw new Error('Waited too long');
+    await new Promise((r) => setTimeout(r, 20));
+  }
+}
+
+test('a run stuck before its tool starts ends at its time limit, saying where it stopped, and its tool never starts after', async () => {
+  const { run } = await import('./staff.ts');
+  const cleo = (await L.staffer('cleo'))!;
+  const logged: string[] = [];
+  const log = mock.method(console, 'error', (...a: unknown[]) => {
+    logged.push(a.map(String).join(' '));
+  });
+  // Opening the run's tools reads the Odd's lessons: a lock on them holds the
+  // run while it gets ready, as a hung database or embedding once held a chat.
+  // On a connection of its own, since the held run takes the ledger's.
+  const pg = postgres(process.env.DATABASE_URL!, { max: 2, onnotice: () => {} });
+  const lock = await pg.reserve();
+  const events: { type: string; message?: string }[] = [];
+  try {
+    await lock`begin`;
+    await lock`lock table lessons in access exclusive mode`;
+    const started = Date.now();
+    const r = await run(cleo, 'Hello?', {
+      kind: 'chat',
+      timeoutMs: 2_000,
+      onEvent: (e) => void events.push(e)
+    });
+    assert.equal(r.ok, false);
+    assert.match(r.text, /^No reply after /);
+    assert.ok(Date.now() - started < 4_000, 'the run outlived its time limit');
+    assert.deepEqual(events, [{ type: 'error', message: r.text }]);
+    assert.ok(
+      logged.some((l) =>
+        /^Cleo's chat run stopped after .+ minutes, opening its tools' gateway\.$/.test(l)
+      ),
+      logged.join('\n')
+    );
+  } finally {
+    await lock`rollback`;
+    lock.release();
+    await pg.end();
+  }
+  // With the lock gone the run gets ready, too late: Claude Code never starts.
+  await until(() => logged.some((l) => l.endsWith('so Claude Code never started.')));
+  assert.equal(L.runsGoing.size, 0);
+  assert.equal(events.length, 1, 'the owner was told twice');
+  log.mock.restore();
 });
 
 test("a Claude Code Odd's chat gets the arguments it always had, with its rules, sandbox and system prompt in files, the office's file tools in place of its own, plus the new instruction files' denies", async () => {
