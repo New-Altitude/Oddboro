@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import {
   asks,
   followUps,
@@ -714,6 +714,36 @@ async function runsAndParks(f: Row, task: number) {
 // A task the lead gave, on no work: the one kind on no work it may park on (`parkOnTask`).
 const aTask = (lead: string, title: string) =>
   O.giveTask(lead, { title, why: 'w', steps: ['Do it'] });
+
+test('a failed wake leaves the task open, its checked steps intact, and its work parked', async () => {
+  const work = await ownWork('failed-wake');
+  const task = await aTask(work.lead, 'Confirm the route');
+  await O.tickStep(task.id, 0);
+  await parksOn(work.lead, work.work, task.id);
+  await db.execute(
+    sql`alter table follow_ups add constraint refuse_test_wake check (kind <> 'resume' or note not like '%Confirm the route%')`
+  );
+  try {
+    await assert.rejects(O.finishTask(task.id, true, 'Use the north path.'));
+    assert.equal((await O.task(task.id))?.status, 'open');
+    assert.equal((await O.task(task.id))?.steps[0].done, true);
+    assert.equal((await threadOf(work.work)).resumeOnTask, task.id);
+    assert.deepEqual(await onThread(work.work, 'resume'), []);
+    assert.equal(
+      (await db.select().from(followUps).where(eq(followUps.taskId, task.id))).length,
+      0
+    );
+  } finally {
+    await db.execute(sql`alter table follow_ups drop constraint refuse_test_wake`);
+  }
+  const attempts = await Promise.all([
+    O.finishTask(task.id, true, 'Use the north path.'),
+    O.finishTask(task.id, true, 'Use the north path.')
+  ]);
+  assert.deepEqual(attempts.sort(), [false, true]);
+  assert.equal((await onThread(work.work, 'resume')).length, 1);
+  assert.equal((await O.task(task.id))?.note, 'Use the north path.');
+});
 
 test('finishing a task wakes the thread parked on it once, and a dropped task wakes it too and says so', async () => {
   const finished = await ownWork('finished');

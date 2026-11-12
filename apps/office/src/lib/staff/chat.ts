@@ -38,7 +38,7 @@ export type ChatEntry = {
   failed?: true;
   inSession?: true;
   re?: ChatRef;
-  item?: ChatRef & { status: string };
+  item?: ChatRef & { status: string; note?: string | null };
   lesson?: LessonLine;
   /** `back` is which hand-back a reply or pick-up line shows. */
   handOff?: { line: HandOffLine; step: HandOffStep; back?: number };
