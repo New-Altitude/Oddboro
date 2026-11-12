@@ -83,26 +83,56 @@ export async function until<T>(
   throw new Error(`no ${what} within ${secs} s`);
 }
 
-export async function getJson<T>(path: string, secs = 20): Promise<T> {
-  const r = await fetch(BASE + path, { signal: AbortSignal.timeout(secs * 1000) });
-  if (!r.ok) throw new Error(`GET ${path}: ${r.status}`);
-  return (await r.json()) as T;
+// The office answers only its owner's key, as a cookie named by its port. This
+// script imports only Node's own modules, so like the app's shell it writes
+// out the key file's name and the cookie's name itself;
+// apps/office/src/lib/server/desktop-names.test.ts holds them to the office's.
+const OWNER_KEY_FILE = 'owner-key';
+const OWNER_COOKIE = `oddboro-owner-${PORT}`;
+
+/**
+ * Every request to the office this run started, with its owner's key read
+ * from the run's home. The office makes the key's file as it starts, so with
+ * no file yet this rejects, as an office that is not up yet does, and never
+ * sends a request without the key. The error names the home, never the key.
+ */
+export async function officeFetch(
+  r: Run,
+  path: string,
+  init: { method?: string; headers?: Record<string, string>; body?: string } = {},
+  secs = 20
+): Promise<Response> {
+  const file = join(r.home, OWNER_KEY_FILE);
+  const key = existsSync(file) ? readFileSync(file, 'utf8').trim() : '';
+  if (!key) throw new Error(`no owner key in ${r.home} yet: the office has not started`);
+  return fetch(BASE + path, {
+    ...init,
+    headers: { ...init.headers, cookie: `${OWNER_COOKIE}=${key}` },
+    signal: AbortSignal.timeout(secs * 1000)
+  });
+}
+
+export async function getJson<T>(r: Run, path: string, secs = 20): Promise<T> {
+  const res = await officeFetch(r, path, {}, secs);
+  if (!res.ok) throw new Error(`GET ${path}: ${res.status}`);
+  return (await res.json()) as T;
 }
 
 export async function send(
+  r: Run,
   method: string,
   path: string,
   headers: Record<string, string>,
   body?: unknown,
   secs = 20
 ): Promise<{ status: number; text: string }> {
-  const r = await fetch(BASE + path, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(secs * 1000)
-  });
-  return { status: r.status, text: (await r.text()).slice(0, 200) };
+  const res = await officeFetch(
+    r,
+    path,
+    { method, headers, body: body === undefined ? undefined : JSON.stringify(body) },
+    secs
+  );
+  return { status: res.status, text: (await res.text()).slice(0, 200) };
 }
 
 /** What the office's own page sends with a write. WebKit before macOS 13.3 sends no Sec-Fetch-Site. */
@@ -401,7 +431,8 @@ export async function ready(app: ChildProcess, r: Run, secs = 120): Promise<numb
   const started = Date.now();
   let lookForDialog = 30_000;
   while (Date.now() - started < secs * 1000) {
-    const answered = await fetch(`${BASE}/api/update`, { signal: AbortSignal.timeout(2000) }).then(
+    // No key file yet rejects, and counts as not up yet.
+    const answered = await officeFetch(r, '/api/update', {}, 2).then(
       (res) => res.ok,
       () => false
     );

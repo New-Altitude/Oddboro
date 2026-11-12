@@ -385,8 +385,12 @@ private, `latest.json` answers 404 to them.
 a table per step; a failed required row fails the run. It runs the app on
 port 4590, database port 54590, a throwaway home and its own log
 (`ODDBORO_LOG`), and points `ODDBORO_UPDATE_URL` at an address that refuses,
-so the build never updates itself away. The port, home and log are its own;
-the secrets are not, so the office runs with no secret store
+so the build never updates itself away. Every request it makes to the office
+carries the office's key as the cookie `oddboro-owner-4590`, read from
+`owner-key` in the run's home (`officeFetch` in `driver.ts`); until the office
+has made that file, it counts as still starting. The page's own fetch inside
+the real window needs nothing added: the window opened with the key. The
+port, home and log are its own; the secrets are not, so the office runs with no secret store
 (`ODDBORO_SECRETS=office`), always with `--stage` and off CI for the app, and
 never reads the owner's Keychain or keyring.
 The Mac app keeps its secrets through its shell, in the same Keychain the

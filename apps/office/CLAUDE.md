@@ -1521,8 +1521,10 @@ sends every action as JSON, body or not.
    the same address without it, setting the cookie. The app's shell
    opens its window with it, and a new window on the office's own origin opens
    in the browser with it. `npm run setup` opens the page with it, and its own
-   checks, and the office's own requests to itself, send the cookie. A wrong key in the
-   address is refused like none.
+   checks, and the office's own requests to itself, send the cookie, and so
+   does every request of the release smoke (`officeFetch` in
+   `apps/desktop/scripts/driver.ts`). A wrong key in the address is refused
+   like none.
 3. A request without the key, a read included, reaches only an exact exception
    route (`EXCEPTION_ROUTES`, judged by `isExceptionPath` on the text the server
    routes on, never decoded again), each with its own proof. `/api/update`

@@ -52,6 +52,7 @@ import {
   logText,
   MAC,
   makeRun,
+  officeFetch,
   type Page,
   pageHeaders,
   plist,
@@ -59,6 +60,7 @@ import {
   ps,
   quit,
   ready,
+  type Run,
   run,
   screenshot,
   send,
@@ -138,31 +140,37 @@ function expectStatus(r: { status: number; text: string }, status: number): stri
 }
 
 /** The office's version: /api/health on a build that has it, /api/update before. */
-async function runningVersion(): Promise<{ version: string; health: boolean }> {
-  const health = await fetch(`${BASE}/api/health`).then(
-    (r) => (r.ok ? r.json() : undefined),
+async function runningVersion(r: Run): Promise<{ version: string; health: boolean }> {
+  const health = await officeFetch(r, '/api/health').then(
+    (res) => (res.ok ? res.json() : undefined),
     () => undefined
   );
   if (health) return { version: (health as { version: string }).version, health: true };
-  return { version: (await getJson<{ current: string }>('/api/update')).current, health: false };
+  return {
+    version: (await getJson<{ current: string }>(r, '/api/update')).current,
+    health: false
+  };
 }
 
 /** The checks every start of the office gets, the staged server's included. */
-async function officeChecks(expect: { version?: string; claude: boolean }): Promise<boolean> {
+async function officeChecks(
+  r: Run,
+  expect: { version?: string; claude: boolean }
+): Promise<boolean> {
   const found = await step('says the version it is', true, async () => {
-    const r = await runningVersion();
-    if (expect.version && r.version !== expect.version)
-      throw new Error(`${r.version}, not ${expect.version}`);
-    return r;
+    const running = await runningVersion(r);
+    if (expect.version && running.version !== expect.version)
+      throw new Error(`${running.version}, not ${expect.version}`);
+    return running;
   });
   await step('refuses a write with no Origin', true, async () =>
-    expectStatus(await send('DELETE', '/api/pokes/999999', {}), 403)
+    expectStatus(await send(r, 'DELETE', '/api/pokes/999999', {}), 403)
   );
   await step('takes a write shaped as the page sends it, with Sec-Fetch-Site', true, async () =>
-    expectStatus(await send('DELETE', '/api/pokes/999999', pageHeaders(true)), 404)
+    expectStatus(await send(r, 'DELETE', '/api/pokes/999999', pageHeaders(true)), 404)
   );
   await step('takes it with Origin only, as older WebKit sends it', true, async () =>
-    expectStatus(await send('DELETE', '/api/pokes/999999', pageHeaders(false)), 404)
+    expectStatus(await send(r, 'DELETE', '/api/pokes/999999', pageHeaders(false)), 404)
   );
   // The checks start programs (claude --version and others): 35 s on the arm64 Windows runner.
   await step(
@@ -170,6 +178,7 @@ async function officeChecks(expect: { version?: string; claude: boolean }): Prom
     true,
     async () => {
       const { checks } = await getJson<{ checks: { id: string; state: string; found: string }[] }>(
+        r,
         '/api/setup',
         90
       );
@@ -186,6 +195,7 @@ async function officeChecks(expect: { version?: string; claude: boolean }): Prom
   await step('onboards with a ready-made manager', true, async () =>
     expectStatus(
       await send(
+        r,
         'POST',
         '/api/onboarding',
         pageHeaders(true),
@@ -355,9 +365,8 @@ async function smokeStage(): Promise<void> {
           throw new Error(
             `it exited ${server.exitCode}: ${readFileSync(r.log, 'utf8').slice(-800)}`
           );
-        return (await fetch(`${BASE}/api/update`, { signal: AbortSignal.timeout(2000) })).ok
-          ? true
-          : undefined;
+        // No key file yet rejects, and `until` reads that as not up yet.
+        return (await officeFetch(r, '/api/update', {}, 2)).ok ? true : undefined;
       },
       90
     );
@@ -382,9 +391,10 @@ async function smokeStage(): Promise<void> {
     await stop(server).catch(() => undefined);
     return;
   }
-  const health = await officeChecks({ version: '0.0.0-smoke', claude: false });
+  const health = await officeChecks(r, { version: '0.0.0-smoke', claude: false });
   await step('serves its health, with every startup step', health, async () => {
     const h = await getJson<{ steps: Record<string, number>; readyMs: number | null }>(
+      r,
       '/api/health'
     );
     if (!h.readyMs || !h.steps.tables) throw new Error(JSON.stringify(h));
@@ -392,11 +402,14 @@ async function smokeStage(): Promise<void> {
   });
   await step("takes the page's report for the log, and nobody else's", health, async () => {
     expectStatus(
-      await send('POST', '/api/client-log', pageHeaders(true), { kind: 'error', message: 'smoke' }),
+      await send(r, 'POST', '/api/client-log', pageHeaders(true), {
+        kind: 'error',
+        message: 'smoke'
+      }),
       200
     );
     expectStatus(
-      await send('POST', '/api/client-log', {}, { kind: 'error', message: 'smoke' }),
+      await send(r, 'POST', '/api/client-log', {}, { kind: 'error', message: 'smoke' }),
       403
     );
     await sleep(500);
@@ -408,7 +421,7 @@ async function smokeStage(): Promise<void> {
   server = start();
   await step('starts again with its data', true, async () => {
     await answered(server);
-    const setup = await getJson<{ welcomed?: boolean }>('/api/setup', 90);
+    const setup = await getJson<{ welcomed?: boolean }>(r, '/api/setup', 90);
     if (!setup.welcomed) throw new Error('it forgot the onboarding');
     return 'still onboarded';
   });
@@ -551,7 +564,7 @@ async function smokeApp(): Promise<void> {
       if (status !== 404) throw new Error(`got ${status}`);
       return status;
     });
-  const health = await officeChecks({ version: args.version, claude });
+  const health = await officeChecks(r, { version: args.version, claude });
   await step('the log has the window loading the page, and the page booting', health, async () => {
     const text = await until(
       'both lines',
@@ -567,7 +580,7 @@ async function smokeApp(): Promise<void> {
       .join(' / ');
   });
   await step('no errors in the page', health, async () => {
-    const h = await getJson<{ pageErrors: number; pages: number }>('/api/health');
+    const h = await getJson<{ pageErrors: number; pages: number }>(r, '/api/health');
     if (h.pageErrors)
       throw new Error(
         `${h.pageErrors} page error(s): ${logText(r)
@@ -590,7 +603,7 @@ async function smokeApp(): Promise<void> {
       const again = launch(exe, r);
       times.push(await ready(again, r));
       if (i === 1) {
-        const setup = await getJson<{ welcomed?: boolean }>('/api/setup', 90);
+        const setup = await getJson<{ welcomed?: boolean }>(r, '/api/setup', 90);
         if (!setup.welcomed) throw new Error('it forgot the onboarding');
       }
       await quit(again, r);
