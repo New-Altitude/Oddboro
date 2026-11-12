@@ -115,9 +115,18 @@ const kit = (await import(
 };
 
 /**
+ * Kit's prefix for a remote function call. Kit's own test for it lives in a
+ * module that imports the built app's paths, which a test cannot load, so the
+ * prefix is written here.
+ */
+const isRemote = (request: Request) => new URL(request.url).pathname.startsWith('/_app/remote/');
+
+/**
  * `event.url` as Kit's `respond` gives it to `handle`: the request's own
- * address, with Kit's data or route suffix taken off. Kit adds back a
- * trailing slash only when its own query asks, which no target here does.
+ * address, with Kit's data or route suffix taken off. On a remote function
+ * call Kit takes the path and query from the client's own headers instead.
+ * Kit adds back a trailing slash only when its own query asks, which no target
+ * here does.
  */
 function kitUrl(request: Request): URL {
   const url = new URL(request.url);
@@ -125,6 +134,13 @@ function kitUrl(request: Request): URL {
     url.pathname = kit.strip_resolution_suffix(url.pathname);
   else if (kit.has_data_suffix(url.pathname))
     url.pathname = kit.strip_data_suffix(url.pathname) || '/';
+  else if (isRemote(request)) {
+    const pathname = request.headers.get('x-sveltekit-pathname');
+    if (pathname !== null) {
+      url.pathname = pathname;
+      url.search = request.headers.get('x-sveltekit-search') ?? '';
+    }
+  }
   return url;
 }
 
@@ -149,6 +165,7 @@ async function send(
     request,
     url: kitUrl(request),
     params: s.params ?? {},
+    isRemoteRequest: isRemote(request),
     getClientAddress: () => s.from ?? '127.0.0.1'
   } as unknown as RequestEvent;
   let ran = false;
@@ -634,6 +651,15 @@ test('a sign-in coming back reaches its page without the key, and nothing else t
     const posted = await send(ok, { path, headers: PAGE });
     assert.deepEqual([path, posted.status, posted.ran], [path, 403, false]);
   }
+});
+
+test('a remote function call that names a sign-in page in its headers is refused without the key', async () => {
+  const r = await send(ok, {
+    method: 'GET',
+    path: '/_app/remote/abc/q',
+    headers: { 'x-sveltekit-pathname': '/account/callback' }
+  });
+  assert.deepEqual([r.status, r.ran], [403, false]);
 });
 
 test("Odds, their tools' web fetch and other programs on this computer cannot read the office or load its pages", async () => {

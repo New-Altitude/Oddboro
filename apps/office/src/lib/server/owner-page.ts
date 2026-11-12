@@ -106,6 +106,10 @@ async function fits(request: Request, limit: number): Promise<boolean> {
  * by GET or HEAD.
  */
 function provesItself(event: RequestEvent): boolean {
+  // On a remote function call (`/_app/remote/...`), Kit takes `url.pathname`
+  // from the client's own `x-sveltekit-pathname` header, so the path there is
+  // the caller's to choose and proves nothing.
+  if (event.isRemoteRequest) return false;
   const { request } = event;
   const path = event.url.pathname;
   if (!isExceptionPath(path)) return false;
