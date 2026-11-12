@@ -14,6 +14,8 @@
   import GoalProposal from './GoalProposal.svelte';
   import { approvalTarget, approveWord, yesWord } from './chat-approval.ts';
   import { chatAnswer } from './task-steps.ts';
+  import BugReport from './BugReport.svelte';
+  import { bugRequest } from '../bug-report.ts';
   import Lesson from './Lesson.svelte';
   import PersonaQuiet from './PersonaQuiet.svelte';
   import { newTurnId } from '#lib/staff/chat-input.ts';
@@ -244,6 +246,7 @@
     );
   });
   let draft = $state('');
+  let report = $state<{ text: string; command?: string }>();
   let sending = $state(false);
   // The office already holds the text, files and reply target under this turn id.
   type Blocked = { turnId: string; signIn: ChatSignIn };
@@ -554,6 +557,12 @@
     if (saving || uploading) return;
     const words = draft.trim();
     if (!words && !pending.length) return;
+    const last = lines.at(-1);
+    const details = bugRequest(words, replyTo?.title ?? (last?.text || last?.item?.title || ''));
+    if (details !== undefined) {
+      report = { text: details, command: draft };
+      return;
+    }
     if (decisionMode) {
       const re = replyTo;
       const explicit = approveWord(words);
@@ -1176,6 +1185,10 @@
       >
       {#if copied === i}<span class="tip shown" aria-live="polite">Copied</span>{/if}
     </button>
+    <button
+      class="hover:text-ink"
+      onclick={() => (report = { text: line.text || line.item?.title || '' })}>Report bug</button
+    >
   </div>
 {/snippet}
 
@@ -1762,6 +1775,18 @@
 </div>
 
 <svelte:window onpointerdown={outside} />
+
+{#if report}
+  <BugReport
+    initial={report.text}
+    staff={profile.id}
+    onclose={() => (report = undefined)}
+    onfiled={() => {
+      if (report?.command === draft) draft = '';
+      if (!sending) load(profile.id);
+    }}
+  />
+{/if}
 
 <style>
   /* Three attached files at most (each 48px square, 2px and a 15px name under
