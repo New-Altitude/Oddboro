@@ -1,6 +1,6 @@
 // New Altitude personas as the page shows them. Type-only from the ledger, so
 // nothing of it reaches the page bundle.
-import type { Quiet } from '@oddboro/ledger';
+import type { HireProposal, Quiet } from '@oddboro/ledger';
 
 export type { Quiet, PersonaLink } from '@oddboro/ledger';
 
@@ -40,3 +40,62 @@ export const QUIET_LINE: Record<Quiet, (name: string) => string> = {
   'signed-out': (name) =>
     `You signed out of New Altitude, so ${name} stays quiet. Sign in under Setup, Account, then press Reconnect.`
 };
+
+/** A name as matching reads it: lowercase words, with dots, commas and extra spaces gone. */
+const words = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+
+/** The names a proposal gives its hire: its name, and its role without a trailing "Persona". */
+const namesIn = (p: Pick<HireProposal, 'name' | 'role'>) =>
+  [words(p.name), words(p.role).replace(/ persona$/, '')].filter(Boolean);
+
+/**
+ * The persona a hire proposal names, when New Altitude offers it: by its slug,
+ * or else by the whole display name as the proposal's name or role ("Pat Q.
+ * Rivers Persona"). A first name alone, or a name inside a longer role, never
+ * matches, and two matches are none.
+ */
+export function proposedPersona(
+  p: Pick<HireProposal, 'name' | 'role' | 'personaSlug'>,
+  offers: Offer[]
+): Offer | undefined {
+  const slug = p.personaSlug?.trim().toLowerCase();
+  const bySlug = slug ? offers.find((o) => o.slug === slug) : undefined;
+  if (bySlug) return bySlug;
+  const names = namesIn(p);
+  const found = offers.filter((o) => names.includes(words(o.displayName)));
+  return found.length === 1 ? found[0] : undefined;
+}
+
+/**
+ * The persona a hire window opened from a proposal offers instead of the
+ * builder: none without a proposal, or while the office has no list of offers
+ * (signed out, or New Altitude did not answer).
+ */
+export function suggestedPersona(
+  proposal: HireProposal | undefined,
+  offers: Offers | undefined
+): Offer | undefined {
+  return proposal && offers?.state === 'ok' ? proposedPersona(proposal, offers.offers) : undefined;
+}
+
+/**
+ * An ordinary Odd built from a proposal that named a persona: a name or role
+ * that is the person's own is cleared, and so is the appearance, so nothing
+ * of their likeness carries over.
+ */
+export function withoutLikeness(
+  p: Pick<HireProposal, 'name' | 'role'>,
+  o: Pick<Offer, 'displayName' | 'name'>
+): { name: string; role: string; appearance: string } {
+  const theirs = [words(o.displayName), words(o.name)];
+  const is = (s: string) => theirs.includes(s);
+  return {
+    name: is(words(p.name)) ? '' : p.name,
+    role: is(words(p.role).replace(/ persona$/, '')) ? '' : p.role,
+    appearance: ''
+  };
+}

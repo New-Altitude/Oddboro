@@ -23,6 +23,7 @@
   import { account } from './account.svelte.ts';
   import PersonaOffer from './PersonaOffer.svelte';
   import { connect, PersonaOffers, personas as asked } from './persona-offers.svelte.ts';
+  import { suggestedPersona, withoutLikeness, type Offer } from '#lib/persona.ts';
   import { call } from './api.ts';
   import { wins } from './windows.svelte.ts';
   import type { StaffProfile } from '../staff/roster.ts';
@@ -41,7 +42,8 @@
   let { rooms, from, id, onhired, ondone }: Props = $props();
 
   // Hire opens on a choice: make an Odd, or hire a persona New Altitude offers
-  // the owner's account. A proposal is always an Odd, so it skips the choice.
+  // the owner's account. A proposal skips the choice: it opens on the builder,
+  // or on the persona it names (`suggested`).
   // A window keeps the proposal it opened with, so its first value is the one.
   let path = $state<'choose' | 'odd' | 'persona'>(untrack(() => from) ? 'odd' : 'choose');
   // The offers, read once the account is signed in, so the list is ready when
@@ -63,6 +65,28 @@
   function hirePersona(slug: string) {
     hiring = slug;
     void connect(slug);
+  }
+
+  // A proposal that names a real person New Altitude offers as a persona shows
+  // that persona in place of the builder, never a made-up look-alike. The
+  // owner may still build an ordinary Odd, without the person's likeness.
+  let ordinary = $state(false);
+  const suggested = $derived(
+    ordinary ? undefined : suggestedPersona(from?.proposal, personas.state)
+  );
+
+  /** Add the persona, as Setup's Add does, on the hire grid with it picked. */
+  function addSuggested(slug: string) {
+    path = 'persona';
+    hirePersona(slug);
+  }
+
+  function buildOrdinary(o: Offer) {
+    const plain = withoutLikeness({ name, role }, o);
+    name = plain.name;
+    role = plain.role;
+    appearance = plain.appearance;
+    ordinary = true;
   }
 
   const STEPS = ['Who', 'Where', 'Job description', 'Model', 'First job', 'Review'];
@@ -289,7 +313,12 @@
         <ul class="grid grid-cols-2 gap-3">
           {#each personas.state.offers as o (o.slug)}
             {@const mine = asked[o.slug]}
-            <li class="flex flex-col items-center gap-2 rounded-xl bg-raise p-3 text-center">
+            <li
+              class="flex flex-col items-center gap-2 rounded-xl bg-raise p-3 text-center {o.slug ===
+              hiring
+                ? 'ring-1 ring-sea'
+                : ''}"
+            >
               <img src={o.portrait} alt="" class="size-16 rounded-md [image-rendering:pixelated]" />
               <div>
                 <p class="font-semibold text-ink">{o.displayName}</p>
@@ -325,10 +354,50 @@
       {/if}
     </div>
     <footer class="flex gap-2 border-t border-hairline p-3">
-      <button class="rounded-lg bg-raise px-3 py-2 text-sm" onclick={() => (path = 'choose')}
-        >Back</button
+      <button
+        class="rounded-lg bg-raise px-3 py-2 text-sm"
+        onclick={() => (path = from ? 'odd' : 'choose')}>Back</button
       >
     </footer>
+  </section>
+{:else if suggested}
+  <section
+    class="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-3 text-sm"
+    aria-label="Hire a persona"
+  >
+    <div class="flex gap-3 rounded-xl bg-raise p-3">
+      <img
+        src={suggested.portrait}
+        alt=""
+        class="size-16 shrink-0 rounded-md [image-rendering:pixelated]"
+      />
+      <div class="flex min-w-0 flex-col gap-2 text-xs">
+        <div>
+          <p class="text-sm font-semibold text-ink">{suggested.displayName}</p>
+          {#if suggested.jobTitle}<p class="text-muted">{suggested.jobTitle}</p>{/if}
+        </div>
+        <p class="leading-relaxed text-ink">
+          {suggested.displayName} is available as a New Altitude persona. Add the persona instead of building
+          an Odd that looks like them.
+        </p>
+        <p class="leading-relaxed text-muted">{suggested.disclosure}</p>
+      </div>
+    </div>
+    {#if suggested.joined === 'installed'}
+      <p class="text-xs leading-relaxed text-ink">{suggested.name} already works in your office.</p>
+    {:else}
+      <button
+        class="rounded-lg bg-sea px-3 py-2 font-medium text-night"
+        onclick={() => addSuggested(suggested.slug)}>Add {suggested.name}</button
+      >
+    {/if}
+    <button
+      class="rounded-lg bg-raise px-3 py-2 text-ink hover:bg-sea/20"
+      onclick={() => buildOrdinary(suggested)}>Build an ordinary Odd instead</button
+    >
+    <p class="text-xs text-muted">
+      An ordinary Odd gets a name and look of its own, not {suggested.displayName}'s.
+    </p>
   </section>
 {:else}
   <section class="flex h-full min-h-0 flex-col" aria-label="Hire an Odd">

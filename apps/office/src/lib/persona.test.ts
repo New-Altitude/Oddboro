@@ -1,0 +1,110 @@
+// Which New Altitude persona a hire proposal names, and when the hire window
+// offers it in place of the builder. Run with `npm test -w @oddboro/office`.
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import type { HireProposal } from '@oddboro/ledger';
+import { proposedPersona, suggestedPersona, withoutLikeness, type Offer } from './persona.ts';
+
+const offer = (slug: string, displayName: string, name: string): Offer => ({
+  slug,
+  displayName,
+  jobTitle: null,
+  disclosure: '',
+  name,
+  role: 'Persona',
+  remit: '',
+  portrait: '',
+  joined: 'no'
+});
+
+const pat = offer('pat-q-rivers', 'Pat Q. Rivers', 'Pat');
+const rowan = offer('rowan-hale', 'Rowan Hale', 'Rowan');
+const offers = [pat, rowan];
+
+const proposal = (p: Partial<HireProposal>): HireProposal => ({
+  name: 'Mira',
+  role: 'Mail Clerk',
+  permission: 'read',
+  remit: 'Sorts the mail',
+  jobDescriptionFile: 'notes/jd.md',
+  ...p
+});
+
+test('a proposal finds its persona by slug', () => {
+  assert.equal(
+    proposedPersona({ name: 'Mira', role: 'Strategy', personaSlug: 'rowan-hale' }, offers),
+    rowan
+  );
+});
+
+test('a proposal finds its persona by the whole name in its role or its name', () => {
+  assert.equal(proposedPersona({ name: 'Pat', role: 'Pat Q. Rivers Persona' }, offers), pat);
+  assert.equal(proposedPersona({ name: 'Pat', role: 'pat q rivers persona' }, offers), pat);
+  assert.equal(proposedPersona({ name: 'Rowan Hale', role: 'Advisor' }, offers), rowan);
+  assert.equal(proposedPersona({ name: 'Mira', role: 'Rowan Hale' }, offers), rowan);
+});
+
+test('a slug New Altitude does not offer falls back to the whole name', () => {
+  assert.equal(
+    proposedPersona(
+      { name: 'Pat', role: 'Pat Q. Rivers Persona', personaSlug: 'pat-rivers' },
+      offers
+    ),
+    pat
+  );
+  assert.equal(
+    proposedPersona({ name: 'Mira', role: 'Mail Clerk', personaSlug: 'nobody' }, offers),
+    undefined
+  );
+});
+
+test('a first name alone, or a name inside a longer role, never matches', () => {
+  assert.equal(proposedPersona({ name: 'Pat', role: 'Mail Clerk' }, offers), undefined);
+  assert.equal(
+    proposedPersona({ name: 'Mira', role: "Pat's Research Assistant" }, offers),
+    undefined
+  );
+  assert.equal(
+    proposedPersona({ name: 'Mira', role: 'Rowan Hale Fan Club Lead' }, offers),
+    undefined
+  );
+  assert.equal(proposedPersona({ name: 'Mira', role: 'Persona' }, offers), undefined);
+});
+
+test('two matches are none', () => {
+  assert.equal(
+    proposedPersona({ name: 'Rowan Hale', role: 'Pat Q. Rivers Persona' }, offers),
+    undefined
+  );
+  const twin = offer('pat-q-rivers-2', 'Pat Q. Rivers', 'Pat');
+  assert.equal(
+    proposedPersona({ name: 'Pat', role: 'Pat Q. Rivers Persona' }, [pat, twin]),
+    undefined
+  );
+});
+
+test('the hire window offers the persona a proposal names, and only with a list of offers', () => {
+  const named = proposal({ name: 'Pat', role: 'Pat Q. Rivers Persona' });
+  assert.equal(suggestedPersona(named, { state: 'ok', offers }), pat);
+  // Signed out, or New Altitude without a list: the builder, as before.
+  assert.equal(suggestedPersona(named, { state: 'out' }), undefined);
+  assert.equal(suggestedPersona(named, { state: 'unreachable' }), undefined);
+  assert.equal(suggestedPersona(named, undefined), undefined);
+  // No such persona on offer, or no proposal: the builder.
+  assert.equal(suggestedPersona(proposal({}), { state: 'ok', offers }), undefined);
+  assert.equal(suggestedPersona(named, { state: 'ok', offers: [rowan] }), undefined);
+  assert.equal(suggestedPersona(undefined, { state: 'ok', offers }), undefined);
+});
+
+test('an ordinary Odd built instead keeps none of the person', () => {
+  assert.deepEqual(withoutLikeness({ name: 'Pat', role: 'Pat Q. Rivers Persona' }, pat), {
+    name: '',
+    role: '',
+    appearance: ''
+  });
+  assert.deepEqual(withoutLikeness({ name: 'Mira', role: 'Strategy Advisor' }, pat), {
+    name: 'Mira',
+    role: 'Strategy Advisor',
+    appearance: ''
+  });
+});

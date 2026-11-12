@@ -1698,6 +1698,15 @@ the persona's voice.
    same wait or problem. The chat prints the disclosure above the messages.
    `hand_off` tells a colleague that a persona's replies come from New
    Altitude, so what is handed to it leaves this computer.
+8. A proposal for a real person. A hire window opened from a proposal that
+   names a persona on offer shows that persona in place of the builder,
+   with Add, which starts the install on the hire grid with it picked, and
+   Build an ordinary Odd instead, which clears the person's name, role and
+   appearance. `proposedPersona` in `src/lib/persona.ts` matches by the
+   proposal's `personaSlug`, or else by the whole display name as its name
+   or role ("<Full Name> Persona"), never a first name, and two matches are
+   none. Signed out or with no match, the builder opens as before. Adding
+   the persona leaves the proposal open on the desk for the owner to deny.
 
 ## Running it always
 
