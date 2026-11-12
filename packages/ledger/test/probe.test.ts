@@ -16,11 +16,11 @@ test('a command that is not there is missing, not an empty answer', async () => 
   assert.deepEqual(await probe('oddboro-no-such-command', []), { status: 'missing' });
 });
 
-test('a file marked to run that no system can run is missing too', async () => {
-  // A Mac and Linux refuse it with ENOEXEC, which execFile throws rather than
-  // passing to its callback. Windows refuses it at the start in its own way.
+test('a file marked to run whose interpreter is not there is missing too', async () => {
+  // A Mac and Linux refuse it with ENOENT, as execve finds no
+  // /no/such/interpreter. Windows refuses it at the start in its own way.
   const file = join(folder, 'not-a-program');
-  writeFileSync(file, 'These are words, not a program.\n');
+  writeFileSync(file, '#!/no/such/interpreter\nThese are words, not a program.\n');
   chmodSync(file, 0o755);
   assert.deepEqual(await probe(file, []), { status: 'missing' });
 });

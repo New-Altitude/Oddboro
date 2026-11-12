@@ -5,7 +5,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { rmSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { after, test } from 'node:test';
 import { recorder, tempOffice } from './diagnostics-harness.ts';
 
@@ -17,7 +16,8 @@ after(() => {
   rmSync(folder, { recursive: true, force: true });
 });
 
-const file = (p: string) => fileURLToPath(new URL(p, import.meta.url));
+// File: URLs, since the ESM loader, and so `--import`, takes no Windows drive path.
+const file = (p: string) => new URL(p, import.meta.url).href;
 const TIMERS = file('./diagnostics-idle-timers.ts');
 
 // One traced request and one error, 7 s for the SDK's 5 s span flush, then a

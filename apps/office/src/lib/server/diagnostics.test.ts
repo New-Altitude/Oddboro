@@ -344,9 +344,8 @@ test('the page sends no span for each file it fetches, and keeps its own spans',
 
 test('an unhandled rejection still ends the server', async () => {
   const from = door.got.length;
-  const instrumentation = fileURLToPath(
-    new URL('../../instrumentation.server.ts', import.meta.url)
-  );
+  // A file: URL, since the ESM loader takes no Windows drive path.
+  const instrumentation = new URL('../../instrumentation.server.ts', import.meta.url).href;
   // Not spawnSync: the door runs in this process and must answer the child.
   const code = await new Promise<number | null>((done) => {
     const child = execFile(

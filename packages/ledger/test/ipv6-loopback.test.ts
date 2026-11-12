@@ -6,7 +6,6 @@ import dns from 'node:dns/promises';
 import { createServer as createHttpServer, request, type Server } from 'node:http';
 import net, { createServer } from 'node:net';
 import { syncBuiltinESMExports } from 'node:module';
-import { fileURLToPath } from 'node:url';
 import { afterEach, mock, test } from 'node:test';
 import { holdIpv6Loopback } from '../src/ipv6-loopback.ts';
 import { answerProof, provesOffice } from '../src/office-proof.ts';
@@ -106,7 +105,8 @@ test('an office whose [::1] is taken stops, with the port-taken error', async ()
   open.push(squatter as unknown as Server);
   await new Promise<void>((done) => squatter.listen({ host: '::1', port: 0 }, done));
   const { port } = squatter.address() as net.AddressInfo;
-  const module = fileURLToPath(new URL('../src/ipv6-loopback.ts', import.meta.url));
+  // A file: URL, since the ESM loader takes no Windows drive path.
+  const module = new URL('../src/ipv6-loopback.ts', import.meta.url).href;
   const script = `import { holdIpv6Loopback } from ${JSON.stringify(module)};
     import { createServer } from 'node:http';
     const s = createServer(); s.listen(${port}, '127.0.0.1'); holdIpv6Loopback(s);`;
