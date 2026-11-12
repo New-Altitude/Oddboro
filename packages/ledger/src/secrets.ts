@@ -22,6 +22,7 @@ import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
 import { SYSTEM, type System } from './platform.ts';
 import { fixedError } from './errors.ts';
+import { UNDER_TEST } from './home.ts';
 
 const SERVICE = 'oddboro';
 
@@ -220,15 +221,23 @@ const STORES: Record<System, (() => Store) | undefined> = {
   linux: () => secretService,
   windows: credentialManager
 };
+/** Under test, the store until a test stands one in: every use throws (`current`). */
+const REFUSING = Symbol('refusing');
 /**
  * This system's store, or none when it has none or it would not load. A
  * process the office starts in the app on a Mac (`ODDBORO_SECRETS=office`,
  * the staff tool server) gets none: only the office reaches the Keychain,
  * through the shell, so a read here finds nothing and a write never lands in
  * the old store where any program could read it.
+ *
+ * Under test it starts refusing, so no test reads or writes the developer's
+ * own Keychain, Secret Service or Credential Manager by accident. A test that
+ * tests a store itself, with its command stubbed, sets
+ * `ODDBORO_SECRETS=system` before it imports this file to get this system's.
  */
-let store = ((): Store | undefined => {
+let store = ((): Store | typeof REFUSING | undefined => {
   if (process.env.ODDBORO_SECRETS === 'office') return undefined;
+  if (UNDER_TEST && process.env.ODDBORO_SECRETS !== 'system') return REFUSING;
   try {
     return SYSTEM ? STORES[SYSTEM]?.() : undefined;
   } catch {
@@ -374,14 +383,30 @@ export async function useShellSecrets(
   await moveLegacy(ask, secrets);
 }
 
+/**
+ * The store in use. It throws under test until a test stands one in, and is
+ * called outside each caller's `try`, so the refusal is never swallowed as a
+ * missing secret.
+ */
+function current(): Store | undefined {
+  if (store === REFUSING) {
+    throw new Error(
+      "A test reached this computer's secret store. Load office-under-test.ts, which stands one in, or stand one in with mock.module."
+    );
+  }
+  return store;
+}
+
 export function setSecret(connector: string, name: string, value: string): void {
-  if (!store) throw fixedError('This system has no secret store the office can use yet.');
-  store.set(`${connector}:${name}`, value);
+  const using = current();
+  if (!using) throw fixedError('This system has no secret store the office can use yet.');
+  using.set(`${connector}:${name}`, value);
 }
 
 export function getSecret(connector: string, name: string): string | undefined {
+  const using = current();
   try {
-    return store?.get(`${connector}:${name}`) || undefined;
+    return using?.get(`${connector}:${name}`) || undefined;
   } catch {
     return undefined;
   }
@@ -389,9 +414,10 @@ export function getSecret(connector: string, name: string): string | undefined {
 
 /** Remove a secret; true when there was one. */
 export function deleteSecret(connector: string, name: string): boolean {
+  const using = current();
   try {
-    store?.remove(`${connector}:${name}`);
-    return !!store;
+    using?.remove(`${connector}:${name}`);
+    return !!using;
   } catch {
     return false;
   }
@@ -399,9 +425,10 @@ export function deleteSecret(connector: string, name: string): boolean {
 
 /** Whether this computer has a secret store the office can use, and why not when it has none. */
 export function secretStore(): { ok: true } | { ok: false; problem: string } {
-  if (!store) return { ok: false, problem: 'not found on this system' };
+  const using = current();
+  if (!using) return { ok: false, problem: 'not found on this system' };
   try {
-    store.check();
+    using.check();
     return { ok: true };
   } catch (e) {
     const missing = (e as NodeJS.ErrnoException).code === 'ENOENT';

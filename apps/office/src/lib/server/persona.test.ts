@@ -21,22 +21,6 @@ const store = new Map<string, string>();
 const undeletable = new Set<string>();
 /** Secrets whose write the store refuses; `setSecret` throws, as a failed system call does. */
 const unwritable = new Set<string>();
-// The real module's other exports too, such as `useShellSecrets`, which the
-// office's server hooks import.
-const realSecrets = await import('@oddboro/ledger/secrets');
-mock.module('@oddboro/ledger/secrets', {
-  namedExports: {
-    ...realSecrets,
-    getSecret: (connector: string, name: string) => store.get(`${connector}:${name}`),
-    setSecret: (connector: string, name: string, value: string) => {
-      if (unwritable.has(`${connector}:${name}`)) throw new Error('the store refused the write');
-      store.set(`${connector}:${name}`, value);
-    },
-    deleteSecret: (connector: string, name: string) =>
-      !undeletable.has(`${connector}:${name}`) && store.delete(`${connector}:${name}`),
-    secretStore: () => ({ ok: true })
-  }
-});
 
 // Everything the office prints, for the check that no secret reaches a log.
 const printed: string[] = [];
@@ -71,6 +55,23 @@ Object.assign(process.env, {
   ODDBORO_LOCAL_DB: '1',
   OLLAMA_URL: 'http://127.0.0.1:9',
   ODDBORO_ACCOUNT_SITE: `${fake.origin}/`
+});
+// The real module's other exports too, such as `useShellSecrets`, which the
+// office's server hooks import. Loaded after the settings above: secrets.ts
+// loads home.ts, which reads where the office is and its ports as it loads.
+const realSecrets = await import('@oddboro/ledger/secrets');
+mock.module('@oddboro/ledger/secrets', {
+  namedExports: {
+    ...realSecrets,
+    getSecret: (connector: string, name: string) => store.get(`${connector}:${name}`),
+    setSecret: (connector: string, name: string, value: string) => {
+      if (unwritable.has(`${connector}:${name}`)) throw new Error('the store refused the write');
+      store.set(`${connector}:${name}`, value);
+    },
+    deleteSecret: (connector: string, name: string) =>
+      !undeletable.has(`${connector}:${name}`) && store.delete(`${connector}:${name}`),
+    secretStore: () => ({ ok: true })
+  }
 });
 const { startLocalDatabase } = await import('@oddboro/ledger/local-db');
 const stopDatabase = await startLocalDatabase();

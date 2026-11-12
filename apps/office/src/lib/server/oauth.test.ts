@@ -10,19 +10,6 @@ import { after, mock, test } from 'node:test';
 import { fakeNewAltitude, LOST_ANSWERS } from './fake-new-altitude.ts';
 
 const store = new Map<string, string>();
-// The real module's other exports too, such as `useShellSecrets`, which the
-// office's server hooks import.
-const realSecrets = await import('@oddboro/ledger/secrets');
-mock.module('@oddboro/ledger/secrets', {
-  namedExports: {
-    ...realSecrets,
-    getSecret: (connector: string, name: string) => store.get(`${connector}:${name}`),
-    setSecret: (connector: string, name: string, value: string) =>
-      void store.set(`${connector}:${name}`, value),
-    deleteSecret: (connector: string, name: string) => store.delete(`${connector}:${name}`),
-    secretStore: () => ({ ok: true })
-  }
-});
 
 const folder = mkdtempSync(join(tmpdir(), 'oddboro-oauth-'));
 const port = await new Promise<number>((done) => {
@@ -40,6 +27,20 @@ Object.assign(process.env, {
   DATABASE_URL: `postgres://postgres:postgres@127.0.0.1:${port}/postgres`,
   ODDBORO_LOCAL_DB: '1',
   OLLAMA_URL: 'http://127.0.0.1:9'
+});
+// The real module's other exports too, such as `useShellSecrets`, which the
+// office's server hooks import. Loaded after the settings above: secrets.ts
+// loads home.ts, which reads where the office is and its ports as it loads.
+const realSecrets = await import('@oddboro/ledger/secrets');
+mock.module('@oddboro/ledger/secrets', {
+  namedExports: {
+    ...realSecrets,
+    getSecret: (connector: string, name: string) => store.get(`${connector}:${name}`),
+    setSecret: (connector: string, name: string, value: string) =>
+      void store.set(`${connector}:${name}`, value),
+    deleteSecret: (connector: string, name: string) => store.delete(`${connector}:${name}`),
+    secretStore: () => ({ ok: true })
+  }
 });
 const fake = await fakeNewAltitude();
 const { startLocalDatabase } = await import('@oddboro/ledger/local-db');
