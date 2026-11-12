@@ -15,6 +15,7 @@
 // and runs once the app is back.
 import {
   askToCatchUp,
+  claimScheduledRun,
   clearAway,
   closeStaleRuns,
   dueNow,
@@ -42,15 +43,22 @@ import { held } from './update.ts';
 const LONGEST_WAIT_MS = 10 * 60_000;
 
 const g = globalThis as unknown as {
-  jobClock?: { started?: true; timer?: ReturnType<typeof setTimeout>; line?: Promise<void> };
+  jobClock?: {
+    started?: true;
+    timer?: ReturnType<typeof setTimeout>;
+    line?: Promise<void>;
+    revision?: number;
+    stop?: () => void;
+  };
 };
 const running = new Set<number>();
 /** Jobs whose owed run waits in the line, so a second look adds none. */
 const inLine = new Set<number>();
 
 async function plan(): Promise<void> {
-  const clock = (g.jobClock ??= {});
-  clearTimeout(clock.timer);
+  const clock = g.jobClock;
+  if (!clock?.started) return;
+  const revision = (clock.revision = (clock.revision ?? 0) + 1);
   const now = new Date();
   let soonest = now.getTime() + LONGEST_WAIT_MS;
   for (const next of await lookAtJobs(now)) soonest = Math.min(soonest, next);
@@ -64,6 +72,8 @@ async function plan(): Promise<void> {
       void wakeThread(t.id).catch((e: unknown) => console.error(`Thread ${t.id} did not wake:`, e));
     else soonest = Math.min(soonest, t.resumeAt.getTime());
   }
+  if (g.jobClock !== clock || clock.revision !== revision) return;
+  clearTimeout(clock.timer);
   clock.timer = setTimeout(() => void plan(), Math.max(1000, soonest - Date.now()));
 }
 
@@ -130,11 +140,17 @@ export async function start(j: JobRow, trigger: RunTrigger, owed?: Date[]): Prom
   try {
     const now = new Date();
     const onTime = trigger === 'schedule' && !owed;
-    if (onTime) await setNextRun(j.id, nextRun(j.schedule, now));
+    // On time, the run claims its due time and moves the job on in one step,
+    // so two looks at once start it once.
+    const run = onTime ? await claimScheduledRun(j, now) : await startRun(j, trigger);
+    if (!run) return;
     const times = owed ?? [onTime && j.nextRunAt ? j.nextRunAt : now];
-    const run = await startRun(j, trigger);
-    const r = await runJob(j, trigger, times);
-    await finishRun(run, j, r.ok, r.text);
+    const r = await runJob(j, trigger, times).catch((e: unknown) => ({
+      ok: false,
+      text: e instanceof Error ? e.message : String(e),
+      checkedFiles: undefined
+    }));
+    await finishRun(run, j, r.ok, r.text, r.checkedFiles);
   } finally {
     running.delete(j.id);
   }
@@ -149,12 +165,19 @@ export async function runNow(id: number): Promise<void> {
 }
 
 /** Start the clock once per process. */
-export function startClock(): void {
-  if (g.jobClock?.started) return;
-  g.jobClock = { ...g.jobClock, started: true };
-  listen();
-  bus.on('event', (e: OfficeEvent) => {
+export function startClock(): () => void {
+  if (g.jobClock?.stop) return g.jobClock.stop;
+  const changed = (e: OfficeEvent) => {
     if (e.type === 'change' && ['jobs', 'pokes', 'threads'].includes(e.table)) void plan();
-  });
+  };
+  const stop = () => {
+    clearTimeout(g.jobClock?.timer);
+    bus.off('event', changed);
+    delete g.jobClock;
+  };
+  g.jobClock = { ...g.jobClock, started: true, stop, revision: 0 };
+  listen();
+  bus.on('event', changed);
   void closeStaleRuns().then(plan);
+  return stop;
 }

@@ -15,6 +15,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  lt,
   lte,
   ne,
   not,
@@ -48,6 +49,7 @@ import {
   answerThread,
   goalThread,
   keepRun,
+  isOnThread,
   raisedOn,
   settleThread,
   startHeld,
@@ -89,6 +91,7 @@ import {
   type HeldCall,
   type ReplyDraft,
   type LedgerKind,
+  type JobFiles,
   type RunTrigger,
   type MissedRuns,
   type Schedule,
@@ -3519,9 +3522,15 @@ export async function tasksFrom(staffId: string): Promise<TaskRow[]> {
 
 // Reports
 
-export async function addReport(staffId: string, title: string, body: string, runId?: number) {
-  await db.insert(reports).values({ staffId, title, body });
-  await record({ kind: 'report', actor: staffId, title, body, runId });
+export async function addReport(
+  staffId: string,
+  title: string,
+  body: string,
+  runId?: number,
+  q: Db = db
+) {
+  await q.insert(reports).values({ staffId, title, body });
+  await record({ kind: 'report', actor: staffId, title, body, runId }, q);
 }
 
 export async function readReport(id: number): Promise<void> {
@@ -3778,6 +3787,7 @@ export async function addJob(
     schedule: Schedule;
     report?: boolean;
     missed?: MissedRuns;
+    files?: JobFiles;
   },
   q: Db = db
 ): Promise<JobRow> {
@@ -3791,15 +3801,21 @@ export async function addJob(
 export async function updateJob(
   id: number,
   patch: Partial<
-    Pick<JobRow, 'name' | 'instructions' | 'schedule' | 'enabled' | 'report' | 'missed'>
-  >
+    Pick<JobRow, 'name' | 'instructions' | 'schedule' | 'enabled' | 'report' | 'missed' | 'files'>
+  >,
+  expectedFiles?: JobFiles
 ): Promise<void> {
-  const [row] = await db.update(jobs).set(patch).where(eq(jobs.id, id)).returning();
-  if (row && (patch.schedule || patch.enabled))
-    await db
-      .update(jobs)
-      .set({ nextRunAt: nextRun(row.schedule, new Date()) })
-      .where(eq(jobs.id, id));
+  const schedule = patch.schedule ?? (patch.enabled ? (await job(id))?.schedule : undefined);
+  const rows = await db
+    .update(jobs)
+    .set({
+      ...patch,
+      changedAt: new Date(),
+      ...(schedule ? { nextRunAt: nextRun(schedule, new Date()) } : {})
+    })
+    .where(and(eq(jobs.id, id), expectedFiles ? eq(jobs.files, expectedFiles) : undefined))
+    .returning({ id: jobs.id });
+  if (!rows.length) throw new Error('This job changed. Reopen it to see its files.');
 }
 
 /** A staffer changes one of its own jobs, carrying out a change the owner approved. */
@@ -3823,22 +3839,30 @@ async function recordGoAhead(who: StaffRow, go: GoAhead, what: string): Promise<
 export async function editOwnJob(
   staffId: string,
   name: string,
-  patch: Partial<Pick<JobRow, 'instructions' | 'schedule' | 'report' | 'missed'>>,
+  patch: Partial<
+    Pick<JobRow, 'name' | 'instructions' | 'schedule' | 'report' | 'missed' | 'files'>
+  >,
   go: GoAhead
 ): Promise<JobRow | undefined> {
   const who = await staffer(staffId);
-  const [j] = await db
+  const [j, other] = await db
     .select()
     .from(jobs)
-    .where(and(eq(jobs.staffId, staffId), eq(jobs.name, name)));
+    .where(and(eq(jobs.staffId, staffId), eq(jobs.name, name)))
+    .limit(2);
+  if (other) throw new Error('Two jobs have that name. Rename one on the Odd’s card first.');
   if (!who || !j) return undefined;
+  if (patch.files && !(await isOnThread(staffId, patch.files.thread)))
+    throw new Error('This Odd has no assignment on that work.');
   await updateJob(j.id, patch);
   await recordGoAhead(who, go, `change its job "${name}"`);
   await record({
     kind: 'work',
     actor: staffId,
-    title: `Changed its job: ${name}`,
+    title: `Changed its job: ${patch.name ?? name}`,
     body: [
+      patch.name && `Former name: ${name}`,
+      patch.files && `Scheduled files: ${JSON.stringify(patch.files)}`,
       patch.instructions && `Steps:\n${patch.instructions}`,
       patch.schedule && `Schedule: ${JSON.stringify(patch.schedule)}`,
       patch.report !== undefined &&
@@ -3849,7 +3873,7 @@ export async function editOwnJob(
       .join('\n\n'),
     askId: 'askId' in go ? go.askId : undefined
   });
-  return j;
+  return job(j.id);
 }
 
 /**
@@ -3905,28 +3929,121 @@ export async function setNextRun(id: number, at: Date): Promise<void> {
   await db.update(jobs).set({ nextRunAt: at }).where(eq(jobs.id, id));
 }
 
-export async function startRun(j: JobRow, trigger: RunTrigger): Promise<RunRow> {
-  const [row] = await db
+/** Claim this due time once, even if two looks by the clock overlapped. */
+export async function claimScheduledRun(j: JobRow, now: Date): Promise<RunRow | undefined> {
+  const dueAt = j.nextRunAt;
+  if (!dueAt || dueAt > now) return undefined;
+  return db.transaction(async (tx) => {
+    const [due] = await tx
+      .update(jobs)
+      .set({ nextRunAt: nextRun(j.schedule, now) })
+      .where(
+        and(
+          eq(jobs.id, j.id),
+          eq(jobs.enabled, true),
+          eq(jobs.nextRunAt, dueAt),
+          eq(sql`date_trunc('milliseconds', ${jobs.changedAt})`, j.changedAt.toISOString())
+        )
+      )
+      .returning({ id: jobs.id });
+    if (due) return startRun(j, 'schedule', tx);
+  });
+}
+
+/** Which timed run supplied this file. A failed, missed or superseded run
+ * leaves the previous file on disk, but it cannot supply the next step. */
+export function scheduledInput(j: JobRow, jobs: JobRow[], latest: RunRow[], now: Date) {
+  if (!j.files?.input) return undefined;
+  const input = j.files.input;
+  const writers = jobs.filter(
+    (w) => w.files?.thread === j.files?.thread && `${w.staffId}/${w.files?.output}` === input
+  );
+  if (writers.length !== 1 || writers[0].id === j.id)
+    return { problem: `Assign one other scheduled job to write ${input}.` };
+  const w = writers[0];
+  const r = latest.find((r) => r.jobId === w.id);
+  if (w.enabled && (!r || r.startedAt < w.changedAt || r.status === 'running'))
+    return {
+      pending: true,
+      problem: `Waiting for "${w.name}" to finish its scheduled file ${input}.`
+    };
+  if (
+    !w.enabled ||
+    !r?.checkedFiles ||
+    r.status !== 'done' ||
+    r.startedAt < w.changedAt ||
+    nextRun(w.schedule, r.startedAt) <= now ||
+    !w.nextRunAt ||
+    w.nextRunAt <= now
+  )
+    return {
+      problem: `"${w.name}" has no checked file for this cycle. Check its last result and let its next scheduled run finish before "${j.name}".`
+    };
+  return { run: r.id, sha256: r.checkedFiles.sha256 };
+}
+
+export function latestScheduledRuns(ids: number[], checked = false): Promise<RunRow[]> {
+  return db
+    .selectDistinctOn([runs.jobId])
+    .from(runs)
+    .where(
+      and(
+        inArray(runs.jobId, ids),
+        eq(runs.trigger, 'schedule'),
+        checked ? isNotNull(runs.checkedFiles) : undefined
+      )
+    )
+    .orderBy(runs.jobId, desc(runs.id));
+}
+
+export async function startRun(j: JobRow, trigger: RunTrigger, q: Db = db): Promise<RunRow> {
+  const [row] = await q
     .insert(runs)
     .values({ jobId: j.id, staffId: j.staffId, trigger })
     .returning();
   return row;
 }
 
-export async function finishRun(r: RunRow, j: JobRow, ok: boolean, summary: string): Promise<void> {
-  await db
-    .update(runs)
-    .set({ status: ok ? 'done' : 'failed', summary, finishedAt: new Date() })
-    .where(eq(runs.id, r.id));
-  if (ok && j.report) await addReport(j.staffId, j.name, summary, r.id);
-  else
-    await record({
-      kind: 'work',
-      actor: j.staffId,
-      title: `${ok ? 'Ran' : 'Failed'}: ${j.name}${r.trigger === 'manual' ? ` (started by ${await ownerName()})` : ''}`,
-      body: summary,
-      runId: r.id
-    });
+export async function finishRun(
+  r: RunRow,
+  j: JobRow,
+  ok: boolean,
+  summary: string,
+  checkedFiles?: RunRow['checkedFiles']
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    const [finished] = await tx
+      .update(runs)
+      .set({ status: ok ? 'done' : 'failed', summary, checkedFiles, finishedAt: new Date() })
+      .where(and(eq(runs.id, r.id), eq(runs.status, 'running')))
+      .returning({ id: runs.id });
+    if (!finished) return;
+    // A repeated block stays in the run history. Put the repair on the desk once.
+    if (j.files && !ok && r.trigger === 'schedule') {
+      const [prior] = await tx
+        .select()
+        .from(runs)
+        .where(and(eq(runs.jobId, j.id), eq(runs.trigger, 'schedule'), lt(runs.id, r.id)))
+        .orderBy(desc(runs.id))
+        .limit(1);
+      if (prior?.status !== 'failed' || prior.summary !== summary) {
+        await addReport(j.staffId, `Blocked: ${j.name}`, summary, r.id, tx);
+        return;
+      }
+    }
+    if (ok && j.report) await addReport(j.staffId, j.name, summary, r.id, tx);
+    else
+      await record(
+        {
+          kind: 'work',
+          actor: j.staffId,
+          title: `${ok ? 'Ran' : 'Failed'}: ${j.name}${r.trigger === 'manual' ? ` (started by ${await ownerName(tx)})` : ''}`,
+          body: summary,
+          runId: r.id
+        },
+        tx
+      );
+  });
 }
 
 /** Runs that a restart left marked running. */
@@ -3965,6 +4082,7 @@ export async function officeActivity(since: Date) {
         status: runs.status,
         trigger: runs.trigger,
         summary: runs.summary,
+        checkedFiles: runs.checkedFiles,
         at: runs.startedAt
       })
       .from(runs)
@@ -3995,6 +4113,10 @@ export async function officeActivity(since: Date) {
       .where(gte(followUps.createdAt, since))
   ]);
   const allJobs = await db.select().from(jobs).where(eq(jobs.enabled, true));
+  const fileJobs = allJobs.filter((j) => j.files).map((j) => j.id);
+  const [latest, verified] = fileJobs.length
+    ? await Promise.all([latestScheduledRuns(fileJobs), latestScheduledRuns(fileJobs, true)])
+    : [[], []];
   return {
     since: pt(since),
     now: pt(new Date()),
@@ -4004,7 +4126,26 @@ export async function officeActivity(since: Date) {
       role: p.role,
       jobs: allJobs
         .filter((j) => j.staffId === p.id)
-        .map((j) => ({ name: j.name, schedule: j.schedule })),
+        .map((j) => {
+          const base = { name: j.name, schedule: j.schedule, next: pt(j.nextRunAt) };
+          if (!j.files) return { ...base, state: 'configured', lastVerified: null };
+          const last = latest.find((r) => r.jobId === j.id && r.startedAt >= j.changedAt);
+          const checked = verified.find((r) => r.jobId === j.id && r.startedAt >= j.changedAt);
+          const source = scheduledInput(j, allJobs, latest, new Date());
+          const repair =
+            last?.status === 'failed' ? last.summary : source?.pending ? null : source?.problem;
+          const current =
+            !!last?.checkedFiles &&
+            j.nextRunAt &&
+            j.nextRunAt > new Date() &&
+            (!source || source.run === last.checkedFiles.inputRun);
+          return {
+            ...base,
+            state: repair ? 'blocked' : current ? 'verified files' : 'configured',
+            ...(repair ? { repair } : source?.pending ? { waiting: source.problem } : {}),
+            lastVerified: checked ? { at: pt(checked.finishedAt), ...checked.checkedFiles } : null
+          };
+        }),
       runs: ranJobs
         .filter((r) => r.staff === p.id)
         .map((r) => ({
@@ -4013,6 +4154,7 @@ export async function officeActivity(since: Date) {
           // 'manual' means the owner pressed Run now; only 'schedule' runs follow the timer.
           trigger: r.trigger,
           at: pt(r.at),
+          checkedFiles: r.checkedFiles,
           summary: r.summary?.slice(0, 600)
         }))
     })),

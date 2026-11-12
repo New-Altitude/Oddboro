@@ -32,7 +32,8 @@ import {
   type GoalHealth,
   type GoalPlanItem,
   type GoalStatus,
-  type InChat
+  type InChat,
+  type JobFiles
 } from './schema.ts';
 import { MANAGER_ROLE, goalReview } from './managers.ts';
 import { HORIZONS } from './goal-words.ts';
@@ -423,6 +424,11 @@ export async function approvePlan(
     .filter(Boolean)
     .join('\n');
 
+  const files = (f?: Omit<JobFiles, 'thread'>) => {
+    if (!f) return undefined;
+    if (!a.threadId) throw new Error('This plan has no work folder.');
+    return { ...f, thread: a.threadId };
+  };
   const hires: AskRow[] = [];
   const approved = await approveAsk(askId, note, {
     link: async (_, tx) => {
@@ -432,15 +438,18 @@ export async function approvePlan(
     carryOut: async () => {
       for (const item of picked) {
         if (item.kind === 'assign') {
-          if (item.job) await addJob({ staffId: item.staff, ...item.job });
+          if (item.job)
+            await addJob({ staffId: item.staff, ...item.job, files: files(item.job.files) });
           if (item.editJob)
             await editOwnJob(
               item.staff,
               item.editJob.name,
               {
+                name: item.editJob.newName,
                 instructions: item.editJob.instructions,
                 schedule: item.editJob.schedule,
-                missed: item.editJob.missed
+                missed: item.editJob.missed,
+                files: files(item.editJob.files)
               },
               { askId }
             );

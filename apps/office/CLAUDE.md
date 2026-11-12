@@ -1010,6 +1010,13 @@ pieces under 3,900 bytes a line, so no value is on a command line.
     stops timers in sleep. A run's result goes in the ledger, and on the owner's
     desk as a report when the job says so. Each run records its trigger:
     `schedule` when the timer started it, `manual` when the owner pressed Run now.
+    `job-run.ts` uses the shared runner and live slots.
+    A job with scheduled files reads its writer's checked result and writes in
+    its own part of that work. Opening the job checks the saved assignment,
+    accounts and source access without running it. The timer also checks source
+    sign-ins. The file server records the read and write; the office checks
+    the result against the file on disk. Gemini uses native file tools, so it
+    cannot verify a file job. Other jobs run as before.
     A thread its hub parked with `resume_at` wakes at that time: the clock
     starts the hub's `resume` follow-up. One parked on a task (`after_task`)
     wakes when that task is done or dropped, with no clock. So does a thread the usage window

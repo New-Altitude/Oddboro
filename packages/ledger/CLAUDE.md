@@ -798,6 +798,12 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   serves or whose thread it leads (`logProgress`), so the lead planning a goal
   logs before any plan is approved, and refuses every other goal. `list_goals`
   is the Office Manager's.
+- A job may name files on one piece of work. A plan binds them to its goal's
+  thread. `edit_my_job` can attach an existing job to work the Odd serves or
+  rename it in place. Sharing applies to the listed sources in that output.
+  A read of a scheduled input needs the latest scheduled writer's checked
+  bytes from the current cycle. `runs.checked_files` keeps the source run
+  and the output digest. Earlier runs and a model's summary have no such proof.
 - A schedule is every n minutes, daily, weekdays, or once a week on a day
   (`{ every: 'week', day: 'Fri', at: '16:00' }`).
 - A job's `missed` says what it does with runs missed while the office was

@@ -219,6 +219,17 @@ export type HireProposal = {
   goal?: { id: number; part: string };
 };
 
+/** Files a recurring job exchanges on one piece of work. Names start inside the thread. */
+export type JobFiles = {
+  thread: number;
+  input?: string;
+  output: string;
+  /** The source tools whose contents the output shares. */
+  sources?: string[];
+  /** The owner approved putting those sources in this output on this work. */
+  share?: boolean;
+};
+
 /** A new job for a staffer. */
 export type NewJob = {
   name: string;
@@ -226,6 +237,7 @@ export type NewJob = {
   schedule: Schedule;
   report?: boolean;
   missed?: MissedRuns;
+  files?: Omit<JobFiles, 'thread'>;
 };
 
 /** One piece of a goal plan. The owner ticks the ones to go ahead with. */
@@ -239,7 +251,14 @@ export type GoalPlanItem =
       /** A new job for it. */
       job?: NewJob;
       /** A change to one of its jobs, by name. */
-      editJob?: { name: string; instructions?: string; schedule?: Schedule; missed?: MissedRuns };
+      editJob?: {
+        name: string;
+        newName?: string;
+        instructions?: string;
+        schedule?: Schedule;
+        missed?: MissedRuns;
+        files?: Omit<JobFiles, 'thread'>;
+      };
     };
 
 /** How the office meets one goal. */
@@ -680,6 +699,8 @@ export const jobs = pgTable('jobs', {
   name: text().notNull(),
   instructions: text().notNull(),
   schedule: jsonb().$type<Schedule>().notNull(),
+  files: jsonb().$type<JobFiles>(),
+  changedAt: created('changed_at'),
   /** The result goes on the owner's desk as a report. */
   report: boolean().notNull().default(false),
   enabled: boolean().notNull().default(true),
@@ -888,6 +909,13 @@ export const runs = pgTable('runs', {
   status: text().$type<RunStatus>().notNull().default('running'),
   trigger: text().$type<RunTrigger>().notNull().default('schedule'),
   summary: text(),
+  /** Only the office records this, after its file tools observed the assigned operations. */
+  checkedFiles: jsonb().$type<{
+    input?: string;
+    inputRun?: number;
+    output: string;
+    sha256: string;
+  }>(),
   startedAt: created('started_at'),
   finishedAt: at('finished_at')
 });
