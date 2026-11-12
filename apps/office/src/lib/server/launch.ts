@@ -95,12 +95,27 @@ export type RunEvent =
   | { type: 'tool'; name: string }
   /** One whole message of the reply. */
   | { type: 'message'; text: string }
+  /** One streamed piece of the reply, as it comes. */
+  | { type: 'delta'; text: string }
   | { type: 'usage'; usage: ModelUsage }
-  /** The turn finished; its reply is the last message. */
-  | { type: 'done' }
-  | { type: 'failed'; message: string }
+  /** What the tool said of the plan's limits (Claude Code's `rate_limit_event`), as it said it. */
+  | { type: 'plan'; info: unknown }
+  /**
+   * The turn finished. `text` is the reply the tool gave with its result,
+   * when it gives one; without it, the reply is what the run said.
+   */
+  | { type: 'done'; text?: string }
+  /** The run ended without its reply; `result`, when the tool's own result line said so. */
+  | { type: 'failed'; message: string; result?: ResultFacts }
   /** Something went wrong that the run may still finish past. */
   | { type: 'error'; message: string };
+
+/**
+ * A Claude Code-shaped `result` line (Claude Code's and Grok's) that is not
+ * a plain success, as the tool sent it. The reader decides nothing about it:
+ * each caller reads these facts by its own rule.
+ */
+export type ResultFacts = { subtype: string; isError: boolean; text?: string; errors: string[] };
 
 /** A file replaced in one step, so the tool never reads it half written. */
 export function replace(path: string, content: string | Uint8Array, mode = 0o600): void {

@@ -146,16 +146,17 @@ import { sourceReady } from './access.ts';
 import { lastExchange } from './chat-preface.ts';
 import { addToChat, history } from './chat-turns.ts';
 import {
-  apiKey,
   claudeAccountOf,
   claudeInput,
   claudeRunHome,
-  claudeSettings,
   modelArgs,
+  pluginsOff,
+  staffEnv,
+  streamTools,
   userTurn
 } from './claude.ts';
 import { keptAt, plainName } from './chat-files.ts';
-import { endedEarly, LAUNCHES, stoppedWhy, streamTools, type Launch } from './cli.ts';
+import { endedEarly, LAUNCHES, stoppedWhy, type Launch } from './cli.ts';
 import { bus, emit } from './events.ts';
 import { deniedEdits, denyRules, readStaffFile } from './files.ts';
 import { firstDayOf } from './first-day.ts';
@@ -174,7 +175,7 @@ import {
 import { notifyMac } from './notify.ts';
 import { OUTCOME_LINE, personaRun, voiced } from './persona-run.ts';
 import { catchUp, NOW, parseSession, saveSession, sectionsOf } from './resume.ts';
-import { runEnv, toolServerEnv } from './run-env-allow.ts';
+import { toolServerEnv } from './run-env-allow.ts';
 import { cut, officeEnv } from './run-env.ts';
 import { sandboxPaths } from './sandbox-paths.ts';
 import { claudeSandbox, NETWORK_REFUSED, NETWORK_REFUSED_LINE } from './sandbox.ts';
@@ -254,32 +255,6 @@ export async function chatLog(id: string): Promise<ChatEntry[]> {
   return [...messages, ...items, ...threads, ...handOffs, ...kept].sort((a, b) =>
     a.at.localeCompare(b.at)
   );
-}
-
-/** Every plugin in the owner's user settings, switched off for staff sessions. */
-export function pluginsOff(): Record<string, false> {
-  try {
-    const user = JSON.parse(readFileSync(join(homedir(), '.claude', 'settings.json'), 'utf8')) as {
-      enabledPlugins?: Record<string, boolean>;
-    };
-    return Object.fromEntries(Object.keys(user.enabledPlugins ?? {}).map((k) => [k, false]));
-  } catch {
-    return {};
-  }
-}
-
-/**
- * A Claude Code run's environment: only what `runEnv` lets through, the
- * owner's Claude login or the API key they gave the office, and never a key
- * that leaked in from a parent session.
- */
-export function staffEnv(claudeDir?: string): NodeJS.ProcessEnv {
-  const env = runEnv('claude');
-  delete env.ANTHROPIC_API_KEY;
-  if (claudeSettings().auth === 'key') env.ANTHROPIC_API_KEY = apiKey();
-  // The account's own Claude Code folder: its login, settings and sessions.
-  if (claudeDir) env.CLAUDE_CONFIG_DIR = claudeDir;
-  return env;
 }
 
 /**
@@ -1348,7 +1323,7 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
             else if (ev.type === 'done') finish({ ok: true, text: last.trim() });
             else if (ev.type === 'failed') finish({ ok: false, text: ev.message });
             // Said again when the tool stops, if the run ends there.
-            else stderr += `${ev.message}\n`;
+            else if (ev.type === 'error') stderr += `${ev.message}\n`;
           }
           continue;
         }

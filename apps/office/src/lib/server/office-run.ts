@@ -27,8 +27,15 @@ import {
   type ModelUsage,
   type UsageKind
 } from '@oddboro/ledger';
-import { notePlan, pluginsOff, staffEnv } from './staff.ts';
-import { claudeInput, claudeRunHome, modelArgs, spawnClaude } from './claude.ts';
+import { notePlan } from './staff.ts';
+import {
+  claudeInput,
+  claudeRunHome,
+  modelArgs,
+  pluginsOff,
+  spawnClaude,
+  staffEnv
+} from './claude.ts';
 import { endedEarly, LAUNCHES, stoppedWhy } from './cli.ts';
 import { SIGN_IN_WHERE, stopGroups, type RunImage } from './launch.ts';
 import { agentCommand } from './agent-sign-in.ts';
