@@ -4,27 +4,34 @@
 // a systemd user unit and the XDG state folder, and Windows a Task Scheduler
 // task and %LOCALAPPDATA%\Oddboro. Everything else in the office is the same
 // code on each.
-import { execFile, execFileSync, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn, type ExecFileException } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
 
 export type System = 'mac' | 'linux' | 'windows';
 
-/** The system the office runs on, or undefined for one it does not know. */
-export const SYSTEM: System | undefined = (
-  { darwin: 'mac', linux: 'linux', win32: 'windows' } as const
-)[process.platform as 'darwin' | 'linux' | 'win32'];
-export const MAC = SYSTEM === 'mac';
-export const LINUX = SYSTEM === 'linux';
-export const WINDOWS = SYSTEM === 'windows';
 /**
  * The system the office runs on, read at each call. Every other file asks this
  * instead of reading `process.platform` (scripts/check-platform.ts), so a test
- * that fakes the system reaches every reader. The constants above are fixed
+ * that fakes the system reaches every reader. The constants below are fixed
  * when this file loads.
  */
 export const currentPlatform = (): NodeJS.Platform => process.platform;
+
+const SYSTEMS: Partial<Record<NodeJS.Platform, System>> = {
+  darwin: 'mac',
+  linux: 'linux',
+  win32: 'windows'
+};
+/** The system the office runs on, read at each call, or undefined for one it does not know. */
+export const currentSystem = (): System | undefined => SYSTEMS[currentPlatform()];
+
+/** The system the office runs on, as it was when this file loaded. */
+export const SYSTEM = currentSystem();
+export const MAC = SYSTEM === 'mac';
+export const LINUX = SYSTEM === 'linux';
+export const WINDOWS = SYSTEM === 'windows';
 
 /**
  * Where the office's logs go. XDG_STATE_HOME wins wherever it is set;
@@ -44,8 +51,53 @@ export const OFFICE_LOG = join(
   MAC && !process.env.XDG_STATE_HOME ? 'oddboro-office.log' : 'office.log'
 );
 
-const run = (cmd: string, args: string[]) =>
-  new Promise<boolean>((done) => execFile(cmd, args, (e) => done(!e)));
+/**
+ * How a one-shot command came back. `missing` means it could not start: it is
+ * not there (ENOENT), may not run (EACCES), or is not a program this system
+ * can run (ENOEXEC). It carries no text, so no caller can show a raw error or
+ * take "not there" for an empty answer.
+ */
+export type Probe =
+  | { status: 'ok'; out: string; err: string }
+  | { status: 'failed'; code: number | null; out: string; err: string }
+  | { status: 'missing' }
+  | { status: 'timeout' };
+
+/**
+ * Run a command to its end and say how it went, with what it printed. No
+ * shell and no window, and no time limit unless `timeout` (in ms) gives one.
+ */
+export function probe(
+  cmd: string,
+  args: readonly string[],
+  o: { timeout?: number; env?: NodeJS.ProcessEnv; cwd?: string } = {}
+): Promise<Probe> {
+  return new Promise((done) => {
+    try {
+      execFile(cmd, args, { ...o, encoding: 'utf8', windowsHide: true }, (e, out, err) =>
+        done(e ? ended(e, out, err) : { status: 'ok', out, err })
+      );
+    } catch (e) {
+      // A file this system cannot run (ENOEXEC) throws here rather than in the
+      // callback. Anything else thrown here is a wrong argument, so it rejects.
+      if (!couldNotStart(e)) throw e;
+      done({ status: 'missing' });
+    }
+  });
+}
+
+/** Whether an error is the command failing to start, thrown or passed to the callback. */
+const couldNotStart = (e: unknown) =>
+  e instanceof Error && 'syscall' in e && String(e.syscall).startsWith('spawn');
+
+function ended(e: ExecFileException, out: string, err: string): Probe {
+  // execFile marks the error killed only when its own timer stopped the command.
+  if (e.killed) return { status: 'timeout' };
+  if (couldNotStart(e)) return { status: 'missing' };
+  return { status: 'failed', code: typeof e.code === 'number' ? e.code : null, out, err };
+}
+
+const run = async (cmd: string, args: string[]) => (await probe(cmd, args)).status === 'ok';
 
 // Windows PowerShell 5.1 ships with every Windows, so the office reaches the
 // Credential Manager, toasts and Task Scheduler through it with nothing to
@@ -68,18 +120,27 @@ export function powershellSync(script: string, env: Record<string, string> = {},
 }
 
 /** Run a PowerShell script: whether it succeeded, and what it printed. */
-export function powershell(
+export async function powershell(
   script: string,
   env: Record<string, string> = {}
 ): Promise<{ ok: boolean; out: string }> {
-  return new Promise((done) =>
-    execFile(
-      'powershell.exe',
-      [...POWERSHELL, '-Command', psScript(script)],
-      { env: { ...process.env, ...env }, windowsHide: true, timeout: 120_000 },
-      (e, out) => done({ ok: !e, out: String(out ?? '').trim() })
-    )
-  );
+  const r = await probe('powershell.exe', [...POWERSHELL, '-Command', psScript(script)], {
+    env: { ...process.env, ...env },
+    timeout: 120_000
+  });
+  switch (r.status) {
+    case 'ok':
+      return { ok: true, out: r.out.trim() };
+    case 'failed':
+      return { ok: false, out: r.out.trim() };
+    case 'missing':
+    case 'timeout':
+      return { ok: false, out: '' };
+    default: {
+      const missed: never = r;
+      throw new Error(`PowerShell came back as ${JSON.stringify(missed)}`);
+    }
+  }
 }
 const ps = async (script: string, env: Record<string, string> = {}) =>
   (await powershell(script, env)).ok;
@@ -97,9 +158,13 @@ const OPENER: Record<System, [string, ...string[]]> = {
 };
 const [OPEN, ...OPEN_WORDS] = OPENER[SYSTEM ?? 'linux'];
 
-/** Open a URL in the owner's browser, and say whether the opener took it. */
+/**
+ * Open a URL in the owner's browser, and say whether the opener took it. Not
+ * through `probe`: on Windows its hidden window would pass through rundll32
+ * to the program the URL opens, which could then open hidden.
+ */
 export function openUrl(url: string): Promise<boolean> {
-  return run(OPEN, [...OPEN_WORDS, url]);
+  return new Promise((done) => execFile(OPEN, [...OPEN_WORDS, url], (e) => done(!e)));
 }
 
 /**

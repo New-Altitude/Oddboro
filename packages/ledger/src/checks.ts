@@ -2,7 +2,6 @@
 // the database and the optional helpers. `npm run setup` walks the owner
 // through these, and the office's Setup window shows them again. Nothing here
 // imports db.ts, so it runs before there is a database to connect to.
-import { execFile } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { release } from 'node:os';
 import postgres from 'postgres';
@@ -12,6 +11,7 @@ import {
   WINDOWS,
   claudeCommand,
   currentPlatform,
+  probe,
   serviceInstalled
 } from './platform.ts';
 import { secretStore } from './secrets.ts';
@@ -27,12 +27,23 @@ export type Check = {
   fix?: string;
 };
 
-const run = (cmd: string, args: string[], timeout = 8000) =>
-  new Promise<{ ok: boolean; out: string }>((done) =>
-    execFile(cmd, args, { timeout }, (err, stdout, stderr) =>
-      done({ ok: !err, out: `${stdout}${stderr}`.trim() })
-    )
-  );
+/** Whether a command ran cleanly, and all it printed. */
+async function run(cmd: string, args: string[], timeout = 8000) {
+  const r = await probe(cmd, args, { timeout });
+  switch (r.status) {
+    case 'ok':
+      return { ok: true, out: `${r.out}${r.err}`.trim() };
+    case 'failed':
+      return { ok: false, out: `${r.out}${r.err}`.trim() };
+    case 'missing':
+    case 'timeout':
+      return { ok: false, out: '' };
+    default: {
+      const missed: never = r;
+      throw new Error(`${cmd} came back as ${JSON.stringify(missed)}`);
+    }
+  }
+}
 
 /**
  * The system the office runs on. It keeps its id "mac" because the setup card
