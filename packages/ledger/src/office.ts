@@ -1383,15 +1383,22 @@ function carriedOutBy(together: AskRow[]): AskRow[] {
 /**
  * Start the carry-outs for asks one answer settled (`carriedOutBy`).
  * `pickedUp` is the work parked on the connect task that just ended, which
- * picks up in its own run (`finishTask`).
+ * picks up in its own run (`finishTask`). `chat` goes only to the run of the
+ * ask the owner answered in chat, never a twin's.
  */
 async function carryOutTogether(
   together: AskRow[],
   pickedUp?: string[],
-  q: Db = db
+  q: Db = db,
+  chat?: InChat
 ): Promise<void> {
   for (const a of carriedOutBy(together))
-    await followUp(a.staffId, 'carry_out', { askId: a.id, note: null, pickedUp }, q);
+    await followUp(
+      a.staffId,
+      'carry_out',
+      { askId: a.id, note: null, pickedUp, ...(chat?.card.id === a.id && { chat }) },
+      q
+    );
 }
 
 /**
@@ -1578,7 +1585,8 @@ export async function giveFolder(
   path: string,
   level: FolderAccess,
   reason: string | null = null,
-  accept = false
+  accept = false,
+  inChat = false
 ): Promise<
   { given: { path: string; level: FolderAccess } } | { warning: string } | FolderNotGiven
 > {
@@ -1591,7 +1599,7 @@ export async function giveFolder(
   if ('warning' in checked) return checked;
   const given = { path: checked.real, level };
   try {
-    const done = await decide(id, 'approve', reason, { folder: { ...a.folder, given } });
+    const done = await decide(id, 'approve', reason, { folder: { ...a.folder, given }, inChat });
     if (!done) return { refused: 'You already answered this ask.', status: 409 };
   } catch (e) {
     if (e instanceof FolderRefused) return { refused: e.message, status: 400 };
@@ -1782,11 +1790,11 @@ async function decide(
       }
       // The folder went to the Odd with the claim: the work that waited on it picks up.
       case 'give_folder':
-        if (gave) await carryOutTogether([ask, ...twins]);
+        if (gave) await carryOutTogether([ask, ...twins], undefined, db, chat);
         break;
       // The switches turned on with the claim: the work that waited on them picks up.
       case 'turn_on':
-        if (turned) await carryOutTogether([ask, ...twins]);
+        if (turned) await carryOutTogether([ask, ...twins], undefined, db, chat);
         break;
       case 'carry_out':
         await followUp(ask.staffId, 'carry_out', {
@@ -3649,6 +3657,9 @@ export type Delivery = {
   status: string;
   /** A saved task response opens from its chat card, including after completion. */
   responseVersion?: number;
+  folder?: FolderRequest;
+  switches?: OwnSwitch[];
+  why?: string;
   /** When the owner decided an ask or finished or dropped a task. */
   decidedAt?: Date | null;
   /** The owner's words on a decided ask or finished task. */
@@ -3665,7 +3676,10 @@ export async function deliveries(staffId: string, limit = 200): Promise<Delivery
         at: asks.createdAt,
         status: asks.status,
         decidedAt: asks.decidedAt,
-        note: asks.reason
+        note: asks.reason,
+        folder: asks.folder,
+        switches: asks.switches,
+        why: asks.why
       })
       .from(asks)
       .where(eq(asks.staffId, staffId))
@@ -3698,7 +3712,19 @@ export async function deliveries(staffId: string, limit = 200): Promise<Delivery
       .limit(limit)
   ]);
   return [
-    ...a.map((x) => ({ kind: 'ask' as const, ...x })),
+    ...a.map(({ folder, switches, why, ...x }) => ({
+      kind: 'ask' as const,
+      ...x,
+      ...(folder && {
+        folder: {
+          ...folder,
+          path: shownFolder(folder.path),
+          ...(folder.given && { given: { ...folder.given, path: shownFolder(folder.given.path) } })
+        },
+        why
+      }),
+      ...(switches && { switches, why })
+    })),
     ...t.map((x) => ({ kind: 'task' as const, ...x })),
     ...r.map(({ readAt, ...x }) => ({
       kind: 'report' as const,

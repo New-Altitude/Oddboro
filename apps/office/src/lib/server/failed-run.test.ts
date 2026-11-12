@@ -71,7 +71,9 @@ async function reload(id: string): Promise<ChatEntry[]> {
 
 test("a chat whose run fails keeps the owner's message and the error after a reload", async () => {
   const events = await withoutClaude(() => send('fay', 'Are you there?'));
-  assert.deepEqual(events.at(-1), { type: 'error', message: GONE });
+  const failedEvent = events.at(-1);
+  assert.ok(failedEvent?.type === 'error');
+  assert.equal(failedEvent.message, GONE);
   const [said, failed] = (await reload('fay')).slice(-2);
   assert.deepEqual(
     { from: said.from, text: said.text, failed: said.failed },
