@@ -211,9 +211,11 @@ export function shellEnv(temp: string): Record<string, string> {
  * of its own (measured on codex-cli 0.166.0), so stopping the tool's group
  * alone leaves a command that was still running when the run timed out. A
  * process that already left the tree (its parent ended, so launchd took it)
- * is not found here.
+ * is not found here. Returns the pids it found under the run, the tool's own
+ * first, so a caller can check after the stop that each is gone: only `[pid]`
+ * on Windows, where taskkill walks the tree itself, and when ps fails.
  */
-export function stopGroups(pid: number, signal: 'SIGTERM' | 'SIGKILL' = 'SIGTERM'): void {
+export function stopGroups(pid: number, signal: 'SIGTERM' | 'SIGKILL' = 'SIGTERM'): number[] {
   if (currentPlatform() === 'win32') {
     try {
       execFileSync(
@@ -224,15 +226,15 @@ export function stopGroups(pid: number, signal: 'SIGTERM' | 'SIGKILL' = 'SIGTERM
     } catch {
       // The run may already have exited.
     }
-    return;
+    return [pid];
   }
   const groups = new Set([pid]);
+  const under = new Set([pid]);
   try {
     const rows = execFileSync('ps', ['-axo', 'pid=,ppid=,pgid='], { encoding: 'utf8' })
       .trim()
       .split('\n')
       .map((l) => l.trim().split(/\s+/).map(Number));
-    const under = new Set([pid]);
     // Once pids wrap, a child can come before its parent in the list, so go round until nothing is added.
     for (let added = true; added;) {
       added = false;
@@ -252,4 +254,5 @@ export function stopGroups(pid: number, signal: 'SIGTERM' | 'SIGKILL' = 'SIGTERM
     } catch {
       // That group is gone already: nothing is left to stop.
     }
+  return [...under];
 }
