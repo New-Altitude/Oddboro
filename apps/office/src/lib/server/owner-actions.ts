@@ -52,7 +52,9 @@ export const TASK_OPS = [
   'aws-secret-keys',
   'aws-secret',
   'tools',
-  'confirm-tools'
+  'confirm-tools',
+  'postal-inboxes',
+  'postal-select'
 ] as const;
 export type TaskOp = (typeof TASK_OPS)[number];
 
@@ -238,6 +240,12 @@ export const OWNER_ACTIONS = {
   'POST /api/tasks/[id]#tools': { notAnAction: 'Lists the tools the server offers.' },
   'POST /api/tasks/[id]#confirm-tools': {
     none: 'Marks the tool ready with the tools it lists, and ticks the step.'
+  },
+  'POST /api/tasks/[id]#postal-inboxes': {
+    notAnAction: 'Lists the LegalZoom mailboxes the sign-in reaches.'
+  },
+  'POST /api/tasks/[id]#postal-select': {
+    none: 'Saves the one LegalZoom mailbox the office reads, marks the tool ready, and ticks the step.'
   },
   // The app's shell reporting an update, and the owner picking when it
   // installs: both write the `app_update` row.

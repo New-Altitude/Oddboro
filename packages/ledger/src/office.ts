@@ -148,6 +148,7 @@ export {
   sayOnSignIn,
   setConnectorConfig,
   reconfigureConnector,
+  bindPostalMailbox,
   connectorReady,
   narrowReadTools,
   grantsFor,

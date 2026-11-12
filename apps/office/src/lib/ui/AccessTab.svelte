@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Candidate, HeldBack } from '@oddboro/ledger';
   import {
+    POSTAL_ID,
     GRANT_LABEL,
     LEVEL_LABEL,
     LEVELS,
@@ -71,6 +72,7 @@
   /** Pick a tool. One named by its address starts on the way in it has, or a sign-in. */
   function choose(p: Pick) {
     pick = p;
+    if (p.id === POSTAL_ID) level = 'read';
     another = false;
     useKey = !!p.keyHeader;
     keyHeader = p.keyHeader ?? 'Authorization';
@@ -643,7 +645,7 @@
               {/if}
             {/if}
             <div class="flex gap-1.5">
-              {#each levels as l (l)}
+              {#each levels.filter((l) => pick?.id !== POSTAL_ID || l === 'read') as l (l)}
                 <button
                   class="flex-1 rounded-lg px-2 py-1.5 text-xs disabled:opacity-40 {level === l
                     ? 'bg-sea/25'
@@ -653,7 +655,11 @@
                 >
               {/each}
             </div>
-            {#if !allowed('act')}
+            {#if pick.id === POSTAL_ID}
+              <p class="text-xs text-muted">
+                Reads one mailbox, including mail for every recipient there.
+              </p>
+            {:else if !allowed('act')}
               <!-- Said in sight, not in a tooltip, with the one click that allows it. -->
               <p class="text-[11px] text-muted">
                 {GRANT_LABEL.act} needs {profile.name} at {LEVEL_LABEL[GRANT_NEEDS.act]} or higher.
@@ -715,7 +721,7 @@
               >
             </div>
             <div class="mt-2 flex gap-1" role="group" aria-label={`${g.name} level`}>
-              {#each levels as l (l)}
+              {#each levels.filter((l) => g.connector !== POSTAL_ID || l === 'read') as l (l)}
                 <button
                   class="flex-1 rounded-lg px-2 py-1 text-xs disabled:opacity-40 {g.level === l
                     ? 'bg-sea/25 text-ink'

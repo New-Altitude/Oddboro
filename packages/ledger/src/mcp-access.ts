@@ -22,6 +22,7 @@ import { commandsOnline } from './agents.ts';
 import { currentPlatform } from './platform.ts';
 import {
   FOLDER_SAID,
+  POSTAL_ID,
   grantWorks,
   NOT_OWN_TOOLS,
   OWN_SWITCHES,
@@ -139,6 +140,8 @@ if (has('ask_for_access'))
       );
       if (!found.connector) return text(`${found.problem} Use find_connectors.`);
       const conn = found.connector;
+      if (conn.id === POSTAL_ID && level !== 'read')
+        return refused('Physical mail only allows Read only access.');
       const product = conn.config.google;
       if (another_account && !product)
         return refused(`another_account is only for Gmail and Google Drive.`);

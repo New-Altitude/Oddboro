@@ -189,6 +189,15 @@ How it works, and what New Altitude does not do:
 
 Oddboro's use and transfer to any other app of information received from Google APIs will adhere to the [Google API Services User Data Policy](https://developers.google.com/terms/api-services-user-data-policy), including the Limited Use requirements. Google user data is used only to do what you ask your Odds to do, is never sold, never used for advertising, and never used to train or improve any AI model.
 
+### LegalZoom physical mail (only if you add it)
+
+An Odd may ask to read your LegalZoom physical mailbox, through LegalZoom's own read-only service. You approve or deny it, and you sign in to LegalZoom yourself, in your browser.
+
+- **One mailbox, read only.** You choose one mailbox. The office lists your mailboxes only for you to choose from, then sends that one mailbox's number with each read. An Odd can search arrivals, see whether a letter is scanned and read pages already scanned. It can never change, forward or discard mail.
+- **Your sign-in stays on your computer,** in your system's secret store, and the office talks to LegalZoom directly from your computer. New Altitude never receives it.
+- **What an Odd reads goes to the AI service it runs on**, as with Google above.
+- **Disconnecting.** Revoking the last grant removes the sign-in from your computer.
+
 ### Other tools you connect
 
 An Odd may ask for a hosted tool (a service reached over the network). You approve or deny every connection, and you sign in to the service yourself. The office keeps the sign-in tokens in your system's secret store and refreshes them before each run. Data the Odd reads from or writes to that service goes to that service under its own terms. Each Odd gets only the access you give it: a tool connects read only, or with write from the Draft level. At Draft, each change through a write grant waits for your yes. At Act, a write-level grant to one Odd for one tool is your standing permission for that Odd to use that tool without asking each time. You can lower the Odd's level, which pauses the grant, or revoke the grant from the Odd's Settings, under Services, at any time.
