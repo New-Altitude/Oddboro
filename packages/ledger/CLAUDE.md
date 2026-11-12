@@ -681,8 +681,10 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   connector, the tool and its exact arguments), raised by the office's gateway
   (`raiseCall`) when an Odd at Draft calls a tool that changes something
   through a write grant (`writesWait` in `access-words.ts`; a write grant
-  works from Draft, `grantWorks`). The same call still open is returned, not
-  raised twice. Only the office approves one, with `approveCall`, once it made
+  works from Draft, `grantWorks`). Its title and why are the Odd's own words: at Draft
+  the gateway adds a required `oddboro_title` and `oddboro_why` to each tool that changes
+  something, takes them out of the call, and refuses a call without them. A title the office reads from the call itself (`said`) comes first. The
+  same call still open is returned, not raised twice. Only the office approves one, with `approveCall`, once it made
   the call (`call.result`); `decide` refuses a plain approve. A yes starts a
   `carry_out` run, whose brief has the call and what it returned.
   `apps/office/src/lib/server/gateway.test.ts` holds it.

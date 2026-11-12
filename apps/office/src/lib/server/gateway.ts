@@ -7,7 +7,8 @@
 // pass `readsOnly` now, as the server marks them on this run, and that the
 // connector's stored list still names; Read and write reaches every tool. At
 // Draft, Read and write still lists every tool, but a call to one that changes
-// something goes on the owner's desk instead (`raiseCall`): the office makes
+// something goes on the owner's desk instead (`raiseCall`), with the Odd's
+// title and reason, which each such tool asks for (`forOwner`): the office makes
 // that exact call on their yes (`makeCall`), and the Odd hears the result in a
 // new run. The tool a run goes through (Claude Code, Codex, Grok) still gets
 // its own per-tool allow list too, so either one alone holds.
@@ -219,13 +220,51 @@ const refusal = (text: string): CallToolResult => ({
 const onlyReads = (c: ConnectorRow, t: Tool): boolean => !!c.config.readsByRole || readsOnly(t);
 
 /**
+ * At Draft, the words the Odd gives a call that will be held, for the owner's
+ * desk: a short title and why it makes the call. The gateway adds both to each
+ * tool that changes something (`forOwner`), and `hold` takes them out before
+ * the call is held, so the service never gets them.
+ */
+const TITLE = 'oddboro_title';
+const WHY = 'oddboro_why';
+/** The longest title the desk takes; a longer one is cut. */
+const TITLE_MAX = 80;
+
+/** A tool as a run at Draft lists it: one that changes something also takes `TITLE` and `WHY`. */
+function forOwner(t: Tool, c: ConnectorRow, owner: string): Tool {
+  const schema = t.inputSchema;
+  const kept = `The office shows it to ${owner} and never sends it to ${c.name}.`;
+  return {
+    ...t,
+    inputSchema: {
+      ...schema,
+      properties: {
+        ...schema.properties,
+        [TITLE]: {
+          type: 'string',
+          description: `What this call does, in a few plain words for ${owner}'s desk, such as "Book the intro call with Gabriel on Wed at 9 AM". Under ${TITLE_MAX} characters. ${kept}`
+        },
+        [WHY]: {
+          type: 'string',
+          description: `Why you make this call, for ${owner} to read on their desk before it is made: what it changes and why, in one or two plain sentences written to them. ${kept}`
+        }
+      },
+      required: [...(schema.required ?? []), TITLE, WHY]
+    }
+  };
+}
+
+const words = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+
+/**
  * Hold one call that changes something for the owner's yes: it goes on their
- * desk as a call ask, and the run hears that nothing has happened yet.
+ * desk as a call ask, with the Odd's title and reason, and the run hears that
+ * nothing has happened yet. A call missing either is refused, and nothing is held.
  */
 async function hold(
   c: ConnectorRow,
   name: string,
-  args: Record<string, unknown>,
+  given: Record<string, unknown>,
   place: CallPlace | undefined
 ): Promise<CallToolResult> {
   if (!place)
@@ -233,16 +272,27 @@ async function hold(
       `This run only reads, so it cannot ask to use ${name}. Say what you would change in your reply.`
     );
   const owner = await ownerName();
-  const words = await heldWordsFor(c, name, args);
+  const { [TITLE]: titled, [WHY]: said, ...args } = given;
+  const title = words(titled);
+  const why = words(said);
+  if (!title || !why)
+    return refusal(
+      `Nothing was held. Call ${name} again with ${TITLE}, what it does in a few plain words, and ${WHY}, why you make it in one or two plain sentences, both for ${owner}, who reads them on their desk.`
+    );
+  const read = await heldWordsFor(c, name, args);
   const { ask, already } = await raiseCall(
     place,
     {
       connector: c.id,
       tool: name,
       arguments: args,
-      ...(words ? { said: words.title, shown: words.items } : {})
+      ...(read ? { said: read.title, shown: read.items } : {})
     },
-    c.name
+    c.name,
+    {
+      title: title.length > TITLE_MAX ? `${title.slice(0, TITLE_MAX - 1).trimEnd()}…` : title,
+      why
+    }
   );
   return {
     content: [
@@ -315,7 +365,12 @@ export async function gateway(request: Request, id: string): Promise<Response> {
     { name: `oddboro-gateway-${id}`, version: '1.0.0' },
     { capabilities: { tools: {} } }
   );
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: await reachable(c, h) }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
+    const tools = await reachable(c, h);
+    if (!h.waits) return { tools };
+    const owner = await ownerName();
+    return { tools: tools.map((t) => (onlyReads(c, t) ? t : forOwner(t, c, owner))) };
+  });
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const name = req.params.name;
     const tool = (await reachable(c, h)).find((t) => t.name === name);

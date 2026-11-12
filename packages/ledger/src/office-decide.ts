@@ -131,13 +131,16 @@ export type CallPlace = {
 
 /**
  * An Odd at Draft called a tool that changes something: the gateway holds
- * the call and it goes on the desk as a `call` ask, showing the exact call.
- * The same call still open is not raised twice: the Odd hears the one there.
+ * the call and it goes on the desk as a `call` ask, showing the exact call,
+ * with the Odd's own title and reason (`odd`). The title the office reads from
+ * the call itself (`said`, Gmail's count of emails) comes first. The same call
+ * still open is not raised twice: the Odd hears the one there.
  */
 export async function raiseCall(
   place: CallPlace,
   call: HeldCall,
-  service: string
+  service: string,
+  odd: { title: string; why: string }
 ): Promise<{ ask: AskRow; already: boolean }> {
   const same = (r: AskRow) =>
     r.call?.connector === call.connector &&
@@ -151,8 +154,8 @@ export async function raiseCall(
   if (there) return { ask: there, already: true };
   const { ask } = await raiseAsk(place.staffId, {
     kind: 'call',
-    title: call.said ? `${call.said} in ${service}` : `Use ${call.tool} in ${service}`,
-    why: `Called while working at Drafts for your yes, so the office held it for you.`,
+    title: `${call.said ?? odd.title} in ${service}`,
+    why: odd.why,
     ifApproved: `The office makes this exact call to ${service}, and the work carries on with what it returns.`,
     call,
     handOffId: place.handOffId,
