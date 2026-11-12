@@ -333,7 +333,12 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    the Goals window (`workLine`) and anything waiting on the owner, with each
    step on Open. A click on a desk item opens
    it on the start side: on the Desk while it waits, else a report in its own
-   window (`ReportView.svelte`). Reply under one sends the next message about
+   window (`ReportView.svelte`). A goal or plan card also takes a decision
+   in chat, using the Desk's ask route and the same plan checkboxes. The
+   manager's New goal box starts empty and sets that exact title through the
+   Goals route. A retry with its request id returns the goal already set. Answer and
+   finish on a plain task sends the owner's words as its closing note. Neither
+   starts a chat run. Reply under an item otherwise sends a message about
    it: the run gets the item in full, and a reply about a report marks it read
    and goes in the ledger as the owner's feedback (`replyToReport`). A
    colleague's chat also lists the threads it works on and does not lead,

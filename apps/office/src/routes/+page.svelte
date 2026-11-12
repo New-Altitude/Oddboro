@@ -1427,6 +1427,9 @@
       {#key profile.id}
         <div class="h-full" in:fly={fromEdge()}>
           <StaffCard
+            {desk}
+            {staff}
+            onplan={planHires}
             {profile}
             activity={selectedActivity}
             {version}

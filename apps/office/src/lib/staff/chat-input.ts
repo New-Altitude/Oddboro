@@ -3,6 +3,7 @@ import type { ChatFile } from '#lib/attachments.ts';
 /** The desktop allows 12 MiB on the wire for an 8 MiB brief or inline import. */
 export const CHAT_BYTES = 8 * 1024 * 1024;
 export const CHAT_REQUEST_BYTES = 12 * 1024 * 1024;
+export const CHAT_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 export type ChatSource = { kind: string; id?: string; revision?: string };
 export type OwnerInput = {
   turnId: string;
