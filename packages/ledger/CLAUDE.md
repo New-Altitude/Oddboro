@@ -804,7 +804,8 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   A file job's run keeps, in `runs.checked_files`, the periods it is for from
   the moment it starts, then the output digest once the file tools saw it
   write, and a reader's source run. A reader for period P reads the bytes of
-  its writer's run for the writer's newest period at or before P
+  its writer's last run for a period at or before P, which wrote the file on
+  disk even when an earlier run was for a newer period
   (`scheduledInput`, `inputFor`): it waits while the writer owes that period,
   skips when the writer skipped it, and fails when that run left no digest.
   An open `catch_up` ask of the writer counts as owed, a refused one as

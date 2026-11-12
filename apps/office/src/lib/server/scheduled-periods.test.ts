@@ -23,7 +23,7 @@ const DAY = 24 * HOUR;
 
 mkdirSync(L.accountHome('claude', 'office'), { recursive: true });
 writeFileSync(join(L.accountHome('claude', 'office'), 'signed-in'), 'fixture@example.test');
-// Job steps, one per run: `WRITE <path> "<text>"`, `COPY <from> TO <to>`
+// Job steps, one per run: `WRITE <path> "<text>"` ({now} in it is the time), `COPY <from> TO <to>`
 // (read one file, write "Copy of <its first line>" to the other) or `NOTHING`.
 const cli = join(bin, 'claude');
 renameSync(cli, cli + '-usual');
@@ -45,7 +45,7 @@ else (async () => {
   const write = /WRITE (\\S+) "([^"]*)"/.exec(message);
   const copy = /COPY (\\S+) TO (\\S+)/.exec(message);
   if (write) {
-    const w = await call('write_file', { path: write[1], content: write[2] });
+    const w = await call('write_file', { path: write[1], content: write[2].replace('{now}', String(Date.now())) });
     said = w.isError ? 'Could not write.' : 'Wrote it.';
   } else if (copy) {
     const r = await call('read_file', { path: copy[1] });
@@ -241,6 +241,39 @@ test("a writer that ran and wrote nothing fails its reader's run", async () => {
     /"Wire \(Writer wrote nothing\)" ran for .* and left no checked lead\/wire.md/
   );
   assert.equal(r.checked_files?.sha256, undefined);
+});
+
+test('a reader due now takes the file of a catch-up that ran after a newer period', async () => {
+  // As in a live office: a normal cycle, then the writer is set 2h10m behind
+  // and the reader due now, both at once. The catch-up's periods are older
+  // than the first run's, but its bytes are the ones on disk.
+  const hourly: Schedule = { every: 'minutes', n: 60 };
+  const { writer, reader, wire, edition } = await pair(
+    'Catch-up after a cycle',
+    hourly,
+    { writer: 'record', reader: 'latest' },
+    new Date(Date.now() - 5_000),
+    'Wire at {now}'
+  );
+  await look(new Date(), [writer, reader]);
+  const [w1] = await runsOf(writer.id);
+  const [r1] = await runsOf(reader.id);
+  assert.equal(r1.status, 'done', r1.summary);
+  const now = new Date();
+  await L.setNextRun(writer.id, new Date(now.getTime() - 2 * HOUR - 10 * 60_000));
+  await L.setNextRun(reader.id, now);
+  await look(new Date(), [writer, reader]);
+  const [, w2] = await runsOf(writer.id);
+  const [, r2] = await runsOf(reader.id);
+  assert.equal(w2.status, 'done', w2.summary);
+  assert.equal(w2.checked_files?.periods.length, 3);
+  assert.ok(w2.checked_files!.periods.every((p) => p < w1.checked_files!.periods[0]));
+  assert.equal(r2.status, 'done', r2.summary);
+  assert.equal(r2.checked_files?.input, 'lead/wire.md');
+  assert.equal(r2.checked_files?.inputRun, w2.id);
+  assert.ok(r2.started_at >= w2.finished_at!, 'the reader ran before its writer caught up');
+  assert.notEqual(w2.checked_files?.sha256, w1.checked_files?.sha256);
+  assert.equal(readFileSync(edition, 'utf8'), `Copy of ${readFileSync(wire, 'utf8')}`);
 });
 
 /** A `record` writer 12 hours behind, which asks the owner first, and its reader due now. */

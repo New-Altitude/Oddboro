@@ -4010,9 +4010,9 @@ export async function claimScheduledRun(j: JobRow, now: Date): Promise<RunRow | 
 
 /**
  * Where a reader job's input stands for the period `at`. The reader takes the
- * file its writer's run wrote for the writer's newest period at or before
- * `at`, by the run, never by whether the file changed: the same bytes as last
- * period are as good as new ones. The answer is one of:
+ * file its writer's last run for a period at or before `at` wrote, by the
+ * run, never by whether the file changed: the same bytes as last period are
+ * as good as new ones. The answer is one of:
  * - `run` and `sha256`: that run wrote the file, and the reader gets those bytes.
  * - `wait`: the writer still owes that period (running, due, or caught up later).
  * - `skip`: the writer skipped that period, or has not written a first one.
@@ -4059,19 +4059,25 @@ export function scheduledInput(
     w.owed?.some((t) => new Date(t) <= at)
   )
     return { wait: `Waiting for "${w.name}" to write ${input} for this period.` };
-  // The writer's newest period at or before `at`, and the run that was for it.
-  let best: { run: RunRow; period: Date } | undefined;
+  // The writer's last run for a period at or before `at` wrote the bytes on
+  // disk, even when an earlier run was for a newer period, as a catch-up of
+  // older periods after a normal cycle is. `newest` is the newest period at
+  // or before `at` that any run was for: the writer covered up to there.
+  let best: RunRow | undefined;
+  let newest: Date | undefined;
   for (const r of ran)
     for (const p of r.checkedFiles!.periods) {
       const period = new Date(p);
-      if (period <= at && (!best || period > best.period)) best = { run: r, period };
+      if (period > at) continue;
+      if (!best || r.id > best.id) best = r;
+      if (!newest || period > newest) newest = period;
     }
   // A missed time the writer's catch_up ask names, newer than that period.
   const askedFor = (open: boolean) =>
     asked.some(
       (a) =>
         a.open === open &&
-        a.times.some((t) => new Date(t) <= at && (!best || new Date(t) > best.period))
+        a.times.some((t) => new Date(t) <= at && (!newest || new Date(t) > newest))
     );
   if (askedFor(true))
     return {
@@ -4082,30 +4088,30 @@ export function scheduledInput(
       skip: `You said no to filling "${w.name}"'s missed periods, so "${j.name}" skips this period too.`,
       away: true
     };
-  const skipped = w.skippedAt && w.skippedAt <= at && (!best || w.skippedAt > best.period);
+  const skipped = w.skippedAt && w.skippedAt <= at && (!newest || w.skippedAt > newest);
   if (skipped)
     return {
       skip: `"${w.name}" skipped its run for ${runTime(w.skippedAt!)}, so "${j.name}" skips this period too.`,
       away: true
     };
-  if (!best)
+  if (!best || !newest)
     return { skip: `Waiting for "${w.name}" to write ${input} for the first time.`, away: false };
   // A time the writer's schedule had after that period, and before `at`, that
   // it neither ran nor owes: it skipped it, or its missed periods wait for the
   // owner's yes. A schedule in minutes counts from when each run started, so
   // give it the clock's on-time margin.
-  const after = nextRun(w.schedule, best.period).getTime();
+  const after = nextRun(w.schedule, newest).getTime();
   if (after + (w.schedule.every === 'minutes' ? ON_TIME_MS : 0) <= at.getTime())
     return {
       skip: `"${w.name}" did not run for ${runTime(new Date(after))}, so "${j.name}" skips this period too.`,
       away: true
     };
-  const sha256 = best.run.status === 'done' ? best.run.checkedFiles!.sha256 : undefined;
+  const sha256 = best.status === 'done' ? best.checkedFiles!.sha256 : undefined;
   if (!sha256)
     return {
-      problem: `"${w.name}" ran for ${runTime(best.period)} and left no checked ${input}. Check its last result before "${j.name}" runs again.`
+      problem: `"${w.name}" ran for ${runTime(new Date(best.checkedFiles!.periods.filter((p) => new Date(p) <= at).at(-1)!))} and left no checked ${input}. Check its last result before "${j.name}" runs again.`
     };
-  return { run: best.run.id, sha256 };
+  return { run: best.id, sha256 };
 }
 
 /** The newest runs of a file job since it last changed, newest first: what each was for and left. */

@@ -109,6 +109,13 @@ test("a reader's input is its writer's run for the reader's period, wait, skip o
     sha256: 'same'
   });
 
+  // A later catch-up of older periods wrote the file now on disk: it wins over
+  // an earlier run for a newer period.
+  assert.deepEqual(
+    input(writer, [run(1, [d2], 'done', 'first'), run(2, [d1], 'done', 'caught up')], d2),
+    { run: 2, sha256: 'caught up' }
+  );
+
   // The writer still owes the period: due, owed, running or starting.
   const waits = (w: JobRow, runs: RunRow[], busy?: (id: number) => boolean) =>
     assert.ok('wait' in input(w, runs, d2, busy)!, JSON.stringify(input(w, runs, d2, busy)));
