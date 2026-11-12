@@ -589,7 +589,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    split from `OFFICE_TOOLS` by `toolGroups` in `src/lib/ui/tool-groups.ts`,
    and filtered by the same search); Folders
    (`FoldersList.svelte`) lists each folder with Can read and Can write side
-   by side; Services holds the outside tools, each with Read only and Read and write side by side, changed in place (`setGrantLevel`, PATCH on the access route): the tool stays signed in, and only Revoke (the trash can) forgets it, after Confirm in place of the row. Refresh beside it reads the service's tools now and says what changed. Actions (n), shut until opened, lists every tool the grant reaches, those that change something first (`tools` from the access route), each with what it does in the service's own words (`connectors.toolNotes`, kept current with the rest of the stored tools, `refreshTools`). Each of those has Ask first and Without asking, with the Odd's level as the default: at Draft, Without asking lets the Odd call it with no desk item (PATCH with `tool` and `standing`, `setStanding` in the ledger); at Act, Ask first puts each call to it on the desk (PATCH with `tool` and `askFirst`, `setAskFirst`, and the gateway's `waitsFor`). A tool that only reads says so. Choose a folder asks
+   by side; Services holds the outside tools, each with Read only and Read and write side by side, changed in place (`setGrantLevel`, PATCH on the access route): the tool stays signed in, and only Revoke (the trash can) forgets it, after Confirm in place of the row. Refresh beside it reads the service's tools now and says what changed. Actions (n), shut until opened, reads them too as it opens, saying only what changed, and lists every tool the grant reaches, those that change something first (`tools` from the access route), each with what it does in the service's own words (`connectors.toolNotes`, kept current with the rest of the stored tools, `refreshTools`). Each of those has Ask first and Without asking, with the Odd's level as the default: at Draft, Without asking lets the Odd call it with no desk item (PATCH with `tool` and `standing`, `setStanding` in the ledger); at Act, Ask first puts each call to it on the desk (PATCH with `tool` and `askFirst`, `setAskFirst`, and the gateway's `waitsFor`). A tool that only reads says so. Choose a folder asks
    `/api/folders/pick`, which opens the system's own picker on this computer
    (`src/lib/server/folder-picker.ts`: AppleScript on a Mac, PowerShell's
    Forms dialog on Windows, zenity or kdialog on Linux), one at a time; a
@@ -964,9 +964,9 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    (`refreshTools` in the ledger): new and dropped tools, Read only's reach
    both ways, each tool's description, and a dropped or redescribed tool off each standing
    yes, each change but a description with a Ledger line. The office does the
-   same for every connected service an Odd holds, but physical mail, as it
-   starts and once a day (`startToolRefresh` in `access.ts`), and on the
-   owner's Refresh (`/api/services/[id]/tools`). A connector
+   same when the owner opens a service's Actions on the Settings tab, and on
+   their Refresh (`/api/services/[id]/tools`, `refreshService`), never on a
+   timer. A connector
    that cannot start during a run gets one Ledger line naming it, per run, in
    the office's own words for why and never the error's text, which can repeat
    a key (`whyNoStart`); the run still gets the error itself. A write

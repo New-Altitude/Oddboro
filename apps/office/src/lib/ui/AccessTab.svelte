@@ -195,18 +195,25 @@
   let refreshing = $state<string>();
   let refreshed = $state<Record<string, string>>({});
 
-  /** Ask the service for its tools now; the grants table's change brings the list back. */
-  async function refresh(g: Grant) {
-    problem = '';
+  /**
+   * Ask the service for its tools now; the connectors table's change brings
+   * the list back. Refresh says what it found. Opening the actions does it
+   * too, `quiet`: it says only what changed, and a service it cannot reach
+   * keeps the list it had, said under the service, not as the tab's problem.
+   */
+  async function refresh(g: Grant, { quiet = false } = {}) {
+    if (!quiet) problem = '';
     refreshing = g.connector;
     try {
-      const r = await call<{ said: string }>(
+      const r = await call<{ said: string; changed: boolean }>(
         `/api/services/${encodeURIComponent(g.connector)}/tools`,
         {}
       );
-      refreshed[g.connector] = r.said;
+      if (!quiet || r.changed) refreshed[g.connector] = r.said;
     } catch (e) {
-      problem = e instanceof Error ? e.message : String(e);
+      const said = e instanceof Error ? e.message : String(e);
+      if (quiet) refreshed[g.connector] = said;
+      else problem = said;
     } finally {
       refreshing = undefined;
     }
@@ -826,7 +833,10 @@
                 {@const free = profile.permission === 'act' && g.level === 'act'}
                 <!-- The level is the default; each tool that changes something can be its exception:
                      without asking at Draft, ask first at Act. -->
-                <details class="mt-2 text-xs">
+                <details
+                  class="mt-2 text-xs"
+                  ontoggle={(e) => e.currentTarget.open && void refresh(g, { quiet: true })}
+                >
                   <summary class="cursor-pointer text-muted hover:text-ink">
                     Actions ({g.tools.length}){asks && g.standing.length
                       ? ` · ${g.standing.length} without asking`

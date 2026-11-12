@@ -159,8 +159,8 @@ export {
   type ListedTool,
   type ToolChanges,
   changesSaid,
-  refreshTools,
-  connectorsInUse
+  toolsChanged,
+  refreshTools
 } from './office-service-tools.ts';
 export {
   giveTask,

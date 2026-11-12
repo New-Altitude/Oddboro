@@ -10,7 +10,7 @@ import { db } from './pglite.ts';
 
 // The ledger rows embed nothing: no Ollama answers here.
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
-const { changesSaid, connector, connectorsInUse, refreshTools } = await import('../src/office.ts');
+const { changesSaid, connector, refreshTools, toolsChanged } = await import('../src/office.ts');
 
 await db.insert(staff).values({
   id: 'cleo',
@@ -45,6 +45,7 @@ test('nothing changed writes nothing', async () => {
     { name: 'apply_changes', readOnly: false }
   ]);
   assert.equal(changesSaid(ch), 'Up to date.');
+  assert.equal(toolsChanged(ch), false);
   assert.deepEqual(await titles(), []);
 });
 
@@ -55,6 +56,7 @@ test('a new tool, a dropped one, a new read tool and a lost standing yes are kep
     { name: 'apply_changes', description: 'Apply what was staged.', readOnly: false }
   ]);
   assert.equal(changesSaid(ch), 'Tools updated: 1 new, 1 gone, Read only changed.');
+  assert.equal(toolsChanged(ch), true);
   const c = (await connector('cal'))!;
   assert.deepEqual(c.tools, ['list_events', 'find_time', 'apply_changes']);
   assert.deepEqual(c.readTools, ['list_events', 'find_time']);
@@ -78,12 +80,6 @@ test('a tool the service stops marking as reading leaves Read only, and says so'
   ]);
   assert.deepEqual((await connector('cal'))!.readTools, ['list_events']);
   assert.deepEqual(await titles(), ['Read only for Calendar no longer reaches find_time']);
-});
-
-test('the office keeps current only connected services an Odd holds', async () => {
-  const ids = (await connectorsInUse()).map((c) => c.id);
-  assert.ok(ids.includes('cal'));
-  assert.ok(!ids.includes('gmail'), 'gmail is not connected here, and no Odd holds it');
 });
 
 test('a service that drops an Ask first tool and adds one moves the Ask first to it, and says so', async () => {

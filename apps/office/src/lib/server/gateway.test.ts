@@ -15,7 +15,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { chatOf, folder, L, odd, secrets } from './office-under-test.ts';
+import { chatOf, folder, L, odd, request, secrets } from './office-under-test.ts';
 
 const { closeGateway, gateway, makeCall, openGateway } = await import('./gateway.ts');
 
@@ -690,4 +690,14 @@ test('a held call lists only the calls made without asking since the last held o
       [3, []]
     ]
   );
+});
+
+test("opening a service's actions reads its tools now, and says whether anything changed", async () => {
+  // As if the service had remarked capture since the office last read it.
+  await L.pg`update connectors set tool_notes = ${JSON.stringify({ capture: 'Old words.' })}::jsonb where id = 'notes'`;
+  const open = async () =>
+    (await request('/api/services/[id]/tools', 'POST', { params: { id: 'notes' } })).json();
+  assert.deepEqual(await open(), { said: 'Tools updated: descriptions changed.', changed: true });
+  assert.equal((await notes()).toolNotes.capture, 'Capture a note.');
+  assert.deepEqual(await open(), { said: 'Up to date.', changed: false });
 });

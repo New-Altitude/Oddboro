@@ -2,8 +2,7 @@
 // (`trustSystemCertificates`), the office's own database if .env names
 // no other (copied aside first on a new version's first start), the tables
 // brought up to date, the update row reset, then the job clock, the follow-up
-// watcher, one read of the New Altitude personas, each service's tools (and
-// again once a day), and the office's address in
+// watcher, one read of the New Altitude personas, and the office's address in
 // the owner's Caddy if it uses theirs (never in the app, which has no address).
 // Each step's time goes to the log and to /api/health (`#lib/server/health.ts`).
 // In the app (ODDBORO_APP) it also quits when the app does: on SIGTERM, once
@@ -23,7 +22,6 @@ import { startLocalDatabase } from '@oddboro/ledger/local-db';
 import { currentPlatform } from '@oddboro/ledger/platform';
 import { useShellSecrets } from '@oddboro/ledger/secrets';
 import { bringUpToDate } from '@oddboro/ledger/upgrade';
-import { startToolRefresh } from '#lib/server/access.ts';
 import { keepAddress } from '#lib/server/address.ts';
 import { startFollowUps } from '#lib/server/follow-ups.ts';
 import { markReady, timed } from '#lib/server/health.ts';
@@ -63,8 +61,6 @@ export const init: ServerInit = async () => {
   whenOddLeaves(stopRuns);
   // Never awaited: an office offline or signed out starts as fast as any.
   void syncPersonas().catch((e) => console.error('[persona] sync at start', e));
-  // Each service's tools, now and once a day, so none goes stale (never awaited either).
-  startToolRefresh();
   void keepAddress();
   markReady();
 };

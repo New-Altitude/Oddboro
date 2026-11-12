@@ -2,11 +2,10 @@
 // what Read only reaches, what each tool does, each standing yes to a tool
 // the service dropped or redescribed, and Ask first carried to the tools that
 // may replace one.
-import { and, eq, exists, isNotNull, ne } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db } from './db.ts';
 import { connectors, grants } from './schema.ts';
 import { GRANT_LABEL, LEVEL_LABEL, POSTAL_ID, settingsTab } from './access-words.ts';
-import type { ConnectorRow } from './office.ts';
 import { staffer } from './office-staff.ts';
 import { record } from './office-ledger.ts';
 
@@ -37,6 +36,10 @@ export type ToolChanges = {
    */
   askFirst: { staffId: string; from: string[]; to: string[] }[];
 };
+
+/** Whether a refresh changed anything the owner sees. */
+export const toolsChanged = (ch: ToolChanges): boolean =>
+  !!(ch.added.length || ch.gone.length || ch.read.length || ch.unread.length || ch.notes);
 
 /** A refresh's changes in a few words for the owner, or that nothing changed. */
 export function changesSaid(ch: ToolChanges): string {
@@ -73,8 +76,9 @@ const NONE: ToolChanges = {
  * a tool drops one name and adds another, the tools it added that change
  * something ask first too: a rename never lets a high-risk tool through.
  * Writes, and says so in the Ledger, only when something changed. Each run
- * that lists the tools calls it, and so do the owner's Refresh, the office's
- * start and its daily look (the office's access.ts). Physical mail keeps
+ * that lists the tools calls it, and so do the owner's Refresh and their
+ * opening its actions on the Settings tab (the office's access.ts), never a
+ * timer: a service no run uses changes nothing the office does. Physical mail keeps
  * the three reads the office picked at setup (`bindPostalMailbox`).
  */
 export async function refreshTools(id: string, listed: ListedTool[]): Promise<ToolChanges> {
@@ -140,7 +144,7 @@ export async function refreshTools(id: string, listed: ListedTool[]): Promise<To
       ]
         .filter(Boolean)
         .join(', and '),
-      body: `The office reads ${c.name}'s tools when it starts, once a day, on each run and on your Refresh. ${GRANT_LABEL.act} reaches a new tool at once.`
+      body: `The office reads ${c.name}'s tools on each run that uses it, when you open its actions on the Settings tab, and on your Refresh. ${GRANT_LABEL.act} reaches a new tool at once.`
     });
   // A tool the service dropped leaves Read only with it; only a mark that changed is news.
   const unread = ch.unread.filter((t) => !ch.gone.includes(t));
@@ -181,18 +185,4 @@ export async function refreshTools(id: string, listed: ListedTool[]): Promise<To
     });
   }
   return ch;
-}
-
-/** Each connected service at least one Odd holds, but physical mail: the ones the office keeps current. */
-export async function connectorsInUse(): Promise<ConnectorRow[]> {
-  return db
-    .select()
-    .from(connectors)
-    .where(
-      and(
-        isNotNull(connectors.readyAt),
-        ne(connectors.id, POSTAL_ID),
-        exists(db.select().from(grants).where(eq(grants.connectorId, connectors.id)))
-      )
-    );
 }
