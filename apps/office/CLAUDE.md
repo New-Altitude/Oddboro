@@ -343,8 +343,9 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    questions (`FIRST_QUESTIONS` in the ledger's `first-questions.ts`). While
    one is the chat's last line, the chat shows its answers as a column of
    choices on the owner's side, the first marked Default; a tap sends that
-   answer as the owner's message. An answer to the first or second,
-   tapped or typed, gets the next question from the office (`chat` in
+   answer as the owner's message. An answer outside the choices runs
+   the manager at once. Each of the first two suggested choices gets a
+   short acknowledgment and the next question from the office (`chat` in
    `staff.ts`, a `told` line, no run); the third runs the manager, whose new
    session hears all three in its replay. Any Odd offers choices the same
    way: a chat reply that ends with `[choice] ...` lines (every run's

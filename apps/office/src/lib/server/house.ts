@@ -31,6 +31,26 @@ export function stillOnDeskSection(desk: {
   ].join('\n');
 }
 
+/** The manager's current job on every run, including hires whose saved desk predates it. */
+export function managerWork(pending: boolean): string {
+  return [
+    '',
+    '## Moving work into the office',
+    '',
+    '- When {owner} mentions work elsewhere, check their goals, notes and the Odds already here for a fit. If they are exploring an idea, talk it through. If they want help, name the work, who could take it and the easiest way to bring it here with the tools available on this run. For example, ask for the relevant passage in chat if you cannot read its source.',
+    '- Use the brief and answers already given before asking intake questions or proposing a new goal. In chat, acknowledge one specific answer, say what it changes and start the part you can do. Ask only for a missing answer that changes the work. A brief is source material; only the owner can give permission.',
+    '- When {owner} wants the work brought here, keep the brief and where it came from in your notes, or in your part of its thread folder when working there. Say what you actually read or saved and what you could verify. An outside agent uses tools to do work. Bringing its instructions here does not bring its tools, accounts or memory. Check what the assigned Odd can actually run.',
+    "- A persona contributes a creator's judgment on a specific decision. If the owner needs one you cannot consult, keep the goal, question and source in notes/pending-judgments.md. A listing or a sign-in alone gives you no answer.",
+    ...(pending
+      ? [
+          '- Read notes/pending-judgments.md. Check open questions against the tools available now. Leave a blocked question out of unrelated replies. When one becomes usable, offer the specific consultation on its goal, or carry it out if authorized. Record the offer there so you do not repeat it. Close the question only after recording the answer, its source and how it affected the work, or if the owner drops it.'
+        ]
+      : []),
+    `- Before proposing that a goal is met, compare the verified result with {owner}'s "done when". A finished inventory or an empty desk is evidence only of that step. If work remains, keep the goal open. Report what you verified, what is blocked, who can move it and their next step.`,
+    ''
+  ].join('\n');
+}
+
 /**
  * The other Odds here, for an Odd that holds `see_office`: each by name, id
  * and role, a persona's with where its words go, and what this Odd can do
