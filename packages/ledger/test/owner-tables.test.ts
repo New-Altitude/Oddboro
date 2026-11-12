@@ -13,8 +13,7 @@ const { CUT_OFF_WORK, OUTCOME_TITLE, closeStaleFollowUps, workTitle } =
   await import('../src/office.ts');
 const { HEALTH_WORDS, STATUS_WORDS } = await import('../src/goal-words.ts');
 const { answerThread } = await import('../src/threads.ts');
-const { asks, followUps, goals, ledger, reports, staff, tasks, threads } =
-  await import('../src/schema.ts');
+const { asks, followUps, goals, ledger, staff, tasks, threads } = await import('../src/schema.ts');
 
 test('no ledger title of a finished run names a thread or a hand-off', () => {
   for (const byOutcome of Object.values(OUTCOME_TITLE)) ownerWords(...Object.values(byOutcome));
@@ -63,7 +62,7 @@ test("a lead's pick-up a restart cut off is named in the Ledger by its goal, or 
   ownerWords(...titles);
 });
 
-test('work a follow-up was about is named by the title of its ask, task, goal or report', async () => {
+test('work a follow-up was about is named by the title of its ask, task or goal', async () => {
   await db.insert(staff).values({
     id: 'namer',
     name: 'Nia',
@@ -83,17 +82,12 @@ test('work a follow-up was about is named by the title of its ask, task, goal or
     .values({ staffId: 'namer', title: 'Sign the lease', why: 'Why.', steps: [] })
     .returning();
   const [g] = await db.insert(goals).values({ title: 'Grow the list' }).returning();
-  const [r] = await db
-    .insert(reports)
-    .values({ staffId: 'namer', title: 'Weekly numbers', body: 'Up.' })
-    .returning();
   const made = await db
     .insert(followUps)
     .values([
       { staffId: 'namer', kind: 'carry_out', askId: a.id },
       { staffId: 'namer', kind: 'task_done', taskId: t.id },
       { staffId: 'namer', kind: 'goal', goalId: g.id },
-      { staffId: 'namer', kind: 'feedback', reportId: r.id },
       { staffId: 'namer', kind: 'first_day' }
     ])
     .returning();
@@ -101,7 +95,6 @@ test('work a follow-up was about is named by the title of its ask, task, goal or
     'Book the van',
     'Sign the lease',
     'Grow the list',
-    'Weekly numbers',
     'getting started'
   ]);
 });

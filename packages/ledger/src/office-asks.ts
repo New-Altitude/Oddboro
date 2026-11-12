@@ -18,13 +18,14 @@ import {
   type ReplyDraft,
   type StandingRequest
 } from './schema.ts';
-import { levelAtMost, switchesSaid, type OwnSwitch } from './access-words.ts';
+import { switchesSaid, type OwnSwitch } from './access-words.ts';
 import { sameCriteria, type GmailFilter } from './filter-words.ts';
 import { ASK_REPLACED } from './desk-answers.ts';
 import type { AskRow, LedgerRow } from './office.ts';
 import { precedent } from './office-ledger.ts';
 import { followUp } from './office-follow-ups.ts';
 import { mediaTypeOf } from './office-tasks.ts';
+import { TWINNED, asksNoMore, sameWanted, carriedOutBy } from './work/twins.ts';
 
 // Asks
 
@@ -384,44 +385,6 @@ export async function asksFor(staffId: string): Promise<AskRow[]> {
 export const DECISIONS = ['approve', 'deny', 'iterate'] as const;
 export type Decision = (typeof DECISIONS)[number];
 
-/** The kinds of ask that have twins (`asksNoMore`): an outside tool, a folder, and switches. */
-const TWINNED: AskKind[] = ['access', 'folder', 'switch'];
-
-/**
- * Whether `later` asks for nothing `first` does not: the same Odd, the same
- * tool or folder, at the same level or lower. Asks for another Google account
- * of one product are the same tool. Two runs of one Odd can each find a tool
- * or a folder missing at once (a hire's first day and its lead's first
- * hand-off), and each raises its own ask. The owner sees the first alone
- * (`desk`), and their answer to it answers the twin too (`decide`), each back
- * where it came from.
- */
-function asksNoMore(first: AskRow, later: AskRow): boolean {
-  if (first.id === later.id || first.staffId !== later.staffId) return false;
-  if (first.kind === 'access' && later.kind === 'access' && first.access && later.access)
-    return (
-      first.access.another === later.access.another &&
-      (!!first.access.another || first.access.connector === later.access.connector) &&
-      levelAtMost(later.access.level, first.access.level)
-    );
-  if (first.kind === 'folder' && later.kind === 'folder' && first.folder && later.folder)
-    return (
-      first.folder.path === later.folder.path &&
-      (first.folder.level === 'write' || later.folder.level === 'read')
-    );
-  if (first.kind === 'switch' && later.kind === 'switch')
-    return (later.switches ?? []).every((s) => first.switches?.includes(s));
-  return false;
-}
-
-/** Whether two asks of one kind ask for the same tool or folder, whatever the level. */
-const sameWanted = (a: AskRow, b: AskRow) =>
-  a.kind === 'folder'
-    ? a.folder?.path === b.folder?.path
-    : a.kind === 'switch'
-      ? (b.switches ?? []).every((s) => a.switches?.includes(s))
-      : a.access?.connector === b.access?.connector;
-
 /**
  * The other access or folder asks the owner's one answer settled with `a`:
  * the same Odd and tool or folder, decided in the same moment, whichever of
@@ -436,30 +399,6 @@ export async function answeredWith(a: AskRow, q: Db = db): Promise<AskRow[]> {
       and(eq(asks.staffId, a.staffId), eq(asks.kind, a.kind), eq(asks.decidedAt, a.decidedAt))
     );
   return rows.filter((r) => r.id !== a.id && r.status === a.status && sameWanted(a, r));
-}
-
-/**
- * Which of the asks one answer settled start a `carry_out`: one for each place
- * a result must go back to, never one per ask. A hand-off's twin comes first,
- * then a thread's; a twin on neither starts a run only when no other does.
- * Two runs of one Odd once each did the same work after one answer, and the
- * owner got every email reply twice.
- */
-function carriedOutBy(together: AskRow[]): AskRow[] {
-  const rank = (a: AskRow) => (a.handOffId ? 0 : a.threadId ? 1 : 2);
-  const places = new Set<string>();
-  const runs: AskRow[] = [];
-  for (const a of [...together].sort((x, y) => rank(x) - rank(y) || x.id - y.id)) {
-    const place = a.handOffId
-      ? `hand-off ${a.handOffId}`
-      : a.threadId
-        ? `thread ${a.threadId}`
-        : '';
-    if (places.has(place) || (place === '' && runs.length)) continue;
-    places.add(place);
-    runs.push(a);
-  }
-  return runs;
 }
 
 /**

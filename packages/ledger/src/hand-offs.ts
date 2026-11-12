@@ -41,6 +41,7 @@ import {
   type ThreadFor
 } from './threads.ts';
 import { workName } from './work-paths.ts';
+import { SERVES_NO_THREAD } from './work/kinds.ts';
 
 type FollowUpRow = typeof followUps.$inferSelect;
 
@@ -257,50 +258,9 @@ export async function leadLeft(q: Db, id: string): Promise<string | undefined> {
   return lead?.leftAt ? lead.name : undefined;
 }
 
-/**
- * A `denied` run only reads the owner's reason for a lesson. The denial itself
- * already went back to the hand-off or thread the ask came from (`answerLater`
- * in office-decide.ts, or `answerHandOffs` for a no to more hand-offs), so the run
- * serves neither: it joins no thread and hands
- * nothing back. An `edited` run only reads the owner's edit to a file, for a
- * lesson, and answers nothing raised anywhere. Neither run hands work on: the
- * office tells its tool server so (`LESSON_RUN`), which then offers no
- * `hand_off`.
- */
-export const SERVES_NO_THREAD: Record<FollowUpKind, boolean> = {
-  carry_out: false,
-  rework: false,
-  denied: true,
-  feedback: false,
-  task_done: false,
-  goal: false,
-  first_day: false,
-  hand_off: false,
-  handed_back: false,
-  resume: false,
-  edited: true
-};
+/** Whether a follow-up's run works at Draft, and whether it serves no thread: the rules live with the kinds (`work/kinds.ts`). */
+export { atDraft } from './work/kinds.ts';
 export const servesNoThread = (kind: FollowUpKind): boolean => SERVES_NO_THREAD[kind];
-
-/**
- * Whether a follow-up's run works at Draft at most: both sides of a hand-off,
- * the hub picking its thread back up, and a run that only reads the owner's
- * reason or edit for a lesson (every kind `SERVES_NO_THREAD` marks).
- */
-export const AT_DRAFT: Record<FollowUpKind, boolean> = {
-  carry_out: false,
-  rework: false,
-  denied: true,
-  feedback: false,
-  task_done: false,
-  goal: false,
-  first_day: false,
-  hand_off: true,
-  handed_back: true,
-  resume: true,
-  edited: true
-};
-export const atDraft = (kind: FollowUpKind): boolean => AT_DRAFT[kind];
 
 /**
  * The hand-off a follow-up's work serves: its own, or the one the ask or task it

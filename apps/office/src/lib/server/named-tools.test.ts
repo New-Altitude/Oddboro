@@ -11,7 +11,6 @@ import {
   type AskRow,
   type FollowUpRow,
   type GoalRow,
-  type ReportRow,
   type TaskRow
 } from '@oddboro/ledger';
 import { GRANTABLE_TOOLS, isOffered, OFFICE_TOOLS, type ToolRun } from '@oddboro/ledger/tools';
@@ -52,8 +51,7 @@ const NAMES_UNHELD: Record<string, readonly string[]> = {
     'propose_reply',
     'propose_filter'
   ], // NEW-1716
-  // These four share the feedback brief (`followUpBrief`).
-  'feedback brief': ['give_owner_a_task'], // NEW-1716
+  // These three share the feedback brief (`followUpBrief`).
   'hand_off brief': ['give_owner_a_task'], // NEW-1716
   'handed_back brief': ['give_owner_a_task'], // NEW-1716
   'edited brief': ['give_owner_a_task'] // NEW-1716
@@ -82,7 +80,6 @@ const ASKS = [
     call: { connector: 'mail', tool: 'send_message', arguments: { to: 'a' } }
   }
 ] as unknown as AskRow[];
-const report = { id: 3, title: 'Weekly', body: 'All well' } as ReportRow;
 const task = {
   row: { id: 4, title: 'Sign in', why: 'Needed', steps: [] } as unknown as TaskRow,
   files: []
@@ -110,7 +107,7 @@ const texts = (has: (tool: string) => boolean, run: ToolRun): Record<string, str
         `${kind} brief`,
         [
           ...ASKS.flatMap((a) =>
-            followUpBrief({ kind, note: 'Their words' } as FollowUpRow, a, report, task, goal)
+            followUpBrief({ kind, note: 'Their words' } as FollowUpRow, a, task, goal)
           ),
           ...followUpBrief({ kind, note: null } as FollowUpRow)
         ].join('\n')

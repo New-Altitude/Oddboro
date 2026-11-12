@@ -186,13 +186,14 @@ export const NOTE_IS_OWNERS: Record<FollowUpKind, boolean> = {
   carry_out: true,
   rework: true,
   denied: true,
-  feedback: true,
   task_done: true,
   goal: true,
   first_day: true,
   hand_off: false,
   handed_back: false,
   resume: false,
+  // An answer's note joins the office's lines around each answer, as a pick-up's does.
+  answered: false,
   // An edit's words go as OWNER_EDIT, which makes only guesses.
   edited: false
 };

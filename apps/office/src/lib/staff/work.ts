@@ -1,5 +1,5 @@
 // A staffer's work in progress, as the office tools track it and the page
-// shows it: a job, a follow-up (an approved ask, a rework, feedback, a
+// shows it: a job, a follow-up (an approved ask, a rework, an answer, a
 // pick-up after a task or a colleague, work handed over) or a draft. Safe to
 // import in the browser.
 import type { FollowUpKind } from '@oddboro/ledger';
@@ -22,10 +22,10 @@ export function followUpDetail(
     task_done: 'Picking up after your task',
     goal: 'Planning your goal',
     first_day: 'Getting started',
-    feedback: 'Acting on your feedback',
     hand_off: `Work ${o.colleague} handed over`,
     handed_back: `Picking up after ${o.colleague}`,
     resume: 'Picking the work back up',
+    answered: 'Reading your answer',
     edited: 'Learning from your edit'
   };
   return words[kind];
