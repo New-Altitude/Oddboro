@@ -47,7 +47,7 @@
   import SidePanel from '#lib/ui/SidePanel.svelte';
   import { fly } from 'svelte/transition';
   import { placesFor, type Place } from '#lib/staff/places.ts';
-  import PixelPencil from '#lib/ui/PixelPencil.svelte';
+  import PixelIcon from '#lib/ui/PixelIcon.svelte';
   import { call, type ApiUrl } from '#lib/ui/api.ts';
   import { setZone, zone, zoneName, zoneShort } from '@oddboro/ledger/time';
   import { LIVE_TABLES, type LiveTable } from '@oddboro/ledger/live-tables';
@@ -1156,7 +1156,7 @@
             class="pointer-events-auto -m-1 p-1 opacity-70 hover:text-ink hover:opacity-100 focus-visible:text-ink focus-visible:opacity-100"
             aria-label={`Rename ${l.name}`}
             title="Rename"
-            onclick={() => startRename(l)}><PixelPencil /></button
+            onclick={() => startRename(l)}><PixelIcon name="pencil" /></button
           >
         {/if}
       </div>

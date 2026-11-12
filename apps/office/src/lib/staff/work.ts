@@ -107,6 +107,7 @@ export const OFFICE_TOOL_WORDS: Record<string, string> = {
   propose_filter: 'Drafting a Gmail filter for you',
   ask_for_folder: 'Asking you for a folder',
   ask_for_switch: 'Asking you to turn on a switch',
+  ask_for_standing_yes: 'Asking to use a tool without your yes each time',
   raise_ask: 'Raising an ask',
   reconnect_access: 'Asking you to reconnect a tool',
   resume_at: 'Setting when to pick up again',

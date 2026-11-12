@@ -58,6 +58,26 @@ test('a call the office made tells the Odd not to make it again, with what came 
   assert.ok(lines.includes('- What it returned: captured'));
 });
 
+test('only an Odd at Draft is offered a standing yes after a call the office made, and never after a no', () => {
+  const called = (ok: boolean): typeof ask => ({
+    ...ask,
+    kind: 'call',
+    call: {
+      connector: 'notes',
+      tool: 'capture',
+      arguments: {},
+      result: { ok, text: ok ? 'captured' : 'failed', at: '2026-11-09T00:00:00.000Z' }
+    }
+  });
+  const offers = (lines: string[]) => lines.some((l) => l.includes('ask_for_standing_yes'));
+  const carry = (level: 'draft' | 'act', ok = true) =>
+    followUpBrief(followUp('carry_out'), called(ok), undefined, undefined, undefined, [], level);
+  assert.equal(offers(carry('draft')), true);
+  assert.equal(offers(carry('act')), false);
+  assert.equal(offers(carry('draft', false)), false);
+  assert.equal(offers(followUpBrief(followUp('denied'), called(true))), false);
+});
+
 test("a finished task's run hears only the owner's choice answers", () => {
   const steps = [
     {

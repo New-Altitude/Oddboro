@@ -34,7 +34,13 @@ Odd and raises that Odd to Act, and from then it uses that tool's
 tools without asking each time (decided 2026-10-30). At Draft a write grant
 is no standing yes: the gateway holds each call that changes something as
 that exact call on the owner's desk, and the office makes it only on their
-yes (decided 2026-11-07). Revoking the grant or lowering the level ends it at
+yes (decided 2026-11-07). The narrower standing yes is a tool the owner lets
+one Odd use without asking, such as one that only stages a change: at Draft
+a call to that tool goes through, and every other change still waits
+(decided 2026-11-10). Its mirror at Act is a tool the owner sets to ask
+first: each call to it waits on the desk as at Draft, so a high-risk tool
+keeps needing a yes however far the owner trusts the Odd (decided
+2026-11-11). Revoking the grant or lowering the level ends it at
 the next run. A yes counts only from the
 owner's own page: the office refuses an action any other site sends it
 (decided 2026-11-04).

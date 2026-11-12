@@ -15,7 +15,8 @@ import {
   type HireProposal,
   type InChat,
   type HeldCall,
-  type ReplyDraft
+  type ReplyDraft,
+  type StandingRequest
 } from './schema.ts';
 import { levelAtMost, switchesSaid, type OwnSwitch } from './access-words.ts';
 import { sameCriteria, type GmailFilter } from './filter-words.ts';
@@ -232,6 +233,29 @@ async function refuseSecondSwitch(
     );
 }
 
+/** A standing ask for tools an open one already covers: the open one is the ask. */
+async function refuseSecondStanding(
+  tx: Tx,
+  staffId: string,
+  want: StandingRequest,
+  revises?: number
+): Promise<void> {
+  const open = await tx
+    .select()
+    .from(asks)
+    .where(and(eq(asks.staffId, staffId), eq(asks.kind, 'standing'), eq(asks.status, 'open')));
+  const same = open.find(
+    (r) =>
+      r.id !== revises &&
+      r.standing?.connector === want.connector &&
+      want.tools.every((t) => r.standing!.tools.includes(t))
+  );
+  if (same)
+    throw new AlreadyOnDesk(
+      `Your ask #${same.id} to use ${(same.standing?.tools ?? []).join(', ')} without asking is already there.`
+    );
+}
+
 /** The asks an Odd raises in its own words, which may not repeat one already open. Access asks have twins instead (`asksNoMore`). */
 const ONCE_ONLY: AskKind[] = ['approval', 'goal', 'remove', 'bring_back'];
 
@@ -257,9 +281,20 @@ export async function raiseAsk(
     call?: HeldCall;
     /** A remove or bring_back ask's Odd (leaving.ts). */
     odd?: string;
-    /** `goal`, `plan`, `reply`, `filter`, `folder`, `switch`, `call`, `remove` and `bring_back` say so; the rest follow from access or hire. */
+    /** A standing ask's tools (`ask_for_standing_yes`, standing.ts). */
+    standing?: StandingRequest;
+    /** `goal`, `plan`, `reply`, `filter`, `folder`, `switch`, `call`, `remove`, `bring_back` and `standing` say so; the rest follow from access or hire. */
     kind?:
-      'goal' | 'plan' | 'reply' | 'filter' | 'folder' | 'switch' | 'call' | 'remove' | 'bring_back';
+      | 'goal'
+      | 'plan'
+      | 'reply'
+      | 'filter'
+      | 'folder'
+      | 'switch'
+      | 'call'
+      | 'remove'
+      | 'bring_back'
+      | 'standing';
     revises?: number;
     /** The colleague whose handed-back work the lead raised this from (`VIA`). */
     via?: string;
@@ -284,12 +319,13 @@ export async function raiseAsk(
     // answer an email twice, and a filter may not file the same mail twice.
     // A folder or switch ask may not repeat one from the same place.
     // Office-raised kinds and access twins are left alone.
-    if (ONCE_ONLY.includes(kind) || a.reply || a.filter || a.folder || a.switches) {
+    if (ONCE_ONLY.includes(kind) || a.reply || a.filter || a.folder || a.switches || a.standing) {
       await lockDesk(tx, staffId);
       if (a.reply) await refuseSecondReply(tx, staffId, a.reply, a.revises);
       else if (a.filter) await refuseSecondFilter(tx, staffId, a.filter, a.revises);
       else if (a.folder) await refuseSecondFolder(tx, staffId, { ...a, folder: a.folder });
       else if (a.switches) await refuseSecondSwitch(tx, staffId, { ...a, switches: a.switches });
+      else if (a.standing) await refuseSecondStanding(tx, staffId, a.standing, a.revises);
       else await refuseRepeat(tx, staffId, a.title, a.revises);
     }
     // A plan goes on its goal's one thread, whatever run raised it: a chat,

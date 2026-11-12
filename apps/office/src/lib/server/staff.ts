@@ -305,8 +305,10 @@ export async function runHomeOf(who: StaffRow): Promise<string> {
  * reaches; `gate` is the run's token, closed when the run ends. The tool's own
  * allow list names the same tools, so either one alone holds. A write grant
  * at Draft lists every tool, and the gateway holds each change for the
- * owner's yes (`writesWait`), on the desk where `place` says; a run with no
- * place (a lesson run) changes nothing.
+ * owner's yes (`writesWait`), on the desk where `place` says, but for the
+ * tools the owner lets the Odd use without asking (`standing`), in any run
+ * with a place; a run with no place (a lesson run) changes nothing. At Act
+ * it holds only calls to the tools the owner set to ask first (`askFirst`).
  */
 async function access(who: StaffRow, ceiling: Level, ms: number, place?: CallPlace) {
   const office: McpServer = {
@@ -320,7 +322,13 @@ async function access(who: StaffRow, ceiling: Level, ms: number, place?: CallPla
   const servers: Record<string, McpServer> = { office };
   const allowed = ['mcp__office'];
   const caps = capped(await capabilities(who), ceiling);
-  const reach: { connector: ConnectorRow; level: Level; waits: boolean }[] = [];
+  const reach: {
+    connector: ConnectorRow;
+    level: Level;
+    waits: boolean;
+    standing: string[];
+    askFirst: string[];
+  }[] = [];
   for (const a of caps.outside) {
     if (a.heldBack) continue;
     const c = a.connector;
@@ -328,7 +336,13 @@ async function access(who: StaffRow, ceiling: Level, ms: number, place?: CallPla
       a.heldBack = 'sign-in ran out';
       continue;
     }
-    reach.push({ connector: c, level: a.level, waits: writesWait(a.level, caps.level) });
+    reach.push({
+      connector: c,
+      level: a.level,
+      waits: writesWait(a.level, caps.level),
+      standing: a.standing,
+      askFirst: a.askFirst
+    });
     if (a.level === 'act') allowed.push(`mcp__${c.id}`);
     else allowed.push(...c.readTools.map((t) => `mcp__${c.id}__${t}`));
   }
@@ -1616,7 +1630,7 @@ export async function followThrough(
           : edit
             ? editBrief(edit.path, edit.shown)
             : [
-                ...followUpBrief(f, a, r, task, g, also),
+                ...followUpBrief(f, a, r, task, g, also, who.permission),
                 ...(serves?.handOff && giver && thread
                   ? handOffContext({
                       h: serves.handOff,

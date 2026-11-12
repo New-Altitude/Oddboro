@@ -20,6 +20,7 @@ import {
 import { commandsHow } from './agents.ts';
 import { currentPlatform } from './platform.ts';
 import { bringBack, leavingRefused, removeOdd } from './leaving.ts';
+import { giveStanding } from './standing.ts';
 import { oweCatchUp } from './missed-runs.ts';
 import { type FolderAccess, type OwnSwitch } from './access-words.ts';
 import { filterWords, type GmailFilter } from './filter-words.ts';
@@ -326,6 +327,9 @@ async function decide(
       claimed?.kind === 'switch' && decision === 'approve'
         ? await turnOnSwitches(tx, claimed)
         : undefined;
+    // The standing yes goes on the grant with the yes, or neither happens.
+    if (claimed && effectsOf(claimed.kind, decision).includes('give_standing'))
+      await giveStanding(tx, claimed);
     // A yes or a no answers the twins too, at the same moment (`answeredWith`).
     // Sending one back leaves them waiting for the new version's answer.
     const open =
@@ -397,9 +401,10 @@ async function decide(
   for (const effect of effectsOf(ask.kind, decision)) {
     if (typeof effect === 'object') continue;
     switch (effect) {
-      // Done before this loop: the caller's approval, and the held hand-off with the claim.
+      // Done before this loop: the caller's approval, and the held hand-off and the standing yes with the claim.
       case 'approval_work':
       case 'start_held':
+      case 'give_standing':
         break;
       case 'grant_access': {
         if (!ask.access) break;
