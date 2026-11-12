@@ -962,7 +962,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    lists only the tools the grant reaches, refuses any other
    call, and keeps the connector's stored tools in step with the list it got
    (`refreshTools` in the ledger): new and dropped tools, Read only's reach
-   both ways, each tool's description, and a dropped tool off each standing
+   both ways, each tool's description, and a dropped or redescribed tool off each standing
    yes, each change but a description with a Ledger line. The office does the
    same for every connected service an Odd holds, but physical mail, as it
    starts and once a day (`startToolRefresh` in `access.ts`), and on the

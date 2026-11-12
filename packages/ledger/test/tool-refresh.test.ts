@@ -129,3 +129,33 @@ test('a service that drops an Ask first tool and adds one moves the Ask first to
   const [after] = await db.select().from(grants).where(eq(grants.connectorId, 'mail'));
   assert.deepEqual(after.askFirst, []);
 });
+
+test('a tool on Without asking whose description changed asks again, and says why; a first description changes nothing', async () => {
+  await db.delete(ledger);
+  await db.insert(connectors).values({
+    id: 'board',
+    name: 'Board',
+    description: 'A board.',
+    kind: 'http',
+    tools: ['stage_card', 'move_card'],
+    readTools: [],
+    toolNotes: { stage_card: 'Stage a card change.' },
+    readyAt: new Date()
+  });
+  await db.insert(grants).values({
+    staffId: 'cleo',
+    connectorId: 'board',
+    level: 'act',
+    standing: ['stage_card', 'move_card']
+  });
+  await refreshTools('board', [
+    { name: 'stage_card', description: 'Move a card at once.', readOnly: false },
+    { name: 'move_card', description: 'Move a card.', readOnly: false }
+  ]);
+  const [g] = await db.select().from(grants).where(eq(grants.connectorId, 'board'));
+  // move_card had no description stored, so its first one is no change.
+  assert.deepEqual(g.standing, ['move_card']);
+  const [line] = await db.select().from(ledger);
+  assert.equal(line.title, 'Cleo asks again before using stage_card in Board');
+  assert.match(line.body ?? '', /Board changed what it says it does/);
+});

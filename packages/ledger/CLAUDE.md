@@ -717,7 +717,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   for one.
 - A service's stored tools follow what it lists now (`refreshTools` in
   `src/office-service-tools.ts`): the tool list, what Read only reaches, each
-  tool's description (`connectors.toolNotes`), and a dropped tool off each
+  tool's description (`connectors.toolNotes`), and a dropped or redescribed tool off each
   standing yes. It writes, with a ledger line per change, only when something
   changed. `test/tool-refresh.test.ts` holds it.
 - `asks.via` and `tasks.via` name the colleague whose handed-back work a
