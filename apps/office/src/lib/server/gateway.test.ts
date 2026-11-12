@@ -653,3 +653,41 @@ test('at Act, a tool the owner set to ask first waits on the desk, and every oth
   assert.equal(calls[0].call.tool, 'wipe');
   assert.deepEqual(calls[0].call.before, [{ tool: 'capture', arguments: {} }]);
 });
+
+test('a held call lists only the calls made without asking since the last held one', async () => {
+  await L.pg`insert into staff ${L.pg({ ...odd('cy', 'Cy'), permission: 'draft' })}`;
+  const place = { staffId: 'cy', run: 'run-cy-1' };
+  const { token } = openGateway(
+    [{ connector: await notes(), level: 'act', waits: true, standing: ['capture'] }],
+    60_000,
+    place
+  );
+  const client = await connect(token);
+  const wipe = (n: number) =>
+    client.callTool({
+      name: 'wipe',
+      arguments: { n, oddboro_title: `Apply change ${n}`, oddboro_why: 'Makes it real.' }
+    });
+  try {
+    await client.callTool({ name: 'capture', arguments: { text: 'one' } });
+    await wipe(1);
+    // The same held call again changes nothing, and keeps nothing back from the next card.
+    await client.callTool({ name: 'capture', arguments: { text: 'two' } });
+    await wipe(1);
+    await wipe(2);
+    await wipe(3);
+  } finally {
+    await client.close();
+    await closeGateway(token);
+  }
+  const calls = await L.pg<{ call: { arguments: { n: number }; before?: unknown[] } }[]>`
+    select call from asks where staff_id = 'cy' and kind = 'call' order by id`;
+  assert.deepEqual(
+    calls.map((c) => [c.call.arguments.n, c.call.before ?? []]),
+    [
+      [1, [{ tool: 'capture', arguments: { text: 'one' } }]],
+      [2, [{ tool: 'capture', arguments: { text: 'two' } }]],
+      [3, []]
+    ]
+  );
+});

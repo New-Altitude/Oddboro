@@ -684,7 +684,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   works from Draft, `grantWorks`). Its title and why are the Odd's own words: at Draft
   the gateway adds a required `oddboro_title` and `oddboro_why` to each tool that changes
   something, takes them out of the call, and refuses a call without them. A title the office reads from the call itself (`said`) comes first. The
-  same call still open is returned, not raised twice. Calls the run made without asking to the same service before it (its standing yes) ride along as `before`, which only the desk shows. Only the office approves one, with `approveCall`, once it made
+  same call still open is returned, not raised twice. The changes the run made without asking to the same service since its last held call ride along as `before`, which only the desk shows. Only the office approves one, with `approveCall`, once it made
   the call (`call.result`); `decide` refuses a plain approve. A yes starts a
   `carry_out` run, whose brief has the call and what it returned.
   `apps/office/src/lib/server/gateway.test.ts` holds it.

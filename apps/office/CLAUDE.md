@@ -985,7 +985,8 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    the ledger's `standing.ts`) goes straight through in any run with a place,
    is listed without the two fields, and each such call rides on the run's
    next held call to that service (`before`), which the desk lists as "Made
-   without asking before this call", so a commit shows what it applies. The
+   without asking before this call", so a commit shows what it applies.
+   Each held call takes only the calls since the run's last one. The
    desk shows the tool and its exact inputs, with Make this
    call: `/api/asks/[id]/call` makes that call itself (`makeCall`, once per
    ask even on a second click), then `approveCall` keeps the result and

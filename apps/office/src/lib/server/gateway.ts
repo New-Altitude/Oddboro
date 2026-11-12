@@ -57,7 +57,8 @@ export const GATEWAY_PATH = '/api/gateway';
  * the run. `waits`: a write grant at Draft, whose changes wait for the owner,
  * except calls to the tools in `standing`, which go through (standing.ts in the
  * ledger). At Act only calls to the tools in `askFirst` wait. `made` keeps the
- * changes that went through, so a call held after them shows them.
+ * changes that went through without asking since the last held call, so the
+ * next one held shows them, and starts again empty.
  * `toldNoStart`: the Ledger already says it could not start in this run.
  */
 type Held = {
@@ -300,7 +301,7 @@ async function hold(
   name: string,
   given: Record<string, unknown>,
   place: CallPlace | undefined,
-  before: Held['made']
+  h: Held
 ): Promise<CallToolResult> {
   if (!place)
     return refusal(
@@ -315,21 +316,34 @@ async function hold(
       `Nothing was held. Call ${name} again with ${TITLE}, what it does in a few plain words, and ${WHY}, why you make it in one or two plain sentences, both for ${owner}, who reads them on their desk.`
     );
   const read = await heldWordsFor(c, name, args);
-  const { ask, already } = await raiseCall(
-    place,
-    {
-      connector: c.id,
-      tool: name,
-      arguments: args,
-      ...(read ? { said: read.title, shown: read.items } : {}),
-      ...(before.length ? { before } : {})
-    },
-    c.name,
-    {
-      title: title.length > TITLE_MAX ? `${title.slice(0, TITLE_MAX - 1).trimEnd()}…` : title,
-      why
-    }
-  );
+  // The calls since the last held one go on this card, and the next card
+  // starts from here. Taken now, so a call made while this one is raised
+  // waits for the next card.
+  const before = h.made;
+  h.made = [];
+  let raised: Awaited<ReturnType<typeof raiseCall>> | undefined;
+  try {
+    raised = await raiseCall(
+      place,
+      {
+        connector: c.id,
+        tool: name,
+        arguments: args,
+        ...(read ? { said: read.title, shown: read.items } : {}),
+        ...(before.length ? { before } : {})
+      },
+      c.name,
+      {
+        title: title.length > TITLE_MAX ? `${title.slice(0, TITLE_MAX - 1).trimEnd()}…` : title,
+        why
+      }
+    );
+  } finally {
+    // Not raised, or the same call was already on the desk with its own list:
+    // these wait for the next card.
+    if (!raised || raised.already) h.made = [...before, ...h.made];
+  }
+  const { ask, already } = raised;
   return {
     content: [
       {
@@ -424,8 +438,7 @@ export async function gateway(request: Request, id: string): Promise<Response> {
     // nothing, standing yes or not.
     const args = req.params.arguments ?? {};
     if (!onlyReads(c, tool)) {
-      if (waitsFor(h, name) || (h.waits && !run.place))
-        return hold(c, name, args, run.place, h.made);
+      if (waitsFor(h, name) || (h.waits && !run.place)) return hold(c, name, args, run.place, h);
       h.made.push({ tool: name, arguments: args });
     }
     const client = await clientOf(c, h);
