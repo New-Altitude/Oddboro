@@ -28,6 +28,7 @@ import {
   attachArg,
   attachable,
   scheduleArg,
+  missedArg,
   hireFields,
   hireFrom,
   goalText,
@@ -51,7 +52,7 @@ tool(
       rows
         .map(
           (j) =>
-            `## ${j.name}\n${describeSchedule(j.schedule)}${j.enabled ? '' : ', paused'}${j.report ? `, reports to ${OWNER}` : ''}\n\n${j.instructions}`
+            `## ${j.name}\n${describeSchedule(j.schedule)}${j.enabled ? '' : ', paused'}${j.report ? `, reports to ${OWNER}` : ''}, missed runs: ${j.missed}\n\n${j.instructions}`
         )
         .join('\n\n')
     );
@@ -161,14 +162,16 @@ if (has('propose_goal_plan'))
                   name: z.string(),
                   instructions: z.string(),
                   schedule: scheduleArg,
-                  report: z.boolean().optional()
+                  report: z.boolean().optional(),
+                  missed: missedArg
                 })
                 .optional(),
               change_job: z
                 .object({
                   name: z.string().describe('The job name, exactly as it is now.'),
                   instructions: z.string().optional(),
-                  schedule: scheduleArg.optional()
+                  schedule: scheduleArg.optional(),
+                  missed: missedArg
                 })
                 .optional()
             })
@@ -373,19 +376,20 @@ if (has('edit_my_job'))
   tool(
     'edit_my_job',
     {
-      description: `Change one of your own jobs: its steps, its schedule, or whether it reports to ${OWNER}. When ${OWNER} asks for a change in chat, make it at once, worded the way they asked, then tell them what changed. Outside a chat, only to carry out an ask they approved, passing its id. To propose a change, raise_ask with the exact new steps first.`,
+      description: `Change one of your own jobs: its steps, its schedule, whether it reports to ${OWNER}, or what it does with runs it missed. When ${OWNER} asks for a change in chat, make it at once, worded the way they asked, then tell them what changed. Outside a chat, only to carry out an ask they approved, passing its id. To propose a change, raise_ask with the exact new steps first.`,
       inputSchema: {
         job: z.string().describe('The job name, exactly as my_jobs lists it.'),
         instructions: z.string().optional().describe('The full new steps, numbered.'),
         schedule: scheduleArg.optional(),
         report: z.boolean().optional(),
+        missed: missedArg,
         approved_ask: approvedArg
       }
     },
-    async ({ job, instructions, schedule, report, approved_ask }) => {
+    async ({ job, instructions, schedule, report, missed, approved_ask }) => {
       const go = await goAhead(approved_ask);
       if ('problem' in go) return text(go.problem);
-      const j = await editOwnJob(ME, job, { instructions, schedule, report }, go);
+      const j = await editOwnJob(ME, job, { instructions, schedule, report, missed }, go);
       return text(j ? `Changed "${job}".` : `You have no job named "${job}". Check my_jobs.`);
     }
   );

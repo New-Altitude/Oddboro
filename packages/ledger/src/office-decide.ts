@@ -20,6 +20,7 @@ import {
 import { commandsHow } from './agents.ts';
 import { currentPlatform } from './platform.ts';
 import { bringBack, leavingRefused, removeOdd } from './leaving.ts';
+import { oweCatchUp } from './missed-runs.ts';
 import { type FolderAccess, type OwnSwitch } from './access-words.ts';
 import { filterWords, type GmailFilter } from './filter-words.ts';
 import { yesOrNo } from './tools.ts';
@@ -214,7 +215,8 @@ export async function giveFolder(
   path: string,
   level: FolderAccess,
   reason: string | null = null,
-  accept = false
+  accept = false,
+  inChat = false
 ): Promise<
   { given: { path: string; level: FolderAccess } } | { warning: string } | FolderNotGiven
 > {
@@ -227,7 +229,7 @@ export async function giveFolder(
   if ('warning' in checked) return checked;
   const given = { path: checked.real, level };
   try {
-    const done = await decide(id, 'approve', reason, { folder: { ...a.folder, given } });
+    const done = await decide(id, 'approve', reason, { folder: { ...a.folder, given }, inChat });
     if (!done) return { refused: 'You already answered this ask.', status: 409 };
   } catch (e) {
     if (e instanceof FolderRefused) return { refused: e.message, status: 400 };
@@ -418,11 +420,11 @@ async function decide(
       }
       // The folder went to the Odd with the claim: the work that waited on it picks up.
       case 'give_folder':
-        if (gave) await carryOutTogether([ask, ...twins]);
+        if (gave) await carryOutTogether([ask, ...twins], undefined, db, chat);
         break;
       // The switches turned on with the claim: the work that waited on them picks up.
       case 'turn_on':
-        if (turned) await carryOutTogether([ask, ...twins]);
+        if (turned) await carryOutTogether([ask, ...twins], undefined, db, chat);
         break;
       case 'carry_out':
         await followUp(ask.staffId, 'carry_out', {
@@ -467,6 +469,9 @@ async function decide(
         break;
       case 'odd_returns':
         if (ask.odd) await bringBack(ask.odd, { askId: ask.id });
+        break;
+      case 'catch_up':
+        await oweCatchUp(ask);
         break;
       default:
         effect satisfies never;

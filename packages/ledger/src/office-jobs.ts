@@ -14,9 +14,10 @@ import {
   threads,
   followUps,
   type RunTrigger,
+  type MissedRuns,
   type Schedule
 } from './schema.ts';
-import { nextRun, zone } from './time.ts';
+import { MISSED_WORDS, nextRun, zone } from './time.ts';
 import { taskSaid } from './desk-answers.ts';
 import type { StaffRow, JobRow, RunRow } from './office.ts';
 import { ofWorkingOdd, roster, staffer } from './office-staff.ts';
@@ -52,6 +53,7 @@ export async function addJob(
     instructions: string;
     schedule: Schedule;
     report?: boolean;
+    missed?: MissedRuns;
   },
   q: Db = db
 ): Promise<JobRow> {
@@ -64,7 +66,9 @@ export async function addJob(
 
 export async function updateJob(
   id: number,
-  patch: Partial<Pick<JobRow, 'name' | 'instructions' | 'schedule' | 'enabled' | 'report'>>
+  patch: Partial<
+    Pick<JobRow, 'name' | 'instructions' | 'schedule' | 'enabled' | 'report' | 'missed'>
+  >
 ): Promise<void> {
   const [row] = await db.update(jobs).set(patch).where(eq(jobs.id, id)).returning();
   if (row && (patch.schedule || patch.enabled))
@@ -95,7 +99,7 @@ async function recordGoAhead(who: StaffRow, go: GoAhead, what: string): Promise<
 export async function editOwnJob(
   staffId: string,
   name: string,
-  patch: Partial<Pick<JobRow, 'instructions' | 'schedule' | 'report'>>,
+  patch: Partial<Pick<JobRow, 'instructions' | 'schedule' | 'report' | 'missed'>>,
   go: GoAhead
 ): Promise<JobRow | undefined> {
   const who = await staffer(staffId);
@@ -114,7 +118,8 @@ export async function editOwnJob(
       patch.instructions && `Steps:\n${patch.instructions}`,
       patch.schedule && `Schedule: ${JSON.stringify(patch.schedule)}`,
       patch.report !== undefined &&
-        `Reports to ${await ownerName()}: ${patch.report ? 'yes' : 'no'}`
+        `Reports to ${await ownerName()}: ${patch.report ? 'yes' : 'no'}`,
+      patch.missed && `Missed runs: ${MISSED_WORDS[patch.missed]}`
     ]
       .filter(Boolean)
       .join('\n\n'),

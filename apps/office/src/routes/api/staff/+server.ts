@@ -21,6 +21,7 @@ import {
   EFFORT_ORDER,
   effortsOf,
   hire,
+  MISSED_RUNS,
   MODELS,
   OFFICE_ACCOUNT,
   officeAgent,
@@ -46,7 +47,13 @@ type Body = Partial<Record<'name' | 'role' | 'room' | 'permission' | 'remit' | '
   look?: unknown;
   portraitPx?: unknown;
   newParts?: unknown;
-  job?: { name?: unknown; instructions?: unknown; schedule?: unknown; report?: unknown };
+  job?: {
+    name?: unknown;
+    instructions?: unknown;
+    schedule?: unknown;
+    report?: unknown;
+    missed?: unknown;
+  };
 };
 
 export const POST: RequestHandler = async ({ request }) => {
@@ -126,7 +133,8 @@ export const POST: RequestHandler = async ({ request }) => {
       name: jobName,
       instructions: jobSteps,
       schedule: jobSchedule,
-      report: b.job.report === true
+      report: b.job.report === true,
+      missed: MISSED_RUNS.find((m) => m === b.job?.missed)
     });
   // The hire is made, so what fails after this is logged, not a failed hire. A
   // goal gone since leaves the proposal open on the desk: the hire does not serve it.

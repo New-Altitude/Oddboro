@@ -1,3 +1,4 @@
+import type { Agent, Delivery } from '@oddboro/ledger';
 import type { WorkAbout } from './work.ts';
 // A staffer's chat, as the office saves it and the page shows it. Safe to
 // import in the browser.
@@ -42,7 +43,7 @@ export type ChatEntry = {
   inSession?: true;
   runFailed?: true;
   re?: ChatRef;
-  item?: ChatRef & { status: string; note?: string | null; responseVersion?: number };
+  item?: Omit<Delivery, 'at' | 'decidedAt'>;
   lesson?: LessonLine;
   /** `back` is which hand-back a reply or pick-up line shows. */
   handOff?: { line: HandOffLine; step: HandOffStep; back?: number };
@@ -54,10 +55,12 @@ export type ChatEntry = {
   /** On a reply: the choices it ended with (`splitChoices`), which the page shows as buttons. */
   choices?: string[];
 };
+export type ChatSignIn = { agent: Agent; account: string; how: 'key' | 'browser' };
+
 /** What a chat's reply streams to the page, one server-sent event each. */
 export type ChatEvent =
   | { type: 'reply'; runId: string; turnId: string }
   | { type: 'delta'; text: string }
   | { type: 'tool'; name: string }
   | { type: 'done'; text: string; choices?: string[] }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string; signIn?: ChatSignIn };

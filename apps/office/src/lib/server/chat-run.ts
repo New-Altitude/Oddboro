@@ -23,6 +23,7 @@ import { chatRun } from './run-state.ts';
 import { addToChat, history, keepOwnerTurn, ChatInputError } from './chat-turns.ts';
 import { attachedFiles, filesNow } from './chat-files.ts';
 import { replyBrief, savedTaskWords } from './chat-delivery.ts';
+import { missingChatSignIn } from './chat-sign-in.ts';
 import { sessionIdIn } from './resume.ts';
 import { changedSince, replay, replayed, replayedAt, replaySince } from './replay.ts';
 import {
@@ -166,6 +167,7 @@ export async function replyToOwnerTurn(
     onEvent({ type: 'reply', runId: live.key, turnId });
     let re: Awaited<ReturnType<typeof replyBrief>> | undefined;
     let r: Run;
+    let usedTool = false;
     try {
       // Lines the office wrote in the chat, and work put on the desk, since the
       // owner last wrote are not in the session: say so, so an answer to the
@@ -231,12 +233,12 @@ export async function replyToOwnerTurn(
         sessionFile: chatSession(id),
         timeoutMs: CHAT_TIMEOUT_MS,
         onEvent: (e) => {
-          if (e.type !== 'done') onEvent(e);
+          if (e.type === 'tool') usedTool = true;
+          if (e.type !== 'done' && e.type !== 'error') onEvent(e);
         }
       });
     } catch (err) {
       r = { ok: false, text: err instanceof Error ? err.message : String(err) };
-      onEvent({ type: 'error', message: r.text });
     }
     const at = new Date();
     const common = {
@@ -262,6 +264,10 @@ export async function replyToOwnerTurn(
       addToChat(id, { ...common, text, ...(choices.length ? { choices } : {}) });
       onEvent({ type: 'done', text, ...(choices.length ? { choices } : {}) });
     } else {
+      const signIn = usedTool
+        ? undefined
+        : await missingChatSignIn(who, r.text).catch(() => undefined);
+      onEvent({ type: 'error', message: r.text, ...(signIn && { signIn }) });
       addToChat(id, {
         ...common,
         text: r.text,

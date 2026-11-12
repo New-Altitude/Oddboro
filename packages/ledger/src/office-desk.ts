@@ -2,7 +2,9 @@
 import { and, asc, desc, eq, exists, gt, isNotNull, isNull, not, or } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { db } from './db.ts';
-import { asks, attachments, ledger, reports, tasks } from './schema.ts';
+import { asks, attachments, ledger, reports, tasks, type FolderRequest } from './schema.ts';
+import { awayJobs, type AwayJob } from './missed-runs.ts';
+import { type OwnSwitch } from './access-words.ts';
 import { type DeskItem } from './desk-answers.ts';
 import type { AskRow, TaskRow, AttachmentRow, ReportRow, LedgerRow } from './office.ts';
 import { ofWorkingOdd } from './office-staff.ts';
@@ -36,6 +38,8 @@ export type Desk = {
    * (`shownFolder`), which only the server can work out.
    */
   folders: Record<number, string>;
+  /** The jobs that skipped a run while the office was off: the While you were away card. */
+  away: AwayJob[];
 };
 
 export async function desk(): Promise<Desk> {
@@ -105,7 +109,8 @@ export async function desk(): Promise<Desk> {
     attachments: f.map((x) => x.attachments),
     folders: Object.fromEntries(
       shown.flatMap((x) => (x.folder ? [[x.id, shownFolder(x.folder.path)]] : []))
-    )
+    ),
+    away: await awayJobs()
   };
 }
 
@@ -155,6 +160,9 @@ export type Delivery = {
   status: string;
   /** A saved task response opens from its chat card, including after completion. */
   responseVersion?: number;
+  folder?: FolderRequest;
+  switches?: OwnSwitch[];
+  why?: string;
   /** When the owner decided an ask or finished or dropped a task. */
   decidedAt?: Date | null;
   /** The owner's words on a decided ask or finished task. */
@@ -171,7 +179,10 @@ export async function deliveries(staffId: string, limit = 200): Promise<Delivery
         at: asks.createdAt,
         status: asks.status,
         decidedAt: asks.decidedAt,
-        note: asks.reason
+        note: asks.reason,
+        folder: asks.folder,
+        switches: asks.switches,
+        why: asks.why
       })
       .from(asks)
       .where(eq(asks.staffId, staffId))
@@ -204,7 +215,19 @@ export async function deliveries(staffId: string, limit = 200): Promise<Delivery
       .limit(limit)
   ]);
   return [
-    ...a.map((x) => ({ kind: 'ask' as const, ...x })),
+    ...a.map(({ folder, switches, why, ...x }) => ({
+      kind: 'ask' as const,
+      ...x,
+      ...(folder && {
+        folder: {
+          ...folder,
+          path: shownFolder(folder.path),
+          ...(folder.given && { given: { ...folder.given, path: shownFolder(folder.given.path) } })
+        },
+        why
+      }),
+      ...(switches && { switches, why })
+    })),
     ...t.map((x) => ({ kind: 'task' as const, ...x })),
     ...r.map(({ readAt, ...x }) => ({
       kind: 'report' as const,

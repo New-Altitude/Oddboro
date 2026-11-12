@@ -13,6 +13,7 @@ import {
   type GoalDraft,
   type GoalPlan,
   type HireProposal,
+  type InChat,
   type HeldCall,
   type ReplyDraft
 } from './schema.ts';
@@ -428,15 +429,22 @@ function carriedOutBy(together: AskRow[]): AskRow[] {
 /**
  * Start the carry-outs for asks one answer settled (`carriedOutBy`).
  * `pickedUp` is the work parked on the connect task that just ended, which
- * picks up in its own run (`finishTask`).
+ * picks up in its own run (`finishTask`). `chat` goes only to the run of the
+ * ask the owner answered in chat, never a twin's.
  */
 async function carryOutTogether(
   together: AskRow[],
   pickedUp?: string[],
-  q: Db = db
+  q: Db = db,
+  chat?: InChat
 ): Promise<void> {
   for (const a of carriedOutBy(together))
-    await followUp(a.staffId, 'carry_out', { askId: a.id, note: null, pickedUp }, q);
+    await followUp(
+      a.staffId,
+      'carry_out',
+      { askId: a.id, note: null, pickedUp, ...(chat?.card.id === a.id && { chat }) },
+      q
+    );
 }
 
 /**

@@ -1,6 +1,6 @@
 // One job: run it now, change it, pause it, or remove it.
 import { error, json } from '@sveltejs/kit';
-import { deleteJob, job, updateJob } from '@oddboro/ledger';
+import { deleteJob, job, MISSED_RUNS, updateJob } from '@oddboro/ledger';
 import { runNow } from '#lib/server/jobs.ts';
 import { parseSchedule } from '#lib/server/schedule.ts';
 import type { RequestHandler } from './$types';
@@ -14,6 +14,8 @@ export const POST: RequestHandler = async ({ params, request }) => {
   else if (b.op === 'update') {
     const schedule = b.schedule === undefined ? undefined : parseSchedule(b.schedule);
     if (schedule === null) error(400, 'Say how often it runs');
+    const missed = MISSED_RUNS.find((m) => m === b.missed);
+    if (b.missed !== undefined && !missed) error(400, 'Say latest or record for missed runs');
     await updateJob(id, {
       ...(typeof b.name === 'string' && b.name.trim() ? { name: b.name.trim().slice(0, 80) } : {}),
       ...(typeof b.instructions === 'string' && b.instructions.trim()
@@ -21,6 +23,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
         : {}),
       ...(typeof b.enabled === 'boolean' ? { enabled: b.enabled } : {}),
       ...(typeof b.report === 'boolean' ? { report: b.report } : {}),
+      ...(missed ? { missed } : {}),
       ...(schedule ? { schedule } : {})
     });
   } else error(400, 'Say run, update or delete');

@@ -108,6 +108,7 @@ export const OWNER_ACTIONS = {
   'POST /api/goals/[id]/staff': { records: 'decision' },
   'DELETE /api/goals/[id]/staff': { records: 'decision' },
   'POST /api/jobs/[id]': { none: NO_ROW },
+  'DELETE /api/jobs/away': { none: "Takes the jobs off the desk's While you were away card." },
   'PATCH /api/lessons/[id]': { records: 'decision' },
   'POST /api/looks': {
     notAnAction: 'Draws a look for the hire window; nothing is kept until a hire.'

@@ -318,7 +318,10 @@
   }
   const status = $derived(Object.fromEntries(tags.map((t) => [t.id, statusOf(t)])));
 
-  const deskCount = $derived(desk.asks.length + desk.tasks.length + desk.reports.length);
+  // The While you were away card counts once, however many jobs it lists.
+  const deskCount = $derived(
+    desk.asks.length + desk.tasks.length + desk.reports.length + (desk.away.length ? 1 : 0)
+  );
 
   /** Rooms a new hire can work in: any with a place to work, read or sort mail. */
   const hireRooms = $derived.by(() => {

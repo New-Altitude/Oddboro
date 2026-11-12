@@ -22,7 +22,7 @@ import { MANAGER_ROLE } from './managers.ts';
 import { type OwnerWords } from './lessons.ts';
 import { workFile } from './threads.ts';
 import { INSTRUCTIONS, THREADS_DIR, workName, workPath } from './work-paths.ts';
-import { type HireProposal } from './schema.ts';
+import { MISSED_RUNS, type HireProposal } from './schema.ts';
 import { officeDay, SCHEDULE_RULE, WEEKDAYS, zone, zoneName } from './time.ts';
 import {
   GRANTABLE_TOOLS,
@@ -207,6 +207,12 @@ const scheduleArg = z.discriminatedUnion('every', [
     .object({ every: z.literal('week'), day: z.enum(WEEKDAYS), at: atArg })
     .describe('Once a week, e.g. { every: "week", day: "Fri", at: "16:00" }.')
 ]);
+const missedArg = z
+  .enum(MISSED_RUNS)
+  .optional()
+  .describe(
+    `What the job does with runs it missed while the office was off. 'latest' (the usual, for sweeps, reports and reminders): only the newest run matters. 'record': every missed period gets its own entry, filled later. Pick 'record' only when each run adds an entry to a series that must have no gaps, such as a daily count or a trend file.`
+  );
 
 /**
  * A file in this staffer's folder, as the path inside it to its real path, or
@@ -417,7 +423,8 @@ const hireFields = {
         .optional()
         .describe(
           `Put each result on ${OWNER}'s desk as a report. True when the job makes something for them to read.`
-        )
+        ),
+      missed: missedArg
     })
     .optional(),
   intake_file: z
@@ -582,6 +589,7 @@ export {
   attachArg,
   attachable,
   scheduleArg,
+  missedArg,
   filesForHandOff,
   attachedForLead,
   hireFields,
