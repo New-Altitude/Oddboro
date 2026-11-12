@@ -676,11 +676,21 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    (`gemini-policy.test.ts`); a message starting with `/` goes in after a line
    break, so Gemini never runs it as a command.
    A chat resumes the Odd's session without waiting for a background slot.
-   Stop reply names the run on that saved turn. Ordinary Send queues while a
-   reply runs; Correct this reply selects interruption explicitly. A
-   correction keeps its own text and files before stopping that run, then waits
-   for it to close. Closing the window just stops the stream to that window.
-   A message about a job or goal in progress goes to its lead.
+   Stop reply names the run on that saved turn, and later runs hear that
+   reply as stopped by the owner, not failed (`chatPreface`). Ordinary Send
+   queues while a reply runs. On a Claude Code Odd the queued message offers
+   Send now, and Ctrl+Enter in the box (Ctrl on every system) queues and
+   sends now at once: `PATCH /api/staff/[id]/chat` names the run, and
+   `addToReply` in `chat-run.ts` writes the words to that run's stdin as a
+   second stream-json user message, which Claude Code answers in the same
+   turn. A Claude Code chat run reads stream-json and keeps stdin open until
+   its result (`streamed` in `runTool`); a run that took added words ends
+   when Claude Code does. The words are an owner line of the same turn
+   (`source.kind` `added`). A run past its result takes nothing, and the page
+   sends the words as the next message. Send now is off for a message with
+   files, and absent for one about a desk item or work, and on Codex, Grok,
+   Gemini and persona Odds. Closing the window just stops the stream to that
+   window. A message about a job or goal in progress goes to its lead.
    Claude Code keeps a session's first system prompt, so a resumed chat's message opens with the
    time and each section that changed since that session last saw it, in full
    (`catchUp` in `src/lib/server/resume.ts`; `session.json` keeps what it saw).

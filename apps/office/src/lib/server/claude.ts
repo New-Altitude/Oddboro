@@ -255,9 +255,8 @@ function keyWorks(value: string): Promise<boolean> {
   });
 }
 
-/** A message on stdin for Claude Code; pictures go in its stream-json user turn. */
-export function claudeInput(message: string, images?: { mediaType: string; data: string }[]) {
-  if (!images?.length) return message;
+/** One user message as a stream-json line for Claude Code: its pictures, then its text. */
+export function userTurn(text: string, images: { mediaType: string; data: string }[] = []): string {
   return (
     JSON.stringify({
       type: 'user',
@@ -268,9 +267,21 @@ export function claudeInput(message: string, images?: { mediaType: string; data:
             type: 'image',
             source: { type: 'base64', media_type: i.mediaType, data: i.data }
           })),
-          { type: 'text', text: message }
+          { type: 'text', text }
         ]
       }
     }) + '\n'
   );
+}
+
+/**
+ * A message on stdin for Claude Code: plain text, or a stream-json user turn
+ * when it carries pictures or the run reads stream-json (`streamed`).
+ */
+export function claudeInput(
+  message: string,
+  images?: { mediaType: string; data: string }[],
+  streamed = false
+): string {
+  return images?.length || streamed ? userTurn(message, images) : message;
 }

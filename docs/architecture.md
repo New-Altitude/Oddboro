@@ -168,7 +168,7 @@ change.
   `failed-run.test.ts` holds where each failure lands. Live execution uses
   `runsGoing` in `run-registry.ts`, with a stop handle on each entry.
   `run-state.test.ts` checks admission and removal; `chat-steer.test.ts`
-  checks that Stop and correction select only the named attempt.
+  checks that Stop and Send now select only the named attempt.
 - **A room kind.** Start at `ROOM_KINDS` in `packages/world/src/generate.ts`.
   Check-types fails at `KIND_ABOUT` and `ROOM_ID`. No check: its furnishing
   in `recipe()`, and the rooms an Odd names in a hire proposal (`hireFields`

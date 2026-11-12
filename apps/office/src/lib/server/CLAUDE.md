@@ -58,7 +58,7 @@ then names every other place.
 entry before preparation and release it after the result is kept. Each entry
 has a stop controller and an end promise. `run-state.ts` admits background
 slots and derives the floor's work from those entries. `chat-run.ts` owns
-saved chat attempts, Stop and corrections. The job clock keeps its own due
+saved chat attempts, Stop and Send now (`add` on a Claude Code chat's entry). The job clock keeps its own due
 jobs; it never owns a second process registry.
 
 ## Later

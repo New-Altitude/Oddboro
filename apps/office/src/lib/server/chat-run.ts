@@ -1,5 +1,5 @@
 // A saved owner turn, its current attempt and its reply. Closing a page never
-// cancels work; Stop and corrections name one attempt in the live registry.
+// cancels work; Stop and Send now name one attempt in the live registry.
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import {
@@ -15,7 +15,6 @@ import {
 } from '@oddboro/ledger';
 import { reserveRun, releaseRun } from '@oddboro/ledger/run-registry';
 import { firstQuestionIn, nextFirstQuestion } from '@oddboro/ledger/first-questions';
-import type { ChatSource } from '#lib/staff/chat-input.ts';
 import type { ChatEntry, ChatEvent, ChatRef } from '#lib/staff/chat.ts';
 import { isPicture, type ChatFile } from '#lib/attachments.ts';
 import { splitChoices } from '#lib/choices.ts';
@@ -43,16 +42,6 @@ export function activeReply(id: string) {
   return r?.turnId ? { runId: r.key, turnId: r.turnId } : undefined;
 }
 
-export function correctionSource(id: string, runId: string): ChatSource {
-  const active = activeReply(id);
-  const turnId =
-    active?.runId === runId
-      ? active.turnId
-      : history(id).findLast((e) => e.from === 'staff' && e.runId === runId)?.turnId;
-  if (!turnId) throw new ChatInputError('That reply is no longer available.');
-  return { kind: 'correction', id: turnId, revision: runId };
-}
-
 export async function stopReply(id: string, runId: string): Promise<boolean> {
   const r = chatRun(id);
   if (!r?.turnId || r.key !== runId) return false;
@@ -61,25 +50,34 @@ export async function stopReply(id: string, runId: string): Promise<boolean> {
   return true;
 }
 
-export function correctionBrief(owner: ChatEntry, before: ChatEntry[]): string[] {
-  const prior =
-    owner.source?.kind === 'correction'
-      ? before.find((e) => e.from === 'owner' && e.turnId === owner.source?.id)
-      : undefined;
-  return [
-    ...(prior
-      ? [
-          `This corrects your reply to: ${prior.text}`,
-          'Keep completed work and saved files. Do not repeat an outside action already taken. Use the correction below for what remains.'
-        ]
-      : []),
-    ...(owner.about
-      ? [
-          `The owner is speaking to you as lead of this ${owner.about.kind} #${owner.about.id}, "${owner.about.title}".`,
-          'Apply their words to that work. This message does not stop a background job or approve an outside action.'
-        ]
-      : [])
-  ];
+/**
+ * Send now: the owner's words go into the reply `runId` while it runs, and the
+ * chat keeps them as an owner line of the same turn. Only a Claude Code chat
+ * takes them (`add` on its run). False when that reply is gone, has given its
+ * result, or cannot take words: the page then sends them as the next message.
+ */
+export function addToReply(id: string, runId: string, text: string): boolean {
+  const r = chatRun(id);
+  if (!r?.turnId || r.key !== runId || !r.add?.(text)) return false;
+  addToChat(id, {
+    at: new Date().toISOString(),
+    from: 'owner',
+    text,
+    turnId: r.turnId,
+    source: { kind: 'added' }
+  });
+  emit({ type: 'change', table: 'chat' });
+  return true;
+}
+
+/** What the lead is told when the owner's message is about work it leads. */
+export function aboutBrief(owner: ChatEntry): string[] {
+  return owner.about
+    ? [
+        `The owner is speaking to you as lead of this ${owner.about.kind} #${owner.about.id}, "${owner.about.title}".`,
+        'Apply their words to that work. This message does not stop a background job or approve an outside action.'
+      ]
+    : [];
 }
 
 function attachedBrief(files: (ChatFile & { path: string })[]): string {
@@ -110,8 +108,7 @@ export async function chat(
 export async function replyToOwnerTurn(
   id: string,
   turnId: string,
-  onEvent: (e: ChatEvent) => void,
-  instead?: string
+  onEvent: (e: ChatEvent) => void
 ): Promise<void> {
   const log = history(id);
   const owner = log.find((e) => e.from === 'owner' && e.turnId === turnId);
@@ -127,23 +124,16 @@ export async function replyToOwnerTurn(
     });
     return;
   }
-  const previous = chatRun(id);
-  if (
-    previous &&
-    (!instead || previous.key !== instead || previous.turnId === turnId || !previous.turnId)
-  )
-    throw new Error('Another reply is in progress. Your message is saved.');
-  if (instead && !previous && log.findLast((e) => e.from === 'staff' && e.runId)?.runId !== instead)
-    throw new Error('That reply is no longer active. Your message is saved.');
+  if (chatRun(id)) throw new Error('Another reply is in progress. Your message is saved.');
   // No await between checking and reserving: a second page sees this attempt.
   const live = reserveRun({ staffId: id, kind: 'chat', turnId });
   const started = Date.now();
-  const message = owner.text;
+  // A retry carries what the owner added to the turn with Send now, too.
+  const message = log
+    .filter((e) => e.from === 'owner' && e.turnId === turnId)
+    .map((e) => e.text)
+    .join('\n\n');
   try {
-    if (previous) {
-      previous.stop.abort();
-      await previous.end.promise;
-    }
     const who = await staffer(id);
     if (!who) throw new ChatInputError('No such Odd');
     const before = history(id).filter((e) => e.turnId !== turnId);
@@ -222,7 +212,7 @@ export async function replyToOwnerTurn(
           : []),
         ...chatPreface(past, landed, session),
         ...(re ? [re.brief] : []),
-        ...correctionBrief(owner, before)
+        ...aboutBrief(owner)
       ].join('\n\n');
       r = await run(who, prompt, {
         kind: 'chat',
@@ -256,7 +246,8 @@ export async function replyToOwnerTurn(
       took: at.getTime() - started
     };
     if (r.interrupted) {
-      const text = `You stopped the reply to “${message.slice(0, 160)}”. Completed work and saved files remain.`;
+      // Said apart from the owner's words, which sit just above it, so no quote ends in doubled punctuation.
+      const text = 'You stopped this reply. Completed work and saved files remain.';
       addToChat(id, {
         ...common,
         text,

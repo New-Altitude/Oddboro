@@ -4,17 +4,12 @@ import { randomUUID } from 'node:crypto';
 import { error, json } from '@sveltejs/kit';
 import { DESK_ITEMS } from '@oddboro/ledger/desk-answers';
 import { FILES_MAX } from '#lib/attachments.ts';
-import { CHAT_REQUEST_BYTES, type OwnerInput } from '#lib/staff/chat-input.ts';
+import { CHAT_BYTES, CHAT_REQUEST_BYTES, type OwnerInput } from '#lib/staff/chat-input.ts';
 import type { ChatEvent } from '#lib/staff/chat.ts';
 import { attachedFiles } from '#lib/server/chat-files.ts';
 import { keepOwnerTurn, ChatInputError } from '#lib/server/chat-turns.ts';
 import { chatLog, isBusy, isStaff } from '#lib/server/staff.ts';
-import {
-  replyToOwnerTurn,
-  activeReply,
-  correctionSource,
-  stopReply
-} from '#lib/server/chat-run.ts';
+import { replyToOwnerTurn, activeReply, addToReply, stopReply } from '#lib/server/chat-run.ts';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ params }) => {
@@ -35,14 +30,10 @@ export const POST: RequestHandler = async ({ params, request }) => {
     error(400, 'Send a chat message.');
   // A JSON object was checked above. Every field is checked before it is used.
   const body = parsed as Record<string, unknown>;
-  const { instead, about } = body;
-  if (
-    (instead !== undefined && typeof instead !== 'string') ||
-    (about !== undefined && typeof about !== 'string')
-  )
-    error(400, 'Choose the work to correct.');
-  if (instead && (about || !('message' in body))) error(400, 'Choose one reply to correct.');
-  if (!instead && isBusy(params.id)) error(409, 'Still replying to the last message');
+  const { about } = body;
+  if (about !== undefined && typeof about !== 'string')
+    error(400, 'Choose the work to talk about.');
+  if (isBusy(params.id)) error(409, 'Still replying to the last message');
   const turnId = body.turnId ?? randomUUID();
   if (typeof turnId !== 'string' || (!('message' in body) && !body.turnId))
     error(400, 'Send a chat message.');
@@ -53,13 +44,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
     kind && typeof r?.id === 'number' && Number.isInteger(r.id) ? { kind, id: r.id } : undefined;
   if ('message' in body) {
     if (typeof body.message !== 'string') error(400, 'Send a chat message.');
-    let source: OwnerInput['source'];
-    try {
-      source = instead ? correctionSource(params.id, instead) : { kind: 'chat' };
-    } catch (e) {
-      error(400, e instanceof Error ? e.message : String(e));
-    }
-    const input: OwnerInput = { turnId, message: body.message, source };
+    const input: OwnerInput = { turnId, message: body.message, source: { kind: 'chat' } };
     if (body.files !== undefined) {
       if (!Array.isArray(body.files) || body.files.length > FILES_MAX)
         error(400, `Attach up to ${FILES_MAX} files at a time.`);
@@ -103,7 +88,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
       const send = (e: ChatEvent) => {
         if (open) controller.enqueue(encoder.encode(`data: ${JSON.stringify(e)}\n\n`));
       };
-      replyToOwnerTurn(params.id, turnId, send, instead)
+      replyToOwnerTurn(params.id, turnId, send)
         .catch((err: unknown) =>
           send({ type: 'error', message: err instanceof Error ? err.message : String(err) })
         )
@@ -127,4 +112,20 @@ export const DELETE: RequestHandler = async ({ params, request }) => {
   if (!body || typeof body !== 'object' || !('runId' in body) || typeof body.runId !== 'string')
     error(400, 'Choose the reply to stop.');
   return json({ stopped: await stopReply(params.id, body.runId) });
+};
+
+/**
+ * Send now: the owner's words join the reply the page names while it runs.
+ * `added: false` when that reply can no longer take them (it ended, gave its
+ * result, or its Odd is not on Claude Code): the page sends them next instead.
+ */
+export const PATCH: RequestHandler = async ({ params, request }) => {
+  if (!(await isStaff(params.id))) error(404, 'No such Odd');
+  const body: unknown = await request.json().catch(() => undefined);
+  if (!body || typeof body !== 'object' || !('runId' in body) || typeof body.runId !== 'string')
+    error(400, 'Choose the reply to add to.');
+  if (!('message' in body) || typeof body.message !== 'string' || !body.message.trim())
+    error(400, 'Write what to add.');
+  if (Buffer.byteLength(body.message) > CHAT_BYTES) error(413, 'Use up to 8 MiB of text.');
+  return json({ added: addToReply(params.id, body.runId, body.message) });
 };

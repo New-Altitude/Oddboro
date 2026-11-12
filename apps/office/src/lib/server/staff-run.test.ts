@@ -296,6 +296,9 @@ test("a Claude Code Odd's chat gets the arguments it always had, with its rules,
   const { args } = run;
   assert.deepEqual(plain(hide(args, '--mcp-config', '--settings', '--append-system-prompt-file')), [
     '-p',
+    // A chat reads stream-json, so Send now can add to its turn.
+    '--input-format',
+    'stream-json',
     '--output-format',
     'stream-json',
     '--verbose',
