@@ -1,9 +1,10 @@
 <script lang="ts">
   import type { Check } from '@oddboro/ledger/checks';
   import type { System } from '@oddboro/ledger/platform';
-  import { computerWord } from '@oddboro/ledger/system-words';
+  import { systemWords } from '@oddboro/ledger/system-words';
   import { call } from '../api.ts';
   import NotifyHelp from './NotifyHelp.svelte';
+  import { browserNeeds } from './notify-help.ts';
 
   // The first card: what the Mac has, ticked off one at a time. Anything
   // missing gets a button that fixes it from here. The owner moves on with
@@ -32,9 +33,9 @@
   let canNotify = $state(true);
   let canOpenSettings = $state(false);
   /** What the owner calls this computer: "Your Mac", and "This computer" off a Mac. */
-  const word = $derived(computerWord(system));
-  const computer = $derived(system === 'mac' ? `Your ${word}` : `This ${word}`);
-  const thisComputer = $derived(`this ${word}`);
+  const words = $derived(systemWords(system));
+  const thisComputer = $derived(`this ${words.word}`);
+  const browserNeedsMore = $derived(browserNeeds(system));
   let problem = $state('');
 
   async function load() {
@@ -161,9 +162,7 @@
             {#if addr.state === 'ready' && addr.secure}
               The office's address on {thisComputer}, secure. No port to remember.
             {:else if addr.state === 'ready' && addr.canSecure}
-              Make it secure so your browser can show notifications. {system === 'windows'
-                ? 'Windows asks you to confirm it, once.'
-                : `It takes your ${word}'s password, once.`}
+              Make it secure so your browser can show notifications. {words.trustAsks}
             {:else if addr.state === 'ready'}
               The office's address on {thisComputer}. No port to remember.
             {:else if addr.state === 'own'}
@@ -184,11 +183,7 @@
         {#if addr.state === 'ready'}
           {#if addr.canSecure}
             <button class="btn" disabled={addrBusy} onclick={() => setUpAddress('secure')}
-              >{addrBusy
-                ? system === 'windows'
-                  ? 'Waiting for you to confirm'
-                  : 'Waiting for your password'
-                : 'Make it secure'}</button
+              >{addrBusy ? words.trustWaiting : 'Make it secure'}</button
             >
           {:else if here === addr.url}
             <span class="text-xs text-moss">✓ {addr.secure ? 'Secure' : 'On'}</span>
@@ -213,9 +208,7 @@
           Firefox keeps its own list of trusted certificates, so it may warn about this address even
           after {thisComputer} trusts it. To fix it, open <code>about:config</code> in Firefox and
           set
-          <code>security.enterprise_roots.enabled</code> to true, or use {system === 'mac'
-            ? 'Safari or Chrome'
-            : 'Chrome or Edge'} for the office.
+          <code>security.enterprise_roots.enabled</code> to true, or use {words.notFirefox} for the office.
         </p>
       {/if}
     </div>
@@ -230,7 +223,7 @@
         <div class="rounded-lg bg-raise px-3 py-2 text-sm">
           <div class="flex items-center gap-3">
             <span class="min-w-0 flex-1">
-              {app ? 'Oddboro' : computer}
+              {app ? 'Oddboro' : words.label}
               <span class="block text-xs text-muted"
                 >{app
                   ? 'Pings from your Odds, even with the window closed.'
@@ -286,9 +279,8 @@
           <p class="mt-2 text-xs text-muted">
             Your browser did not ask out loud. Look for a bell in the address bar and allow
             notifications there, or allow them for this site in the browser's site settings.
-            {#if system === 'mac'}
-              On a Mac, the browser itself also needs notifications on in System Settings,
-              Notifications.
+            {#if browserNeedsMore}
+              {browserNeedsMore}
             {/if}
           </p>
         {:else if browser === 'denied'}
