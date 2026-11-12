@@ -255,12 +255,16 @@ export async function updateGoal(
   return row;
 }
 
-/** Link a staffer to a goal, with its part in it. A staffer sees only goals it serves. */
+/**
+ * Link a staffer to a goal, with its part in it. A staffer sees only goals it
+ * serves. `askId` is the ask whose yes did it, so the Desk lists that yes once.
+ */
 export async function serveGoal(
   staffId: string,
   goalId: number,
   part: string,
-  q: Db = db
+  q: Db = db,
+  askId?: number
 ): Promise<void> {
   const who = await staffer(staffId, q);
   const g = await goal(goalId, q);
@@ -276,7 +280,8 @@ export async function serveGoal(
       kind: 'decision',
       actor: 'owner',
       title: `${who.name} serves the goal: ${g.title}`,
-      body: words
+      body: words,
+      askId
     },
     q
   );
@@ -292,7 +297,7 @@ export async function approveHire(askId: number, staffId: string): Promise<void>
   const approved = await approveAsk(askId, null, {
     link: async (a, tx) => {
       if (a.kind !== 'hire') throw new Error('That is not a proposed hire');
-      if (a.hire?.goal) await serveGoal(staffId, a.hire.goal.id, a.hire.goal.part, tx);
+      if (a.hire?.goal) await serveGoal(staffId, a.hire.goal.id, a.hire.goal.part, tx, askId);
     }
   });
   if (!approved) throw new Error('That proposal is no longer open');
@@ -347,12 +352,16 @@ export async function approveGoal(askId: number, reason: string | null): Promise
   return set;
 }
 
-const itemLabel = (i: GoalPlanItem) =>
-  i.kind === 'hire' ? `hire ${i.hire.name}, ${i.hire.role}` : `${i.staff}: ${i.part}`;
+/** A plan item in words, with the Odd's name, never its id. */
+const itemLabel = (names: Map<string, string>) => (i: GoalPlanItem) =>
+  i.kind === 'hire'
+    ? `hire ${i.hire.name}, ${i.hire.role}`
+    : `${names.get(i.staff) ?? i.staff}: ${i.part}`;
 
 /**
  * A plan ask approved, with the parts the owner ticked. Staff already here take
- * on their part at once. Each hire becomes a hire ask on the plan's thread,
+ * on their part in the transaction that approves the ask, so a part that fails
+ * leaves the plan open. Each hire becomes a hire ask on the plan's thread,
  * which the page opens in the hire window, and the owner's own steps a task on
  * their desk. Only then does the answer bring the plan's Odd back to the goal's
  * thread to lead the work, so its run finds all of it. Hiring one of the plan's
@@ -372,20 +381,24 @@ export async function approvePlan(
   const picked = plan.items.filter((_, i) => picks.includes(i));
   if (!picked.length) throw fixedError('Tick at least one part of the plan, or deny it');
   const left = plan.items.filter((_, i) => !picks.includes(i));
+  const label = itemLabel(new Map((await roster()).map((s) => [s.id, s.name])));
   const note = [
     reason,
-    `Approved: ${picked.map(itemLabel).join('; ')}`,
-    left.length && `Left out: ${left.map(itemLabel).join('; ')}.`
+    `Approved: ${picked.map(label).join('; ')}`,
+    left.length && `Left out: ${left.map(label).join('; ')}.`
   ]
     .filter(Boolean)
     .join('\n');
 
   const hires: AskRow[] = [];
   const approved = await approveAsk(askId, note, {
+    link: async (_, tx) => {
+      for (const item of picked)
+        if (item.kind === 'assign') await serveGoal(item.staff, g.id, item.part, tx, askId);
+    },
     carryOut: async () => {
       for (const item of picked) {
         if (item.kind === 'assign') {
-          await serveGoal(item.staff, g.id, item.part);
           if (item.job) await addJob({ staffId: item.staff, ...item.job });
           if (item.editJob)
             await editOwnJob(

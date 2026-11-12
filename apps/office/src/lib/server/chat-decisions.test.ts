@@ -49,7 +49,11 @@ test('one proposal sets one goal, even from two open cards or on a repeated clic
   const desk = await L.desk();
   assert.ok(desk.asks.some((r) => r.id === a.id));
   assert.ok(!desk.asks.some((r) => r.id === b.id));
-  assert.ok(desk.recent.some((r) => r.title === `Set a goal: ${b.title}`));
+  // Setting it is one decision, so the Desk lists it once, not the goal set again.
+  assert.deepEqual(
+    desk.recent.filter((r) => r.title.includes(b.title)).map((r) => r.title),
+    [`Approved: ${b.title}`]
+  );
   const chat = await chatLog('lead');
   assert.equal(
     chat.find((l) => l.item?.kind === 'ask' && l.item.id === b.id)?.item?.status,
@@ -89,9 +93,15 @@ test('a plan applies the ticked part of an owner-created goal', async () => {
     ['cleo']
   );
   const reason = (await L.ask(ask.id))?.reason;
-  assert.match(reason ?? '', /Approved: cleo: Mark the turn/);
-  assert.match(reason ?? '', /Left out: paige: Map the route/);
-  assert.ok((await L.desk()).recent.some((row) => row.reason === reason));
+  assert.match(reason ?? '', /Approved: Cleo: Mark the turn/);
+  assert.match(reason ?? '', /Left out: Paige: Map the route/);
+  // One line for the plan's yes, not another for Cleo serving the goal.
+  const recent = (await L.desk()).recent;
+  assert.deepEqual(
+    recent.filter((row) => row.reason === reason).map((row) => row.title),
+    ['Approved: Field day assignments']
+  );
+  assert.ok(!recent.some((row) => row.title.includes('serves the goal')));
   assert.ok(
     (await chatLog('lead')).some((line) => line.item?.id === ask.id && line.item.note === reason)
   );
@@ -174,4 +184,23 @@ test("one explicit manager chat submission sets the owner's goal and starts plan
   const manual = await set({ title: 'Count the fruit', horizon: 'year', area: 'garden' });
   assert.equal(manual.horizon, 'year');
   assert.equal(manual.requestId, null);
+});
+
+test('the Desk lists each decision and answer once', async () => {
+  const back = await propose('Weed the beds');
+  await post(asks.POST, back.id, { decision: 'iterate', reason: 'Just the front beds.' });
+  const set = await propose('Plant the bulbs');
+  await post(asks.POST, set.id, { decision: 'approve' });
+  const chore = await L.giveTask('paige', {
+    title: 'Buy the bulbs',
+    why: 'They go in this week.',
+    steps: ['Buy them.']
+  });
+  await post(tasks.POST, chore.id, { op: 'finish', done: true, note: 'Bought forty.' });
+  const recent = (await L.desk()).recent.map((r) => r.title);
+  assert.deepEqual(recent.slice(0, 3), [
+    `Done by ${await L.ownerName()}: Buy the bulbs`,
+    'Approved: Plant the bulbs',
+    'Sent back: Weed the beds'
+  ]);
 });
