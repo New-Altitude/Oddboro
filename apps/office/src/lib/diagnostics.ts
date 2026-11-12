@@ -89,12 +89,15 @@ export const DATA_COLLECTION = {
 } satisfies DataCollection;
 
 /**
- * Never traced. The event stream stays open for as long as the page does. The
+ * Never traced. The event streams stay open with the page or terminal, and
+ * the terminal posts each input to its command route. The
  * shell asks for updates every 30 seconds, so a trace there would send
  * reports while the owner is away. The relay would trace itself in a loop.
  */
 export const QUIET_ROUTES: ReadonlySet<string> = new Set<RouteId>([
   '/api/events',
+  '/api/project-sessions',
+  '/api/project-sessions/[id]/events',
   '/api/update',
   '/api/diagnostics/envelope'
 ]);
@@ -113,6 +116,7 @@ export const ROUTE_IDS = {
   '/api/agents': true,
   '/api/agents/[tool]': true,
   '/api/asks/[id]': true,
+  '/api/asks/[id]/attachments/[n]': true,
   '/api/asks/[id]/call': true,
   '/api/asks/[id]/filter': true,
   '/api/asks/[id]/filter-preview': true,
@@ -132,6 +136,7 @@ export const ROUTE_IDS = {
   '/api/goals/[id]': true,
   '/api/goals/[id]/staff': true,
   '/api/jobs/[id]': true,
+  '/api/jobs/away': true,
   '/api/ledger': true,
   '/api/lessons': true,
   '/api/lessons/[id]': true,
@@ -144,20 +149,29 @@ export const ROUTE_IDS = {
   '/api/office/layouts/[id]': true,
   '/api/office/move-in': true,
   '/api/onboarding': true,
+  '/api/personas': true,
+  '/api/personas/[slug]': true,
   '/api/pokes/[id]': true,
+  '/api/project-sessions': true,
+  '/api/project-sessions/[id]/events': true,
   '/api/reports/[id]': true,
   '/api/rooms': true,
   '/api/services': true,
   '/api/services/[id]': true,
   '/api/setup': true,
   '/api/setup/address': true,
+  '/api/setup/advanced': true,
   '/api/setup/claude': true,
   '/api/setup/notify': true,
   '/api/staff': true,
   '/api/staff/[id]': true,
   '/api/staff/[id]/access': true,
   '/api/staff/[id]/chat': true,
+  '/api/staff/[id]/chat/[turnId]/[index]': true,
   '/api/staff/[id]/description': true,
+  '/api/staff/[id]/attachments': true,
+  '/api/staff/[id]/attachments/[name]': true,
+  '/api/staff/[id]/bug-reports': true,
   '/api/staff/[id]/jobs': true,
   '/api/staff/[id]/lessons': true,
   '/api/staff/[id]/look': true,

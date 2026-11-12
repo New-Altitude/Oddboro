@@ -11,11 +11,16 @@
     items: AttachmentRow[];
     /** Where a Markdown file starts: Edit when the owner has to fill it in. */
     start?: 'view' | 'edit';
+    reference?: boolean;
     ondirty?: (dirty: boolean) => void;
   };
-  let { items, start = 'view', ondirty }: Props = $props();
+  let { items, start = 'view', reference = false, ondirty }: Props = $props();
 
-  const ref = (f: AttachmentRow): FileRef => ({ staff: f.staffId, path: f.path });
+  const ref = (f: AttachmentRow): FileRef => ({
+    staff: f.staffId,
+    path: f.path,
+    readOnly: reference
+  });
   // svelte-ignore state_referenced_locally: each file starts in this mode, then the owner switches it
   let mode = $state<Record<number, 'view' | 'edit'>>(
     Object.fromEntries(items.map((f) => [f.id, offers(ref(f)).edit ? start : 'view']))
@@ -66,7 +71,7 @@
           <div class="mt-2">
             <FileEditor
               file={ref(f)}
-              bind:mode={mode[f.id]}
+              mode={reference ? 'view' : mode[f.id]}
               inline
               ondirty={(d) => (dirty[f.id] = d)}
             />

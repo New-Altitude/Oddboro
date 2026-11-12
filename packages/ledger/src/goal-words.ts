@@ -13,6 +13,14 @@ export const HORIZONS: { id: GoalHorizon; label: string }[] = [
   { id: 'ongoing', label: 'Ongoing' }
 ];
 
+/** Whether a goal is still worked on: its threads, its Odds' goals and the Goals window's live list. */
+export const GOAL_IS_LIVE: Record<GoalStatus, boolean> = {
+  active: true,
+  paused: true,
+  met: false,
+  dropped: false
+};
+
 export const STATUS_WORDS: Record<GoalStatus, string> = {
   active: 'Active',
   paused: 'Paused',

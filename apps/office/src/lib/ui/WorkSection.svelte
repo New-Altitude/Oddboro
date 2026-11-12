@@ -6,9 +6,10 @@
   import { serviceNames } from './service-names.svelte.ts';
   import type { StaffProfile } from '../staff/roster.ts';
 
-  // What an Odd is working on right now, on its info page: each job, approved
-  // ask or rework, and what it is using this moment. It updates as the Odd
-  // works.
+  // What an Odd is working on right now, on its info page: each run going (a
+  // job, an approved ask, a pick-up after a task or a colleague, work handed
+  // over, parked work waking), what it is using this moment, and each
+  // follow-up waiting to start. It updates as the Odd works.
   type Props = { profile: StaffProfile; items: Work[] };
   let { profile, items }: Props = $props();
 
@@ -16,8 +17,10 @@
   let now = $state(Date.now());
 
   // Whole minutes: a tick a minute while something runs, and none otherwise.
+  // Work that waits shows no time.
+  const running = $derived(items.some((w) => !w.queued));
   $effect(() => {
-    if (!items.length) return;
+    if (!running) return;
     now = Date.now();
     const timer = setInterval(() => (now = Date.now()), 60_000);
     return () => clearInterval(timer);
@@ -44,7 +47,7 @@
   </h3>
   {#if !items.length}
     <p class="rounded-xl bg-raise px-3 py-3 text-sm text-muted">
-      Nothing right now. Jobs and approved asks show here while they run.
+      Nothing right now. Whatever {profile.name} works on shows here while it runs or waits to start.
     </p>
   {/if}
   {#each items as w (w.id)}
@@ -55,7 +58,11 @@
         <span class="text-faint">· {w.queued ? 'waiting' : runningFor(w.since, now)}</span>
       </div>
       <h3 class="mt-1 text-sm leading-snug font-medium">{w.label}</h3>
-      {#if w.queued}
+      {#if w.toStart}
+        <p class="mt-1 text-xs text-muted">
+          Starts once {profile.name}'s current run on this work ends.
+        </p>
+      {:else if w.queued}
         <p class="mt-1 text-xs text-muted">
           Waiting for a free slot: {profile.name} runs up to three things at once.
         </p>

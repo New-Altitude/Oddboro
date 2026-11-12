@@ -12,6 +12,7 @@
 // It also fetches the Node binary the app carries, checked against nodejs.org's
 // published sums. `--smoke` then starts the staged office on a spare port and
 // home, and stops it once it answers.
+import { stagePty } from '../../../scripts/prepare-pty.mjs';
 import { execFileSync, execSync, spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
@@ -54,8 +55,13 @@ const NODE_BIN = join(
   `node-${MACHINE.triple}${WINDOWS ? '.exe' : ''}`
 );
 const PACKAGES = ['ledger', 'sprites', 'world'];
-/** What a package needs at runtime. Everything else in it stays behind. */
+/**
+ * What a package does not need at runtime. Its own CLAUDE.md stays behind;
+ * every other document in it ships, since the office reads the sprites'
+ * FORMAT.md and ART.md when it draws.
+ */
 const LEAVE_OUT = new Set([
+  'CLAUDE.md',
   'node_modules',
   'out',
   'scripts',
@@ -99,13 +105,24 @@ function checkOfficeDependencies(): void {
     );
 }
 
-/** Every third-party runtime dependency, pinned to the version installed here. */
+/**
+ * Every third-party runtime dependency, pinned to the version installed here.
+ * Optional ones count too: the ledger's terminal library, node-pty, is
+ * optional so `npm install` works where it cannot build, but the app needs it.
+ */
 function dependencies(): Record<string, string> {
   const out: Record<string, string> = {};
   for (const dir of ['apps/office', ...PACKAGES.map((p) => `packages/${p}`)]) {
-    for (const name of Object.keys(readJson(join(ROOT, dir, 'package.json')).dependencies ?? {})) {
+    const pkg = readJson(join(ROOT, dir, 'package.json'));
+    for (const name of Object.keys({ ...pkg.dependencies, ...pkg.optionalDependencies })) {
       if (name.startsWith('@oddboro/')) continue;
-      out[name] = readJson(join(ROOT, 'node_modules', name, 'package.json')).version;
+      const local = join(ROOT, dir, 'node_modules', name, 'package.json');
+      const version = readJson(
+        existsSync(local) ? local : join(ROOT, 'node_modules', name, 'package.json')
+      ).version;
+      if (out[name] && out[name] !== version)
+        throw new Error(`Conflicting runtime versions of ${name}`);
+      out[name] = version;
     }
   }
   return out;
@@ -136,7 +153,7 @@ function stagePackage(name: string): void {
     recursive: true,
     filter: (src) => {
       const rel = src.slice(from.length + 1).split(sep)[0];
-      return !LEAVE_OUT.has(rel) && !(rel.endsWith('.md') && !src.includes(`${sep}src${sep}`));
+      return !LEAVE_OUT.has(rel);
     }
   });
   compileAll(join(to, 'src'));
@@ -168,8 +185,8 @@ const BUILD_ONLY = [
   'sentry'
 ];
 /**
- * The only native code the app may carry beside the shell and Node, which the
- * release signs. Each arrives signed by its publisher's Developer ID.
+ * Native packages shipped under their publisher's signature. The terminal
+ * binaries are checked separately because the app signs them at release.
  */
 const NATIVE = ['node_modules/@napi-rs/keyring-'];
 
@@ -186,10 +203,12 @@ function isNative(path: string): boolean {
 }
 
 /**
- * Fails on native code outside NATIVE, and on a Mac on any without a
- * Developer ID signature and a secure timestamp: Apple's notary refuses both.
+ * Reject unexpected native code. On a Mac, verify the publisher signature
+ * and secure timestamp for each file the release does not sign itself.
  */
 function checkNative(path: string, rel: string): void {
+  // The Mac release signs precisely these terminal files before Tauri bundles them.
+  if (terminalFiles.has(path)) return;
   if (!NATIVE.some((p) => rel.startsWith(p)))
     throw new Error(`stage/${rel} is native code the app does not sign. Leave it out of the stage`);
   if (process.platform !== 'darwin') return;
@@ -367,6 +386,7 @@ writeFileSync(
 npm(['install', '--omit=dev', '--omit=peer', '--no-audit', '--no-fund', '--loglevel=error'], STAGE);
 for (const p of [...BUILD_ONLY, '.bin/sentry'])
   rmSync(join(STAGE, 'node_modules', p), { recursive: true, force: true });
+const terminalFiles = new Set(stagePty(STAGE));
 for (const p of PACKAGES) stagePackage(p);
 stageOffice();
 prune(STAGE);

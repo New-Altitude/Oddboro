@@ -3,9 +3,12 @@
 // in-memory PGlite that stands in for db.ts (pglite.ts). Run with
 // `npm test -w @oddboro/ledger`.
 import assert from 'node:assert/strict';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { and, eq, sql } from 'drizzle-orm';
 import { asks, followUps, staff, threads } from '../src/schema.ts';
+import { workName } from '../src/work-paths.ts';
 // Types only, erased before run, so threads.ts still loads after the mock.
 import type { ThreadFor } from '../src/threads.ts';
 import { db } from './pglite.ts';
@@ -16,7 +19,8 @@ process.env.OLLAMA_URL = 'http://127.0.0.1:9';
 // Loaded once db.ts is this database, so every query they make lands here.
 const { handOff } = await import('../src/hand-offs.ts');
 const { decideAsk } = await import('../src/office.ts');
-const { HAND_OFF_LIMIT, goalThreads, recentThreads } = await import('../src/threads.ts');
+const { HAND_OFF_LIMIT, goalThreads, recentThreads, threadPart } =
+  await import('../src/threads.ts');
 
 const odd = (id: string, name: string) => ({
   id,
@@ -132,6 +136,30 @@ test('a yes starts the held hand-off once, exactly as handed, as the first of a 
   assert.equal(next.left, HAND_OFF_LIMIT - 2);
   for (let n = 3; n <= HAND_OFF_LIMIT; n++) assert.ok('id' in (await give({ id })));
   assert.ok('asked' in (await give({ id })), 'one more round, not an open limit');
+});
+
+test("a hand-off past the round's limit keeps its files until the owner's yes", async () => {
+  const [other] = await db
+    .insert(threads)
+    .values({ title: 'Older work', hubId: 'cole', holderId: 'cole' })
+    .returning({ id: threads.id });
+  const real = join(threadPart(other.id, 'cole'), 'x.md');
+  mkdirSync(dirname(real), { recursive: true });
+  writeFileSync(real, 'from older work');
+  const id = await atLimit();
+  const name = `threads-${other.id}-cole-x.md`;
+  const r = await handOff({
+    from: 'cole',
+    to: 'ivy',
+    work,
+    thread: { id },
+    carry: [{ real, name, named: workName(other.id, 'cole/x.md') }]
+  });
+  assert.ok('asked' in r, JSON.stringify(r));
+  assert.equal(readFileSync(join(threadPart(id, 'cole'), name), 'utf8'), 'from older work');
+  await decideAsk(r.asked, 'approve', null);
+  const [started] = await ofKind(id, 'hand_off');
+  assert.deepEqual(started?.handOff?.files, [`cole/${name}`]);
 });
 
 test("a yes with the owner's words starts the held hand-off and tells the hub not to hand it on again", async () => {

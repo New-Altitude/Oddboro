@@ -8,6 +8,9 @@ it. A floor plan (`plans/*.json`) places stamps to make one office, and its
 lights and a walkable grid. Each placed prop has an id, `room/sprite#i`, on its
 draws, lights and spots (`obj`), so a switch can name it and find all three.
 
+Where a new kind of thing starts, the shared function for each job, and the
+check that catches a missed place: `docs/architecture.md`.
+
 A plan's `grounds` puts land around the building. `margin` pads the plan on
 each side, then a grounds template in world coordinates (`rooms/grounds-main-street.json`)
 fills every cell nothing else claimed: grass, the river, the footpath and the
@@ -44,8 +47,9 @@ order: remove an item, move one to a tile, add an extra at a tile. Moving or
 removing the first of a group takes the group. An add or a move lands on the
 tile it names, or the nearest one within three that fits (`nearby`); one that
 fits nowhere near is left out, and the build notes say so. An edit marked
-`hand` is the owner dragging or tapping in arrange mode, and goes exactly where
-they put it: only what keeps the office working is checked (on the room's
+`hand` was the owner's own, from the office's arranging by hand, which it no
+longer offers; a layout saved then still carries its own. It goes exactly where the owner
+put it: only what keeps the office working is checked (on the room's
 floor, off the doorway unless it lies flat like a rug or a mat, off other things, every seat reachable), and the note
 says which one it broke. What moves with a dragged thing is what stands on it,
 at its seats, or as a chair facing it (on the tile above it); the rest of its
@@ -114,6 +118,12 @@ tag says where the furnisher puts it. `scripts/render.ts spec:<file> --art
 `checkWorld` refuses missing art, no bus stop, no owner's desk, no bench, an
 unreachable seat, or fewer work seats than Odds. Everything is seeded from the
 spec, so a preview and the office it becomes match tile for tile.
+
+To add a kind of room, start at `ROOM_KINDS` in `src/generate.ts`. The type
+checker then names `KIND_ABOUT` and `ROOM_ID`. Nothing names its furnishing:
+add its case to `recipe()`'s switch, or the kind gets no furniture of its own.
+The room an Odd names in a hire proposal (`room` in `hireFields`,
+`packages/ledger/src/mcp.ts`) lists Main Street's rooms by hand.
 
 | File                | What it does                                               |
 | ------------------- | ---------------------------------------------------------- |

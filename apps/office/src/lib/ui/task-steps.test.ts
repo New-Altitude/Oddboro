@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Step } from '@oddboro/ledger';
-import { mustDo, stepsToGo, stepText } from './task-steps.ts';
+import { chatAnswer, mustDo, stepsToGo, stepText } from './task-steps.ts';
 
 const signIn: Step = {
   text: 'Click Sign in.',
@@ -43,6 +43,33 @@ test('the count to go is the undone steps that must be done', () => {
   assert.equal(stepsToGo([signIn, landed, tools, plain]), 3);
   assert.equal(stepsToGo([{ ...signIn, done: true }, { ...landed, done: true }, tools, plain]), 1);
   assert.equal(stepsToGo([{ ...tools, done: true }, plain]), 0);
+});
+
+test('a task answered with one response is answered in chat; anything more stays on the Desk', () => {
+  const task = (steps: Step[], askId: number | null = null, response: string | null = null) => ({
+    steps,
+    askId,
+    response
+  });
+  assert.deepEqual(chatAnswer(task([]), false), { steps: [] });
+  assert.deepEqual(chatAnswer(task([plain]), false), { steps: [plain] });
+  assert.deepEqual(chatAnswer(task([plain, choice]), false), {
+    steps: [plain],
+    choice: { index: 1, options: ['A', 'B'] }
+  });
+  // A choice made on the Desk already: what is left is an answer typed in the editor.
+  assert.deepEqual(chatAnswer(task([{ ...choice, done: true, answer: 'A' }]), false), {
+    steps: []
+  });
+  assert.equal(chatAnswer(task([choice, choice]), false), undefined);
+  for (const s of [signIn, landed, secret, tools])
+    assert.equal(chatAnswer(task([s]), false), undefined, s.text);
+  // A file to fill in stays on the Desk; beside a response it is only to read.
+  assert.equal(chatAnswer(task([plain]), true), undefined);
+  assert.deepEqual(chatAnswer(task([plain], null, 'Pack plates.'), true), { steps: [plain] });
+  // One response per card: a choice and a response together go to the Desk.
+  assert.equal(chatAnswer(task([choice], null, ''), false), undefined);
+  assert.equal(chatAnswer(task([], 4), false), undefined);
 });
 
 test('a bare email address in a step becomes code the owner copies, never a mail link', () => {

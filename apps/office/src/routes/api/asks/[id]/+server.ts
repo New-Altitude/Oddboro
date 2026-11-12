@@ -6,18 +6,61 @@
 // Approving an access ask answers with the connect task it made, if any, so the
 // desk goes straight on to it. A reply is approved only by sending it or saving
 // it (`reply/+server.ts`), a filter only by creating it (`filter/+server.ts`),
-// and a folder ask only by giving the folder (`folder/+server.ts`).
+// and a folder ask only by giving the folder (`folder/+server.ts`). `chat`
+// says the owner answered on the ask's card in its Odd's chat, so the run the
+// answer starts replies there too.
 import { error, json } from '@sveltejs/kit';
 import {
   approveGoal,
   approvePlan,
   ask,
   decideAsk,
+  DECISIONS,
   precedent,
   tasksFrom,
-  type Decision
+  type AskKind,
+  type AskRow
 } from '@oddboro/ledger';
+import { OWNER_ANSWERS, type AskEffect } from '@oddboro/ledger/desk-answers';
 import type { RequestHandler } from './$types';
+
+type Yes = (typeof OWNER_ANSWERS.ask)[AskKind]['approve'];
+/** The ask kinds whose yes does work of its own (`approval_work`) before the answer goes back. */
+type WorksOnYes = {
+  [K in AskKind]: (typeof OWNER_ANSWERS.ask)[K]['approve'] extends readonly (infer E)[]
+    ? 'approval_work' extends E
+      ? K
+      : never
+    : never;
+}[AskKind];
+
+const worksOnYes = (kind: AskKind): kind is WorksOnYes => {
+  const yes: Yes = OWNER_ANSWERS.ask[kind].approve;
+  return !('by' in yes) && (yes as readonly AskEffect[]).includes('approval_work');
+};
+
+/**
+ * The work a yes does, one per kind whose row says `approval_work`, so a new
+ * one fails the type check here until it says what approving it means.
+ */
+const APPROVAL_WORK: Record<
+  WorksOnYes,
+  (a: AskRow, reason: string | null, picks: unknown, inChat: boolean) => Promise<Response>
+> = {
+  goal: async (a, reason, _, inChat) => {
+    await approveGoal(a.id, reason, inChat).catch((e: Error) => error(400, e.message));
+    return json({ ok: true });
+  },
+  plan: async (a, reason, picks, inChat) => {
+    const ticked = Array.isArray(picks)
+      ? picks.filter((p): p is number => Number.isInteger(p))
+      : [];
+    const done = await approvePlan(a.id, ticked, reason, inChat).catch((e: Error) =>
+      error(400, e.message)
+    );
+    return json({ ok: true, hires: done.hires });
+  }
+};
 
 export const GET: RequestHandler = async ({ params }) => {
   const a = await ask(Number(params.id));
@@ -35,37 +78,27 @@ export const POST: RequestHandler = async ({ params, request }) => {
     reason?: unknown;
     report?: unknown;
     picks?: unknown;
+    chat?: unknown;
   };
-  const decision = (['approve', 'deny', 'iterate'] as Decision[]).find((d) => d === body.decision);
-  if (!decision) error(400, 'Say approve, deny or iterate');
+  const decision = DECISIONS.find((d) => d === body.decision);
+  if (!decision) error(400, `Say ${DECISIONS.slice(0, -1).join(', ')} or ${DECISIONS.at(-1)}`);
   const a = await ask(Number(params.id));
   if (!a) error(404, 'No such ask');
-  if (a.kind === 'hire' && decision === 'approve') error(400, 'Approve a hire by hiring');
-  if (a.kind === 'reply' && decision === 'approve')
-    error(400, 'Send the reply, or save it to Gmail drafts');
-  if (a.kind === 'filter' && decision === 'approve')
-    error(400, 'Create the filter from its card on the desk');
-  if (a.kind === 'folder' && decision === 'approve')
-    error(400, 'Give the folder from its card on the desk');
+  if (a.status !== 'open') error(409, 'This ask was already answered');
+  const yes: Yes = OWNER_ANSWERS.ask[a.kind].approve;
+  if (decision === 'approve' && 'by' in yes) error(400, yes.by);
   const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 2000) : '';
-  if (decision === 'approve' && a.kind === 'goal') {
-    await approveGoal(a.id, reason || null).catch((e: Error) => error(400, e.message));
-    return json({ ok: true });
+  const inChat = body.chat === true;
+  if (decision === 'approve' && worksOnYes(a.kind)) {
+    return APPROVAL_WORK[a.kind](a, reason || null, body.picks, inChat);
   }
-  if (decision === 'approve' && a.kind === 'plan') {
-    const picks = Array.isArray(body.picks)
-      ? body.picks.filter((p): p is number => Number.isInteger(p))
-      : [];
-    const done = await approvePlan(a.id, picks, reason || null).catch((e: Error) =>
-      error(400, e.message)
-    );
-    return json({ ok: true, hires: done.hires });
-  }
+  let decided;
   try {
-    await decideAsk(a.id, decision, reason || null, body.report === true);
+    decided = await decideAsk(a.id, decision, reason || null, body.report === true, inChat);
   } catch (e) {
     error(400, e instanceof Error ? e.message : String(e));
   }
+  if (!decided) error(409, 'This ask was already answered');
   if (decision === 'approve' && a.access) {
     const task = (await tasksFrom(a.staffId)).find((t) => t.askId === a.id && t.status === 'open');
     return json({ ok: true, task: task ?? null });

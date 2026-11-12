@@ -10,6 +10,7 @@
     "./agents": "./src/agents.ts",
     "./first-questions": "./src/first-questions.ts",
     "./access": "./src/access-words.ts",
+    "./grantable": "./src/grantable.ts",
     "./goals": "./src/goal-words.ts",
     "./checks": "./src/checks.ts",
     "./platform": "./src/platform.ts",
@@ -21,7 +22,12 @@
     "./upgrade": "./src/upgrade.ts",
     "./update-window": "./src/update-window.ts",
     "./work-paths": "./src/work-paths.ts",
-    "./filters": "./src/filter-words.ts"
+    "./run-registry": "./src/run-registry.ts",
+    "./desk-answers": "./src/desk-answers.ts",
+    "./live-tables": "./src/live-tables.ts",
+    "./filters": "./src/filter-words.ts",
+    "./certificates": "./src/certificates.ts",
+    "./project-terminal": "./src/project-terminal.ts"
   },
   "scripts": {
     "generate": "drizzle-kit generate",
@@ -44,5 +50,8 @@
     "drizzle-orm": "^0.45.4",
     "postgres": "^3.4.9",
     "zod": "^4.6.7"
+  },
+  "optionalDependencies": {
+    "node-pty": "1.1.0"
   }
 }

@@ -44,6 +44,8 @@ none. Without it, the office is at `http://oddboro.localhost:4500`.
 
 ## Day to day
 
+Use [project sessions](docs/project-sessions.md) to open a native Codex or Claude Code conversation in the office and share it with an Odd.
+
 - `npm run setup -- --check` checks everything and changes nothing.
 - `npm run reset` starts the office over. It moves the old one into
   `~/.oddboro/backups/` and deletes nothing.

@@ -130,6 +130,10 @@ export function proxyArgs(region: string): string[] {
 
 /** The sign-in under way, which the desk waits on. */
 let pending: Promise<void> | undefined;
+/** AWS's page and code for the sign-in under way, so a desk opened in another tab can show them. */
+let approving: AwsApproval | undefined;
+
+export type AwsApproval = { url: string; code: string };
 
 /**
  * Start the owner's sign-in. Registers the office as a client when it has
@@ -178,9 +182,19 @@ export async function startAwsSignIn(
       startUrl
     })
   );
-  pending = waitForApproval(oidc, s, d.deviceCode!, d.interval ?? 5, d.expiresIn ?? 600);
-  pending.catch(() => {}).finally(() => (pending = undefined));
-  return { url: d.verificationUriComplete ?? d.verificationUri!, code: d.userCode ?? '' };
+  const mine = waitForApproval(oidc, s, d.deviceCode!, d.interval ?? 5, d.expiresIn ?? 600);
+  const page = { url: d.verificationUriComplete ?? d.verificationUri!, code: d.userCode ?? '' };
+  pending = mine;
+  approving = page;
+  // A newer sign-in replaces this one, so only this one's end clears it.
+  mine
+    .catch(() => {})
+    .finally(() => {
+      if (pending !== mine) return;
+      pending = undefined;
+      approving = undefined;
+    });
+  return page;
 }
 
 /**
@@ -235,8 +249,11 @@ export async function awsSignInDone(): Promise<void> {
   if (!(await ssoToken())) throw new Error('AWS is not signed in. Click Sign in.');
 }
 
-/** Whether a sign-in is waiting on the owner's approval, so a desk opened mid-way waits too. */
-export const awsSigningIn = (): boolean => !!pending;
+/**
+ * AWS's page and code while a sign-in waits on the owner's approval, so a desk
+ * opened mid-way, in any tab, waits too and can open the page again.
+ */
+export const awsSigningIn = (): AwsApproval | null => approving ?? null;
 
 /** Whether the office's AWS sign-in still works. */
 export async function awsSignedIn(): Promise<boolean> {

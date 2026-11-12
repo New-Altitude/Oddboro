@@ -5,6 +5,9 @@ Tailwind 4, TypeScript, and `@sveltejs/adapter-static`: every page prerenders
 to plain files in `build/`, so any static host serves it. Port 4501 for `dev`
 and `preview`, fixed.
 
+Where a new kind of thing starts, the shared function for each job, and the
+check that catches a missed place: `docs/architecture.md`.
+
 ## The name and the words
 
 - The product is **Oddboro**. Its AI workers are **Odds** (one Odd, many
@@ -68,7 +71,7 @@ access its job needs, and every claim rests on the office's real rules:
 | A tool connects read only, or with write from draft                   | `grantAccess` and `grantWorks`; `access()` in `staff.ts`                  |
 | At draft, each change through a write grant waits for the owner's yes | `writesWait`; the gateway's `raiseCall`, and `makeCall` on the yes        |
 | A lowered level makes a grant above it wait                           | `access()` skips it; `setPermission`'s comment                            |
-| At act, a write grant uses that one tool without asking; revocable    | `revoke` in `office.ts`; the Access tab in `apps/office`                  |
+| At act, a write grant uses that one tool without asking; revocable    | `revoke` in `office.ts`; the Odd's Settings › Services in `apps/office`   |
 | An Odd pokes the owner in chat at a time it sets                      | `poke_owner` in `packages/ledger/src/mcp.ts`                              |
 | Every Odd reads the people list, which stays on the owner's computer  | `readable` in `staff.ts`; hard rule 9                                     |
 
@@ -243,7 +246,7 @@ its own composition; none is a row of identical cards.
 | `hire`         | `Hire`       | "Hire an Odd for ..." as a list you pick from, and the pick as a job card        |
 | `how-it-works` | `HowItWorks` | Six floor states as vignettes cut from a real office, Odd in                     |
 | `managers`     | `Managers`   | Character cards with portraits, a walk on hover, pick one; describe your own     |
-| `access`       | `Access`     | Least access: an Odd's Access tab as a working mock, level and tool grants       |
+| `access`       | `Access`     | Least access: an Odd's Settings as a working mock, level and tool grants         |
 | `goals`        | `Goals`      | A sample goal beside its three-step plan, the line drawing in on scroll          |
 | `on-your-mac`  | `OnYourMac`  | A map of where the data lives: the computer in the middle, edges on dashed lines |
 | `open-source`  | `OpenSource` | The license as a terminal block, the GitHub link, the music note                 |
@@ -303,7 +306,7 @@ changed since the frame before (`encodeGifChanges`).
 ## Layout
 
 ```
-scripts/art.ts               The art generator. hero-office.json, vignette-office.json and manager-looks.json are its specs.
+scripts/art.ts               The art generator. hero-office.json, vignette-office.json, manager-looks.json and persona-looks.json are its specs.
 scripts/paint.ts             Paints and lights the office's sprites for an hour of the day, for art.ts and office-gif.ts.
 scripts/office-gif.ts        The README's office: Main Street by day with eight Odds at work, as docs/office.gif.
 scripts/release-art.ts       The releases page's GIFs, on the desk vignette. gif.ts encodes them.

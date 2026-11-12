@@ -1,6 +1,8 @@
+import { runsGoing } from './run-registry.ts';
 // What the office does with its tables. The office app and the staff tool
 // server both call these, so a rule lives in one place: an ask is decided only
 // here, a task is finished only here, and each writes its ledger row.
+import { proposedProjectWork } from './project-sessions.ts';
 import {
   and,
   arrayOverlaps,
@@ -9,15 +11,18 @@ import {
   desc,
   eq,
   exists,
+  gt,
   gte,
   inArray,
   isNotNull,
   isNull,
+  lt,
   lte,
   ne,
   not,
   or,
   sql,
+  type AnyColumn,
   type SQL
 } from 'drizzle-orm';
 import { existsSync, realpathSync, rmSync, statSync } from 'node:fs';
@@ -28,21 +33,24 @@ import { db, sql as pg } from './db.ts';
 import { deleteSecret, getSecret } from './secrets.ts';
 import { embed } from './embed.ts';
 import { fixedError } from './errors.ts';
-import { chatSession, CODE, home } from './home.ts';
+import { accountsHome, chatSession, CODE, home } from './home.ts';
 import {
   answeredAll,
   handBack,
   handBackLater,
+  leadLeft,
   servesHandOff,
   servesNoThread
 } from './hand-offs.ts';
 import { answerWindow } from './usage-window.ts';
+import { parkedWork, wakeOnTask, type TaskEnded } from './task-parking.ts';
 import {
   addFollowUp,
   answerHandOffs,
   answerThread,
   goalThread,
   keepRun,
+  isOnThread,
   raisedOn,
   settleThread,
   startHeld,
@@ -70,6 +78,7 @@ import {
   usage,
   followUps,
   goals,
+  chatCardOf,
   type AccessRequest,
   type AskKind,
   type FolderRequest,
@@ -78,11 +87,15 @@ import {
   type GoalPlan,
   type GoogleProduct,
   type HireProposal,
+  type InChat,
   type Outcome,
   type HeldCall,
   type ReplyDraft,
   type LedgerKind,
+  type CheckedFiles,
+  type JobFiles,
   type RunTrigger,
+  type MissedRuns,
   type Schedule,
   type Step,
   type UsageKind
@@ -103,9 +116,23 @@ import {
 } from './agents.ts';
 // Read only inside functions, so the import cycle with managers.ts is safe.
 import { MANAGER_ROLE } from './managers.ts';
+import { currentPlatform } from './platform.ts';
+import { bringBack, leavingRefused, removeOdd } from './leaving.ts';
 import {
+  awayJobs,
+  catchUpAsks,
+  ON_TIME_MS,
+  oweCatchUp,
+  type AwayJob,
+  type CatchUpAsk
+} from './missed-runs.ts';
+import {
+  GRANT_LABEL,
   grantWorks,
+  LEVEL_LABEL,
   levelAtMost,
+  POSTAL_ID,
+  POSTAL_NAME,
   SWITCH_NAMES,
   switchesSaid,
   type FolderAccess,
@@ -113,9 +140,24 @@ import {
   type OwnSwitch
 } from './access-words.ts';
 import { filterWords, sameCriteria, type GmailFilter } from './filter-words.ts';
-import { nextRun, zone } from './time.ts';
-import { isGrantable, OFFICE_TOOLS, STARTER_TOOLS, tickable, yesOrNo } from './tools.ts';
+import { MISSED_WORDS, nextRun, runTime, zone } from './time.ts';
+import { isGrantable, OFFICE_TOOLS, ON_BY_DEFAULT, stepsToGo, tickable, yesOrNo } from './tools.ts';
+import { HIRE_DEFAULTS } from './grantable.ts';
+import {
+  ASK_REPLACED,
+  flat,
+  OWN_RUN,
+  ownerAnswers,
+  OWNER_ANSWERS,
+  pickedUpLine,
+  taskSaid,
+  type AskAnswer,
+  type AskEffect,
+  type DeskItem,
+  type TaskEffect
+} from './desk-answers.ts';
 import { lookSignature, type DrawnPart, type LookSpec } from '@oddboro/sprites/look';
+import type { PersonaLink } from './personas.ts';
 
 export type StaffRow = typeof staff.$inferSelect;
 export type AskRow = typeof asks.$inferSelect;
@@ -131,13 +173,38 @@ export type LedgerRow = Omit<typeof ledger.$inferSelect, 'embedding'>;
 
 // Staff
 
+/**
+ * Rows of an Odd that still works here. One that left runs nothing and shows
+ * nowhere (leaving.ts), even should a row of its slip past the closing there.
+ */
+const ofWorkingOdd = (col: AnyColumn) =>
+  inArray(col, db.select({ id: staff.id }).from(staff).where(isNull(staff.leftAt)));
+
 export async function roster(): Promise<StaffRow[]> {
   return db.select().from(staff).where(isNull(staff.leftAt)).orderBy(asc(staff.hiredAt));
 }
 
+/**
+ * A working Odd. One that left the office is not found, so nothing runs it,
+ * hands it work or changes it (`removeOdd` in leaving.ts).
+ */
 export async function staffer(id: string, q: Db = db): Promise<StaffRow | undefined> {
+  const [row] = await q
+    .select()
+    .from(staff)
+    .where(and(eq(staff.id, id), isNull(staff.leftAt)));
+  return row;
+}
+
+/** Any Odd ever hired, one that left included: for a name in history, and a new hire's id. */
+export async function anyStaffer(id: string, q: Db = db): Promise<StaffRow | undefined> {
   const [row] = await q.select().from(staff).where(eq(staff.id, id));
   return row;
+}
+
+/** The Odds that left the office, the latest to leave first. */
+export async function formerStaff(): Promise<StaffRow[]> {
+  return db.select().from(staff).where(isNotNull(staff.leftAt)).orderBy(desc(staff.leftAt));
 }
 
 /** Only the owner moves a staffer's level. Grants above the new level wait until it rises again. */
@@ -221,7 +288,7 @@ export function heldReach<T extends { network: boolean }>(
  * office holds it says the hold's words instead.
  */
 function networkNote(before: StaffRow, after: StaffRow): { body?: string } {
-  const [was, is] = [before, after].map((s) => commandsOnline(s.agent, process.platform, s));
+  const [was, is] = [before, after].map((s) => commandsOnline(s.agent, currentPlatform(), s));
   if (was === is) return {};
   if (!is) return { body: NETWORK_NOTE.off };
   const opened = heldReach(after.agent, { network: is }, networkHeld()).network;
@@ -229,25 +296,50 @@ function networkNote(before: StaffRow, after: StaffRow): { body?: string } {
 }
 
 /** The tool the office runs on, from `.env` as it stands now (`officeAgentOf`). */
-export const officeAgent = (): Agent => officeAgentOf(process.env.OFFICE_AGENT, process.platform);
+export const officeAgent = (): Agent => officeAgentOf(process.env.OFFICE_AGENT, currentPlatform());
+
+/**
+ * Why Run commands cannot be stored for `agent` on this system, or nothing
+ * when its tool follows the switch. A stored yes must be the owner's own
+ * choice, or it would turn commands on unasked after a later move to a tool
+ * that follows it.
+ */
+function commandsRefused(agent: Agent): { refused: string } | undefined {
+  const how = commandsHow(agent, currentPlatform());
+  return how.state === 'switch' ? undefined : { refused: how.why };
+}
 
 /**
  * Only the owner moves a staffer to another coding tool. Its chat session
  * belongs to the tool it left, which could not resume it, so the next chat
- * starts a fresh one.
+ * starts a fresh one. With `commands`, the move also sets Run commands (the
+ * one click the Settings tab offers under a switch the Odd's own tool cannot
+ * follow), refused before anything changes when the new tool does not follow
+ * it, so the Odd never moves without the commands it was moved for.
  */
-export async function setAgent(id: string, agent: Agent): Promise<void> {
+export async function setAgent(
+  id: string,
+  agent: Agent,
+  commands?: boolean
+): Promise<{ refused: string } | undefined> {
   const before = await staffer(id);
-  if (!before || before.agent === agent) return;
-  // An account belongs to one tool, so the Odd starts the new one on its Office account.
-  await db.update(staff).set({ agent, account: null }).where(eq(staff.id, id));
-  rmSync(chatSession(id), { force: true });
-  await record({
-    kind: 'access',
-    actor: 'owner',
-    title: `Moved ${before.name} from ${AGENT_NAMES[before.agent]} to ${AGENT_NAMES[agent]}`,
-    ...networkNote(before, { ...before, agent })
-  });
+  if (!before) return;
+  if (commands !== undefined) {
+    const refused = commandsRefused(agent);
+    if (refused) return refused;
+  }
+  if (before.agent !== agent) {
+    // An account belongs to one tool, so the Odd starts the new one on its Office account.
+    await db.update(staff).set({ agent, account: null }).where(eq(staff.id, id));
+    rmSync(chatSession(id), { force: true });
+    await record({
+      kind: 'access',
+      actor: 'owner',
+      title: `Moved ${before.name} from ${AGENT_NAMES[before.agent]} to ${AGENT_NAMES[agent]}`,
+      ...networkNote(before, { ...before, agent })
+    });
+  }
+  if (commands !== undefined) return setOwnTool(id, 'commands', commands);
 }
 
 /** Only the owner grants or removes an office tool. Takes effect on the staffer's next run. */
@@ -329,14 +421,23 @@ export async function setModel(
   });
 }
 
-/** Only the owner switches Run commands or Browse the web. Takes effect on the staffer's next run. */
+/**
+ * Only the owner switches Run commands or Browse the web. Takes effect on the
+ * staffer's next run. Run commands, on or off, is refused for a tool that does
+ * not follow the switch on this system, a repeat included.
+ */
 export async function setOwnTool(
   id: string,
   which: 'commands' | 'web',
   on: boolean
-): Promise<void> {
+): Promise<{ refused: string } | undefined> {
   const before = await staffer(id);
-  if (!before || before[which] === on) return;
+  if (!before) return;
+  if (which === 'commands') {
+    const refused = commandsRefused(before.agent);
+    if (refused) return refused;
+  }
+  if (before[which] === on) return;
   await db
     .update(staff)
     .set({ [which]: on })
@@ -360,21 +461,27 @@ export async function setOwnTool(
 
 /**
  * Only the owner gives an Odd a folder outside the office, to read or to read
- * and change, or takes it back (`access` null). `path` is the real path
- * `checkFolder` gave, or, to take one back, the path as stored, so a folder
- * deleted from the disk can still be taken back. A folder is the same one
+ * and change, or takes it back (`access` null). A folder given is the path as
+ * the owner typed it: `checkFolder` refuses it or gives its real path, which
+ * is what is stored. A folder taken back is the path as stored, unchecked, so
+ * a folder deleted from the disk can still be taken back. A folder is the same one
  * when its real path is (`real`), so a level change replaces it, even one
  * stored in another case. A new folder inside or holding one the Odd already
- * has is refused (`FOLDER_REFUSED.nested`): one would carry two levels.
- * Takes effect on the next run.
+ * has is refused (`FOLDER_REFUSED.nested`): one would carry two levels. A
+ * stored folder no run gets (`touchesSecretStore`) carries none, so the owner
+ * can give a clean folder inside it. It still counts against a folder that
+ * would hold it, which would put the store it was dropped for in a run. A
+ * whole drive or system files comes back as a `warning` and changes nothing
+ * until the owner accepts it (`accept`). Takes effect on the next run.
  */
 export async function setFolder(
   id: string,
   path: string,
-  access: FolderAccess | null
-): Promise<{ refused: string } | undefined> {
-  const done = await changeFolder(db, id, path, access);
-  if (!done || 'refused' in done) return done;
+  access: FolderAccess | null,
+  accept = false
+): Promise<{ refused: string } | { warning: string } | undefined> {
+  const done = await changeFolder(db, id, path, access, { accept });
+  if (!done || 'refused' in done || 'warning' in done) return done;
   await record({ kind: 'access', actor: 'owner', title: done.title });
 }
 
@@ -386,17 +493,26 @@ async function changeFolder(
   q: Db,
   id: string,
   path: string,
-  access: FolderAccess | null
-): Promise<{ refused: string } | { title: string } | undefined> {
+  access: FolderAccess | null,
+  owner: { accept: boolean }
+): Promise<{ refused: string } | { warning: string } | { title: string } | undefined> {
   const before = await staffer(id, q);
   if (!before) return;
+  if (access !== null) {
+    const checked = checkFolder(path, owner.accept);
+    if ('refused' in checked || 'warning' in checked) return checked;
+    path = checked.real;
+  }
   const at = real(path);
   const same = (f: { path: string }) => real(f.path) === at;
   const had = before.folders.find(same);
   const write = access === 'write';
   if (access === null ? !had : had?.write === write) return;
   const rest = before.folders.filter((f) => !same(f));
-  if (access !== null && rest.some((f) => within(at, real(f.path)) || within(real(f.path), at)))
+  if (
+    access !== null &&
+    rest.some((f) => (touchesSecretStore(f.path) ? within(real(f.path), at) : nests(at, f)))
+  )
     return { refused: FOLDER_REFUSED.nested };
   const folders = access === null ? rest : [...rest, { path, write }];
   await q.update(staff).set({ folders }).where(eq(staff.id, id));
@@ -412,11 +528,19 @@ async function changeFolder(
 const gaveFolder = (name: string, path: string, access: FolderAccess) =>
   `Let ${name} ${access === 'write' ? 'read and change' : 'read'} ${shownFolder(path)}`;
 
+/** Whether `at` (a real path) sits inside the stored folder `f`, or holds it. */
+const nests = (at: string, f: { path: string }) =>
+  within(at, real(f.path)) || within(real(f.path), at);
+
 /**
  * Why an Odd may not ask for `path` (a real path from `checkFolder`) at
  * `level`, or nothing when it may: it has that folder, or one holding it,
  * at that level or above; or the owner could not give it, since it sits
- * inside or holds another folder the Odd has (`setFolder`).
+ * inside or holds another folder the Odd has (`setFolder`). A stored folder
+ * no run gets (`touchesSecretStore`) never covers what is asked for, so the
+ * Odd is never told that a folder it does not get covers it, and a clean
+ * folder inside one can be asked for. It still counts against a folder that
+ * would hold it, which would put the store it was dropped for in a run.
  */
 export function folderAskRefused(
   who: Pick<StaffRow, 'folders'>,
@@ -424,12 +548,15 @@ export function folderAskRefused(
   level: FolderAccess
 ): string | undefined {
   const at = real(path);
-  const covers = who.folders.find((f) => within(at, real(f.path)) && (f.write || level === 'read'));
+  const held = who.folders.filter((f) => !touchesSecretStore(f.path));
+  const covers = held.find((f) => within(at, real(f.path)) && (f.write || level === 'read'));
   if (covers)
     return `You already have ${shownFolder(covers.path)} (${covers.write ? 'read and change' : 'read only'}), which covers it.`;
-  const other = (f: { path: string }) => real(f.path) !== at;
-  if (who.folders.some((f) => other(f) && (within(at, real(f.path)) || within(real(f.path), at))))
-    return FOLDER_REFUSED.nested;
+  const nested = who.folders.some(
+    (f) =>
+      real(f.path) !== at && (touchesSecretStore(f.path) ? within(real(f.path), at) : nests(at, f))
+  );
+  if (nested) return FOLDER_REFUSED.nested;
 }
 
 /**
@@ -442,7 +569,7 @@ export function switchAskRefused(
   who: Pick<StaffRow, 'agent' | 'commands' | 'web'>,
   wanted: readonly OwnSwitch[]
 ): string | undefined {
-  const how = commandsHow(who.agent, process.platform);
+  const how = commandsHow(who.agent, currentPlatform());
   if (wanted.includes('commands') && how.state === 'never')
     return `${SWITCH_NAMES.commands} is not open to an Odd on ${AGENT_NAMES[who.agent]} here: ${how.why}`;
   if (!switchesOff(who, wanted).length) return `You already have ${switchesSaid(wanted)} on.`;
@@ -459,26 +586,56 @@ const turnedOn = (name: string, on: readonly OwnSwitch[]) =>
   `Let ${name} ${switchesSaid(on).toLowerCase()}`;
 
 /**
- * Secret stores in the home folder, by name: keys, sign-ins and settings,
- * including those other apps on this computer keep there, like the Google
- * Workspace MCP server's, and each coding tool's own home. AppData is where
- * Windows apps keep theirs. No run reads them (`unreadable` in the office's
- * staff.ts), and no folder given to an Odd holds or sits in one (`checkFolder`).
+ * Secret stores, by name, each with how it is found anywhere but the top of
+ * the home, where the name alone is enough (`touchesSecretStore`). An empty
+ * list means the name alone everywhere. A list names what marks the real
+ * store, for a name a project may use for its own files (`.ssh`, `.aws`,
+ * `.gnupg`, `.claude`, `.codex`, `.docker`, `.kube`, `.config`) or an ordinary
+ * word (`Library`, `AppData`): a key, a sign-in, a tool's history or a
+ * cluster's keys, or a Mac user's keychain and cookies, which `/Library` has
+ * none of, so that system folder stays a warning. `.ssh` and `.aws` leave out
+ * `config` on purpose, since a project may well hold one.
+ *
+ * Where the check stops (`inOrHoldsStore`): the folder, the folders above it
+ * and one level down. A store deeper than that, or under another name, is not
+ * found, and a `.ssh` with only custom-named keys and no `known_hosts` is given
+ * anywhere but the top of the home.
  */
-export const SECRET_STORES: string[] = [
-  '.ssh',
-  '.aws',
-  '.gnupg',
-  '.config',
-  'Library',
-  'AppData',
-  '.claude',
-  '.claude.json',
-  '.google_workspace_mcp',
-  '.grok',
-  '.codex',
-  '.gemini'
-];
+export const STORE_MARKS: Record<string, string[]> = {
+  '.ssh': [
+    'id_rsa',
+    'id_ecdsa',
+    'id_ecdsa_sk',
+    'id_ed25519',
+    'id_ed25519_sk',
+    'id_dsa',
+    'authorized_keys',
+    'known_hosts'
+  ],
+  '.aws': ['credentials', 'sso', 'cli/cache', 'login'],
+  '.gnupg': ['private-keys-v1.d', 'secring.gpg', 'pubring.kbx'],
+  '.config': ['gcloud', 'gh/hosts.yml'],
+  Library: ['Keychains/login.keychain-db', 'Cookies'],
+  AppData: ['Roaming', 'Local'],
+  '.claude': ['.credentials.json', 'history.jsonl', 'projects'],
+  '.claude.json': [],
+  '.google_workspace_mcp': [],
+  '.grok': ['auth.json', 'sessions'],
+  '.codex': ['auth.json', 'sessions'],
+  '.gemini': ['oauth_creds.json', 'google_accounts.json'],
+  '.docker': ['config.json'],
+  '.kube': ['config']
+};
+
+/**
+ * The secret stores' names: keys, sign-ins and settings in the home folder,
+ * including those other apps on this computer keep there, like the Google
+ * Workspace MCP server's, Docker's registry sign-ins and Kubernetes' cluster
+ * keys, and each coding tool's own home. AppData is where Windows apps keep
+ * theirs. No run reads them (`unreadable` in the office's staff.ts), and no
+ * folder given to an Odd holds or sits in one (`checkFolder`).
+ */
+export const SECRET_STORES: string[] = Object.keys(STORE_MARKS);
 
 /** What the owner reads when a folder cannot be given to an Odd. */
 export const FOLDER_REFUSED = {
@@ -499,35 +656,20 @@ export const FOLDER_REFUSED = {
 export const FOLDER_WARNING =
   "This folder is a whole drive or holds system files, so an Odd could reach everything inside it. We don't recommend giving it.";
 
-/**
- * Secret stores found by what they hold, for a folder outside the home, where
- * no store sits at a known place: by name, and for a coding tool's home, a
- * file only its sign-in or history leaves, since a project keeps its own
- * `.claude` or `.codex` of settings. An empty list means the name alone.
- */
-const STORE_MARKS: Record<string, string[]> = {
-  '.ssh': [],
-  '.aws': [],
-  '.gnupg': [],
-  '.google_workspace_mcp': [],
-  '.claude': ['.credentials.json', 'history.jsonl', 'projects'],
-  '.codex': ['auth.json', 'sessions'],
-  '.grok': ['auth.json', 'sessions'],
-  '.gemini': ['oauth_creds.json', 'google_accounts.json']
-};
-
 /** Whether `p` is a secret store by `STORE_MARKS`. */
 function marksStore(p: string): boolean {
-  const marks = STORE_MARKS[basename(p).toLowerCase()];
+  const name = basename(p).toLowerCase();
+  const marks = Object.entries(STORE_MARKS).find(([store]) => store.toLowerCase() === name)?.[1];
   return !!marks && existsSync(p) && (!marks.length || marks.some((m) => existsSync(join(p, m))));
 }
 
 /**
- * Whether `p`, outside the home, is in a secret store or holds one at its
- * top (`STORE_MARKS`). Deeper folders are not looked at, so giving one is
- * never a walk of a whole drive.
+ * Whether `p` is in a secret store or holds one directly (`STORE_MARKS`).
+ * Folders deeper than one level down are not looked at, so giving one is
+ * never a walk of a whole drive, and a store renamed to another folder name
+ * cannot be found at all.
  */
-function holdsStoreOutside(p: string): boolean {
+function inOrHoldsStore(p: string): boolean {
   for (let at = p; dirname(at) !== at; at = dirname(at)) if (marksStore(at)) return true;
   return Object.keys(STORE_MARKS).some((name) => marksStore(join(p, name)));
 }
@@ -536,14 +678,14 @@ function holdsStoreOutside(p: string): boolean {
 function systemFolders(): string[] {
   const env = process.env;
   const list =
-    process.platform === 'win32'
+    currentPlatform() === 'win32'
       ? [
           env.SystemRoot ?? 'C:\\Windows',
           env.ProgramFiles ?? 'C:\\Program Files',
           env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)',
           env.ProgramData ?? 'C:\\ProgramData'
         ]
-      : process.platform === 'darwin'
+      : currentPlatform() === 'darwin'
         ? ['/System', '/Library', '/Applications', '/usr', '/bin', '/sbin', '/private', '/dev']
         : [
             ...['/etc', '/usr', '/bin', '/sbin', '/lib', '/lib32', '/lib64', '/boot'],
@@ -588,7 +730,7 @@ const real = (p: string): string => (existsSync(p) ? realpathSync.native(p) : p)
 /** Whether `p` is `parent` or sits inside it. A Windows disk ignores case. */
 export function within(p: string, parent: string): boolean {
   const [a, b] =
-    process.platform === 'win32' ? [p.toLowerCase(), parent.toLowerCase()] : [p, parent];
+    currentPlatform() === 'win32' ? [p.toLowerCase(), parent.toLowerCase()] : [p, parent];
   return a === b || a.startsWith(b.endsWith(sep) ? b : b + sep);
 }
 
@@ -600,17 +742,38 @@ export function shownFolder(path: string): string {
 }
 
 /**
+ * Whether the folder at `path`, by its real path, is a secret store at the
+ * top of the home (`SECRET_STORES`, by name) or the office's own accounts
+ * folder, where each tool's sign-ins live (`accountsHome`), sits in one or
+ * holds one, or anywhere else is, sits in or directly holds a store found by
+ * what it holds (`inOrHoldsStore`). `checkFolder` refuses such a folder as it
+ * is given, and `ownTools` leaves out one stored before its store was listed,
+ * or written past `setFolder`, so no run is given it. By real path, so on a
+ * disk that ignores case `~/.SSH` is `~/.ssh`.
+ */
+export function touchesSecretStore(path: string): boolean {
+  const p = real(path);
+  const h = real(homedir());
+  const known = [...SECRET_STORES.map((s) => join(h, s)), accountsHome()].some((s) => {
+    const store = real(s);
+    return within(p, store) || within(store, p);
+  });
+  return known || inOrHoldsStore(p);
+}
+
+/**
  * Whether `path`, as the owner typed it, may be given to an Odd, and its real
  * path when it may. Any folder on the computer but the home itself, and one
- * that holds or sits in a secret store (`SECRET_STORES` in the home, and
- * outside it `holdsStoreOutside`), the office's own home or Oddboro's code:
- * those would let an Odd past the office's walls, so no Accept gives them. A
- * deny inside a folder a run reads is not held by every tool, so a folder
- * that holds one is refused at the door. A real path with a character Codex
- * cannot take (`GLOB`) is refused too, by the real path, since that is what a
- * run is given. A whole drive or system files (`broadFolder`) comes back as
- * a `warning` until the owner accepts it (`accept`). Only the folder routes
- * call this, so a folder given before a rule is not checked again.
+ * that holds or sits in a secret store (`touchesSecretStore`), the office's
+ * own home or Oddboro's code: those would let an Odd past the office's walls,
+ * so no Accept gives them. A deny inside a folder a run reads is not held by
+ * every tool, so a folder that holds one is refused at the door. A real path
+ * with a character Codex cannot take (`GLOB`) is refused too, by the real
+ * path, since that is what a run is given. A whole drive or system files
+ * (`broadFolder`) comes back as a `warning` until the owner accepts it
+ * (`accept`). Only the ways a folder is given call this, so a folder given
+ * before a rule was added is not checked again, but for the secret stores,
+ * which every run checks again (`touchesSecretStore`).
  */
 export function checkFolder(
   path: string,
@@ -624,9 +787,7 @@ export function checkFolder(
   const h = real(homedir());
   if (p === h) return { refused: FOLDER_REFUSED.home };
   const either = (q: string) => within(p, q) || within(q, p);
-  if ([...SECRET_STORES.map((s) => real(join(h, s))), real(home())].some(either))
-    return { refused: FOLDER_REFUSED.secrets };
-  if (!within(p, h) && holdsStoreOutside(p)) return { refused: FOLDER_REFUSED.secrets };
+  if (touchesSecretStore(p) || either(real(home()))) return { refused: FOLDER_REFUSED.secrets };
   if (either(real(CODE))) return { refused: FOLDER_REFUSED.code };
   const glob = GLOB.exec(p)?.[0];
   if (glob) return { refused: FOLDER_REFUSED.glob(glob) };
@@ -636,8 +797,10 @@ export function checkFolder(
 
 export type Hire = Pick<
   StaffRow,
-  'name' | 'role' | 'variant' | 'portrait' | 'room' | 'permission' | 'remit' | 'desk'
+  'name' | 'role' | 'variant' | 'portrait' | 'room' | 'remit' | 'desk'
 > & {
+  /** Its level; `HIRE_DEFAULTS` when left out. */
+  permission?: Level;
   /** The office they work in, by name. */
   office?: string;
   sprite?: string;
@@ -648,6 +811,12 @@ export type Hire = Pick<
   newParts?: DrawnPart[];
   /** The coding tool its runs go through, stored before its first run. Claude Code when left out. */
   agent?: Agent;
+  /** The account it signs in with on that tool, its model, and how hard it thinks. The office's when left out. */
+  account?: string | null;
+  model?: string | null;
+  effort?: Effort | null;
+  /** The New Altitude persona it was installed from. */
+  package?: PersonaLink;
 };
 
 /** Current staff whose generated look matches this one, other than `except`. */
@@ -691,6 +860,8 @@ export async function setLook(
 ): Promise<void> {
   const who = await staffer(id);
   if (!who) throw fixedError('No such Odd');
+  if (who.package)
+    throw new Error(`${who.name}'s look comes from New Altitude and cannot be redrawn.`);
   const twin = await lookTaken(look, id);
   if (twin) throw new Error(`${twin.name} already looks exactly like that`);
   await saveParts(newParts, id);
@@ -705,8 +876,11 @@ export async function hire(h: Hire): Promise<StaffRow> {
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '') || 'staff';
   let id = base;
-  for (let i = 2; await staffer(id); i++) id = `${base}-${i}`;
-  const tools = h.tools?.filter(isGrantable);
+  // An Odd that left keeps its id, so it can come back as itself.
+  for (let i = 2; await anyStaffer(id); i++) id = `${base}-${i}`;
+  // A hire that names its tools still starts with the ones on by default.
+  const named = h.tools?.filter(isGrantable);
+  const tools = named && [...new Set([...ON_BY_DEFAULT, ...named])];
   if (h.look) {
     const twin = await lookTaken(h.look);
     if (twin) throw new Error(`${twin.name} already looks exactly like that. Redraw first.`);
@@ -715,7 +889,12 @@ export async function hire(h: Hire): Promise<StaffRow> {
   const [row] = await db
     .insert(staff)
     // With no tool picked, the hire runs on the office's own.
-    .values({ ...values, agent: values.agent ?? officeAgent(), id, tools: tools ?? STARTER_TOOLS })
+    .values({
+      ...values,
+      agent: values.agent ?? officeAgent(),
+      id,
+      tools: tools ?? HIRE_DEFAULTS.staff.tools
+    })
     .returning();
   await saveParts(newParts, id);
   await record({
@@ -1024,7 +1203,7 @@ async function refuseSecondSwitch(
 }
 
 /** The asks an Odd raises in its own words, which may not repeat one already open. Access asks have twins instead (`asksNoMore`). */
-const ONCE_ONLY: AskKind[] = ['approval', 'goal'];
+const ONCE_ONLY: AskKind[] = ['approval', 'goal', 'remove', 'bring_back'];
 
 export async function raiseAsk(
   staffId: string,
@@ -1046,8 +1225,11 @@ export async function raiseAsk(
     switches?: OwnSwitch[];
     /** A call ask's held call, from the gateway (`holdCall` in the office's gateway.ts). */
     call?: HeldCall;
-    /** `goal`, `plan`, `reply`, `filter`, `folder`, `switch` and `call` say so; the rest follow from access or hire. */
-    kind?: 'goal' | 'plan' | 'reply' | 'filter' | 'folder' | 'switch' | 'call';
+    /** A remove or bring_back ask's Odd (leaving.ts). */
+    odd?: string;
+    /** `goal`, `plan`, `reply`, `filter`, `folder`, `switch`, `call`, `remove` and `bring_back` say so; the rest follow from access or hire. */
+    kind?:
+      'goal' | 'plan' | 'reply' | 'filter' | 'folder' | 'switch' | 'call' | 'remove' | 'bring_back';
     revises?: number;
     /** The colleague whose handed-back work the lead raised this from (`VIA`). */
     via?: string;
@@ -1100,7 +1282,7 @@ export async function raiseAsk(
     if (a.revises)
       await tx
         .update(asks)
-        .set({ status: 'revise', reason: 'Replaced by a new version.', decidedAt: new Date() })
+        .set({ status: 'revise', reason: ASK_REPLACED, decidedAt: new Date() })
         .where(and(eq(asks.id, a.revises), eq(asks.staffId, staffId), eq(asks.status, 'open')));
     if (row.threadId) {
       // The thread keeps the run's key, so the owner's answer cannot start the
@@ -1119,8 +1301,8 @@ export async function raiseAsk(
   return { ask, precedent: await precedent(`${a.title}\n${a.why}`) };
 }
 
-export async function ask(id: number): Promise<AskRow | undefined> {
-  const [row] = await db.select().from(asks).where(eq(asks.id, id));
+export async function ask(id: number, q: Db = db): Promise<AskRow | undefined> {
+  const [row] = await q.select().from(asks).where(eq(asks.id, id));
   return row;
 }
 
@@ -1133,7 +1315,8 @@ export async function asksFor(staffId: string): Promise<AskRow[]> {
     .limit(30);
 }
 
-export type Decision = 'approve' | 'deny' | 'iterate';
+export const DECISIONS = ['approve', 'deny', 'iterate'] as const;
+export type Decision = (typeof DECISIONS)[number];
 
 /** The kinds of ask that have twins (`asksNoMore`): an outside tool, a folder, and switches. */
 const TWINNED: AskKind[] = ['access', 'folder', 'switch'];
@@ -1178,9 +1361,9 @@ const sameWanted = (a: AskRow, b: AskRow) =>
  * the same Odd and tool or folder, decided in the same moment, whichever of
  * them the owner saw.
  */
-export async function answeredWith(a: AskRow): Promise<AskRow[]> {
+export async function answeredWith(a: AskRow, q: Db = db): Promise<AskRow[]> {
   if (!TWINNED.includes(a.kind) || !a.decidedAt) return [];
-  const rows = await db
+  const rows = await q
     .select()
     .from(asks)
     .where(
@@ -1213,10 +1396,25 @@ function carriedOutBy(together: AskRow[]): AskRow[] {
   return runs;
 }
 
-/** Start the carry-outs for asks one answer settled (`carriedOutBy`). */
-async function carryOutTogether(together: AskRow[]): Promise<void> {
+/**
+ * Start the carry-outs for asks one answer settled (`carriedOutBy`).
+ * `pickedUp` is the work parked on the connect task that just ended, which
+ * picks up in its own run (`finishTask`). `chat` goes only to the run of the
+ * ask the owner answered in chat, never a twin's.
+ */
+async function carryOutTogether(
+  together: AskRow[],
+  pickedUp?: string[],
+  q: Db = db,
+  chat?: InChat
+): Promise<void> {
   for (const a of carriedOutBy(together))
-    await followUp(a.staffId, 'carry_out', { askId: a.id, note: null });
+    await followUp(
+      a.staffId,
+      'carry_out',
+      { askId: a.id, note: null, pickedUp, ...(chat?.card.id === a.id && { chat }) },
+      q
+    );
 }
 
 /**
@@ -1242,9 +1440,10 @@ export async function decideAsk(
   id: number,
   decision: Decision,
   reason: string | null,
-  reportWhenDone = false
-): Promise<void> {
-  await decide(id, decision, reason, { reportWhenDone });
+  reportWhenDone = false,
+  inChat = false
+): Promise<boolean> {
+  return decide(id, decision, reason, { reportWhenDone, inChat });
 }
 
 /** What approving an ask means, done before the answer goes back. */
@@ -1256,6 +1455,8 @@ export type Approval = {
   link?: (ask: AskRow, tx: Tx) => Promise<void>;
   /** Done once the ask is approved, so the run the answer starts finds it. */
   carryOut?: (ask: AskRow) => Promise<void>;
+  /** The owner answered on the ask's card in its Odd's chat: the run the answer starts replies there. */
+  inChat?: boolean;
 };
 
 /**
@@ -1336,7 +1537,7 @@ export async function raiseCall(
   if (there) return { ask: there, already: true };
   const { ask } = await raiseAsk(place.staffId, {
     kind: 'call',
-    title: `Use ${call.tool} in ${service}`,
+    title: call.said ? `${call.said} in ${service}` : `Use ${call.tool} in ${service}`,
     why: `Called while working at Drafts for your yes, so the office held it for you.`,
     ifApproved: `The office makes this exact call to ${service}, and the work carries on with what it returns.`,
     call,
@@ -1371,7 +1572,7 @@ async function turnOnSwitches(
   const [before] = await tx.select().from(staff).where(eq(staff.id, a.staffId));
   if (!before) return;
   const on = switchesOff(before, a.switches ?? []);
-  if (on.includes('commands') && commandsHow(before.agent, process.platform).state === 'never')
+  if (on.includes('commands') && commandsHow(before.agent, currentPlatform()).state === 'never')
     throw fixedError(
       "This Odd's tool cannot run commands here. Move it to another tool on its Settings tab first"
     );
@@ -1400,7 +1601,8 @@ export async function giveFolder(
   path: string,
   level: FolderAccess,
   reason: string | null = null,
-  accept = false
+  accept = false,
+  inChat = false
 ): Promise<
   { given: { path: string; level: FolderAccess } } | { warning: string } | FolderNotGiven
 > {
@@ -1413,7 +1615,7 @@ export async function giveFolder(
   if ('warning' in checked) return checked;
   const given = { path: checked.real, level };
   try {
-    const done = await decide(id, 'approve', reason, { folder: { ...a.folder, given } });
+    const done = await decide(id, 'approve', reason, { folder: { ...a.folder, given }, inChat });
     if (!done) return { refused: 'You already answered this ask.', status: 409 };
   } catch (e) {
     if (e instanceof FolderRefused) return { refused: e.message, status: 400 };
@@ -1440,25 +1642,39 @@ async function decide(
     filter?: GmailFilter;
     call?: HeldCall;
     folder?: FolderRequest;
+    /**
+     * The Odd that raised it left the office (`removeOdd`): the office closes
+     * it as a no, with this line as the answer that goes back, and no run reads it.
+     */
+    withdrawn?: string;
   }
 ): Promise<boolean> {
   if (decision === 'iterate' && !reason) throw fixedError('Say what to change');
   if (decision !== 'deny') {
-    const [raised] = await db.select({ kind: asks.kind }).from(asks).where(eq(asks.id, id));
+    const [raised] = await db
+      .select({ kind: asks.kind, odd: asks.odd })
+      .from(asks)
+      .where(eq(asks.id, id));
+    // Refused before the ask closes, so a no-longer-possible yes leaves it open with the reason.
+    if (decision === 'approve' && raised) {
+      const move = oddMoveOf(raised.kind);
+      const held = move && (await leavingRefused(LEAVING_CHECK[move], raised.odd));
+      if (held) throw new Error(held);
+    }
     if (decision === 'iterate' && yesOrNo(raised?.kind))
-      throw new Error('Say yes or no: the office raised this, so nobody reworks it');
+      throw new Error('Say yes or no: nobody reworks this one');
     // Only the office's send or save approves a reply, once Gmail took it.
     if (decision === 'approve' && raised?.kind === 'reply' && !o.reply)
-      throw new Error('Send the reply, or save it to Gmail drafts');
+      throw new Error(OWNER_ANSWERS.ask.reply.approve.by);
     // Only the office's Create filter approves a filter, once Gmail made it.
     if (decision === 'approve' && raised?.kind === 'filter' && !o.filter)
-      throw new Error('Create the filter from its card on the desk');
+      throw new Error(OWNER_ANSWERS.ask.filter.approve.by);
     // Only the office's own call approves a held call, once it made it.
     if (decision === 'approve' && raised?.kind === 'call' && !o.call)
-      throw new Error('Approve the call from its card on the desk');
+      throw new Error(OWNER_ANSWERS.ask.call.approve.by);
     // Only the office's Give access approves a folder ask, giving the folder with it.
     if (decision === 'approve' && raised?.kind === 'folder' && !o.folder?.given)
-      throw new Error('Give the folder from its card on the desk');
+      throw new Error(OWNER_ANSWERS.ask.folder.approve.by);
   }
   const status = decision === 'approve' ? 'approved' : decision === 'deny' ? 'denied' : 'revise';
   const at = new Date();
@@ -1477,11 +1693,15 @@ async function decide(
       .where(and(eq(asks.id, id), eq(asks.status, 'open')))
       .returning();
     if (claimed) await o.link?.(claimed, tx);
-    if (claimed?.kind === 'hand_offs' && decision === 'approve') await startHeld(tx, claimed);
+    if (claimed && effectsOf(claimed.kind, decision).includes('start_held'))
+      await startHeld(tx, claimed);
     // The folder goes to the Odd with the yes, or neither happens.
     const given = claimed?.kind === 'folder' && decision === 'approve' && o.folder?.given;
     if (claimed && given) {
-      const changed = await changeFolder(tx, claimed.staffId, given.path, given.level);
+      // `giveFolder` checked this path with the owner's Accept, so no warning comes back.
+      const changed = await changeFolder(tx, claimed.staffId, given.path, given.level, {
+        accept: true
+      });
       if (changed && 'refused' in changed) throw new FolderRefused(changed.refused);
     }
     // The switches turn on with the yes, or neither happens.
@@ -1524,17 +1744,19 @@ async function decide(
     : { approve: 'Approved', deny: 'Denied', iterate: 'Sent back' }[decision];
   await record({
     kind: 'decision',
-    actor: 'owner',
+    actor: o.withdrawn ? 'office' : 'owner',
     // A folder given or a switch turned on from its ask reads as the Settings tab's change does.
-    title: made
-      ? `Created a Gmail filter: ${filterDone(made)}`
-      : gave
-        ? gaveFolder((await staffer(ask.staffId))?.name ?? ask.staffId, gave.path, gave.level)
-        : turned?.on.length
-          ? turnedOn(turned.before.name, turned.on)
-          : called
-            ? `${called.ok ? 'Made' : 'Made, and it failed'}: ${ask.title}`
-            : `${verb}: ${ask.title}`,
+    title: o.withdrawn
+      ? `Withdrawn: ${ask.title}`
+      : made
+        ? `Created a Gmail filter: ${filterDone(made)}`
+        : gave
+          ? gaveFolder((await anyStaffer(ask.staffId))?.name ?? ask.staffId, gave.path, gave.level)
+          : turned?.on.length
+            ? turnedOn(turned.before.name, turned.on)
+            : called
+              ? `${called.ok ? 'Made' : 'Made, and it failed'}: ${ask.title}`
+              : `${verb}: ${ask.title}`,
     body: `${sent ? `To ${sent.to.join(', ')}${sent.cc.length ? `, cc ${sent.cc.join(', ')}` : ''}. Subject: ${sent.subject}. ` : ''}${called ? `It returned: ${callResultText(called, 600)} ` : ''}${turned ? (networkNote(turned.before, turned.after).body ?? '') + ' ' : ''}Asked by ${ask.staffId}. ${ask.why}${
       twins.length
         ? ` This also answers ${twins.map((t) => `#${t.id}`).join(', ')}, the same ask from another of ${ask.staffId}'s runs.`
@@ -1544,69 +1766,169 @@ async function decide(
     askId: ask.id
   });
   await o.carryOut?.(ask);
-  if (decision === 'approve' && ask.access) {
-    const { task, connector: granted } = await grantAccess(ask.staffId, ask.access, ask.id);
-    // Another Google account is a new connector: the ask and its twins name
-    // it from now on, so finishing the connect task finds them.
-    if (ask.access.another)
-      await db
-        .update(asks)
-        .set({ access: { ...ask.access, connector: granted } })
-        .where(
-          inArray(
-            asks.id,
-            [ask, ...twins].map((a) => a.id)
-          )
+  // Only the run this ask's own answer starts, never a twin's, replies under its card.
+  const chat: InChat | undefined = o.inChat
+    ? { staffId: ask.staffId, card: { kind: 'ask', id: ask.id, title: ask.title } }
+    : undefined;
+  const owner = await ownerName();
+  const said = sent
+    ? `${owner} ${sent.sent?.action === 'draft' ? 'saved to Gmail drafts' : 'sent'} "${ask.title}"`
+    : made
+      ? `${owner} created the Gmail filter "${ask.title}" as: ${filterDone(made)}`
+      : `${owner} ${decision === 'deny' ? 'said no to' : 'approved'} "${ask.title}"`;
+  const answer = o.withdrawn ?? (ask.reason ? `${said}: ${ask.reason}` : `${said}.`);
+  for (const effect of effectsOf(ask.kind, decision)) {
+    if (typeof effect === 'object') continue;
+    switch (effect) {
+      // Done before this loop: the caller's approval, and the held hand-off with the claim.
+      case 'approval_work':
+      case 'start_held':
+        break;
+      case 'grant_access': {
+        if (!ask.access) break;
+        const { task, connector: granted } = await grantAccess(ask.staffId, ask.access, ask.id);
+        // Another Google account is a new connector: the ask and its twins name
+        // it from now on, so finishing the connect task finds them.
+        if (ask.access.another)
+          await db
+            .update(asks)
+            .set({ access: { ...ask.access, connector: granted } })
+            .where(
+              inArray(
+                asks.id,
+                [ask, ...twins].map((a) => a.id)
+              )
+            );
+        // Connected already: the work that waited picks up now. Otherwise finishing
+        // the connect task starts it (`finishTask`).
+        if (!task) await carryOutTogether([ask, ...twins]);
+        break;
+      }
+      // The folder went to the Odd with the claim: the work that waited on it picks up.
+      case 'give_folder':
+        if (gave) await carryOutTogether([ask, ...twins], undefined, db, chat);
+        break;
+      // The switches turned on with the claim: the work that waited on them picks up.
+      case 'turn_on':
+        if (turned) await carryOutTogether([ask, ...twins], undefined, db, chat);
+        break;
+      case 'carry_out':
+        await followUp(ask.staffId, 'carry_out', {
+          askId: ask.id,
+          note: ask.reason,
+          reportWhenDone: o.reportWhenDone,
+          chat
+        });
+        break;
+      case 'rework':
+        await followUp(ask.staffId, 'rework', { askId: ask.id, note: ask.reason, chat });
+        break;
+      case 'answer_window': {
+        // The title asks whether to pause the work or let it carry on, so "approved" would not say which.
+        const ran = `${owner} let hand-offs run until the usage window resets. Hand on the work the office held.`;
+        await answerWindow(
+          ask.id,
+          decision === 'approve',
+          ask.reason ? `${ran} They said: ${ask.reason}` : ran
         );
-    // Connected already: the work that waited picks up now. Otherwise finishing
-    // the connect task starts it (`finishTask`).
-    if (!task) await carryOutTogether([ask, ...twins]);
-  } else if (gave || turned)
-    // The folder or the switches are the Odd's now: the work that waited on them picks up.
-    await carryOutTogether([ask, ...twins]);
-  else if (decision === 'approve' && (ask.kind === 'approval' || ask.kind === 'call'))
-    await followUp(ask.staffId, 'carry_out', {
-      askId: ask.id,
-      note: ask.reason,
-      reportWhenDone: o.reportWhenDone
-    });
-  else if (decision === 'iterate')
-    await followUp(ask.staffId, 'rework', { askId: ask.id, note: ask.reason });
-  // No run carries out a denial, or a hire, goal, plan or more hand-offs the owner
-  // approved: the answer itself goes back to a hand-off the ask came from, or
-  // to the thread's hub. A yes to more hand-offs started the hand-off it held
-  // with the claim, and a no stops the thread. A yes to the usage window wakes the threads it held.
-  else {
-    const owner = await ownerName();
-    const said = sent
-      ? `${owner} ${sent.sent?.action === 'draft' ? 'saved to Gmail drafts' : 'sent'} "${ask.title}"`
-      : made
-        ? `${owner} created the Gmail filter "${ask.title}" as: ${filterDone(made)}`
-        : `${owner} ${decision === 'deny' ? 'said no to' : 'approved'} "${ask.title}"`;
-    const answer = ask.reason ? `${said}: ${ask.reason}` : `${said}.`;
-    if (ask.kind === 'window') {
-      // The title asks whether to pause the work or let it carry on, so "approved" would not say which.
-      const ran = `${owner} let hand-offs run until the usage window resets. Hand on the work the office held.`;
-      await answerWindow(
-        ask.id,
-        decision === 'approve',
-        ask.reason ? `${ran} They said: ${ask.reason}` : ran
-      );
-    } else if (ask.kind === 'hand_offs' && ask.threadId)
-      await answerHandOffs({ ...ask, threadId: ask.threadId }, decision === 'approve', answer);
-    else
-      for (const a of [ask, ...twins])
-        await answerLater(
-          { handOffId: a.handOffId, threadId: a.threadId, askId: a.id },
-          decision === 'deny' ? 'failed' : 'done',
-          answer
-        );
-    // A no with a reason may be a lesson: the Odd that asked reads it once. The
-    // office raised a window ask, not the Odd named on it, so it has none to learn.
-    if (decision === 'deny' && ask.reason && ask.kind !== 'window')
-      await followUp(ask.staffId, 'denied', { askId: ask.id, note: ask.reason });
+        break;
+      }
+      // A yes started the hand-off it held with the claim, and a no stops the thread.
+      case 'answer_hand_offs':
+        if (ask.threadId)
+          await answerHandOffs({ ...ask, threadId: ask.threadId }, decision === 'approve', answer);
+        else await answerBack(ask, decision, answer);
+        break;
+      case 'answer_back':
+        for (const a of [ask, ...twins])
+          await answerBack(a, decision, answer, a.id === ask.id ? chat : undefined);
+        break;
+      // A no with a reason may be a lesson: the Odd that asked reads it once. An
+      // ask withdrawn because its Odd left has nobody to read it.
+      case 'denied_lesson':
+        if (ask.reason && !o.withdrawn)
+          await followUp(ask.staffId, 'denied', { askId: ask.id, note: ask.reason });
+        break;
+      // Last in its row, so the answer went back first, and leaving closes any run it started.
+      case 'odd_leaves':
+        if (ask.odd) await removeOdd(ask.odd, { askId: ask.id });
+        break;
+      case 'odd_returns':
+        if (ask.odd) await bringBack(ask.odd, { askId: ask.id });
+        break;
+      case 'catch_up':
+        await oweCatchUp(ask);
+        break;
+      default:
+        effect satisfies never;
+    }
   }
   return true;
+}
+
+/** What the owner's decision on an ask of this kind does, from its row in `OWNER_ANSWERS`. */
+function effectsOf(kind: AskKind, decision: Decision): readonly AskEffect[] {
+  const cell = (OWNER_ANSWERS.ask[kind] as AskAnswer)[decision];
+  return cell === 'refused' ? [] : 'by' in cell ? cell.then : cell;
+}
+
+/**
+ * What `leavingRefused` checks before a yes that moves an Odd, by the move.
+ * Any kind whose yes makes that move gets the same check.
+ */
+const LEAVING_CHECK = {
+  odd_leaves: 'remove',
+  odd_returns: 'bring_back'
+} as const satisfies Partial<
+  Record<Extract<AskEffect, string>, Parameters<typeof leavingRefused>[0]>
+>;
+
+/** The move the owner's yes to an ask of this kind makes, from its row in `OWNER_ANSWERS`. */
+function oddMoveOf(kind: AskKind): keyof typeof LEAVING_CHECK | undefined {
+  return effectsOf(kind, 'approve').find(
+    (e): e is keyof typeof LEAVING_CHECK => typeof e === 'string' && Object.hasOwn(LEAVING_CHECK, e)
+  );
+}
+
+/** No run carries out this answer: it goes back to the hand-off or thread the ask came from. */
+const answerBack = (ask: AskRow, decision: Decision, answer: string, chat?: InChat) =>
+  answerLater(
+    { handOffId: ask.handOffId, threadId: ask.threadId, askId: ask.id },
+    decision === 'deny' ? 'failed' : 'done',
+    answer,
+    db,
+    chat
+  );
+
+/**
+ * The Odd that raised an open ask left the office: the office closes it as a
+ * no, and `line` goes back where the ask came from, to a hand-off's lead or the
+ * thread's hub. Nobody reads it for a lesson.
+ */
+export async function withdrawAsk(id: number, line: string): Promise<void> {
+  await decide(id, 'deny', line, { withdrawn: line });
+}
+
+/**
+ * The Odd that gave the owner an open task left the office, or took the task
+ * off the desk with its `withdraw` tool: the office drops it, and it ends as a
+ * dropped task does, `line` going back where it came from.
+ */
+export async function withdrawTask(id: number, line: string): Promise<void> {
+  const [t] = await db
+    .update(tasks)
+    .set({ status: 'dropped', note: line, withdrawn: true, doneAt: new Date() })
+    .where(and(eq(tasks.id, id), eq(tasks.status, 'open')))
+    .returning();
+  if (!t) return;
+  await record({
+    kind: 'work',
+    actor: 'office',
+    title: `Withdrawn: ${t.title}`,
+    body: line,
+    taskId: t.id
+  });
+  await taskEnded(t, { ended: 'withdrawn', owner: await ownerName(), said: line });
 }
 
 /**
@@ -1618,10 +1940,12 @@ async function decide(
 async function answerLater(
   on: { handOffId: number | null; threadId: number | null; askId?: number },
   outcome: Outcome,
-  answer: string
+  answer: string,
+  q: Db = db,
+  chat?: InChat
 ): Promise<void> {
-  if (on.handOffId) await handBackLater(on.handOffId, outcome, answer);
-  else if (on.threadId) await answerThread(on.threadId, answer, on.askId);
+  if (on.handOffId) await handBackLater(on.handOffId, outcome, answer, q);
+  else if (on.threadId) await answerThread(on.threadId, answer, on.askId, q, chat);
 }
 
 /**
@@ -1654,18 +1978,29 @@ async function followUp(
     reportId?: number;
     taskId?: number;
     note: string | null;
+    pickedUp?: string[];
     reportWhenDone?: boolean;
-  }
+    /** The owner answered in a chat: a run in that Odd's chat replies there too. */
+    chat?: InChat;
+  },
+  q: Db = db
 ): Promise<void> {
   // The answer to something raised on a thread works on that thread.
   const [on] = servesNoThread(kind)
     ? []
     : f.askId
-      ? await db.select({ threadId: asks.threadId }).from(asks).where(eq(asks.id, f.askId))
+      ? await q.select({ threadId: asks.threadId }).from(asks).where(eq(asks.id, f.askId))
       : f.taskId
-        ? await db.select({ threadId: tasks.threadId }).from(tasks).where(eq(tasks.id, f.taskId))
+        ? await q.select({ threadId: tasks.threadId }).from(tasks).where(eq(tasks.id, f.taskId))
         : [];
-  await addFollowUp(db, { staffId, kind, ...f, threadId: on?.threadId });
+  const { chat, ...rest } = f;
+  await addFollowUp(q, {
+    staffId,
+    kind,
+    ...rest,
+    chatCard: chatCardOf(staffId, chat),
+    threadId: on?.threadId
+  });
 }
 
 /**
@@ -1696,7 +2031,7 @@ export async function followUpsToDo(): Promise<
   const rows = await db
     .select()
     .from(followUps)
-    .where(and(isNull(followUps.startedAt), not(waitsOnOwnRun())))
+    .where(and(isNull(followUps.startedAt), not(waitsOnOwnRun()), ofWorkingOdd(followUps.staffId)))
     .orderBy(asc(followUps.createdAt));
   return Promise.all(
     rows.map(async (f) => {
@@ -1716,6 +2051,23 @@ export async function followUpsToDo(): Promise<
       };
     })
   );
+}
+
+/**
+ * Follow-ups of Odds still in the office that have yet to start, oldest
+ * first. One waits while a run of its Odd on the same work goes
+ * (`waitsOnOwnRun`), such as the chat that gave the owner the task it picks
+ * up after; any other starts at the office's next look. The office lists them
+ * under In progress, so work the owner's answer started shows while it waits.
+ */
+export async function followUpsToStart(): Promise<FollowUpRow[]> {
+  return db
+    .select()
+    .from(followUps)
+    .where(
+      and(isNull(followUps.startedAt), isNull(followUps.outcome), ofWorkingOdd(followUps.staffId))
+    )
+    .orderBy(asc(followUps.createdAt), asc(followUps.id));
 }
 
 /**
@@ -1755,7 +2107,7 @@ function waitsOnOwnRun(): SQL {
               and(
                 eq(threads.id, followUps.threadId),
                 eq(threads.hubId, followUps.staffId),
-                arrayOverlaps(threads.runs, [...runsGoing])
+                arrayOverlaps(threads.runs, [...runsGoing.keys()])
               )
             )
         )
@@ -1772,33 +2124,72 @@ function waitsOnOwnRun(): SQL {
  * the database: a restart ends every run, and so every hold, and nothing
  * waits forever.
  */
-export const runsGoing = new Set<string>();
+export { runsGoing, reserveRun, releaseRun } from './run-registry.ts';
+
+/** The wait a lead's run ended as it started: the task's title, or the time it was parked until. */
+export type Unparked = { task: string } | { at: Date };
 
 /**
  * Claim a follow-up, and return it as claimed: an answer that joined it after
  * it was listed is in its note (`answerThread`). Undefined when something else
  * already started it, or it waits (`waitsOnOwnRun`).
+ *
+ * A thread stays parked only while no run of its lead's on it has started
+ * since it parked, so the claim of one ends the park, and returns the wait it
+ * ended for the run's brief (`unparked`). Without it, work a hand-back or the
+ * owner's words picked up stayed parked on a task that might never end, and
+ * that task's end woke the finished work again. A colleague's run leaves the
+ * lead's park alone, and so does a usage-window hold, which is the office's.
+ * The claimed row keeps the task or time it lifted (`unparkedTask`,
+ * `unparkedAt`), so a run that then fails gives that wait back (`finishFollowUp`).
  */
-export async function startFollowUp(id: number): Promise<FollowUpRow | undefined> {
+export async function startFollowUp(
+  id: number
+): Promise<(FollowUpRow & { unparked?: Unparked }) | undefined> {
   return db.transaction(async (tx) => {
     // The thread is locked, so two claims on it at once cannot each miss the
     // other's run starting, and both go.
     const [on] = await tx
-      .select({ threadId: followUps.threadId })
+      .select({ threadId: followUps.threadId, staffId: followUps.staffId })
       .from(followUps)
       .where(eq(followUps.id, id));
-    if (on?.threadId)
-      await tx
-        .select({ id: threads.id })
-        .from(threads)
-        .where(eq(threads.id, on.threadId))
-        .for('update');
+    const [t] = on?.threadId
+      ? await tx
+          .select({
+            hubId: threads.hubId,
+            resumeOnTask: threads.resumeOnTask,
+            resumeAt: threads.resumeAt,
+            heldBy: threads.heldBy
+          })
+          .from(threads)
+          .where(eq(threads.id, on.threadId))
+          .for('update')
+      : [];
+    // Only the lead's own run ends its park, so only it records the wait it lifted.
+    const leads = t !== undefined && on?.staffId === t.hubId;
+    const timed = leads && t.heldBy === null ? t.resumeAt : null;
     const [claimed] = await tx
       .update(followUps)
-      .set({ startedAt: new Date() })
+      .set({
+        startedAt: new Date(),
+        unparkedTask: leads ? t.resumeOnTask : null,
+        unparkedAt: timed
+      })
       .where(and(eq(followUps.id, id), isNull(followUps.startedAt), not(waitsOnOwnRun())))
       .returning();
-    return claimed;
+    if (!claimed?.threadId || !leads) return claimed;
+    if (t.resumeOnTask === null && timed === null) return claimed;
+    const [task] = t.resumeOnTask
+      ? await tx.select({ title: tasks.title }).from(tasks).where(eq(tasks.id, t.resumeOnTask))
+      : [];
+    await tx
+      .update(threads)
+      .set({ resumeOnTask: null, ...(timed ? { resumeAt: null } : {}) })
+      .where(eq(threads.id, claimed.threadId));
+    return {
+      ...claimed,
+      unparked: task ? { task: task.title } : timed ? { at: timed } : undefined
+    };
   });
 }
 
@@ -1857,19 +2248,57 @@ export const OUTCOME_TITLE: Record<FollowUpKind, Record<Outcome, string>> = {
 };
 
 /**
+ * A colleague's result that no lead takes, since the lead that handed it the
+ * work left the office (`leadLeft`): nothing picks the work up. The owner
+ * ruled that nothing goes on the desk for it. The colleague, the last Odd on
+ * the work, pokes the owner now, and the Ledger keeps a line. What the
+ * colleague did stays in the work's folder.
+ */
+export type Unreturned = {
+  colleague: { id: string; name: string };
+  lead: string;
+  title: string;
+  outcome: Exclude<Outcome, 'waiting'>;
+};
+
+/** The poke that tells the owner, sent now, as `poke_owner` would send one. */
+export async function pokeUnreturned(q: Db, u: Unreturned): Promise<void> {
+  const did = u.outcome === 'done' ? 'finished' : 'could not finish';
+  const yet = u.outcome === 'done' ? 'but' : 'and';
+  await q.insert(pokes).values({
+    staffId: u.colleague.id,
+    at: new Date(),
+    message: `${u.colleague.name} ${did} "${u.title}", ${yet} could not hand it back to ${u.lead} because ${u.lead} is no longer here.`
+  });
+}
+
+/** The Ledger's line for it. Outside a transaction: `record` embeds its text first. */
+export async function recordUnreturned(u: Unreturned): Promise<void> {
+  const did = u.outcome === 'done' ? 'finished' : 'could not finish';
+  await record({
+    kind: 'work',
+    actor: u.colleague.id,
+    title: `${u.outcome === 'done' ? 'Finished' : 'Could not finish'}, but ${u.lead} has left: ${u.title}`,
+    body: `${u.colleague.name} ${did} "${u.title}", but ${u.lead} has left the office, so nothing picks the work up. What ${u.colleague.name} did stays in the work's folder.`
+  });
+}
+
+/**
  * Record how a follow-up ended. Every outcome goes in the ledger. The owner's desk
  * gets a failure no lead is woken for, and a success only when the owner asked
  * for one. When the staffer is waiting, what it needs is already on their desk
  * as an ask or task. `joined` are the results this run picked up with its own
- * (`resultsToJoin`): they end with it.
+ * (`resultsToJoin`): they end with it. `stopped` is work its lead's leaving
+ * stopped (`removeOdd`): the owner let the lead go, so no report says it failed.
+ * True when this call wrote the outcome, false when one was written already.
  */
 export async function finishFollowUp(
   f: FollowUpRow,
   about: string,
   outcome: Outcome,
   result: string,
-  o: { joined?: number[] } = {}
-): Promise<void> {
+  o: { joined?: number[]; stopped?: boolean } = {}
+): Promise<boolean> {
   const joined = o.joined ?? [];
   const title = `${OUTCOME_TITLE[f.kind][outcome].replace('{owner}', await ownerName())}: ${about}`;
   const origin = await servesHandOff(f);
@@ -1878,12 +2307,25 @@ export async function finishFollowUp(
   // never leaves the desk short or the staffer that handed it waiting.
   const finished = await db.transaction(async (tx) => {
     const now = new Date();
+    // A lead that left runs nothing, so nothing goes back to wait on it.
+    // Looked at first, so this locks the lead's row before its threads, in the
+    // order `removeOdd` does.
+    const left = origin?.handOff ? await leadLeft(tx, origin.handOff.from) : undefined;
     const [row] = await tx
       .update(followUps)
       .set({ outcome, result, doneAt: now })
       .where(and(eq(followUps.id, f.id), isNull(followUps.outcome)))
-      .returning({ id: followUps.id });
+      .returning({
+        id: followUps.id,
+        unparkedTask: followUps.unparkedTask,
+        unparkedAt: followUps.unparkedAt
+      });
     if (!row) return false;
+    // Read from the row, not `f`: the claim wrote it after `f` may have been read.
+    const ended =
+      outcome === 'failed' && (row.unparkedTask !== null || row.unparkedAt !== null) && f.threadId
+        ? await giveWaitBack(tx, f.threadId, row)
+        : undefined;
     if (joined.length)
       await tx
         .update(followUps)
@@ -1907,17 +2349,45 @@ export async function finishFollowUp(
       origin && (outcome !== 'waiting' || (f.kind === 'hand_off' && !(await answeredAll(tx, f.id))))
         ? handBack(origin, outcome, result)
         : undefined;
+    // With the lead gone, the colleague tells the owner instead (`Unreturned`).
+    // One left waiting has its ask or task on the desk already, and the run
+    // the owner's answer brings ends here again.
+    const unreturned: Unreturned | undefined =
+      back && left && origin?.handOff && outcome !== 'waiting'
+        ? {
+            colleague: {
+              id: f.staffId,
+              name: (await anyStaffer(f.staffId, tx))?.name ?? f.staffId
+            },
+            lead: left,
+            title: flat(origin.handOff.title),
+            outcome
+          }
+        : undefined;
     // A failure that goes back to a lead goes to the lead only: the lead
     // picks it up at once and decides what comes next, so a desk item would
     // wait on the owner for work already moving. With no one to wake, the
-    // owner hears.
-    const reported = outcome === 'failed' ? !back : outcome === 'done' && f.reportWhenDone;
+    // owner hears, unless the lead left: then the colleague's poke tells them.
+    const reported =
+      !o.stopped && (outcome === 'failed' ? !back : outcome === 'done' && f.reportWhenDone);
     if (reported) await tx.insert(reports).values({ staffId: f.staffId, title, body: result });
+    if (unreturned) await pokeUnreturned(tx, unreturned);
     // The hand-back moves the thread on; with none, the outcome may end it.
-    if (back) await addFollowUp(tx, back);
+    if (back && !left) await addFollowUp(tx, back);
     else if (f.threadId) await settleThread(tx, f.threadId);
-    return true;
+    return { ended, unreturned };
   });
+  if (finished && finished.ended) {
+    const t = finished.ended;
+    // The task's own run was set going when the task ended, while the park was
+    // lifted, so it was not told of this work and does not pick up now.
+    const own = await ownRunOf(await taskEnd(t));
+    await wakeOnTask(t, {
+      ended: endedAs(t),
+      owner: await ownerName(),
+      ownRun: own && { ...own, earlier: true }
+    });
+  }
   // The ledger row embeds its text first, which can take a while: outside the transaction.
   if (finished)
     await record({
@@ -1927,19 +2397,75 @@ export async function finishFollowUp(
       body: result,
       askId: f.askId ?? undefined
     });
+  if (finished && finished.unreturned) await recordUnreturned(finished.unreturned);
+  return !!finished;
+}
+
+/**
+ * A lead's run that ended a park failed, so the wait comes back, on its task or
+ * its time: only a run that ends without failing, or the wait's own end, ends
+ * one. Not when the run parked the work again, on a task or a time, or the
+ * work ended. The task is locked, as `parkOnTask` locks it, so it cannot end
+ * between this look and the park and wake nothing. Returns the task when it
+ * ended during the run: the park is back so the work stays open, and
+ * `wakeOnTask` then wakes it as the task's end would have, but told the task's
+ * own run was set going back when the task ended. A time that passed
+ * during the run comes back as it was, so the clock's next look wakes the work,
+ * once, since `wakeThread` claims the time as it wakes.
+ */
+async function giveWaitBack(
+  tx: Tx,
+  threadId: number,
+  lifted: Pick<FollowUpRow, 'unparkedTask' | 'unparkedAt'>
+): Promise<TaskRow | undefined> {
+  const [task] =
+    lifted.unparkedTask === null
+      ? []
+      : await tx.select().from(tasks).where(eq(tasks.id, lifted.unparkedTask)).for('update');
+  // A claim lifts a task or a time, never both, so one of these is null.
+  const [back] = await tx
+    .update(threads)
+    .set({ resumeOnTask: lifted.unparkedTask, resumeAt: lifted.unparkedAt })
+    .where(
+      and(
+        eq(threads.id, threadId),
+        isNull(threads.resumeOnTask),
+        isNull(threads.resumeAt),
+        isNull(threads.endedAt)
+      )
+    )
+    .returning({ id: threads.id });
+  return back && task && task.status !== 'open' ? task : undefined;
+}
+
+/**
+ * How a task that ended during a run reads to the work that run gives the park
+ * back to. A task the office or its Odd took off the desk (`withdrawTask`), as
+ * its Odd left or through its `withdraw` tool, says so; one the owner dropped
+ * reads as dropped. Read from the row, not from whether the Odd is gone: one
+ * brought back since has no mark of leaving.
+ */
+function endedAs(t: TaskRow): TaskEnded {
+  return t.status === 'done' ? 'done' : t.withdrawn ? 'withdrawn' : 'dropped';
 }
 
 /** The result of a run a restart cut off. */
 export const CUT_OFF_RESULT =
   'The office restarted while this was running, so it may be half done. Check it, then ask the Odd to finish it.';
 
-/** Follow-ups a restart cut off mid-run. They fail rather than run twice. */
-export async function closeStaleFollowUps(): Promise<void> {
+/**
+ * Follow-ups a restart cut off mid-run. They fail rather than run twice.
+ * Returns those this closed, so the office can say so where each began.
+ */
+export async function closeStaleFollowUps(): Promise<FollowUpRow[]> {
   const stale = await db
     .select()
     .from(followUps)
     .where(and(isNotNull(followUps.startedAt), isNull(followUps.outcome)));
-  for (const f of stale) await finishFollowUp(f, await workTitle(f), 'failed', CUT_OFF_RESULT);
+  const closed: FollowUpRow[] = [];
+  for (const f of stale)
+    if (await finishFollowUp(f, await workTitle(f), 'failed', CUT_OFF_RESULT)) closed.push(f);
+  return closed;
 }
 
 /**
@@ -2011,6 +2537,8 @@ export async function grantAccess(
   const who = await staffer(staffId);
   const named = await connector(req.connector);
   if (!who || !named) throw fixedError('No such Odd or connector');
+  if (named.id === POSTAL_ID && req.level !== 'read')
+    throw new Error('Physical mail only allows Read only access.');
   if (req.level === 'draft')
     throw new Error(`${named.name} connects to read, or to read and write`);
   if (!grantWorks(req.level, who.permission))
@@ -2018,13 +2546,32 @@ export async function grantAccess(
   if (req.another && named.config.google !== req.another)
     throw new Error(`Only Gmail and Google Drive take another account`);
   const conn = req.another ? await addGoogleAccount(req.another) : named;
-  await db
-    .insert(grants)
-    .values({ staffId, connectorId: conn.id, level: req.level, askId })
-    .onConflictDoUpdate({
-      target: [grants.staffId, grants.connectorId],
-      set: { level: req.level, askId, grantedAt: new Date() }
+  const saveGrant = (store: Tx | typeof db) =>
+    store
+      .insert(grants)
+      .values({ staffId, connectorId: conn.id, level: req.level, askId })
+      .onConflictDoUpdate({
+        target: [grants.staffId, grants.connectorId],
+        set: { level: req.level, askId, grantedAt: new Date() }
+      });
+  if (conn.id === POSTAL_ID) {
+    await db.transaction(async (tx) => {
+      const [current] = await tx
+        .select({ ready: connectors.readyAt })
+        .from(connectors)
+        .where(eq(connectors.id, conn.id))
+        .for('update');
+      if (!current?.ready) {
+        const pending = await tx
+          .select({ id: grants.staffId })
+          .from(grants)
+          .where(eq(grants.connectorId, conn.id));
+        if (pending.some((g) => g.id !== staffId))
+          throw new Error('Choose the office mailbox before granting another Odd access.');
+      }
+      await saveGrant(tx);
     });
+  } else await saveGrant(db);
   const steps = connectSteps(conn);
   if (steps.length) {
     // A further Google account not signed in yet reads as one, beside the one already there.
@@ -2058,13 +2605,16 @@ export async function grantAccess(
  * A tool the owner already gave a staffer stopped working: its connect steps go
  * on the desk again, after the staffer's own steps for getting a new key. There
  * is no ask, since the owner said yes once. A tool has one open reconnect at a time.
+ * Only a tool that takes a key has a box for one, so the staffer's key steps
+ * go only on its task. For a tool that signs in, or needs nothing, they would
+ * send the owner looking for a box that is not there (`keptOut` says so).
  */
 export async function reconnectTask(
   staffId: string,
   connectorId: string,
   problem: string,
   getKey: string[]
-): Promise<{ task: TaskRow; already: boolean } | { problem: string }> {
+): Promise<{ task: TaskRow; already: boolean; keptOut: boolean } | { problem: string }> {
   const who = await staffer(staffId);
   const conn = await connector(connectorId);
   if (!who || !conn) return { problem: `No connector named ${connectorId}.` };
@@ -2080,15 +2630,16 @@ export async function reconnectTask(
   const waiting = open.find((t) =>
     t.steps.some((st) => st.action && 'connector' in st.action && st.action.connector === conn.id)
   );
-  if (waiting) return { task: waiting, already: true };
+  if (waiting) return { task: waiting, already: true, keptOut: false };
+  const takesKey = secretNames(conn).some((n) => n !== 'oauth');
   const steps = connectSteps(conn, true);
   const task = await giveTask(staffId, {
     title: `Reconnect ${conn.name} for ${who.name}`,
     why: problem,
-    steps: [...getKey, ...steps],
+    steps: [...(takesKey ? getKey : []), ...steps],
     byOffice: true
   });
-  return { task, already: false };
+  return { task, already: false, keptOut: !takesKey && getKey.length > 0 };
 }
 
 /**
@@ -2222,11 +2773,21 @@ function connectSteps(conn: ConnectorRow, again = false): Step[] {
       done: false,
       action: { kind: 'secret' as const, connector: conn.id, name }
     })),
-    {
-      text: `Click Connect. The office starts ${conn.name} and lists its tools, marking the ones that only read.`,
-      done: false,
-      action: { kind: 'tools', connector: conn.id }
-    }
+    ...(conn.id === POSTAL_ID
+      ? [
+          {
+            text: 'Choose the LegalZoom mailbox this Odd can read. Access includes every recipient in that mailbox.',
+            done: false,
+            action: { kind: 'postal' as const, connector: conn.id }
+          }
+        ]
+      : [
+          {
+            text: `Click Connect. The office starts ${conn.name} and lists its tools, marking the ones that only read.`,
+            done: false,
+            action: { kind: 'tools' as const, connector: conn.id }
+          }
+        ])
   ];
 }
 
@@ -2457,13 +3018,21 @@ async function dropConnectTasks(id: string, staffId?: string): Promise<void> {
     .where(
       staffId ? and(eq(tasks.status, 'open'), eq(tasks.staffId, staffId)) : eq(tasks.status, 'open')
     );
-  const stale = open
-    .filter((t) =>
-      t.steps.some((s) => s.action && 'connector' in s.action && s.action.connector === id)
-    )
-    .map((t) => t.id);
-  if (stale.length)
-    await db.update(tasks).set({ status: 'dropped' }).where(inArray(tasks.id, stale));
+  const stale = open.filter((t) =>
+    t.steps.some((s) => s.action && 'connector' in s.action && s.action.connector === id)
+  );
+  if (!stale.length) return;
+  await db
+    .update(tasks)
+    .set({ status: 'dropped' })
+    .where(
+      inArray(
+        tasks.id,
+        stale.map((t) => t.id)
+      )
+    );
+  const owner = await ownerName();
+  for (const t of stale) await wakeOnTask(t, { ended: 'dropped', owner });
 }
 
 /**
@@ -2513,12 +3082,20 @@ async function forgetConnector(id: string): Promise<{ forgot: boolean; googleTol
     await db.delete(connectors).where(eq(connectors.id, id));
     return { forgot: removed.length > 0, googleTold };
   }
-  if (removed.length) {
+  if (removed.length || id === POSTAL_ID) {
     const config = { ...c.config };
     delete config.account;
+    delete config.pmb;
     await db
       .update(connectors)
-      .set({ readyAt: null, ...(product ? { name: GOOGLE[product].name, config } : {}) })
+      .set({
+        readyAt: null,
+        ...(product
+          ? { name: GOOGLE[product].name, config }
+          : id === POSTAL_ID
+            ? { name: POSTAL_NAME, config, tools: [], readTools: [] }
+            : {})
+      })
       .where(eq(connectors.id, id));
   }
   return { forgot: removed.length > 0, googleTold };
@@ -2540,6 +3117,38 @@ async function forgetAws(c: ConnectorRow): Promise<boolean> {
   if (!all.some((k) => k.id !== c.id && isAws(k.id) && k.config.aws))
     deleteSecret(AWS_SIGN_IN.id, AWS_SIGN_IN.name);
   return true;
+}
+
+/** Save the mailbox and its read tools together, only for a current owner's setup task.
+ * Two setup cards cannot change an already connected mailbox under another Odd. */
+export async function bindPostalMailbox(
+  taskId: number,
+  pmb: string,
+  names: string[]
+): Promise<void> {
+  const [saved] = await db
+    .update(connectors)
+    .set({
+      name: `${POSTAL_NAME} · PMB ${pmb}`,
+      config: sql`jsonb_set(${connectors.config}, '{pmb}', to_jsonb(${pmb}::text))`,
+      tools: names,
+      readTools: names,
+      readyAt: new Date()
+    })
+    .where(
+      and(
+        eq(connectors.id, POSTAL_ID),
+        sql`(${connectors.config}->>'pmb' is null or ${connectors.config}->>'pmb' = ${pmb})`,
+        sql`exists (select 1 from ${tasks} t join ${grants} g on g.staff_id = t.staff_id
+      where t.id = ${taskId} and t.status = 'open' and g.connector_id = ${POSTAL_ID} and g.level = 'read'
+      and t.steps @> ${JSON.stringify([{ action: { kind: 'postal', connector: POSTAL_ID } }])}::jsonb)`
+      )
+    )
+    .returning({ id: connectors.id });
+  if (!saved)
+    throw new Error(
+      'This setup is no longer open or another mailbox is connected. Revoke its grants before changing mailboxes.'
+    );
 }
 
 export async function connectorReady(
@@ -2568,8 +3177,8 @@ export async function narrowReadTools(id: string, gone: string[]): Promise<void>
   await record({
     kind: 'access',
     actor: 'office',
-    title: `Read only for ${c.name} no longer reaches ${gone.join(', ')}`,
-    body: `${c.name} does not mark ${gone.length === 1 ? 'it' : 'them'} as only reading, or the name says ${gone.length === 1 ? 'it changes' : 'they change'} something. Read and write reaches ${gone.length === 1 ? 'it' : 'them'}: at Drafts for your yes each use waits for your yes, and at Acts on its own it goes.`
+    title: `${GRANT_LABEL.read} for ${c.name} no longer reaches ${gone.join(', ')}`,
+    body: `${c.name} does not mark ${gone.length === 1 ? 'it' : 'them'} as only reading, or the name says ${gone.length === 1 ? 'it changes' : 'they change'} something. ${GRANT_LABEL.act} reaches ${gone.length === 1 ? 'it' : 'them'}: at ${LEVEL_LABEL.draft} each use waits for your yes, and at ${LEVEL_LABEL.act} it goes.`
   });
 }
 
@@ -2597,6 +3206,8 @@ export async function setGrantLevel(
   const who = await staffer(staffId);
   const conn = await connector(connectorId);
   if (!who || !conn) throw new Error('No such Odd or tool');
+  if (conn.id === POSTAL_ID && level !== 'read')
+    throw new Error('Physical mail only allows Read only access.');
   if (!grantWorks(level, who.permission))
     throw new Error(`${who.name} holds ${who.permission}, so it cannot be given ${level}`);
   const [changed] = await db
@@ -2658,6 +3269,7 @@ export async function giveTask(
     title: string;
     why: string;
     steps: (string | Step)[];
+    response?: string;
     attach?: string[];
     /** Given while working on this hand-off: the owner's answer goes back to it. */
     handOffId?: number;
@@ -2667,6 +3279,8 @@ export async function giveTask(
     run?: string;
     /** The colleague whose handed-back work the lead gave this from (`VIA`). */
     via?: string;
+    /** In a chat, the owner's message (`OWNER_SAID`), which the run that picks it up reads. */
+    ownerSaid?: string;
     /** The office gives it in the Odd's name (a plan's steps, a reconnect), so it may repeat a title. */
     byOffice?: true;
   }
@@ -2685,9 +3299,11 @@ export async function giveTask(
         title: t.title,
         why: t.why,
         steps,
+        response: t.response,
         handOffId: t.handOffId,
         threadId: t.threadId,
-        via: t.via
+        via: t.via,
+        ownerSaid: t.ownerSaid
       })
       .returning();
     if (row.threadId) {
@@ -2771,49 +3387,212 @@ export async function tickKey(key: string): Promise<void> {
         .where(eq(tasks.id, t.id));
 }
 
-export async function finishTask(id: number, done: boolean, note: string | null): Promise<void> {
-  const [t] = await db
+export class TaskResponseConflict extends Error {}
+
+/**
+ * Start from a file attached to the task, or save the owner's edit to the
+ * version they opened. A task with no response yet takes its first at version 0.
+ */
+export async function saveTaskResponse(id: number, version: number | 'start', text: string) {
+  const start = version === 'start';
+  const next = start ? 0 : version + 1;
+  const [saved] = await db
     .update(tasks)
-    .set({ status: done ? 'done' : 'dropped', note: note || null, doneAt: new Date() })
-    .where(and(eq(tasks.id, id), eq(tasks.status, 'open')))
+    .set({ response: text, responseVersion: next })
+    .where(
+      and(
+        eq(tasks.id, id),
+        eq(tasks.status, 'open'),
+        start ? isNull(tasks.response) : eq(tasks.responseVersion, version)
+      )
+    )
     .returning();
-  if (!t) return;
-  const answers = t.steps
-    .filter((s) => s.answer && s.action?.kind === 'choice')
-    .map((s) => `${s.text} ${s.answer}`);
-  await record({
-    kind: 'work',
-    actor: 'owner',
-    title: `${done ? 'Done' : 'Dropped'} by ${await ownerName()}: ${t.title}`,
-    body: [t.why, ...answers].join('\n'),
-    reason: t.note,
-    taskId: t.id
-  });
-  if (!done) {
-    // No run follows a dropped task: the answer itself goes back. A tool's connect
-    // task belongs to the access ask it came from.
-    const from = t.askId ? await ask(t.askId) : undefined;
-    await answerLater(
+  if (saved) return saved;
+  const t = await task(id);
+  if (!t || t.status !== 'open') throw new TaskResponseConflict('This task is closed.');
+  // A retry after a lost reply returns the same version. Opening a response never resets it.
+  if (t.response !== null && (start || (t.responseVersion === next && t.response === text)))
+    return t;
+  throw new TaskResponseConflict(
+    'The response changed. Review the saved words before saving again.'
+  );
+}
+
+/**
+ * What an ended task starts (`OWNER_ANSWERS`), and whether a run on the task's
+ * own work picks up among it (`OWN_RUN`). `finishTask` and a failed run giving
+ * a wait back (`finishFollowUp`) both read it, so parked work hears of the same run.
+ */
+async function taskEnd(t: TaskRow, q: Db = db) {
+  // A tool's connect task belongs to the access ask it came from.
+  const from = t.askId ? await ask(t.askId, q) : undefined;
+  const effects: readonly TaskEffect[] =
+    t.status !== 'done'
+      ? OWNER_ANSWERS.task.dropped
+      : !t.staffId
+        ? OWNER_ANSWERS.task.done.noOdd
+        : from?.kind === 'access'
+          ? OWNER_ANSWERS.task.done.fromAccess
+          : OWNER_ANSWERS.task.done.other;
+  const ownThread = t.threadId ?? from?.threadId ?? null;
+  const ownRuns = effects.some(
+    (e) =>
+      typeof e === 'string' &&
+      (OWN_RUN[e] === 'always' || (OWN_RUN[e] === 'on its work' && ownThread !== null))
+  );
+  return { from, effects, ownThread, ownRuns };
+}
+
+/** The run on an ended task's own work that `wakeOnTask` tells parked work of, if one picks up. */
+async function ownRunOf(
+  end: {
+    ownThread: number | null;
+    ownRuns: boolean;
+  },
+  q: Db = db
+): Promise<{ work: string | null } | undefined> {
+  if (!end.ownRuns) return undefined;
+  const [own] = end.ownThread
+    ? await q
+        .select({ title: threads.title, hubId: threads.hubId, status: threads.status })
+        .from(threads)
+        .where(eq(threads.id, end.ownThread))
+    : [];
+  // Stopped work carries no part of its own, and a lead that left the office
+  // runs nothing, so parked work must not leave its part to either. Its lead
+  // leaving stopped the work, so a lead brought back since still reads as gone.
+  if (own && (own.status === 'stopped' || !(await staffer(own.hubId, q)))) return undefined;
+  return { work: own?.title ?? null };
+}
+
+/** The owner's words on an ended task: the response they saved when they finished it, then their note. */
+const taskAnswer = (t: TaskRow): string | null =>
+  [t.status === 'done' && t.responseVersion ? t.response : null, t.note]
+    .filter(Boolean)
+    .join('\n\n') || null;
+
+export async function finishTask(
+  id: number,
+  done: boolean,
+  note: string | null,
+  o: { inChat?: boolean; responseVersion?: number } = {}
+): Promise<boolean> {
+  const { inChat = false, responseVersion } = o;
+  const finished = await db.transaction(async (q) => {
+    const [t] = await q
+      .update(tasks)
+      .set({ status: done ? 'done' : 'dropped', note: note || null, doneAt: new Date() })
+      .where(and(eq(tasks.id, id), eq(tasks.status, 'open')))
+      .returning();
+    if (!t) return false;
+    const owner = await ownerName(q);
+    const answers = ownerAnswers(t.steps).map((a) => `${a.step} ${a.answer}`);
+    if (done && t.response !== null) {
+      if (!t.responseVersion || responseVersion !== t.responseVersion)
+        throw new TaskResponseConflict(
+          'Review and save your response before marking this task done.'
+        );
+      if (stepsToGo(t.steps))
+        throw new TaskResponseConflict('Finish the required steps before marking this task done.');
+    }
+    const words = taskAnswer(t);
+    await record(
       {
-        handOffId: t.handOffId ?? from?.handOffId ?? null,
-        threadId: t.threadId ?? from?.threadId ?? null
+        kind: 'work',
+        actor: 'owner',
+        title: `${done ? 'Done' : 'Dropped'} by ${owner}: ${t.title}`,
+        // Answers first: search_ledger shows the first 400 characters, and a long why would cut them off.
+        body: [...answers, t.why].join('\n'),
+        // Their saved response and note are their answer, or a choice they tapped when they wrote neither.
+        reason:
+          words ??
+          (ownerAnswers(t.steps)
+            .map((a) => a.answer)
+            .join('\n') ||
+            null),
+        taskId: t.id
       },
-      'failed',
-      `${await ownerName()} dropped "${t.title}"${t.note ? `: ${t.note}` : '.'}`
+      q
     );
-    return;
+    await taskEnded(
+      t,
+      {
+        ended: done ? 'done' : 'dropped',
+        owner,
+        said: `${owner} ${done ? 'finished' : 'dropped'} "${t.title}"${words ? `: ${words}` : '.'}`
+      },
+      q,
+      inChat && t.staffId
+        ? { staffId: t.staffId, card: { kind: 'task', id: t.id, title: t.title } }
+        : undefined
+    );
+    return true;
+  });
+  if (finished || !done || !responseVersion) return finished;
+  const t = await task(id);
+  return t?.status === 'done' && t.responseVersion === responseVersion;
+}
+
+/**
+ * What a task's end starts, from its row in `OWNER_ANSWERS`, whoever ended it:
+ * the owner (`finishTask`), or the office or its Odd taking it off the desk
+ * (`withdrawTask`), which ends it as a drop. `said` is the line that goes back
+ * where the task came from when no run follows.
+ */
+async function taskEnded(
+  t: TaskRow,
+  how: { ended: TaskEnded; owner: string; said: string },
+  q: Db = db,
+  chat?: InChat
+): Promise<void> {
+  const done = how.ended === 'done';
+  const end = await taskEnd(t, q);
+  const { from, effects } = end;
+  // Read before the effects: waking the parked work clears what parks it. Its
+  // lead's run on the task's own work picks up in the same moment, so each run
+  // is told the other has its part, or both do the parked work.
+  const parked = await parkedWork(t.id, q);
+  const ownRun = parked.length ? await ownRunOf(end, q) : undefined;
+  const pickedUp = parked.length ? parked.map((p) => p.title) : undefined;
+  for (const effect of effects) {
+    if (typeof effect === 'object') continue;
+    switch (effect) {
+      // No run follows a dropped task: the answer itself goes back.
+      case 'answer_back':
+        await answerLater(
+          {
+            handOffId: t.handOffId ?? from?.handOffId ?? null,
+            threadId: t.threadId ?? from?.threadId ?? null
+          },
+          done ? 'done' : 'failed',
+          [how.said, ...parked.map((p) => pickedUpLine(p.title))].join(' '),
+          q
+        );
+        break;
+      // The owner finished connecting a tool an Odd asked for: it can start the
+      // work that was waiting on it, once however many asks that one answer settled.
+      case 'carry_out':
+        if (t.staffId && from)
+          await carryOutTogether([from, ...(await answeredWith(from, q))], pickedUp, q);
+        break;
+      // Any other task an Odd gave them: the Odd picks up whatever waited on
+      // it, such as hiring from an intake the owner just filled in.
+      case 'task_done':
+        if (t.staffId)
+          await followUp(t.staffId, 'task_done', { taskId: t.id, note: t.note, pickedUp, chat }, q);
+        break;
+      // Work on another thread that waited on this task, whoever gave it.
+      case 'wake_parked':
+        await wakeOnTask(
+          { ...t, note: taskAnswer(t) },
+          { ended: how.ended, owner: how.owner, ownRun },
+          q
+        );
+        break;
+      default:
+        effect satisfies never;
+    }
   }
-  if (!t.staffId) return;
-  // The owner finished connecting a tool a staffer asked for: it can start the
-  // work that was waiting on it.
-  const a = t.askId ? await ask(t.askId) : undefined;
-  if (a?.kind === 'access') {
-    await carryOutTogether([a, ...(await answeredWith(a))]);
-    return;
-  }
-  // Any other task a staffer gave them: the staffer picks up whatever waited on
-  // it, such as hiring from an intake the owner just filled in.
-  await followUp(t.staffId, 'task_done', { taskId: t.id, note: t.note });
 }
 
 export async function tasksFrom(staffId: string): Promise<TaskRow[]> {
@@ -2827,9 +3606,15 @@ export async function tasksFrom(staffId: string): Promise<TaskRow[]> {
 
 // Reports
 
-export async function addReport(staffId: string, title: string, body: string, runId?: number) {
-  await db.insert(reports).values({ staffId, title, body });
-  await record({ kind: 'report', actor: staffId, title, body, runId });
+export async function addReport(
+  staffId: string,
+  title: string,
+  body: string,
+  runId?: number,
+  q: Db = db
+) {
+  await q.insert(reports).values({ staffId, title, body });
+  await record({ kind: 'report', actor: staffId, title, body, runId }, q);
 }
 
 export async function readReport(id: number): Promise<void> {
@@ -2839,6 +3624,9 @@ export async function readReport(id: number): Promise<void> {
 // The desk: everything waiting on the owner
 
 export type Desk = {
+  projectWork: Awaited<ReturnType<typeof proposedProjectWork>>;
+  /** The latest answers, kept apart from the items waiting on the owner. */
+  recent: Pick<LedgerRow, 'id' | 'title' | 'reason'>[];
   asks: AskRow[];
   tasks: TaskRow[];
   reports: ReportRow[];
@@ -2849,32 +3637,81 @@ export type Desk = {
    * (`shownFolder`), which only the server can work out.
    */
   folders: Record<number, string>;
+  /** The jobs that skipped a run while the office was off: the While you were away card. */
+  away: AwayJob[];
 };
 
 export async function desk(): Promise<Desk> {
-  const [a, t, r, f] = await Promise.all([
-    db.select().from(asks).where(eq(asks.status, 'open')).orderBy(asc(asks.createdAt)),
-    db.select().from(tasks).where(eq(tasks.status, 'open')).orderBy(asc(tasks.createdAt)),
-    db.select().from(reports).where(isNull(reports.readAt)).orderBy(asc(reports.createdAt)),
+  const later = alias(ledger, 'later');
+  const [a, t, r, f, recent, projectWork] = await Promise.all([
+    db
+      .select()
+      .from(asks)
+      .where(and(eq(asks.status, 'open'), ofWorkingOdd(asks.staffId)))
+      .orderBy(asc(asks.createdAt)),
+    db
+      .select()
+      .from(tasks)
+      .where(and(eq(tasks.status, 'open'), or(isNull(tasks.staffId), ofWorkingOdd(tasks.staffId))))
+      .orderBy(asc(tasks.createdAt)),
+    // A report from an Odd that left waits unseen, and shows again if it comes back.
+    db
+      .select()
+      .from(reports)
+      .where(and(isNull(reports.readAt), ofWorkingOdd(reports.staffId)))
+      .orderBy(asc(reports.createdAt)),
     db
       .select({ attachments })
       .from(attachments)
       .leftJoin(asks, eq(attachments.askId, asks.id))
       .leftJoin(tasks, eq(attachments.taskId, tasks.id))
       .where(or(eq(asks.status, 'open'), eq(tasks.status, 'open')))
-      .orderBy(asc(attachments.id))
+      .orderBy(asc(attachments.id)),
+    // One line per decision. An answer to an ask is written last, after what
+    // its yes set in the same transaction (a goal set, an Odd serving it), so
+    // a line with a newer one on the same ask is part of that answer.
+    db
+      .select({ id: ledger.id, title: ledger.title, reason: ledger.reason })
+      .from(ledger)
+      .where(
+        and(
+          eq(ledger.actor, 'owner'),
+          or(eq(ledger.kind, 'decision'), isNotNull(ledger.taskId)),
+          not(
+            exists(
+              db
+                .select({ id: later.id })
+                .from(later)
+                .where(
+                  and(
+                    eq(later.askId, ledger.askId),
+                    gt(later.id, ledger.id),
+                    eq(later.actor, 'owner'),
+                    eq(later.kind, 'decision')
+                  )
+                )
+            )
+          )
+        )
+      )
+      .orderBy(desc(ledger.createdAt), desc(ledger.id))
+      .limit(5),
+    proposedProjectWork()
   ]);
   // A twin waits behind the first ask it repeats, and the owner's answer to
   // that one answers it too (`asksNoMore`, `decide`).
   const shown = a.filter((x) => !a.some((first) => first.id < x.id && asksNoMore(first, x)));
   return {
+    projectWork,
+    recent,
     asks: shown,
     tasks: t,
     reports: r,
     attachments: f.map((x) => x.attachments),
     folders: Object.fromEntries(
       shown.flatMap((x) => (x.folder ? [[x.id, shownFolder(x.folder.path)]] : []))
-    )
+    ),
+    away: await awayJobs()
   };
 }
 
@@ -2916,14 +3753,21 @@ export async function stillOnDesk(
 
 /** Something a staffer put on the owner's desk, as its chat shows it. */
 export type Delivery = {
-  kind: 'ask' | 'task' | 'report';
+  kind: DeskItem;
   id: number;
   title: string;
   at: Date;
   /** open, approved, denied, revise, done, dropped, or for a report new or read. */
   status: string;
-  /** When the owner decided it, for an ask. */
+  /** A saved task response opens from its chat card, including after completion. */
+  responseVersion?: number;
+  folder?: FolderRequest;
+  switches?: OwnSwitch[];
+  why?: string;
+  /** When the owner decided an ask or finished or dropped a task. */
   decidedAt?: Date | null;
+  /** The owner's words on a decided ask or finished task. */
+  note?: string | null;
 };
 
 /** What one staffer put on the owner's desk, newest last, with where each stands. */
@@ -2935,14 +3779,26 @@ export async function deliveries(staffId: string, limit = 200): Promise<Delivery
         title: asks.title,
         at: asks.createdAt,
         status: asks.status,
-        decidedAt: asks.decidedAt
+        decidedAt: asks.decidedAt,
+        note: asks.reason,
+        folder: asks.folder,
+        switches: asks.switches,
+        why: asks.why
       })
       .from(asks)
       .where(eq(asks.staffId, staffId))
       .orderBy(desc(asks.createdAt))
       .limit(limit),
     db
-      .select({ id: tasks.id, title: tasks.title, at: tasks.createdAt, status: tasks.status })
+      .select({
+        id: tasks.id,
+        title: tasks.title,
+        at: tasks.createdAt,
+        status: tasks.status,
+        note: tasks.note,
+        responseVersion: tasks.responseVersion,
+        decidedAt: tasks.doneAt
+      })
       .from(tasks)
       .where(eq(tasks.staffId, staffId))
       .orderBy(desc(tasks.createdAt))
@@ -2960,7 +3816,19 @@ export async function deliveries(staffId: string, limit = 200): Promise<Delivery
       .limit(limit)
   ]);
   return [
-    ...a.map((x) => ({ kind: 'ask' as const, ...x })),
+    ...a.map(({ folder, switches, why, ...x }) => ({
+      kind: 'ask' as const,
+      ...x,
+      ...(folder && {
+        folder: {
+          ...folder,
+          path: shownFolder(folder.path),
+          ...(folder.given && { given: { ...folder.given, path: shownFolder(folder.given.path) } })
+        },
+        why
+      }),
+      ...(switches && { switches, why })
+    })),
     ...t.map((x) => ({ kind: 'task' as const, ...x })),
     ...r.map(({ readAt, ...x }) => ({
       kind: 'report' as const,
@@ -2998,30 +3866,93 @@ export async function jobsFor(staffId: string): Promise<(JobRow & { lastRun?: Ru
   );
 }
 
-export async function addJob(j: {
-  staffId: string;
-  name: string;
-  instructions: string;
-  schedule: Schedule;
-  report?: boolean;
-}): Promise<JobRow> {
-  const [row] = await db
+export async function addJob(
+  j: {
+    staffId: string;
+    name: string;
+    instructions: string;
+    schedule: Schedule;
+    report?: boolean;
+    missed?: MissedRuns;
+    files?: JobFiles;
+  },
+  q: Db = db
+): Promise<JobRow> {
+  if (j.files) refuseFileCycle([...(await fileJobs(q)), { ...j, id: 0, files: j.files }]);
+  const [row] = await q
     .insert(jobs)
     .values({ ...j, nextRunAt: nextRun(j.schedule, new Date()) })
     .returning();
   return row;
 }
 
+/** A job as the file check sees it: what it reads and what it writes. */
+export type FileJob = Pick<JobRow, 'id' | 'name' | 'staffId' | 'files'>;
+
+/** Every job, by what it reads and writes, for `refuseFileCycle`. */
+export function fileJobs(q: Db = db): Promise<FileJob[]> {
+  return q
+    .select({ id: jobs.id, name: jobs.name, staffId: jobs.staffId, files: jobs.files })
+    .from(jobs);
+}
+
+/**
+ * A ring of jobs on one thread where each reads the next one's file, as the
+ * owner reads it, or nothing. A reader waits for its writer's period, so in
+ * a ring every job would wait for another and none would run.
+ */
+export function fileCycle(list: FileJob[]): string | undefined {
+  const writers = new Map(
+    list.flatMap((j) => (j.files ? [[`${j.files.thread}:${j.staffId}/${j.files.output}`, j]] : []))
+  );
+  const writerOf = (j: FileJob) =>
+    j.files?.input ? writers.get(`${j.files.thread}:${j.files.input}`) : undefined;
+  for (const first of list) {
+    const chain: FileJob[] = [];
+    let at: FileJob | undefined = first;
+    while (at?.files?.input && !chain.includes(at)) {
+      chain.push(at);
+      at = writerOf(at);
+    }
+    if (!at || !chain.includes(at)) continue;
+    const ring = chain.slice(chain.indexOf(at));
+    const reads = ring.map(
+      (j) => `"${j.name}" reads ${j.files!.input} from "${writerOf(j)!.name}"`
+    );
+    return `These jobs would each wait for another's file, so none would run: ${reads.join(', ')}. Change one job's files.`;
+  }
+}
+
+/** Refuse a change to jobs' files that would leave them in a ring (`fileCycle`). */
+export function refuseFileCycle(after: FileJob[]): void {
+  const ring = fileCycle(after);
+  if (ring) throw new Error(ring);
+}
+
 export async function updateJob(
   id: number,
-  patch: Partial<Pick<JobRow, 'name' | 'instructions' | 'schedule' | 'enabled' | 'report'>>
+  patch: Partial<
+    Pick<JobRow, 'name' | 'instructions' | 'schedule' | 'enabled' | 'report' | 'missed' | 'files'>
+  >,
+  expectedFiles?: JobFiles
 ): Promise<void> {
-  const [row] = await db.update(jobs).set(patch).where(eq(jobs.id, id)).returning();
-  if (row && (patch.schedule || patch.enabled))
-    await db
-      .update(jobs)
-      .set({ nextRunAt: nextRun(row.schedule, new Date()) })
-      .where(eq(jobs.id, id));
+  if (patch.files)
+    refuseFileCycle(
+      (await fileJobs()).map((j) =>
+        j.id === id ? { ...j, name: patch.name ?? j.name, files: patch.files! } : j
+      )
+    );
+  const schedule = patch.schedule ?? (patch.enabled ? (await job(id))?.schedule : undefined);
+  const rows = await db
+    .update(jobs)
+    .set({
+      ...patch,
+      changedAt: new Date(),
+      ...(schedule ? { nextRunAt: nextRun(schedule, new Date()) } : {})
+    })
+    .where(and(eq(jobs.id, id), expectedFiles ? eq(jobs.files, expectedFiles) : undefined))
+    .returning({ id: jobs.id });
+  if (!rows.length) throw new Error('This job changed. Reopen it to see its files.');
 }
 
 /** A staffer changes one of its own jobs, carrying out a change the owner approved. */
@@ -3045,32 +3976,41 @@ async function recordGoAhead(who: StaffRow, go: GoAhead, what: string): Promise<
 export async function editOwnJob(
   staffId: string,
   name: string,
-  patch: Partial<Pick<JobRow, 'instructions' | 'schedule' | 'report'>>,
+  patch: Partial<
+    Pick<JobRow, 'name' | 'instructions' | 'schedule' | 'report' | 'missed' | 'files'>
+  >,
   go: GoAhead
 ): Promise<JobRow | undefined> {
   const who = await staffer(staffId);
-  const [j] = await db
+  const [j, other] = await db
     .select()
     .from(jobs)
-    .where(and(eq(jobs.staffId, staffId), eq(jobs.name, name)));
+    .where(and(eq(jobs.staffId, staffId), eq(jobs.name, name)))
+    .limit(2);
+  if (other) throw new Error('Two jobs have that name. Rename one on the Odd’s card first.');
   if (!who || !j) return undefined;
+  if (patch.files && !(await isOnThread(staffId, patch.files.thread)))
+    throw new Error('This Odd has no assignment on that work.');
   await updateJob(j.id, patch);
   await recordGoAhead(who, go, `change its job "${name}"`);
   await record({
     kind: 'work',
     actor: staffId,
-    title: `Changed its job: ${name}`,
+    title: `Changed its job: ${patch.name ?? name}`,
     body: [
+      patch.name && `Former name: ${name}`,
+      patch.files && `Scheduled files: ${JSON.stringify(patch.files)}`,
       patch.instructions && `Steps:\n${patch.instructions}`,
       patch.schedule && `Schedule: ${JSON.stringify(patch.schedule)}`,
       patch.report !== undefined &&
-        `Reports to ${await ownerName()}: ${patch.report ? 'yes' : 'no'}`
+        `Reports to ${await ownerName()}: ${patch.report ? 'yes' : 'no'}`,
+      patch.missed && `Missed runs: ${MISSED_WORDS[patch.missed]}`
     ]
       .filter(Boolean)
       .join('\n\n'),
     askId: 'askId' in go ? go.askId : undefined
   });
-  return j;
+  return job(j.id);
 }
 
 /**
@@ -3111,7 +4051,10 @@ export async function deleteJob(id: number): Promise<void> {
 }
 
 export async function enabledJobs(): Promise<JobRow[]> {
-  return db.select().from(jobs).where(eq(jobs.enabled, true));
+  return db
+    .select()
+    .from(jobs)
+    .where(and(eq(jobs.enabled, true), ofWorkingOdd(jobs.staffId)));
 }
 
 export async function job(id: number): Promise<JobRow | undefined> {
@@ -3123,28 +4066,257 @@ export async function setNextRun(id: number, at: Date): Promise<void> {
   await db.update(jobs).set({ nextRunAt: at }).where(eq(jobs.id, id));
 }
 
-export async function startRun(j: JobRow, trigger: RunTrigger): Promise<RunRow> {
-  const [row] = await db
+/** Claim this due time once, even if two looks by the clock overlapped. The run is for that time. */
+export async function claimScheduledRun(j: JobRow, now: Date): Promise<RunRow | undefined> {
+  const dueAt = j.nextRunAt;
+  if (!dueAt || dueAt > now) return undefined;
+  return db.transaction(async (tx) => {
+    const [due] = await tx
+      .update(jobs)
+      .set({ nextRunAt: nextRun(j.schedule, now) })
+      .where(
+        and(
+          eq(jobs.id, j.id),
+          eq(jobs.enabled, true),
+          eq(jobs.nextRunAt, dueAt),
+          eq(sql`date_trunc('milliseconds', ${jobs.changedAt})`, j.changedAt.toISOString())
+        )
+      )
+      .returning({ id: jobs.id });
+    if (due) return startRun(j, 'schedule', [dueAt], tx);
+  });
+}
+
+/**
+ * Where a reader job's input stands for the period `at`. The reader takes the
+ * file its writer's last run for a period at or before `at` wrote, by the
+ * run, never by whether the file changed: the same bytes as last period are
+ * as good as new ones. The answer is one of:
+ * - `run` and `sha256`: that run wrote the file, and the reader gets those bytes.
+ * - `wait`: the writer still owes that period (running, due, or caught up later).
+ * - `skip`: the writer skipped that period, or has not written a first one.
+ *   `away` puts the reader's skip on the desk's While you were away card.
+ * - `problem`: the writer ran for that period and left no checked file, or
+ *   the job's files are not set up. The reader's run fails with it.
+ * `busy` says the writer runs now, before its run is in the ledger.
+ * `asked` are the writer's catch_up asks: an open one's times are owed until
+ * the owner answers, and a refused one's were skipped.
+ */
+export type ScheduledInput =
+  | { run: number; sha256: string }
+  | { wait: string }
+  | { skip: string; away: boolean }
+  | { problem: string };
+
+export function scheduledInput(
+  j: JobRow,
+  jobs: JobRow[],
+  writerRuns: RunRow[],
+  at: Date,
+  busy: (jobId: number) => boolean = () => false,
+  asked: CatchUpAsk[] = []
+): ScheduledInput | undefined {
+  if (!j.files?.input) return undefined;
+  const input = j.files.input;
+  const writers = jobs.filter(
+    (w) => w.files?.thread === j.files?.thread && `${w.staffId}/${w.files?.output}` === input
+  );
+  if (writers.length !== 1 || writers[0].id === j.id)
+    return { problem: `Assign one other scheduled job to write ${input}.` };
+  const w = writers[0];
+  if (!w.enabled)
+    return { problem: `"${w.name}" is paused, so nothing writes ${input}. Turn it back on.` };
+  const ran = writerRuns.filter(
+    (r) => r.jobId === w.id && r.startedAt >= w.changedAt && r.checkedFiles?.periods.length
+  );
+  if (
+    busy(w.id) ||
+    ran.some(
+      (r) => r.status === 'running' && r.checkedFiles!.periods.some((p) => new Date(p) <= at)
+    ) ||
+    (w.nextRunAt && w.nextRunAt <= at) ||
+    w.owed?.some((t) => new Date(t) <= at)
+  )
+    return { wait: `Waiting for "${w.name}" to write ${input} for this period.` };
+  // The writer's last run for a period at or before `at` wrote the bytes on
+  // disk, even when an earlier run was for a newer period, as a catch-up of
+  // older periods after a normal cycle is. `newest` is the newest period at
+  // or before `at` that any run was for: the writer covered up to there.
+  let best: RunRow | undefined;
+  let newest: Date | undefined;
+  for (const r of ran)
+    for (const p of r.checkedFiles!.periods) {
+      const period = new Date(p);
+      if (period > at) continue;
+      if (!best || r.id > best.id) best = r;
+      if (!newest || period > newest) newest = period;
+    }
+  // A missed time the writer's catch_up ask names, newer than that period.
+  const askedFor = (open: boolean) =>
+    asked.some(
+      (a) =>
+        a.open === open &&
+        a.times.some((t) => new Date(t) <= at && (!newest || new Date(t) > newest))
+    );
+  if (askedFor(true))
+    return {
+      wait: `Waiting for your answer on filling "${w.name}"'s missed periods, then for its ${input}.`
+    };
+  if (askedFor(false))
+    return {
+      skip: `You said no to filling "${w.name}"'s missed periods, so "${j.name}" skips this period too.`,
+      away: true
+    };
+  const skipped = w.skippedAt && w.skippedAt <= at && (!newest || w.skippedAt > newest);
+  if (skipped)
+    return {
+      skip: `"${w.name}" skipped its run for ${runTime(w.skippedAt!)}, so "${j.name}" skips this period too.`,
+      away: true
+    };
+  if (!best || !newest)
+    return { skip: `Waiting for "${w.name}" to write ${input} for the first time.`, away: false };
+  // A time the writer's schedule had after that period, and before `at`, that
+  // it neither ran nor owes: it skipped it, or its missed periods wait for the
+  // owner's yes. A schedule in minutes counts from when each run started, so
+  // give it the clock's on-time margin.
+  const after = nextRun(w.schedule, newest).getTime();
+  if (after + (w.schedule.every === 'minutes' ? ON_TIME_MS : 0) <= at.getTime())
+    return {
+      skip: `"${w.name}" did not run for ${runTime(new Date(after))}, so "${j.name}" skips this period too.`,
+      away: true
+    };
+  const sha256 = best.status === 'done' ? best.checkedFiles!.sha256 : undefined;
+  if (!sha256)
+    return {
+      problem: `"${w.name}" ran for ${runTime(new Date(best.checkedFiles!.periods.filter((p) => new Date(p) <= at).at(-1)!))} and left no checked ${input}. Check its last result before "${j.name}" runs again.`
+    };
+  return { run: best.id, sha256 };
+}
+
+/** The newest runs of a file job since it last changed, newest first: what each was for and left. */
+export function fileRuns(j: JobRow, limit = 50): Promise<RunRow[]> {
+  return db
+    .select()
+    .from(runs)
+    .where(
+      and(eq(runs.jobId, j.id), isNotNull(runs.checkedFiles), gte(runs.startedAt, j.changedAt))
+    )
+    .orderBy(desc(runs.id))
+    .limit(limit);
+}
+
+/** The job that writes this reader's input, among the jobs that are on. */
+export function writerOf(j: JobRow, on: JobRow[]): JobRow | undefined {
+  const input = j.files?.input;
+  if (!input) return undefined;
+  return on.find(
+    (w) =>
+      w.id !== j.id &&
+      w.files?.thread === j.files?.thread &&
+      `${w.staffId}/${w.files?.output}` === input
+  );
+}
+
+/** Where a reader's input stands for the period `at` (`scheduledInput`), from the ledger. */
+export async function inputFor(
+  j: JobRow,
+  at: Date,
+  busy?: (jobId: number) => boolean
+): Promise<ScheduledInput | undefined> {
+  if (!j.files?.input) return undefined;
+  const on = await enabledJobs();
+  const w = writerOf(j, on);
+  return scheduledInput(
+    j,
+    [j, ...on.filter((o) => o.id !== j.id)],
+    w ? await fileRuns(w) : [],
+    at,
+    busy,
+    w ? await catchUpAsks(w.id) : []
+  );
+}
+
+export function latestScheduledRuns(ids: number[], checked = false): Promise<RunRow[]> {
+  return db
+    .selectDistinctOn([runs.jobId])
+    .from(runs)
+    .where(
+      and(
+        inArray(runs.jobId, ids),
+        eq(runs.trigger, 'schedule'),
+        checked ? sql`${runs.checkedFiles}->>'sha256' is not null` : undefined
+      )
+    )
+    .orderBy(runs.jobId, desc(runs.id));
+}
+
+/**
+ * A job's run starts, for the scheduled `times` (Run now's is now). A file
+ * job's run keeps them in `checked_files` from the start, so a run that never
+ * finishes still shows which period it left without a file.
+ */
+export async function startRun(
+  j: JobRow,
+  trigger: RunTrigger,
+  times: Date[] = [new Date()],
+  q: Db = db
+): Promise<RunRow> {
+  const [row] = await q
     .insert(runs)
-    .values({ jobId: j.id, staffId: j.staffId, trigger })
+    .values({
+      jobId: j.id,
+      staffId: j.staffId,
+      trigger,
+      checkedFiles: j.files
+        ? { periods: times.map((t) => t.toISOString()), output: `${j.staffId}/${j.files.output}` }
+        : null
+    })
     .returning();
   return row;
 }
 
-export async function finishRun(r: RunRow, j: JobRow, ok: boolean, summary: string): Promise<void> {
-  await db
-    .update(runs)
-    .set({ status: ok ? 'done' : 'failed', summary, finishedAt: new Date() })
-    .where(eq(runs.id, r.id));
-  if (ok && j.report) await addReport(j.staffId, j.name, summary, r.id);
-  else
-    await record({
-      kind: 'work',
-      actor: j.staffId,
-      title: `${ok ? 'Ran' : 'Failed'}: ${j.name}${r.trigger === 'manual' ? ` (started by ${await ownerName()})` : ''}`,
-      body: summary,
-      runId: r.id
-    });
+export async function finishRun(
+  r: RunRow,
+  j: JobRow,
+  ok: boolean,
+  summary: string,
+  checked?: Omit<CheckedFiles, 'periods'>
+): Promise<void> {
+  // The periods stay as the run started; the check adds what it wrote.
+  const checkedFiles = r.checkedFiles && checked ? { ...r.checkedFiles, ...checked } : undefined;
+  await db.transaction(async (tx) => {
+    const [finished] = await tx
+      .update(runs)
+      .set({ status: ok ? 'done' : 'failed', summary, checkedFiles, finishedAt: new Date() })
+      .where(and(eq(runs.id, r.id), eq(runs.status, 'running')))
+      .returning({ id: runs.id });
+    if (!finished) return;
+    // A repeated block stays in the run history. Put the repair on the desk once.
+    if (j.files && !ok && r.trigger === 'schedule') {
+      const [prior] = await tx
+        .select()
+        .from(runs)
+        .where(and(eq(runs.jobId, j.id), eq(runs.trigger, 'schedule'), lt(runs.id, r.id)))
+        .orderBy(desc(runs.id))
+        .limit(1);
+      if (prior?.status !== 'failed' || prior.summary !== summary) {
+        await addReport(j.staffId, `Blocked: ${j.name}`, summary, r.id, tx);
+        return;
+      }
+    }
+    if (ok && j.report) await addReport(j.staffId, j.name, summary, r.id, tx);
+    else
+      await record(
+        {
+          kind: 'work',
+          actor: j.staffId,
+          title: `${ok ? 'Ran' : 'Failed'}: ${j.name}${r.trigger === 'manual' ? ` (started by ${await ownerName(tx)})` : ''}`,
+          body: summary,
+          runId: r.id
+        },
+        tx
+      );
+  });
 }
 
 /** Runs that a restart left marked running. */
@@ -3183,6 +4355,7 @@ export async function officeActivity(since: Date) {
         status: runs.status,
         trigger: runs.trigger,
         summary: runs.summary,
+        checkedFiles: runs.checkedFiles,
         at: runs.startedAt
       })
       .from(runs)
@@ -3213,6 +4386,23 @@ export async function officeActivity(since: Date) {
       .where(gte(followUps.createdAt, since))
   ]);
   const allJobs = await db.select().from(jobs).where(eq(jobs.enabled, true));
+  const fileJobs = allJobs.filter((j) => j.files).map((j) => j.id);
+  const [latest, verified] = fileJobs.length
+    ? await Promise.all([latestScheduledRuns(fileJobs), latestScheduledRuns(fileJobs, true)])
+    : [[], []];
+  const now = new Date();
+  // Each reader's input for a run now, by the period its writer last ran for.
+  const inputs = new Map(
+    await Promise.all(
+      allJobs
+        .filter((j) => j.files?.input)
+        .map(async (j) => {
+          const w = writerOf(j, allJobs);
+          const [ran, asked] = w ? await Promise.all([fileRuns(w), catchUpAsks(w.id)]) : [[], []];
+          return [j.id, scheduledInput(j, allJobs, ran, now, undefined, asked)] as const;
+        })
+    )
+  );
   return {
     since: pt(since),
     now: pt(new Date()),
@@ -3222,7 +4412,32 @@ export async function officeActivity(since: Date) {
       role: p.role,
       jobs: allJobs
         .filter((j) => j.staffId === p.id)
-        .map((j) => ({ name: j.name, schedule: j.schedule })),
+        .map((j) => {
+          const base = { name: j.name, schedule: j.schedule, next: pt(j.nextRunAt) };
+          if (!j.files) return { ...base, state: 'configured', lastVerified: null };
+          const last = latest.find((r) => r.jobId === j.id && r.startedAt >= j.changedAt);
+          const checked = verified.find((r) => r.jobId === j.id && r.startedAt >= j.changedAt);
+          const source = inputs.get(j.id);
+          const waiting =
+            source && ('wait' in source ? source.wait : 'skip' in source && source.skip);
+          const repair =
+            last?.status === 'failed'
+              ? last.summary
+              : source && 'problem' in source
+                ? source.problem
+                : undefined;
+          const current =
+            !!last?.checkedFiles?.sha256 &&
+            j.nextRunAt &&
+            j.nextRunAt > now &&
+            (!source || ('run' in source && source.run === last.checkedFiles.inputRun));
+          return {
+            ...base,
+            state: repair ? 'blocked' : current ? 'verified files' : 'configured',
+            ...(repair ? { repair } : waiting ? { waiting } : {}),
+            lastVerified: checked ? { at: pt(checked.finishedAt), ...checked.checkedFiles } : null
+          };
+        }),
       runs: ranJobs
         .filter((r) => r.staff === p.id)
         .map((r) => ({
@@ -3231,6 +4446,7 @@ export async function officeActivity(since: Date) {
           // 'manual' means the owner pressed Run now; only 'schedule' runs follow the timer.
           trigger: r.trigger,
           at: pt(r.at),
+          checkedFiles: r.checkedFiles,
           summary: r.summary?.slice(0, 600)
         }))
     })),
@@ -3258,7 +4474,15 @@ export async function officeActivity(since: Date) {
     })),
     tasksForOwner: {
       open: openTasks.map((t) => ({ from: t.staffId, title: t.title, since: pt(t.createdAt) })),
-      done: doneTasks.map((t) => ({ from: t.staffId, title: t.title, status: t.status }))
+      done: doneTasks.map((t) => {
+        const said = taskSaid(t);
+        return {
+          from: t.staffId,
+          title: t.title,
+          status: t.status,
+          ...(said ? { answer: said } : {})
+        };
+      })
     }
   };
 }
@@ -3308,8 +4532,8 @@ export async function setPlanLimits(w: Partial<PlanWindows>): Promise<void> {
 }
 
 /** What the staff call the owner. "the owner" until the install sets a name. */
-export async function ownerName(): Promise<string> {
-  const [row] = await db.select().from(owner).where(eq(owner.id, 'owner'));
+export async function ownerName(q: Db = db): Promise<string> {
+  const [row] = await q.select().from(owner).where(eq(owner.id, 'owner'));
   return row?.name.trim() || 'the owner';
 }
 
@@ -3430,7 +4654,13 @@ export async function waitingPokes(staffId?: string): Promise<PokeRow[]> {
   return db
     .select()
     .from(pokes)
-    .where(and(eq(pokes.status, 'waiting'), staffId ? eq(pokes.staffId, staffId) : undefined))
+    .where(
+      and(
+        eq(pokes.status, 'waiting'),
+        staffId ? eq(pokes.staffId, staffId) : undefined,
+        ofWorkingOdd(pokes.staffId)
+      )
+    )
     .orderBy(asc(pokes.at));
 }
 

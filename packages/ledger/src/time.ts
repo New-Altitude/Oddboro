@@ -2,9 +2,29 @@
 // OFFICE_TIME_ZONE. A job's schedule is written in it, and this file turns a
 // schedule into the next real instant it should run. The page gets the zone
 // from the server and calls setZone before it shows a time.
-import type { Schedule, Weekday } from './schema.ts';
+import type { MissedRuns, Schedule, Weekday } from './schema.ts';
 
 export const WEEKDAYS: Weekday[] = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+/**
+ * How often and when a job may run. The owner's limits and an Odd's differ on
+ * purpose: the owner sets a job's schedule on the page, and an Odd sets
+ * its own (`edit_my_job`). An Odd's minimum is higher than the owner's and
+ * it has no maximum; its time takes any two digits each side, while the
+ * owner's must be on the clock.
+ */
+export const SCHEDULE_RULE = {
+  ownerMinMinutes: 5,
+  ownerMaxMinutes: 1440,
+  ownerAt: /^([01]\d|2[0-3]):[0-5]\d$/,
+  oddMinMinutes: 15,
+  oddAt: /^\d\d:\d\d$/
+} as const;
+/** What a job does with runs it missed while the office was off (`jobs.missed`), as the owner reads it. */
+export const MISSED_WORDS: Record<MissedRuns, string> = {
+  latest: 'Only the latest run matters',
+  record: 'Fill every missed period'
+};
 const DAY_NAMES: Record<Weekday, string> = {
   Mon: 'Mondays',
   Tue: 'Tuesdays',
@@ -109,7 +129,8 @@ export function instant(y: number, m: number, d: number, h: number, min: number)
 
 /** The first time after `from` that the schedule says to run. */
 export function nextRun(s: Schedule, from: Date): Date {
-  if (s.every === 'minutes') return new Date(from.getTime() + Math.max(5, s.n) * 60_000);
+  if (s.every === 'minutes')
+    return new Date(from.getTime() + Math.max(SCHEDULE_RULE.ownerMinMinutes, s.n) * 60_000);
   const [h, min] = s.at.split(':').map(Number);
   const today = wallClock(from);
   for (let i = 0; i < 8; i++) {
@@ -122,6 +143,34 @@ export function nextRun(s: Schedule, from: Date): Date {
     return t;
   }
   throw new Error(`No next run for ${JSON.stringify(s)}`);
+}
+
+/**
+ * Every time the schedule says to run from `first` up to `now`, oldest first:
+ * `first` (a job's next run), then each `nextRun` after it. Stepping through
+ * `nextRun` itself means any schedule it knows lists right.
+ */
+export function runsBetween(s: Schedule, first: Date, now: Date): Date[] {
+  const times: Date[] = [];
+  for (let t = first; t <= now; t = nextRun(s, t)) times.push(t);
+  return times;
+}
+
+/** How long one period of the schedule is at a run time: from it to the run after it. */
+export const periodAt = (s: Schedule, t: Date): number => nextRun(s, t).getTime() - t.getTime();
+
+/** "Wed, Nov 11, 2026, 9:00 AM EST": a run's time in a brief, in the office's zone. */
+export function runTime(t: Date): string {
+  return t.toLocaleString('en-US', {
+    timeZone: zone(),
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short'
+  });
 }
 
 /** "Every 30 minutes", "Daily at 7:00 AM", "Weekdays at 9:30 AM", "Fridays at 4:00 PM". */

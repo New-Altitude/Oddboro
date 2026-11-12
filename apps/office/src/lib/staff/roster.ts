@@ -2,7 +2,7 @@
 // doing. The staff themselves live in Postgres; hiring adds a row there.
 // The page loads this file for ACTIVITY_LABEL, so it takes only types from
 // the ledger; the server builds the profile (`toProfile` in `lib/server/profile.ts`).
-import type { OwnTools } from '@oddboro/ledger';
+import type { OwnTools, PersonaLink } from '@oddboro/ledger';
 import type { Level } from '@oddboro/ledger/access';
 import type { Agent, Effort, GrantedFolder } from '@oddboro/ledger/agents';
 import type { LookSpec } from '@oddboro/sprites/look';
@@ -10,6 +10,8 @@ import type { LookSpec } from '@oddboro/sprites/look';
 export type Activity =
   'work' | 'intake' | 'read' | 'wait' | 'play' | 'rest' | 'eat' | 'exercise' | 'talk' | 'home';
 
+/** The most characters an Odd's name, role and remit take, however it joins: hired or added from New Altitude. */
+export const LIMITS = { name: 40, role: 60, remit: 200 } as const;
 export type StaffProfile = {
   id: string;
   name: string;
@@ -32,6 +34,8 @@ export type StaffProfile = {
   effort?: Effort;
   /** The office tools the owner granted, beyond the ones every staffer has. */
   tools: string[];
+  /** The Office Manager, whom the office always keeps: its card offers no Remove. */
+  manager?: true;
   /** The owner's Run commands switch, as stored; `reach.commandsHow` says whether its tool follows it. */
   commands: boolean;
   /** The owner's Browse the web switch, as stored. */
@@ -42,11 +46,12 @@ export type StaffProfile = {
    * Folders outside the office the owner gave it, as stored, so one gone from
    * the disk can still be taken back, each with its home folder written `~`.
    */
-  folders: (GrantedFolder & { shown: string })[];
+  /** `touchesStore`: in or holding a secret store, so no run gets it (`touchesSecretStore`). */
+  folders: (GrantedFolder & { shown: string; touchesStore: boolean })[];
   /**
    * What its runs get now. The stored switches and folders above are the
    * owner's choice; this is what its tool makes of them, less folders gone
-   * from the disk and a network this office holds back.
+   * from the disk or touching a secret store, and a network this office holds back.
    */
   reach: OwnTools & { held: boolean };
   /** One sentence on what this staffer is for, shown on the card. */
@@ -57,6 +62,8 @@ export type StaffProfile = {
   guesses: number;
   /** A generated look: where its frames and portrait load from. Absent for hand-drawn art. */
   look?: { spec: LookSpec; sheet: string; portrait: string; version: string };
+  /** Set for an Odd added from a New Altitude persona's package. */
+  persona?: PersonaLink;
 };
 
 /** A short stamp that changes whenever the look or portrait does. */

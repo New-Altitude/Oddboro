@@ -2,7 +2,16 @@
   import type { AskRow, Desk, LedgerRow, ReportRow, Step, TaskRow } from '@oddboro/ledger';
   import Pixel from './Pixel.svelte';
   import Markdown from './Markdown.svelte';
+  import TaskResponse from './TaskResponse.svelte';
+  import {
+    current,
+    drafts,
+    finishWithResponse,
+    writing,
+    staleDraft
+  } from './task-response.svelte.ts';
   import Attachments from './Attachments.svelte';
+  import PostalMailbox from './PostalMailbox.svelte';
   import AwsSignIn from './AwsSignIn.svelte';
   import AwsSecretPick from './AwsSecretPick.svelte';
   import SelectToChat from './SelectToChat.svelte';
@@ -13,16 +22,17 @@
   import { call } from './api.ts';
   import { AWS_GUIDES, siteLink } from '../site.ts';
   import { ago, when } from './format.ts';
-  import { openFile, wins } from './windows.svelte.ts';
+  import { openFile, openProject, wins } from './windows.svelte.ts';
   import { chatAbout, replyAbout, showInChat } from './chat-about.svelte.ts';
   import { OFFICE_TOOLS } from '@oddboro/ledger/tools';
   import { describe } from '@oddboro/ledger/time';
   import { tickable, yesOrNo } from '@oddboro/ledger/tools';
+  import type { DeskItem } from '@oddboro/ledger/desk-answers';
   import { untrack } from 'svelte';
-  import { goalWhen } from '@oddboro/ledger/goals';
+  import GoalProposal from './GoalProposal.svelte';
   import { LEVEL_LABEL, type FolderAccess } from '@oddboro/ledger/access';
   import type { StaffProfile } from '../staff/roster.ts';
-  import { stepText, stepsToGo } from './task-steps.ts';
+  import { chatAnswer, stepText, stepsToGo } from './task-steps.ts';
 
   type Props = {
     desk: Desk;
@@ -38,10 +48,9 @@
   };
   let { desk, staff, focus, onhire, onplan, onstaff }: Props = $props();
 
-  type Item =
-    | { key: string; kind: 'ask'; at: string; row: AskRow }
-    | { key: string; kind: 'task'; at: string; row: TaskRow }
-    | { key: string; kind: 'report'; at: string; row: ReportRow };
+  /** The row each kind of desk item shows. */
+  type DeskRow = { ask: AskRow; task: TaskRow; report: ReportRow };
+  type Item = { [K in DeskItem]: { key: string; kind: K; at: string; row: DeskRow[K] } }[DeskItem];
 
   /**
    * The connect task an approved access ask just made, until the desk reloads
@@ -104,7 +113,7 @@
     const f = focus;
     if (f) untrack(() => go(f));
   });
-  const attached = (kind: 'ask' | 'task', id: number) =>
+  const attached = (kind: Exclude<DeskItem, 'report'>, id: number) =>
     desk.attachments.filter((f) => (kind === 'ask' ? f.askId : f.taskId) === id);
   const open = $derived(items.find((i) => i.key === openKey));
   const who = (id: string | null) => staff.find((p) => p.id === id);
@@ -228,7 +237,6 @@
       if (!r.warning) show(undefined);
     });
   const picked = (a: AskRow) => a.plan?.items.filter((_, i) => !skip[i]).length ?? 0;
-  const nameOf = (id: string) => staff.find((p) => p.id === id)?.name ?? id;
   const toolName = (id: string) => OFFICE_TOOLS.find((t) => t.id === id)?.name ?? id;
   const step = (t: TaskRow, index: number, body: Record<string, unknown>) =>
     act(() => call(`/api/tasks/${t.id}`, { index, ...body }));
@@ -238,9 +246,16 @@
   }
   const finish = (t: TaskRow, done: boolean) =>
     act(async () => {
-      await call(`/api/tasks/${t.id}`, { op: 'finish', done, note });
+      // Done saves the response the owner sees first, so the Odd gets those words.
+      if (done) await finishWithResponse(t, { note });
+      else await call(`/api/tasks/${t.id}`, { op: 'finish', done, note });
       made = undefined;
     }, true);
+
+  /** Run now on a job that skipped a run: it runs, and leaves the While you were away card. */
+  const runAway = (id: number) => act(() => call(`/api/jobs/${id}`, { op: 'run' }));
+  /** Dismiss the While you were away card: every job on it leaves it. */
+  const dismissAway = () => act(() => call('/api/jobs/away', undefined, 'DELETE'));
 
   /** The service's sign-in page opens in a new tab; the step ticks when the owner comes back. */
   async function hostedSignIn(t: TaskRow, index: number) {
@@ -304,7 +319,76 @@
 
   <div class="flex-1 overflow-y-auto p-3">
     {#if !open}
-      {#if !items.length}
+      {#if desk.away.length}
+        <section class="mb-3 rounded-xl bg-raise px-3 py-2.5" aria-label="While you were away">
+          <div class="flex items-center gap-2">
+            <h3 class="flex-1 text-sm font-medium text-ink">While you were away</h3>
+            <button
+              class="rounded-lg px-2.5 py-1 text-xs text-muted hover:text-ink disabled:opacity-40"
+              disabled={busy}
+              onclick={dismissAway}>Dismiss</button
+            >
+          </div>
+          <p class="mt-0.5 text-xs text-muted">
+            {desk.away.length === 1
+              ? 'This job skipped a run that was too late to be useful. It runs again at its next time.'
+              : 'These jobs each skipped a run that was too late to be useful. Each runs again at its next time.'}
+          </p>
+          <ul class="mt-2 flex flex-col gap-1.5">
+            {#each desk.away as j (j.id)}
+              <li class="flex items-center gap-2">
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate text-sm text-ink">{j.name}</span>
+                  <span class="block text-[11px] text-faint"
+                    >{who(j.staffId)?.name ?? j.staffId} · skipped {when(j.skippedAt)}</span
+                  >
+                </span>
+                <button
+                  class="shrink-0 rounded-lg bg-night/60 px-2.5 py-1 text-xs hover:bg-sea/25 disabled:opacity-40"
+                  disabled={busy}
+                  onclick={() => runAway(j.id)}>Run now</button
+                >
+              </li>
+            {/each}
+          </ul>
+          {#if problem}
+            <p class="mt-2 text-xs text-coral">{problem}</p>
+          {/if}
+        </section>
+      {/if}
+      {#if desk.projectWork.length}
+        <ul class="mb-1.5 flex flex-col gap-1.5" aria-label="Project work to review">
+          {#each desk.projectWork as p (p.id)}
+            {@const from = p.staffId ? who(p.staffId) : undefined}
+            <li>
+              <button
+                class="flex w-full items-start gap-3 rounded-xl bg-raise px-3 py-2.5 text-start transition-colors hover:bg-sea/15"
+                onclick={() => openProject(p.sessionId)}
+              >
+                {#if from}
+                  <Pixel
+                    src={from.look?.portrait}
+                    frame={`${from.portrait}/default`}
+                    fallback={`${from.sprite}@${from.variant}/idle-down-0`}
+                    scale={1}
+                    label={from.name}
+                    class="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-sea-deep"
+                  />
+                {/if}
+                <span class="min-w-0 flex-1">
+                  <span class="flex items-center gap-2 text-[10px] tracking-[0.16em] uppercase">
+                    <span class="text-ember">Project work</span>
+                    <span class="text-faint">{from?.name ?? 'Office'} · {ago(p.at)}</span>
+                  </span>
+                  <span class="mt-0.5 block text-sm text-ink">{p.title}</span>
+                  <span class="mt-0.5 block truncate text-xs text-muted">{p.prompt}</span>
+                </span>
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+      {#if !items.length && !desk.away.length && !desk.projectWork.length}
         <p class="py-10 text-center text-sm text-muted">
           Desk clear. Your Odds will bring you anything that needs you.
         </p>
@@ -337,7 +421,7 @@
                   >
                 </span>
                 <span class="mt-0.5 block text-sm text-ink">{i.row.title}</span>
-                {#if i.kind === 'task'}
+                {#if i.kind === 'task' && i.row.steps.length}
                   <span class="mt-0.5 block text-xs text-muted"
                     >{doneCount(i.row.steps)} of {i.row.steps.length} steps done</span
                   >
@@ -347,6 +431,19 @@
           </li>
         {/each}
       </ul>
+      {#if desk.recent.length}
+        <details class="mt-4 border-t border-hairline pt-2 text-xs text-muted">
+          <summary class="cursor-pointer">Recent decisions and answers</summary>
+          <ul class="mt-2 flex flex-col gap-2">
+            {#each desk.recent as row (row.id)}
+              <li>
+                <span class="block text-ink">{row.title}</span>
+                {#if row.reason}<span class="whitespace-pre-wrap">{row.reason}</span>{/if}
+              </li>
+            {/each}
+          </ul>
+        </details>
+      {/if}
     {:else if open.kind === 'ask' && open.row.kind === 'reply' && open.row.reply}
       {@const a = open.row}
       {#key a.id}
@@ -455,107 +552,11 @@
                 </div>
               </dd>
             </div>
-          {:else if a.goal}
-            {@const g = a.goal}
-            <div>
-              <dt class="text-xs text-muted">The goal</dt>
-              <dd class="mt-1 flex flex-col gap-1 rounded-lg bg-raise px-2.5 py-2 text-xs">
-                <div class="text-sm text-ink">{g.title}</div>
-                {#if g.why}<div><span class="text-muted">Why:</span> {g.why}</div>{/if}
-                {#if g.doneWhen}
-                  <div><span class="text-muted">Done when:</span> {g.doneWhen}</div>
-                {/if}
-                <div><span class="text-muted">When:</span> {goalWhen(g)} · {g.area}</div>
-              </dd>
-              <p class="mt-1.5 text-[11px] text-faint">
-                Setting it sends {who(a.staffId)?.name ?? 'your manager'} off to plan it. The plan comes
-                back to your desk.
-              </p>
-            </div>
-          {:else if a.plan}
-            {@const plan = a.plan}
-            <div>
-              <dt class="text-xs text-muted">The plan · untick any part to leave it out</dt>
-              <dd class="mt-1 flex flex-col gap-1.5">
-                {#each plan.items as item, i (i)}
-                  <label
-                    class="flex cursor-pointer items-start gap-2.5 rounded-lg bg-raise px-2.5 py-2 text-xs"
-                    class:opacity-50={skip[i]}
-                  >
-                    <input
-                      type="checkbox"
-                      class="mt-0.5"
-                      checked={!skip[i]}
-                      onchange={(e) => (skip[i] = !e.currentTarget.checked)}
-                    />
-                    <span class="flex min-w-0 flex-1 flex-col gap-0.5">
-                      {#if item.kind === 'hire'}
-                        {@const h = item.hire}
-                        <span class="text-sm text-ink">Hire {h.name}, {h.role}</span>
-                        <span>{item.part}</span>
-                        <span class="text-muted"
-                          >{LEVEL_LABEL[h.permission]}{h.room ? ` · ${h.room}` : ''}</span
-                        >
-                        {#if h.job}
-                          <span class="text-muted"
-                            >First job: {h.job.name}, {describe(h.job.schedule)}</span
-                          >
-                        {/if}
-                        <span class="flex flex-wrap gap-x-2">
-                          <button
-                            type="button"
-                            class="text-sea underline underline-offset-2"
-                            onclick={() =>
-                              openFile({ staff: a.staffId, path: h.jobDescriptionFile })}
-                            >Job description</button
-                          >
-                          {#if h.intakeFile}
-                            {@const intake = h.intakeFile}
-                            <button
-                              type="button"
-                              class="text-sea underline underline-offset-2"
-                              onclick={() => openFile({ staff: a.staffId, path: intake })}
-                              >Your intake answers</button
-                            >
-                          {/if}
-                        </span>
-                      {:else}
-                        <span class="text-sm text-ink">{nameOf(item.staff)} takes it on</span>
-                        <span>{item.part}</span>
-                        {#if item.job}
-                          <span class="text-muted"
-                            >New job: {item.job.name}, {describe(item.job.schedule)}</span
-                          >
-                        {/if}
-                        {#if item.editJob}
-                          <span class="text-muted"
-                            >Changes its job "{item.editJob.name}"{item.editJob.schedule
-                              ? ` to ${describe(item.editJob.schedule).toLowerCase()}`
-                              : ''}</span
-                          >
-                        {/if}
-                      {/if}
-                    </span>
-                  </label>
-                {/each}
-                {#if plan.ownerSteps?.length}
-                  <div class="rounded-lg bg-ember/10 px-2.5 py-2 text-xs">
-                    <div class="text-muted">Yours to do, as a task on your desk</div>
-                    <ol class="mt-1 list-decimal ps-4">
-                      {#each plan.ownerSteps as s, i (i)}<li>{s}</li>{/each}
-                    </ol>
-                  </div>
-                {/if}
-              </dd>
-              <p class="mt-1.5 text-[11px] text-faint">
-                Odds already here take on their part as soon as you approve. Each hire opens in the
-                hire window.
-              </p>
-            </div>
+          {:else if a.goal || a.plan}
+            <GoalProposal {a} {staff} {skip} onskip={(i, skipped) => (skip[i] = skipped)} />
           {:else if a.call}
             {@const c = a.call}
-            <div>
-              <dt class="text-xs text-muted">The call, exactly as the office makes it</dt>
+            {#snippet exact()}
               <dd class="mt-1 flex flex-col gap-1 rounded-lg bg-raise px-2.5 py-2 text-xs">
                 <div><span class="text-muted">Tool:</span> {c.tool}</div>
                 <div class="text-muted">Inputs:</div>
@@ -564,6 +565,28 @@
                     c.arguments
                   )}</pre>
               </dd>
+            {/snippet}
+            <div>
+              {#if c.said && c.shown?.length}
+                <!-- What it does in words, and each email it does it to, as Gmail showed them when it was held. -->
+                <dt class="text-xs text-muted">{c.said}</dt>
+                <dd class="mt-1 rounded-lg bg-raise px-2.5 py-2 text-xs">
+                  <ul class="flex max-h-72 flex-col gap-1 overflow-y-auto">
+                    {#each c.shown as item, n (n)}
+                      <li class="break-words">{item}</li>
+                    {/each}
+                  </ul>
+                </dd>
+                <details class="mt-2">
+                  <summary class="cursor-pointer text-xs text-muted hover:text-ink"
+                    >The call, exactly as the office makes it</summary
+                  >
+                  {@render exact()}
+                </details>
+              {:else}
+                <dt class="text-xs text-muted">The call, exactly as the office makes it</dt>
+                {@render exact()}
+              {/if}
               <p class="mt-1.5 text-[11px] text-faint">
                 Nothing has changed yet. Approve, and the office makes this call once, then {who(
                   a.staffId
@@ -681,11 +704,15 @@
                     ? 'Connect'
                     : a.kind === 'switch'
                       ? 'Turn on'
-                      : a.kind === 'window'
-                        ? 'Let it carry on'
-                        : a.plan && picked(a) < a.plan.items.length
-                          ? `Approve ${picked(a)} of ${a.plan.items.length}`
-                          : 'Approve'}</button
+                      : a.kind === 'remove'
+                        ? 'Remove'
+                        : a.kind === 'bring_back'
+                          ? 'Bring back'
+                          : a.kind === 'window'
+                            ? 'Let it carry on'
+                            : a.plan && picked(a) < a.plan.items.length
+                              ? `Approve ${picked(a)} of ${a.plan.items.length}`
+                              : 'Approve'}</button
             >
           {/if}
         </div>
@@ -711,7 +738,19 @@
         {@const t = open.row}
         <p class="mt-2 text-sm leading-relaxed text-muted">{t.why}</p>
         {@const toGo = stepsToGo(t.steps)}
-        <ol class="mt-3 flex flex-col gap-2">
+        {@const response = current(t)}
+        {@const draft = drafts[t.id]}
+        {@const needsSave = !!draft || (response.response !== null && !response.responseVersion)}
+        {@const blockedResponse =
+          writing[t.id] ||
+          staleDraft(draft, response) ||
+          (needsSave && !(draft?.text ?? response.response)?.trim())}
+        {@const how = chatAnswer(
+          { ...t, response: response.response },
+          attached('task', t.id).length > 0
+        )}
+        <!-- A question with one answer has no steps: its answer goes in the response below. -->
+        <ol class="mt-3 flex flex-col gap-2" class:hidden={!t.steps.length}>
           {#each t.steps as s, index (index)}
             <li
               class="flex gap-2.5 rounded-xl bg-raise px-3 py-2.5 text-sm"
@@ -750,7 +789,8 @@
                       </p>
                     {/if}
                   </div>
-                  {#if s.done && !tickable(s)}
+                  <!-- A chosen mailbox changes only by revoking its grants, so its step has no Undo. -->
+                  {#if s.done && !tickable(s) && s.action?.kind !== 'postal'}
                     <button
                       class="ms-auto shrink-0 text-xs text-muted underline hover:text-ink disabled:opacity-40"
                       disabled={busy}
@@ -764,6 +804,16 @@
                     disabled={busy}
                     onclick={() => hostedSignIn(t, index)}>Sign in</button
                   >
+                {:else if s.action?.kind === 'postal'}
+                  {#if s.done}
+                    {#if s.answer}<p class="mt-1.5 text-xs text-muted">{s.answer}</p>{/if}
+                  {:else}
+                    {#key t.id}<PostalMailbox
+                        taskId={t.id}
+                        {index}
+                        odd={who(t.staffId)?.name ?? 'the Odd'}
+                      />{/key}
+                  {/if}
                 {:else if s.action?.kind === 'aws'}
                   {#if s.done}
                     {#if s.answer}<p class="mt-1.5 text-xs text-muted">{s.answer}</p>{/if}
@@ -841,7 +891,20 @@
           {/each}
         </ol>
         {#key open.key}
-          <Attachments items={attached('task', t.id)} start="edit" ondirty={(d) => (unsaved = d)} />
+          {#if t.staffId && !t.askId}
+            <TaskResponse
+              task={t}
+              odd={who(t.staffId)?.name}
+              files={attached('task', t.id)}
+              open={!!how && !how.choice}
+            />
+          {/if}
+          <Attachments
+            items={attached('task', t.id)}
+            reference={response.response !== null}
+            start="edit"
+            ondirty={(d) => (unsaved = d)}
+          />
         {/key}
         <label class="mt-4 block text-xs text-muted" for="note">Note (optional)</label>
         <textarea
@@ -863,13 +926,15 @@
           >
           <button
             class="flex-1 rounded-lg bg-sea px-3 py-2 text-sm font-medium text-night disabled:opacity-40"
-            disabled={busy || unsaved || toGo > 0}
+            disabled={busy || unsaved || blockedResponse || toGo > 0}
             onclick={() => finish(t, true)}
             >{unsaved
               ? 'Save the attached file first'
               : toGo
                 ? `${toGo} ${toGo === 1 ? 'step' : 'steps'} to go`
-                : 'Mark done'}</button
+                : needsSave
+                  ? 'Save and finish'
+                  : 'Mark done'}</button
           >
         </div>
       {:else}

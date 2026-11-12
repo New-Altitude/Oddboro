@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Ten questions as native disclosures. Each answer fades in once when
+  // Eleven questions as native disclosures. Each answer fades in once when
   // opened; the chevron turns. Code in an answer is marked in the text with
   // backticks and rendered as <code>.
   import SectionHeader from '#lib/components/SectionHeader.svelte';
@@ -19,12 +19,16 @@
       a: 'One of these: a Claude plan that signs in to Claude Code, or an Anthropic API key; the ChatGPT account you use with Codex; or your Grok account. You pick one for the office, and can run any Odd on another.'
     },
     {
+      q: 'Can I hire my New Altitude personas?',
+      a: 'Yes. Sign in to your New Altitude account from the office, and hire them as Odds. Their replies come from New Altitude.'
+    },
+    {
       q: 'Does it run on Windows or Linux?',
       a: 'Yes, both. Windows: an installer for Windows 10 and 11, on x64 and arm64. Linux: an AppImage for x86_64 and arm64, on a desktop with systemd, a keyring and notifications.'
     },
     {
       q: 'What leaves my computer?',
-      a: 'Only what the work needs. Odds send their work to the AI they run on, under your own account, and an Odd talks to the tools you connected for it. The app checks GitHub for new versions of itself. Your sign-in goes to New Altitude only if you sign in to a New Altitude account, and error reports only if you are signed in and turn them on.'
+      a: 'Only what the work needs. Odds send their work to the AI they run on, under your own account, and an Odd talks to the tools you connected for it. An Odd with Browse the web on sends its searches, and the pages it opens, to the web. The app checks GitHub for new versions of itself. Your sign-in goes to New Altitude only if you sign in to a New Altitude account, and error reports only if you are signed in and turn them on. A New Altitude persona you hire sends New Altitude what you ask it and what its work in your office found, which can include your files and data from your tools. New Altitude keeps it.'
     },
     {
       q: 'Can an Odd act without asking me?',

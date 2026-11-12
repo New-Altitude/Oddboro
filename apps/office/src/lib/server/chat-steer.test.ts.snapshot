@@ -1,0 +1,6 @@
+exports[`a message about work tells the lead which work it changes, and nothing else 1`] = `
+[
+  "The owner is speaking to you as lead of this goal #7, \\"Plan the fair\\".",
+  "Apply their words to that work. This message does not stop a background job or approve an outside action."
+]
+`;

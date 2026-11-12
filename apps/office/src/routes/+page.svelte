@@ -14,11 +14,12 @@
   import { threadTag, type HeldThread } from '#lib/staff/thread-tags.ts';
   import StaffCard from '#lib/ui/StaffCard.svelte';
   import { chatRequest, type Delivered } from '#lib/ui/chat-about.svelte.ts';
-  import OddsRail, { ODDS_RAIL } from '#lib/ui/OddsRail.svelte';
+  import OddsRail, { ODDS_RAIL, ODDS_RAIL_OPEN } from '#lib/ui/OddsRail.svelte';
   import type { Work } from '#lib/staff/work.ts';
   import type { LessonEvent, OfficeEvent } from '#lib/server/events.ts';
   import DeskDrawer from '#lib/ui/DeskDrawer.svelte';
   import { account } from '#lib/ui/account.svelte.ts';
+  import { personaNews } from '#lib/ui/persona-offers.svelte.ts';
   import { diagnostics } from '#lib/ui/diagnostics.svelte.ts';
   import LedgerPanel from '#lib/ui/LedgerPanel.svelte';
   import ServicesPanel from '#lib/ui/ServicesPanel.svelte';
@@ -26,15 +27,18 @@
   import GoalsPanel from '#lib/ui/GoalsPanel.svelte';
   import LessonsLibrary from '#lib/ui/LessonsLibrary.svelte';
   import Welcome from '#lib/ui/Welcome.svelte';
+  import ProjectSessions from '#lib/ui/ProjectSessions.svelte';
   import HireDrawer from '#lib/ui/HireDrawer.svelte';
   import FileViewer from '#lib/ui/FileViewer.svelte';
   import ReportView from '#lib/ui/ReportView.svelte';
   import {
+    advanced,
     close,
     deskRequest,
     open,
     openHire,
     openLessons,
+    openProject,
     openReport,
     wins,
     type Win
@@ -44,8 +48,9 @@
   import { fly } from 'svelte/transition';
   import { placesFor, type Place } from '#lib/staff/places.ts';
   import PixelPencil from '#lib/ui/PixelPencil.svelte';
-  import { call } from '#lib/ui/api.ts';
+  import { call, type ApiUrl } from '#lib/ui/api.ts';
   import { setZone, zone, zoneName, zoneShort } from '@oddboro/ledger/time';
+  import { LIVE_TABLES, type LiveTable } from '@oddboro/ledger/live-tables';
 
   let { data } = $props();
   // Every time on the page is in the office's zone, which only the server knows.
@@ -118,6 +123,14 @@
   /** False until the owner finishes the welcome, which the office opens on. */
   // svelte-ignore state_referenced_locally
   let welcomed = $state(data.welcomed);
+  // Advanced mode as the server says; Setup changes it on this page as the owner answers.
+  $effect.pre(() => {
+    advanced.on = data.advanced;
+  });
+  // Off, nothing offers Projects, and an open Projects window closes.
+  $effect(() => {
+    if (!advanced.on) for (const w of wins.list) if (w.kind === 'projects') close(w.id, true);
+  });
   /** A new owner's first visit, from the empty lot until their manager says hello. */
   // svelte-ignore state_referenced_locally
   let firstRun = $state(!data.welcomed);
@@ -134,16 +147,43 @@
   let following = $state<string | undefined>();
   /** The light on the floor: the office's clock, or held at day or night for this viewer. */
   let light = $state<Light>('auto');
-  /** On the first run, a new hire stays off the floor until the bus brings them. */
+  /** Odds on the floor or stepping off the bus. Any other hire stays off the floor until the bus brings it. */
   const arrived = new Set<string>();
+  /** Hires on a bus that has not pulled up yet, so a second sync books no second seat. */
+  const riding = new Set<string>();
+  /** One bus at a time: a hire made during a ride takes the next one. */
+  let busLine = Promise.resolve();
+  /**
+   * The camera while a hire comes in: held on the whole office while the bus
+   * comes (nothing to follow), then on the hire. The owner taking the camera
+   * ends it.
+   */
+  let watching: (() => [number, number] | undefined) | undefined;
   const openSetup = () => open({ id: 'setup', kind: 'setup' });
   let working = $state<Record<string, string>>({});
-  /** Each staffer's work in progress. */
+  /** Each staffer's runs going, or waiting for a slot: every `working` event brings them. */
   let inProgress = $state<Record<string, Work[]>>({});
+  /** Each staffer's follow-ups yet to start, read with the office. */
+  let toStart = $state<Record<string, Work[]>>({});
+  /** Each staffer's work in progress: its runs, then what waits to start. */
+  const work = $derived(
+    Object.fromEntries(
+      [...new Set([...Object.keys(inProgress), ...Object.keys(toStart)])].map((id) => [
+        id,
+        [...(inProgress[id] ?? []), ...(toStart[id] ?? [])]
+      ])
+    )
+  );
   /** A request for the card to open on a tab, from the Odds rail's list. */
   let cardShow = $state<{ id: string; tab: 'work'; n: number } | undefined>();
   /** Bumps when jobs, runs, access, goals, threads or lessons change, so the card's tabs and the Goals and Lessons windows reload. */
   let version = $state(0);
+  /** Bumped on a change to the ledger's rows, so the Ledger window searches again. */
+  let ledgerVersion = $state(0);
+  /** What the page does when each table changes, by the name the event carries. */
+  const ON_CHANGE = new Map<string, LiveTable['page']>(
+    Object.entries(LIVE_TABLES).map(([table, live]) => [table, live.page])
+  );
   /** The start panel is open while it holds windows and the owner has not folded it away. */
   const leftOpen = $derived(wins.shown && wins.list.length > 0);
   const front = $derived(wins.list.find((w) => w.id === wins.active));
@@ -164,15 +204,19 @@
     { id: 'lessons', label: 'Lessons' },
     { id: 'ledger', label: 'Ledger' },
     { id: 'services', label: 'Services' },
+    { id: 'projects', label: 'Projects' },
     { id: 'hire', label: 'Hire' },
     { id: 'office', label: 'Office' }
   ] as const;
+  /** The sections the top bar offers: Projects only in Advanced mode. */
+  const sections = $derived(SECTIONS.filter((s) => s.id !== 'projects' || advanced.on));
 
   /** Select a staffer, opening its panel if it was folded away. */
   function select(id: string | undefined) {
     selected = id;
     railAsked = false;
     letGo = false;
+    wins.raised = !id;
     if (id) rightCollapsed = false;
   }
 
@@ -248,6 +292,19 @@
   const rightSpace = $derived(
     (showRail && !cardOpen ? ODDS_RAIL + 16 : 0) + (cardOpen && wide ? rightWidth + 8 : 0)
   );
+  /** The Odds rail is wide now: hovered, in the keyboard's path, or opened with ⌘K. */
+  let railOpen = $state(false);
+  /**
+   * Projects in front widens the start panel to the Odd's panel, else to the
+   * Odds rail: px kept free at the end edge, 8 of them a gap. While the rail
+   * is wide, the panel steps back to its edge, so every Odd stays in view.
+   */
+  const projectsReach = $derived.by(() => {
+    if (!wide || !leftOpen || front?.kind !== 'projects') return undefined;
+    if (cardOpen) return rightWidth + 24;
+    if (showRail) return (railOpen ? ODDS_RAIL_OPEN : ODDS_RAIL) + 24;
+    return 16;
+  });
   /** The Odd's panel slides in from the screen's edge (the left in a right-to-left page). */
   const fromEdge = (far = 48) => ({
     x: (getComputedStyle(document.documentElement).direction === 'rtl' ? -1 : 1) * far,
@@ -288,7 +345,14 @@
   }
   const status = $derived(Object.fromEntries(tags.map((t) => [t.id, statusOf(t)])));
 
-  const deskCount = $derived(desk.asks.length + desk.tasks.length + desk.reports.length);
+  // The While you were away card counts once, however many jobs it lists.
+  const deskCount = $derived(
+    desk.asks.length +
+      desk.tasks.length +
+      desk.reports.length +
+      desk.projectWork.length +
+      (desk.away.length ? 1 : 0)
+  );
 
   /** Rooms a new hire can work in: any with a place to work, read or sort mail. */
   const hireRooms = $derived.by(() => {
@@ -428,9 +492,17 @@
     actors = actors.filter((a) => staff.some((p) => p.id === a.profile.id));
     // A redraw: the staffer changes clothes where they stand.
     for (const a of actors) a.wear(wearing[a.profile.id]);
+    const boarding: string[] = [];
     for (const p of staff) {
       if (actors.some((a) => a.profile.id === p.id) || !atlasCatalog[p.sprite]) continue;
       if (firstRun && !arrived.has(p.id)) continue;
+      // Every hire after the office opened, an Odd or a persona, comes by bus.
+      if (opened && !arrived.has(p.id)) {
+        if (!riding.has(p.id)) boarding.push(p.id);
+        riding.add(p.id);
+        continue;
+      }
+      arrived.add(p.id);
       const a = new F!.StaffActor(floor, p, start);
       a.wear(wearing[p.id]);
       a.sprite.on('pointertap', () => select(p.id));
@@ -448,6 +520,39 @@
       actors.push(a);
     }
     opened = true;
+    if (boarding.length) busLine = busLine.then(() => ride(boarding));
+  }
+
+  /**
+   * The bus brings hires in: it pulls up at the stop, they step off and walk
+   * to work, and it drives on. As on the first run, the camera shows the
+   * whole office while the bus comes, then steps in on the first hire as it
+   * gets off and follows it to its spot, unless the owner takes the camera. Nothing waits on
+   * them, so each is on the floor, and can be tapped, from the moment it
+   * steps off.
+   */
+  async function ride(ids: string[]) {
+    if (!floor || !F) return;
+    const bus = F.bus(floor);
+    watching = () => undefined;
+    floor.overview();
+    await bus.arrive();
+    bus.open();
+    await new Promise((r) => setTimeout(r, 800));
+    for (const id of ids) {
+      riding.delete(id);
+      arrived.add(id);
+    }
+    await syncActors();
+    const hire = actors.find((a) => a.profile.id === ids[0]);
+    // Then the hire, to its spot, if the camera is still the ride's.
+    const follow = (): [number, number] | undefined => {
+      if (hire?.moving && hire.visible) return [hire.x, hire.y - TILE];
+      if (watching === follow) watching = undefined;
+    };
+    if (watching) watching = follow;
+    await new Promise((r) => setTimeout(r, 2500));
+    await bus.leave();
   }
 
   /** The mode the office puts a staffer in: outside the owner's door, at its job, or free. */
@@ -472,6 +577,7 @@
         desk: Desk;
         working: Record<string, string>;
         inProgress: Record<string, Work[]>;
+        toStart: Record<string, Work[]>;
         roomNames: Record<string, string>;
         switchedOff: string[];
         messages: Record<string, number>;
@@ -497,6 +603,7 @@
       desk = next.desk;
       working = next.working;
       inProgress = next.inProgress;
+      toStart = next.toStart;
       roomNames = next.roomNames;
       switchedOff = next.switchedOff;
       messages = next.messages;
@@ -534,15 +641,24 @@
    * else a report on its own. False when there is nothing to open.
    */
   function openDelivered(staffId: string, d: Delivered): boolean {
-    const waiting =
-      d.kind === 'ask'
-        ? desk.asks.some((a) => a.id === d.id)
-        : d.kind === 'task'
-          ? desk.tasks.some((t) => t.id === d.id)
-          : desk.reports.some((r) => r.id === d.id);
-    if (waiting) void openDesk(`${d.kind}-${d.id}`);
-    else if (d.kind === 'report') openReport({ id: d.id, staff: staffId, title: d.title });
-    return waiting || d.kind === 'report';
+    const waiting = (rows: { id: number }[]) => {
+      const found = rows.some((r) => r.id === d.id);
+      if (found) void openDesk(`${d.kind}-${d.id}`);
+      return found;
+    };
+    switch (d.kind) {
+      case 'ask':
+        return waiting(desk.asks);
+      case 'task':
+        return waiting(desk.tasks);
+      case 'report':
+        if (!waiting(desk.reports)) openReport({ id: d.id, staff: staffId, title: d.title });
+        return true;
+      default: {
+        const missed: never = d.kind;
+        throw new Error(`Nothing opens a ${String(missed)}`);
+      }
+    }
   }
 
   /** A thread from the Goals window: the oldest thing it waits on, else its hub's chat, which shows it as a card. */
@@ -556,6 +672,7 @@
     if (leftOpen && front?.kind === id) return hide();
     if (id === 'desk') return void openDesk();
     if (id === 'ledger') return open({ id: 'ledger', kind: 'ledger' });
+    if (id === 'projects') return openProject();
     if (id === 'services') return open({ id: 'services', kind: 'services' });
     if (id === 'goals') return open({ id: 'goals', kind: 'goals' });
     if (id === 'lessons') return openLessons();
@@ -577,6 +694,7 @@
   function winTitle(w: Win): string {
     if (w.kind === 'desk') return 'Desk';
     if (w.kind === 'ledger') return 'Ledger';
+    if (w.kind === 'projects') return 'Projects';
     if (w.kind === 'services') return 'Services';
     if (w.kind === 'goals') return 'Goals';
     if (w.kind === 'lessons') return 'Lessons';
@@ -605,7 +723,7 @@
     const timer = setInterval(() => (now = new Date()), 15_000);
 
     // One live line from the server. Changes arrive as they happen.
-    const events = new EventSource('/api/events');
+    const events = new EventSource('/api/events' satisfies ApiUrl);
     events.onmessage = (m) => {
       const e = JSON.parse(m.data) as OfficeEvent;
       if (e.type === 'account') {
@@ -631,46 +749,17 @@
         actors.find((a) => a.profile.id === e.staff)?.pop(LESSON_POP[e.kind]);
         return;
       }
+      // Only the persona offers hear this: the floor meets a persona Odd, or
+      // sees it go quiet, through the staff table's change, as any hire.
+      if (e.type === 'persona') return void personaNews(e);
+      const page = e.table === 'chat' ? ['version'] : (ON_CHANGE.get(e.table) ?? []);
       // A move into another layout rebuilds the whole floor.
       // During the first run, and until its last drawn pieces land, the floor
       // already shows the office being moved into.
-      if (e.table === 'offices') return firstRun || landing ? void refresh() : location.reload();
-      if (
-        [
-          'staff',
-          'asks',
-          'tasks',
-          'reports',
-          'room_names',
-          'switched_off',
-          'pokes',
-          'lessons',
-          'threads',
-          'connectors'
-        ].includes(e.table)
-      )
-        refresh();
-      if (
-        [
-          'jobs',
-          'runs',
-          'grants',
-          'asks',
-          'tasks',
-          'reports',
-          'connectors',
-          'usage',
-          'plan_limits',
-          'pokes',
-          'goals',
-          'staff_goals',
-          'goal_progress',
-          'lessons',
-          'lesson_uses',
-          'threads'
-        ].includes(e.table)
-      )
-        version++;
+      if (page.includes('reload')) return firstRun || landing ? void refresh() : location.reload();
+      if (page.includes('refresh')) refresh();
+      if (page.includes('version')) version++;
+      if (page.includes('ledger')) ledgerVersion++;
     };
 
     (async () => {
@@ -726,7 +815,10 @@
             });
         };
 
-        floor.onRelease = () => (letGo = true);
+        floor.onRelease = () => {
+          letGo = true;
+          watching = undefined;
+        };
         floor.onTap = flip;
         floor.onShelf = () => openLessons('all');
 
@@ -772,7 +864,10 @@
           // Centre the camera on the floor left between the two panels, and fit the office there.
           floor.viewOffsetX = centreOffset();
           floor.viewCover = leftSpace + rightSpace;
-          if (lead && lead.visible) floor.focus(lead.x, lead.y - TILE);
+          if (watching) {
+            const seen = watching();
+            if (seen) floor.focus(seen[0], seen[1]);
+          } else if (lead && lead.visible) floor.focus(lead.x, lead.y - TILE);
           floor.updateDoors(actors.filter((a) => a.visible).flatMap((a) => a.steps));
         });
         ready = true;
@@ -1001,8 +1096,10 @@
     }
   });
 
+  // The end of the first run is a change too: the Odds it held back walk on then.
   $effect(() => {
     void staff;
+    void firstRun;
     if (floorReady) void syncActors();
   });
 </script>
@@ -1116,13 +1213,13 @@
     </div>
     <!-- The command center's buttons arrive with the office, once the first run is over. -->
     <div class="flex flex-wrap gap-1.5 {open ? 'px-3 pt-2' : 'mt-2'}" class:hidden={firstRun}>
-      {#each SECTIONS as sec (sec.id)}
+      {#each sections as sec (sec.id)}
+        {@const pressed = leftOpen && front?.kind === sec.id}
         <button
-          class="rounded-full px-3 py-1 text-xs whitespace-nowrap {leftOpen &&
-          front?.kind === sec.id
+          class="rounded-full px-3 py-1 text-xs whitespace-nowrap {pressed
             ? 'bg-sea/25 text-ink'
             : 'bg-raise text-muted hover:text-ink'}"
-          aria-pressed={leftOpen && front?.kind === sec.id}
+          aria-pressed={pressed}
           onclick={() => toggle(sec.id)}
           >{sec.label}{#if sec.id === 'desk' && deskCount}<span class="ms-1 text-ember"
               >{deskCount}</span
@@ -1185,6 +1282,8 @@
       min={340}
       max={Math.max(760, Math.round(innerWidth * 0.4))}
       storageKey="oddboro.panel.start"
+      onTop={wins.raised}
+      reach={projectsReach}
     >
       <div class="flex h-full min-h-0 flex-col">
         <div class="pb-2">{@render plate(true)}</div>
@@ -1204,7 +1303,10 @@
                 role="tab"
                 aria-selected={wins.active === w.id}
                 class="flex max-w-44 items-center gap-1.5 truncate py-1.5 ps-2.5 pe-1 text-xs"
-                onclick={() => (wins.active = w.id)}
+                onclick={() => {
+                  wins.active = w.id;
+                  wins.raised = true;
+                }}
                 >{#if wins.busy[w.id]}<span class="busy" aria-label="drawing"></span>{/if}{winTitle(
                   w
                 )}{#if w.kind === 'desk' && deskCount}<span class="text-ember">{deskCount}</span
@@ -1236,7 +1338,9 @@
               {:else if w.kind === 'lessons'}
                 <LessonsLibrary {staff} {version} bind:filter={w.filter} />
               {:else if w.kind === 'ledger'}
-                <LedgerPanel {staff} />
+                <LedgerPanel {staff} version={ledgerVersion} />
+              {:else if w.kind === 'projects'}
+                <ProjectSessions {staff} {version} ask={w.ask} />
               {:else if w.kind === 'services'}
                 <ServicesPanel {staff} {version} onstaff={select} />
               {:else if w.kind === 'setup'}
@@ -1271,7 +1375,11 @@
                   onhired={(p) => {
                     close(w.id, true);
                     refresh();
-                    selected = p.id;
+                    select(p.id);
+                  }}
+                  ondone={() => {
+                    close(w.id, true);
+                    refresh();
                   }}
                 />
               {:else if w.kind === 'report'}
@@ -1286,8 +1394,11 @@
             </div>
           {/each}
         </div>
+        <!-- The music keeps its place and size while Projects widens the panel. -->
         <div class="border-t border-hairline px-3 py-2">
-          <FloorControls bind:light onfit={fitFloor} onzoom={(d) => floor?.zoomBy(d)} />
+          <div style="max-inline-size: {leftWidth - 24}px">
+            <FloorControls bind:light onfit={fitFloor} onzoom={(d) => floor?.zoomBy(d)} />
+          </div>
         </div>
       </div>
     </SidePanel>
@@ -1302,10 +1413,11 @@
     </header>
   {/if}
 
-  <!-- The desk pill, centred on the floor between the two panels -->
+  <!-- The desk pill, centred on the floor between the two panels. Projects
+       covers the floor, and the plate's Desk button carries the count. -->
   <div
     class="pointer-events-none absolute top-4 flex justify-center max-sm:top-24"
-    class:hidden={firstRun}
+    class:hidden={firstRun || projectsReach !== undefined}
     style="inset-inline: {leftSpace}px {rightSpace}px"
   >
     <button
@@ -1335,13 +1447,14 @@
         {staff}
         {status}
         {waiting}
-        {inProgress}
+        inProgress={work}
         selected={profile && !rightCollapsed ? selected : undefined}
         find={findAgent}
         searching={railAsked}
         onleave={() => (railAsked = false)}
         onselect={select}
         onchat={(id) => chatAbout(id, '')}
+        onwiden={(w) => (railOpen = w)}
       />
     </div>
   {/if}
@@ -1358,11 +1471,14 @@
       {#key profile.id}
         <div class="h-full" in:fly={fromEdge()}>
           <StaffCard
+            {desk}
+            {staff}
+            onplan={planHires}
             {profile}
             activity={selectedActivity}
             {version}
             working={working[profile.id]}
-            work={inProgress[profile.id] ?? []}
+            work={work[profile.id] ?? []}
             show={cardShow?.id === profile.id ? cardShow : undefined}
             {places}
             manual={!!manual[profile.id]}

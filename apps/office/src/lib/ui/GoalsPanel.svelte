@@ -10,6 +10,7 @@
   } from '@oddboro/ledger';
   import {
     GOAL_AREAS,
+    GOAL_IS_LIVE,
     goalWhen,
     HEALTH_WORDS,
     HORIZONS,
@@ -55,8 +56,8 @@
   let showDone = $state(false);
 
   const manager = $derived(staff.find((s) => s.role === 'Office Manager'));
-  const live = $derived(goals.filter((g) => g.status === 'active' || g.status === 'paused'));
-  const past = $derived(goals.filter((g) => g.status === 'met' || g.status === 'dropped'));
+  const live = $derived(goals.filter((g) => GOAL_IS_LIVE[g.status]));
+  const past = $derived(goals.filter((g) => !GOAL_IS_LIVE[g.status]));
   const areas = $derived([
     ...new Set([...GOAL_AREAS, ...goals.map((g) => g.area)].map((a) => a.toLowerCase()))
   ]);

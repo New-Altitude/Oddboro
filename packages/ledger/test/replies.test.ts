@@ -9,6 +9,8 @@
 // propose_reply store the colleague the office names in `VIA`. Run with
 // `npm test -w @oddboro/ledger`.
 import assert from 'node:assert/strict';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { db, sql, toolServer } from './tool-server.ts';
@@ -77,6 +79,63 @@ test('propose_reply is offered to every Odd that holds Gmail, at any level, what
     await offered(await toolServer('tess', { RUN_KEY: 'k-tess' })),
     'a hire list cannot leave it out'
   );
+});
+
+test("a reply carries files from the Odd's own folder only, each under the name a recipient sees", async () => {
+  const { home } = await import('../src/home.ts');
+  const dir = join(home('staff', 'paige'), 'attachments');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, '20261110-081108-35bc-image.png'), 'png');
+  writeFileSync(join(home('staff', 'paige'), 'chat.jsonl'), '{}');
+  mkdirSync(home('staff', 'nora'), { recursive: true });
+  writeFileSync(join(home('staff', 'nora'), 'notes.md'), 'Nora’s');
+  const c = await toolServer('paige', { RUN_KEY: 'k-files' });
+  const withFiles = (attachments: string[], thread: string) =>
+    c.callTool({
+      name: 'propose_reply',
+      arguments: { ...REPLY, gmail_thread_id: thread, in_reply_to: `m-${thread}`, attachments }
+    });
+  const r = await withFiles(['attachments/20261110-081108-35bc-image.png'], 't-files');
+  assert.notEqual(r.isError, true, said(r));
+  assert.deepEqual((await ask(idOf(said(r))))?.reply?.attachments, [
+    {
+      path: 'attachments/20261110-081108-35bc-image.png',
+      name: 'image.png',
+      mediaType: 'image/png',
+      size: 3
+    }
+  ]);
+  // Another Odd's file, the office's own, a hidden one and a missing one never go.
+  for (const [n, bad] of [
+    '../nora/notes.md',
+    join(home('staff', 'nora'), 'notes.md'),
+    'chat.jsonl',
+    '.claude/settings.json',
+    'nope.png'
+  ].entries()) {
+    const no = await withFiles([bad], `t-bad-${n}`);
+    assert.equal(no.isError, true, bad);
+    assert.match(said(no), /is not a file in your folder/, bad);
+  }
+});
+
+test("an email never carries one of the office's own files at the top of an Odd's folder, a persona's session among them", async () => {
+  const { home, OFFICE_FILE_NAMES } = await import('../src/home.ts');
+  const { mailAttachment } = await import('../src/mail-attachments.ts');
+  mkdirSync(home('staff', 'paige'), { recursive: true });
+  assert.ok(OFFICE_FILE_NAMES.includes('persona-session.json'));
+  // The same file under another name goes, so only the name turns these down.
+  writeFileSync(home('staff', 'paige', 'kept.json'), '{}');
+  const kept = mailAttachment('paige', 'kept.json');
+  assert.ok(!('problem' in kept), JSON.stringify(kept));
+  for (const name of OFFICE_FILE_NAMES) {
+    writeFileSync(home('staff', 'paige', name), '{}');
+    assert.deepEqual(
+      mailAttachment('paige', name),
+      { problem: `${name} is not a file in your folder.` },
+      name
+    );
+  }
 });
 
 test('each call raises one reply ask with the email, and the owner sees it on the desk', async () => {
@@ -280,4 +339,26 @@ test("an Odd's new version of its own open reply takes the old one's place on th
   assert.ok(shown.includes(after.ask.id));
   assert.ok(!shown.includes(before.ask.id));
   assert.equal((await ask(before.ask.id))?.status, 'revise');
+});
+
+test('a lead that leaves out work still gives a task, on no work', async () => {
+  // The lead leads the inbox work from the hand-offs above, so its tools take
+  // work. A session that kept the tools' older form sends none at all.
+  const c = await toolServer('lead', { RUN_KEY: 'k-no-work' });
+  const given = said(
+    await c.callTool({
+      name: 'give_owner_a_task',
+      arguments: {
+        title: 'Tell me your favourite animal',
+        why: 'Only you know.',
+        steps: ['Say it.']
+      }
+    })
+  );
+  const taskId = Number(/^Task (\d+) /.exec(given)?.[1]);
+  assert.ok(taskId, `the task went on the desk: ${given}`);
+  const [task] = await sql<
+    { thread_id: number | null }[]
+  >`select thread_id from tasks where id = ${taskId}`;
+  assert.equal(task.thread_id, null);
 });

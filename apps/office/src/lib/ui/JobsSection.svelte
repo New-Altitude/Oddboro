@@ -1,7 +1,10 @@
 <script lang="ts">
-  import type { JobRow, RunRow, Schedule } from '@oddboro/ledger';
-  import { describe, zoneName } from '@oddboro/ledger/time';
+  import type { JobRow, MissedRuns, RunRow, Schedule } from '@oddboro/ledger';
+  import { describe, MISSED_WORDS, zoneName } from '@oddboro/ledger/time';
   import SchedulePicker from './SchedulePicker.svelte';
+  import ChatSignInCard from './ChatSignInCard.svelte';
+  import type { ChatSignIn } from '../staff/chat.ts';
+  import { chatAbout, showInChat } from './chat-about.svelte.ts';
   import Markdown from './Markdown.svelte';
   import { call } from './api.ts';
   import { ago, nextWhen } from './format.ts';
@@ -26,6 +29,17 @@
   let instructions = $state('');
   let schedule = $state<Schedule>({ every: 'day', at: '07:00' });
   let report = $state(false);
+  let missed = $state<MissedRuns>('latest');
+  let files = $state<Job['files']>(null);
+  let share = $state(false);
+  type Review = {
+    signIns: { name: string; request: ChatSignIn }[];
+    browse: { id: string; name: string; ask?: { id: number; title: string } }[];
+    blocks: string[];
+    waiting?: string;
+    checkedAt: string | null;
+  };
+  let review = $state<Review>();
   let problem = $state('');
 
   $effect(() => {
@@ -44,21 +58,45 @@
     }
   }
 
+  async function check(id: number) {
+    const fresh = await call<Review>(`/api/jobs/${id}`);
+    if (editing === id) review = fresh;
+  }
+
   function open(j?: Job) {
     problem = '';
     name = j?.name ?? '';
     instructions = j?.instructions ?? '';
     schedule = j ? { ...j.schedule } : { every: 'day', at: '07:00' };
     report = j?.report ?? false;
+    missed = j?.missed ?? 'latest';
+    files = j?.files ?? null;
+    share = !!files?.share;
     editing = j ? j.id : 'new';
+    review = undefined;
+    if (j?.files) void act(() => check(j.id));
   }
 
   async function save() {
     await act(async () => {
       if (editing === 'new')
-        await call(`/api/staff/${profile.id}/jobs`, { name, instructions, schedule, report });
+        await call(`/api/staff/${profile.id}/jobs`, {
+          name,
+          instructions,
+          schedule,
+          report,
+          missed
+        });
       else
-        await call(`/api/jobs/${editing}`, { op: 'update', name, instructions, schedule, report });
+        await call(`/api/jobs/${editing}`, {
+          op: 'update',
+          name,
+          instructions,
+          schedule,
+          report,
+          missed,
+          ...(files && share !== !!files.share ? { share, expectedFiles: files } : {})
+        });
       editing = undefined;
     });
   }
@@ -95,8 +133,75 @@
           aria-label="What to do each run"
           bind:value={instructions}></textarea>
         <SchedulePicker bind:value={schedule} />
+        {#if files}
+          <div aria-live="polite" class="text-xs text-muted">
+            {#if review}
+              {#each review.blocks as block (block)}<p>{block}</p>{/each}
+              {#each review.signIns as sign}
+                <ChatSignInCard
+                  request={sign.request}
+                  name={sign.name}
+                  onready={() => typeof editing === 'number' && act(() => check(Number(editing)))}
+                  retryLabel="Check job again"
+                />
+              {/each}
+              {#each review.browse as odd (odd.id)}
+                <button
+                  class="text-sea"
+                  onclick={() =>
+                    odd.ask
+                      ? showInChat(odd.id, { kind: 'ask', ...odd.ask })
+                      : chatAbout(
+                          odd.id,
+                          `Please ask for Browse the web for your part of "${name}".`
+                        )}
+                  >{odd.ask ? 'Review browsing request' : 'Request browsing'} in {odd.name}'s chat</button
+                >
+              {/each}
+              {#if review.waiting}<p>{review.waiting}</p>{/if}
+              <p>
+                {review.checkedAt
+                  ? `Last scheduled file check ${ago(review.checkedAt)}.`
+                  : `Waiting for a scheduled run to check ${files.output}.`}
+              </p>
+              {#if files.sources?.length}<p>
+                  The run checks its source sign-ins when it starts.
+                </p>{/if}
+            {:else if !problem}
+              Checking access for these files…
+            {/if}
+          </div>
+        {:else if editing !== 'new'}
+          <p class="text-xs text-muted">
+            To exchange files with a colleague, ask {profile.name} in chat to link this job to that work.
+          </p>
+        {/if}
+        {#if files?.sources?.length}
+          <label class="flex items-center gap-2 text-xs text-muted"
+            ><input type="checkbox" bind:checked={share} />
+            Allow colleagues on this work to read {files.output} with material from {files.sources.join(
+              ', '
+            )}.
+          </label>
+        {/if}
         <label class="flex items-center gap-2 text-xs text-muted">
           <input type="checkbox" bind:checked={report} /> Put the result on my desk as a report
+        </label>
+        <label class="flex flex-col gap-1 text-xs text-muted">
+          When the office was off at run time
+          <select
+            class="rounded-lg bg-night/60 px-2 py-1.5 text-sm text-ink outline-none"
+            bind:value={missed}
+          >
+            {#each Object.entries(MISSED_WORDS) as [value, words] (value)}
+              <option {value}>{words}</option>
+            {/each}
+          </select>
+          <span class="text-[11px] text-faint"
+            >{missed === 'record'
+              ? 'Each missed run is filled later, one entry per period. For counts and trends that must have no gaps.'
+              : 'Runs once if it is still early enough, else waits for its next time. For sweeps, reports and reminders.'}</span
+          >
         </label>
         <div class="flex gap-2">
           <button
@@ -135,7 +240,10 @@
                   >{j.name}</span
                 >
                 <span class="block text-xs text-muted">
-                  {describe(j.schedule)}{j.report ? ' · report to your desk' : ''}
+                  {describe(j.schedule)}{j.report ? ' · report to your desk' : ''}{j.missed ===
+                  'record'
+                    ? ' · fills missed runs'
+                    : ''}
                 </span>
               </span>
               {#if working === j.name}

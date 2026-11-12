@@ -164,7 +164,7 @@ async function signIn(): Promise<void> {
   assert.equal(done.title, 'Signed in');
 }
 
-const OLD = 'This sign-in link is old. Click Sign in in Oddboro again.';
+const OLD = 'This sign-in link is old. Start it again from Oddboro.';
 const failed = (message: string): Loaded => ({ ok: false, title: 'Not signed in', message });
 
 type Blob = {
@@ -187,20 +187,20 @@ function makeDue() {
 
 let latestUrl: string;
 
-test('signing in registers once, asks only for profile, and sends the owner to New Altitude with PKCE', async () => {
+test('signing in registers once, asks for profile and personas, and sends the owner to New Altitude with PKCE', async () => {
   const first = await account('POST');
   assert.equal(first.status, 200);
   const registered = fake.seen.filter((s) => s.path === '/register');
   assert.equal(registered.length, 1);
   const client = JSON.parse(registered[0].body);
   assert.deepEqual(client.redirect_uris, ['http://127.0.0.1:4517/account/callback']);
-  assert.equal(client.scope, 'profile');
+  assert.equal(client.scope, 'profile personas');
   assert.equal(client.token_endpoint_auth_method, 'none');
 
   const firstUrl = new URL(String(first.body.url));
   const q = firstUrl.searchParams;
   assert.equal(`${firstUrl.origin}${firstUrl.pathname}`, `${fake.origin}/authorize`);
-  assert.equal(q.get('scope'), 'profile');
+  assert.equal(q.get('scope'), 'profile personas');
   assert.equal(q.get('code_challenge_method'), 'S256');
   assert.ok(q.get('code_challenge'));
   assert.ok(q.get('state'));

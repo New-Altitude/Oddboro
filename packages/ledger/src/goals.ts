@@ -1,12 +1,15 @@
 // Goals: what the owner wants more of. The owner sets one, or approves one the
 // Office Manager heard in chat, and the manager plans it: one ask holding the
 // hires and the work staff already here take on. A staffer serves the goals it
-// is linked to, sees only those, and says how each is going.
-import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
+// is linked to, sees only those, and says how each is going, as does the Odd
+// leading a goal's thread, which plans it before anyone serves it.
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from './db.ts';
 import { fixedError } from './errors.ts';
 import {
   addJob,
+  fileJobs,
+  refuseFileCycle,
   approveAsk,
   ask,
   editOwnJob,
@@ -25,14 +28,25 @@ import {
   jobs,
   staff,
   staffGoals,
+  chatCardOf,
+  threads,
   type GoalDraft,
   type GoalHealth,
   type GoalPlanItem,
-  type GoalStatus
+  type GoalStatus,
+  type InChat,
+  type JobFiles
 } from './schema.ts';
 import { MANAGER_ROLE, goalReview } from './managers.ts';
 import { HORIZONS } from './goal-words.ts';
-import { addFollowUp, goalThread, goalThreads, type Db, type GoalThread } from './threads.ts';
+import {
+  addFollowUp,
+  goalThread,
+  goalThreads,
+  type Db,
+  type Tx,
+  type GoalThread
+} from './threads.ts';
 
 export type GoalRow = typeof goals.$inferSelect;
 export type ProgressRow = typeof goalProgress.$inferSelect;
@@ -156,46 +170,77 @@ export async function manager(q: Db = db): Promise<StaffRow | undefined> {
  * Set a goal: the owner wrote it, or approved one the manager proposed. The
  * manager then plans it, and reviews every goal once a week from the first one.
  */
-export async function addGoal(d: GoalDraft, askId?: number): Promise<GoalRow> {
-  const [row] = await db.insert(goals).values(d).returning();
-  await record({
-    kind: 'decision',
-    actor: 'owner',
-    title: `Set a goal: ${d.title}`,
-    body: [d.why && `Why: ${d.why}`, d.doneWhen && `Done when: ${d.doneWhen}`]
-      .filter(Boolean)
-      .join('\n'),
-    askId
-  });
-  const m = await manager();
+export async function addGoal(d: GoalDraft, source?: number | ChatGoalRequest): Promise<GoalRow> {
+  return db.transaction((tx) => setGoal(tx, d, source));
+}
+
+type ChatGoalRequest = { managerId: string; requestId: string };
+
+export class GoalRequestConflict extends Error {}
+
+async function setGoal(
+  tx: Tx,
+  d: GoalDraft,
+  source?: number | ChatGoalRequest,
+  answered?: InChat
+): Promise<GoalRow> {
+  const chat = typeof source === 'object' ? source : undefined;
+  const askId = typeof source === 'number' ? source : undefined;
+  const m = await manager(tx);
+  if (chat && chat.managerId !== m?.id)
+    throw new GoalRequestConflict('Open the current Office Manager to set this goal.');
+  const [row] = await tx
+    .insert(goals)
+    .values({ ...d, requestId: chat?.requestId })
+    .onConflictDoNothing({ target: goals.requestId })
+    .returning();
+  if (!row && chat) {
+    const [saved] = await tx.select().from(goals).where(eq(goals.requestId, chat.requestId));
+    if (saved?.title === d.title) return saved;
+    throw new GoalRequestConflict('This submission already set a different goal.');
+  }
+  await record(
+    {
+      kind: 'decision',
+      actor: 'owner',
+      title: `Set a goal: ${d.title}`,
+      body: [d.why && `Why: ${d.why}`, d.doneWhen && `Done when: ${d.doneWhen}`]
+        .filter(Boolean)
+        .join('\n'),
+      askId
+    },
+    tx
+  );
   if (m) {
-    await ensureReview(m);
-    // Planned on a thread for the goal, so what the plan raises files under it.
-    await db.transaction(async (tx) =>
-      addFollowUp(tx, {
-        staffId: m.id,
-        kind: 'goal',
-        goalId: row.id,
-        threadId: await goalThread(tx, row.id, m.id)
-      })
-    );
+    await ensureReview(m, tx);
+    await addFollowUp(tx, {
+      staffId: m.id,
+      kind: 'goal',
+      goalId: row.id,
+      threadId: await goalThread(tx, row.id, m.id),
+      chatCard: chatCardOf(m.id, answered)
+    });
   }
   return row;
 }
 
-/** The manager's weekly review, made with the first goal so an office with none runs nothing. */
-async function ensureReview(m: StaffRow): Promise<void> {
-  const [has] = await db
+/** The manager's weekly review, made once even when two goals arrive together. */
+async function ensureReview(m: StaffRow, tx: Tx): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext('weekly-goal-review'))`);
+  const [has] = await tx
     .select({ id: jobs.id })
     .from(jobs)
     .where(and(eq(jobs.staffId, m.id), eq(jobs.name, REVIEW_JOB)));
   if (has) return;
-  await addJob({
-    staffId: m.id,
-    name: REVIEW_JOB,
-    instructions: goalReview(await ownerName()),
-    schedule: { every: 'week', day: 'Fri', at: '16:00' }
-  });
+  await addJob(
+    {
+      staffId: m.id,
+      name: REVIEW_JOB,
+      instructions: goalReview(await ownerName(tx)),
+      schedule: { every: 'week', day: 'Fri', at: '16:00' }
+    },
+    tx
+  );
 }
 
 /** The owner changes a goal: its words, when it is for, or where it stands. */
@@ -223,12 +268,16 @@ export async function updateGoal(
   return row;
 }
 
-/** Link a staffer to a goal, with its part in it. A staffer sees only goals it serves. */
+/**
+ * Link a staffer to a goal, with its part in it. A staffer sees only goals it
+ * serves. `askId` is the ask whose yes did it, so the Desk lists that yes once.
+ */
 export async function serveGoal(
   staffId: string,
   goalId: number,
   part: string,
-  q: Db = db
+  q: Db = db,
+  askId?: number
 ): Promise<void> {
   const who = await staffer(staffId, q);
   const g = await goal(goalId, q);
@@ -244,7 +293,8 @@ export async function serveGoal(
       kind: 'decision',
       actor: 'owner',
       title: `${who.name} serves the goal: ${g.title}`,
-      body: words
+      body: words,
+      askId
     },
     q
   );
@@ -260,7 +310,7 @@ export async function approveHire(askId: number, staffId: string): Promise<void>
   const approved = await approveAsk(askId, null, {
     link: async (a, tx) => {
       if (a.kind !== 'hire') throw new Error('That is not a proposed hire');
-      if (a.hire?.goal) await serveGoal(staffId, a.hire.goal.id, a.hire.goal.part, tx);
+      if (a.hire?.goal) await serveGoal(staffId, a.hire.goal.id, a.hire.goal.part, tx, askId);
     }
   });
   if (!approved) throw new Error('That proposal is no longer open');
@@ -280,18 +330,29 @@ export async function stopServing(staffId: string, goalId: number): Promise<void
     });
 }
 
-/** A staffer's word on a goal it serves. */
+/**
+ * A staffer's word on a goal it serves, or on one whose thread it leads. The
+ * lead plans the goal before anyone serves it, so it logs from the start.
+ */
 export async function logProgress(
   staffId: string,
   goalId: number,
   health: GoalHealth,
   note: string
 ): Promise<ProgressRow | string> {
-  const [link] = await db
-    .select()
-    .from(staffGoals)
-    .where(and(eq(staffGoals.staffId, staffId), eq(staffGoals.goalId, goalId)));
-  if (!link) return `You do not serve goal #${goalId}. my_goals lists the ones you do.`;
+  const [[link], [lead]] = await Promise.all([
+    db
+      .select({ id: staffGoals.goalId })
+      .from(staffGoals)
+      .where(and(eq(staffGoals.staffId, staffId), eq(staffGoals.goalId, goalId))),
+    db
+      .select({ id: threads.id })
+      .from(threads)
+      .where(and(eq(threads.hubId, staffId), eq(threads.goalId, goalId)))
+      .limit(1)
+  ]);
+  if (!link && !lead)
+    return `You neither serve goal #${goalId} nor lead its thread. my_goals lists the goals you serve.`;
   const [row] = await db
     .insert(goalProgress)
     .values({ goalId, staffId, health, note: note.trim().slice(0, 500) })
@@ -299,37 +360,53 @@ export async function logProgress(
   return row;
 }
 
-/** A goal ask approved: the goal is set, and the manager plans it. */
-export async function approveGoal(askId: number, reason: string | null): Promise<GoalRow> {
+/**
+ * A goal ask approved: the goal is set, and the manager plans it. Approved
+ * on its card in the manager's chat (`inChat`), the planning run replies there.
+ */
+export async function approveGoal(
+  askId: number,
+  reason: string | null,
+  inChat = false
+): Promise<GoalRow> {
   const a = await ask(askId);
   if (a?.kind !== 'goal' || !a.goal || a.status !== 'open')
     throw fixedError('That goal is no longer open');
   const draft = a.goal;
+  const chat: InChat | undefined = inChat
+    ? { staffId: a.staffId, card: { kind: 'ask', id: a.id, title: a.title } }
+    : undefined;
   let set: GoalRow | undefined;
   await approveAsk(askId, reason, {
-    carryOut: async () => {
-      set = await addGoal(draft, askId);
+    link: async (_, tx) => {
+      set = await setGoal(tx, draft, askId, chat);
     }
   });
   if (!set) throw fixedError('That goal is no longer open');
   return set;
 }
 
-const itemLabel = (i: GoalPlanItem) =>
-  i.kind === 'hire' ? `hire ${i.hire.name}, ${i.hire.role}` : `${i.staff}: ${i.part}`;
+/** A plan item in words, with the Odd's name, never its id. */
+const itemLabel = (names: Map<string, string>) => (i: GoalPlanItem) =>
+  i.kind === 'hire'
+    ? `hire ${i.hire.name}, ${i.hire.role}`
+    : `${names.get(i.staff) ?? i.staff}: ${i.part}`;
 
 /**
  * A plan ask approved, with the parts the owner ticked. Staff already here take
- * on their part at once. Each hire becomes a hire ask on the plan's thread,
+ * on their part in the transaction that approves the ask, so a part that fails
+ * leaves the plan open. Each hire becomes a hire ask on the plan's thread,
  * which the page opens in the hire window, and the owner's own steps a task on
  * their desk. Only then does the answer bring the plan's Odd back to the goal's
  * thread to lead the work, so its run finds all of it. Hiring one of the plan's
- * hires answers its ask, and that brings the Odd back there again.
+ * hires answers its ask, and that brings the Odd back there again. Approved
+ * on its card in the Odd's chat (`inChat`), that pick-up replies there.
  */
 export async function approvePlan(
   askId: number,
   picks: number[],
-  reason: string | null
+  reason: string | null,
+  inChat = false
 ): Promise<{ hires: AskRow[] }> {
   const a = await ask(askId);
   if (a?.kind !== 'plan' || !a.plan || a.status !== 'open')
@@ -340,23 +417,62 @@ export async function approvePlan(
   const picked = plan.items.filter((_, i) => picks.includes(i));
   if (!picked.length) throw fixedError('Tick at least one part of the plan, or deny it');
   const left = plan.items.filter((_, i) => !picks.includes(i));
-  const note =
-    [reason, left.length && `Left out: ${left.map(itemLabel).join('; ')}.`]
-      .filter(Boolean)
-      .join('\n') || null;
+  const label = itemLabel(new Map((await roster()).map((s) => [s.id, s.name])));
+  const note = [
+    reason,
+    `Approved: ${picked.map(label).join('; ')}`,
+    left.length && `Left out: ${left.map(label).join('; ')}.`
+  ]
+    .filter(Boolean)
+    .join('\n');
 
+  const files = (f?: Omit<JobFiles, 'thread'>) => {
+    if (!f) return undefined;
+    if (!a.threadId) throw new Error('This plan has no work folder.');
+    return { ...f, thread: a.threadId };
+  };
+  // Refuse the whole plan, before any part of it, if its files make a ring.
+  let after = await fileJobs();
+  picked.forEach((item, i) => {
+    if (item.kind !== 'assign') return;
+    if (item.job?.files)
+      after.push({
+        id: -1 - i,
+        name: item.job.name,
+        staffId: item.staff,
+        files: files(item.job.files)!
+      });
+    const edit = item.editJob;
+    if (edit?.files)
+      after = after.map((j) =>
+        j.staffId === item.staff && j.name === edit.name
+          ? { ...j, name: edit.newName ?? j.name, files: files(edit.files)! }
+          : j
+      );
+  });
+  refuseFileCycle(after);
   const hires: AskRow[] = [];
   const approved = await approveAsk(askId, note, {
+    link: async (_, tx) => {
+      for (const item of picked)
+        if (item.kind === 'assign') await serveGoal(item.staff, g.id, item.part, tx, askId);
+    },
     carryOut: async () => {
       for (const item of picked) {
         if (item.kind === 'assign') {
-          await serveGoal(item.staff, g.id, item.part);
-          if (item.job) await addJob({ staffId: item.staff, ...item.job });
+          if (item.job)
+            await addJob({ staffId: item.staff, ...item.job, files: files(item.job.files) });
           if (item.editJob)
             await editOwnJob(
               item.staff,
               item.editJob.name,
-              { instructions: item.editJob.instructions, schedule: item.editJob.schedule },
+              {
+                name: item.editJob.newName,
+                instructions: item.editJob.instructions,
+                schedule: item.editJob.schedule,
+                missed: item.editJob.missed,
+                files: files(item.editJob.files)
+              },
               { askId }
             );
         } else {
@@ -377,7 +493,8 @@ export async function approvePlan(
           steps: plan.ownerSteps,
           byOffice: true
         });
-    }
+    },
+    inChat
   });
   if (!approved) throw fixedError('That plan is no longer open');
   return { hires };

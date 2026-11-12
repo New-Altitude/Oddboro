@@ -94,16 +94,21 @@ const github = createServer((req, res) => {
         code_challenge_methods_supported: ['S256']
       });
     if (path === '/login/oauth/access_token' && req.method === 'POST') {
+      // GitHub refuses with 200 and its own error codes in the body (checked
+      // against github.com 2026-11-10), never a 4xx.
       const form = new URLSearchParams(body);
       if (form.get('client_id') !== 'Ov23liHSAMGGQ2kvqbkS' || form.get('client_secret') !== 'shh')
-        return send(401, { error: 'invalid_client' });
+        return send(200, { error: 'incorrect_client_credentials' });
       if (form.get('grant_type') === 'authorization_code') {
         const proof = createHash('sha256')
           .update(form.get('code_verifier') ?? '')
           .digest('base64url');
-        if (proof !== challenge) return send(400, { error: 'invalid_grant' });
+        if (proof !== challenge) return send(200, { error: 'bad_verification_code' });
       } else if (!refreshes.delete(form.get('refresh_token') ?? ''))
-        return send(400, { error: 'invalid_grant' });
+        return send(200, {
+          error: 'bad_refresh_token',
+          error_description: 'The refresh token passed is incorrect or expired.'
+        });
       n++;
       refreshes.add(`ghr_${n}`);
       // Inside the office's refresh margin, so the next bearer() renews it.
@@ -183,6 +188,34 @@ test("a server that signs in through GitHub uses New Altitude's GitHub app and t
   const renewal = new URLSearchParams(seen.at(-1)?.body);
   assert.equal(renewal.get('grant_type'), 'refresh_token');
   assert.equal(renewal.get('client_id'), 'Ov23liHSAMGGQ2kvqbkS');
+});
+
+test('a renewal GitHub refuses with a 200 is logged with its reason and forgets the dead sign-in', async () => {
+  // GitHub no longer takes the stored refresh token.
+  refreshes.clear();
+  const logged: string[] = [];
+  const log = mock.method(console, 'error', (line: unknown) => void logged.push(String(line)));
+  try {
+    assert.equal(await bearer('githubcopilot'), undefined);
+  } finally {
+    log.mock.restore();
+  }
+  assert.ok(
+    logged.some((l) =>
+      l.includes(
+        'GitHub refused the token request: bad_refresh_token: The refresh token passed is incorrect or expired.'
+      )
+    ),
+    logged.join('\n')
+  );
+  assert.ok(logged.some((l) => l.includes("githubcopilot's sign-in did not renew")));
+  // The dead tokens are gone, so the office shows the tool as needing a sign-in.
+  const kept = JSON.parse(store.get('githubcopilot:oauth') ?? '{}') as { tokens?: unknown };
+  assert.equal(kept.tokens, undefined);
+  // And the next run asks GitHub nothing.
+  seen.length = 0;
+  assert.equal(await bearer('githubcopilot'), undefined);
+  assert.ok(!seen.some((s) => s.path === '/login/oauth/access_token'));
 });
 
 test("a build without the GitHub app's secret says so on Sign in, never that the server offers no sign-in", async () => {

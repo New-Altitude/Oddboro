@@ -5,6 +5,9 @@ colour from `src/palette.json`. `scripts/compile.ts` turns the `.px` files into
 `dist/atlas.png`, `dist/atlas.json` (a PixiJS spritesheet) and `dist/meta.json`
 (footprints, origins, spots and lights).
 
+Where a new kind of thing starts, the shared function for each job, and the
+check that catches a missed place: `docs/architecture.md`.
+
 - `FORMAT.md` is the contract: the grid, the camera, the file format, the
   sprites the room builder asks for by name, and the `staff` animation names.
 - `ART.md` is the style guide: palette roles, outlines, shading, and how to add

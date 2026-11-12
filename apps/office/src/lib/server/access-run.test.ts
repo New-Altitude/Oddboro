@@ -63,25 +63,18 @@ function made(...parts: string[]): string {
 const after = (args: string[], flag: string) => args[args.indexOf(flag) + 1];
 /** Every value given with `flag`, which may come more than once. */
 const each = (args: string[], flag: string) => args.filter((_, i) => args[i - 1] === flag);
-/** The values after `flag`, up to the next flag. */
-function listAfter(args: string[], flag: string): string[] {
-  const from = args.indexOf(flag) + 1;
-  const end = args.findIndex((a, i) => i >= from && a.startsWith('--'));
-  return args.slice(from, end);
-}
 type Sandbox = {
   filesystem: { denyRead: string[]; allowRead: string[]; denyWrite: string[] };
   network: { allowedDomains: string[]; deniedDomains?: string[] };
   credentials: { envVars: { name: string; mode: string }[] };
 };
-const sandboxOf = (run: Gave) =>
-  (JSON.parse(after(run.args, '--settings')) as { sandbox?: Sandbox }).sandbox;
+const sandboxOf = (run: Gave) => run.claudeSettings!.sandbox as Sandbox | undefined;
 /** The run's temp folder, where Run commands puts its commands' own files. */
 const tmpOf = (run: Gave) => `/private/tmp/ob-${run.env.RUN_KEY.slice(0, 8)}`;
 /** The paths of a Claude Code run's Read allows, in order. */
 const readAllows = (run: Gave) =>
-  listAfter(run.args, '--allowedTools')
-    .filter((a) => a.startsWith('Read(/'))
+  run
+    .claudeSettings!.permissions.allow.filter((a) => a.startsWith('Read(/'))
     .map((a) => a.slice('Read(/'.length, -'/**)'.length));
 
 /** A run on another tool, with `commands` as given and nothing else switched on. */
@@ -112,6 +105,12 @@ test("each tool's launch gives a shell exactly when commandsHow says and the off
   /** A Codex run's `-c` value for `key`. */
   const codexSet = (args: string[], key: string) =>
     args.find((a, i) => args[i - 1] === '-c' && a.startsWith(`${key}=`))?.slice(key.length + 1);
+  // A Mac's row gives Claude Code a shell, so the run makes its temp folder
+  // under /private/tmp (`sandboxPaths`), and only a real Mac can make that.
+  // That row runs on a Mac alone, which CI's Mac leg covers.
+  const systems = (['darwin', 'linux', 'win32'] as const).filter(
+    (p) => p !== 'darwin' || process.platform === 'darwin'
+  );
   // Every Odd here has Run commands stored on, so only its tool decides.
   for (const [id, agent] of [
     ['bo', 'claude'],
@@ -119,7 +118,7 @@ test("each tool's launch gives a shell exactly when commandsHow says and the off
     ['cole', 'codex']
   ] as const) {
     await setOwn(id, { commands: true });
-    for (const platform of ['darwin', 'linux', 'win32'] as const) {
+    for (const platform of systems) {
       const on = `${agent} on ${platform}`;
       assert.ok(L.AGENT_PLATFORMS[agent].runs.includes(platform), on);
       const chat = () => chatOf(id);
@@ -132,7 +131,7 @@ test("each tool's launch gives a shell exactly when commandsHow says and the off
       if (agent === 'claude') {
         // Its own file tools never, since the office carries them on every system.
         assert.equal(tools, shell ? 'Bash' : '', on);
-        assert.ok(listAfter(run.args, '--allowedTools').includes('mcp__files'), on);
+        assert.ok(run.claudeSettings!.permissions.allow.includes('mcp__files'), on);
       }
       if (agent === 'grok') {
         assert.ok(!shell, on);
@@ -210,7 +209,7 @@ test(
     assert.equal(after(run.args, '--tools'), 'Bash,WebSearch,WebFetch');
     assert.ok(filesOf(run)?.walls.writes.includes(w), 'the given folder left the file tools');
     assert.ok(sandboxOf(run), 'the handed-over run lost its sandbox');
-    const allowed = listAfter(run.args, '--allowedTools');
+    const allowed = run.claudeSettings!.permissions.allow;
     assert.ok(allowed.includes(`Edit(${L.rulePath(w)}/**)`), allowed.join(' '));
     assert.equal(run.env.CEILING, 'draft');
     // Every tool is listed: the gateway holds each change for the owner's yes.
@@ -407,6 +406,30 @@ test(
 );
 
 test(
+  'a chat after a refused one opens the network again once the office restarts, though its prompt quotes the refused message',
+  onMac,
+  async () => {
+    await setOwn('dee', { commands: true, web: true });
+    try {
+      let refused = '';
+      await chat('dee', 'Refuse the open network.', (e) => {
+        if (e.type === 'error') refused = e.message;
+      });
+      assert.match(refused, /will not let commands reach the internet/);
+      // As a restart does.
+      resetHeldNetwork();
+      // The stand-in reads only the end of its message, as the owner's words
+      // come last, so the quoted message does not make it refuse again.
+      const next = await chatOf('dee', 'Count the chairs.');
+      assert.ok(next.message.includes('Refuse the open network.'), next.message);
+      assert.ok(sandboxOf(next)?.network.allowedDomains.includes('*'));
+    } finally {
+      resetHeldNetwork();
+    }
+  }
+);
+
+test(
   "a run with its network closed that fails with Claude Code's refusal words keeps its own words and holds no network",
   onMac,
   async () => {
@@ -418,8 +441,8 @@ test(
     writeFileSync(
       claude,
       `#!/usr/bin/env node
-process.stdin.resume();
-process.stdin.on('end', () => {
+// A chat's stdin stays open until its result, so it fails on its first line.
+process.stdin.once('data', () => {
   process.stderr.write('Overly broad patterns like "*" are not allowed\\n');
   process.exit(1);
 });
@@ -662,15 +685,18 @@ test(
   "with Run commands and Browse the web both on, the office's secrets stay hidden from commands that reach the internet",
   onMac,
   () =>
-    withEnv({ FAKE_OWNER_API_TOKEN: 'x' }, async () => {
+    withEnv({ FAKE_OWNER_API_TOKEN: 'x', ANTHROPIC_AUTH_TOKEN: 'x' }, async () => {
       await setOwn('bo', { commands: true, web: true });
-      const sandbox = sandboxOf(await chatOf('bo'));
+      const run = await chatOf('bo');
+      const sandbox = sandboxOf(run);
+      // An office token outside the allow list never reaches the run at all (`runEnv`).
+      assert.ok(!run.envNames.includes('FAKE_OWNER_API_TOKEN'), 'the token reached the run');
       assert.deepEqual(sandbox?.network, {
         allowedDomains: ['*'],
         deniedDomains: macAddresses(networkInterfaces(), hostname())
       });
       const hidden = sandbox?.credentials.envVars ?? [];
-      for (const name of ['FAKE_OWNER_API_TOKEN', 'ANTHROPIC_API_KEY'])
+      for (const name of ['ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY'])
         assert.ok(
           hidden.some((v) => v.name === name && v.mode === 'deny'),
           `${name} reaches commands: ${JSON.stringify(hidden)}`

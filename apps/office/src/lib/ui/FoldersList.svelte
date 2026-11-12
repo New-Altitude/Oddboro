@@ -10,7 +10,9 @@
   // has Can read and Can write side by side. Each shows with the home folder
   // written `~`, which only the server can work out, so the profile carries
   // it. A level change or Remove sends the path as stored, so a folder gone
-  // from the disk can still go.
+  // from the disk can still go. A folder given before its secret store was
+  // listed reaches no run, so it says why here and can still be removed; the
+  // server works that out (`touchesStore`).
   import { FOLDER_LABEL, type FolderAccess } from '@oddboro/ledger/access';
   import { call } from './api.ts';
   import FolderWarning from './FolderWarning.svelte';
@@ -145,6 +147,11 @@
           <span class="min-w-0 flex-1" title={f.shown}>
             <span class="block truncate text-sm font-medium">{nameOf(f.shown)}</span>
             <span class="block truncate text-[11px] text-muted">{whereOf(f.shown)}</span>
+            {#if f.touchesStore}
+              <span class="block text-[11px] text-ember"
+                >Holds keys or sign-ins, so this Odd no longer gets it.</span
+              >
+            {/if}
           </span>
           <span
             class="flex shrink-0 rounded-lg bg-night/60 p-0.5"

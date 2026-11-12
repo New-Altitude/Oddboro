@@ -31,7 +31,7 @@
   import { setZone } from '@oddboro/ledger/time';
   import type { StaffProfile } from '../../staff/roster.ts';
   import { AgentTools } from '../agent-tools.svelte.ts';
-  import { call, follow } from '../api.ts';
+  import { call, follow, type ApiUrl } from '../api.ts';
   import AiCard from './AiCard.svelte';
   import MacCard, { type Setup } from './MacCard.svelte';
   import ManagerCard, { type Custom, type Preset } from './ManagerCard.svelte';
@@ -154,9 +154,9 @@
     let resolve!: (v: T) => void;
     return { promise: new Promise<T>((r) => (resolve = r)), resolve };
   };
-  const finished = later<World | null>();
+  let finished = later<World | null>();
   /** Whether the office moved into the drawing. */
-  const moved = later<boolean>();
+  let moved = later<boolean>();
   let drawnArt: { sheet?: ArtSheet; catalog?: SpriteCatalog } | undefined;
   /** The pieces the design is drawing, for the card the reveal waits behind. */
   let pieces = $state({ done: 0, total: 0 });
@@ -195,18 +195,23 @@
       design.failed = true;
       finished.resolve(null);
       moved.resolve(false);
-      strip = 'The design did not come out. You will start on Main Street.';
+      strip = `The design did not come out: ${l.message} Go back to try again, or start on Main Street.`;
     }
   }
 
   async function startDesign() {
-    if (design || mainStreet) return;
+    if ((design && !design.failed) || mainStreet) return;
+    // A design that failed draws again, such as after the owner picks another AI.
+    if (design) {
+      finished = later();
+      moved = later();
+    }
     design = {};
     strip = 'Planning the office.';
-    let url = '/api/office/design';
+    let url: ApiUrl = '/api/office/design';
     try {
       const job = await call<{ id: number }>('/api/office/design', { description });
-      url += `?id=${job.id}`;
+      url = `/api/office/design?id=${job.id}`;
     } catch {
       // Already drawing one, from before a reload: follow that.
     }
@@ -467,7 +472,7 @@
             <SpaceCard
               bind:description
               bind:mainStreet
-              drawing={!!design}
+              drawing={!!design && !design.failed}
               {canDraw}
               onback={back}
               onnext={() => {

@@ -55,23 +55,30 @@ const FILTER = {
 /** The id in "Filter 12 is on ...". */
 const idOf = (text: string) => Number(/^Filter (\d+) /.exec(text)?.[1]);
 
-test('propose_filter is offered to every Odd that holds Gmail, at any level, whatever tools it was hired with', async () => {
-  const t = await offered(await toolServer('paige', { RUN_KEY: 'k-paige' }));
-  assert.ok(t, 'Paige reads Gmail and holds the tool');
-  for (const words of [
-    'One filter per call',
-    'Call list_filters first',
-    'what mail it matches and what it does',
-    'Nothing changes in Gmail until',
-    'never deletes or forwards'
-  ])
-    assert.ok(t.description?.includes(words), words);
-  assert.equal(await offered(await toolServer('nora', { RUN_KEY: 'k-nora' })), undefined);
-  assert.ok(
-    await offered(await toolServer('tess', { RUN_KEY: 'k-tess' })),
-    'a hire list cannot leave it out'
-  );
-});
+test(
+  'propose_filter is offered to every Odd that holds Gmail, at any level, whatever tools it was hired with',
+  // Three tool servers, which cannot be one: each reads its Odd from STAFF_ID
+  // as it starts and offers only that Odd's tools. Three starts in a row hit
+  // the package's 15 s limit on a loaded machine, so each gets that limit.
+  { timeout: 45_000 },
+  async () => {
+    const t = await offered(await toolServer('paige', { RUN_KEY: 'k-paige' }));
+    assert.ok(t, 'Paige reads Gmail and holds the tool');
+    for (const words of [
+      'One filter per call',
+      'Call list_filters first',
+      'what mail it matches and what it does',
+      'Nothing changes in Gmail until',
+      'never deletes or forwards'
+    ])
+      assert.ok(t.description?.includes(words), words);
+    assert.equal(await offered(await toolServer('nora', { RUN_KEY: 'k-nora' })), undefined);
+    assert.ok(
+      await offered(await toolServer('tess', { RUN_KEY: 'k-tess' })),
+      'a hire list cannot leave it out'
+    );
+  }
+);
 
 test('each call raises one filter ask in plain words, and one that matches nothing or does nothing is refused', async () => {
   const c = await toolServer('paige', { RUN_KEY: 'k-one' });

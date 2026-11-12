@@ -743,6 +743,46 @@ test("an install that fails says the installer's last line and leaves the tool o
   }
 });
 
+test('Install with no npm on PATH says to install Node.js, never a spawn error, and runs nothing', async () => {
+  const path = process.env.PATH;
+  // Node alone, the way the app runs on a Mac whose npm comes from nvm set up in ~/.zshrc.
+  process.env.PATH = nodeBin;
+  try {
+    assert.equal(onPath('npm'), undefined);
+    const from = installed().length;
+    await awayFromHome(async () => {
+      await assert.rejects(
+        onPlatform('darwin', () => send('POST', 'codex', { action: 'install' })),
+        refused(
+          400,
+          'Codex installs with npm, which comes with Node.js, and the office cannot find npm on this Mac. Install Node.js from nodejs.org, then quit and reopen Oddboro.'
+        )
+      );
+      const t = await toolIn('codex');
+      assert.equal(t?.signIn?.installing, false);
+      assert.equal(toolAction(t), 'install');
+      // Claude Code's install in Setup takes npm too, off Windows.
+      await assert.rejects(
+        onPlatform('linux', () =>
+          claudeRoute.POST({
+            request: new Request('http://office/api/setup/claude', {
+              method: 'POST',
+              body: JSON.stringify({ action: 'install' })
+            })
+          } as unknown as Parameters<typeof claudeRoute.POST>[0])
+        ),
+        refused(
+          400,
+          'Claude Code installs with npm, which comes with Node.js, and the office cannot find npm on this computer. Install Node.js from nodejs.org, then quit and reopen Oddboro.'
+        )
+      );
+    });
+    assert.equal(installed().length, from, 'an installer ran');
+  } finally {
+    process.env.PATH = path;
+  }
+});
+
 test("a Grok installed from the page only into xAI's install folder is offered, signs in, renews and runs without restarting the office", async () => {
   await withNoTools(async (home) => {
     assert.equal((await toolIn('grok'))?.installed, false);
@@ -1009,6 +1049,7 @@ test('only Claude Code on Opus or Codex on Sol or Astra draws a look; on any oth
   for (const [agent, model, draws] of [
     ['claude', undefined, true],
     ['claude', 'opus', true],
+    ['claude', 'claude-fable-5-2', true],
     ['claude', 'claude-fable-5-1', true],
     ['claude', 'sonnet', false],
     ['codex', undefined, true],
@@ -1104,4 +1145,21 @@ test('an office run stops when its signal does, as a drawing left for parts', as
   );
   assert.deepEqual(run, { ok: false, text: 'Stopped.' });
   assert.deepEqual(existsSync(runs) ? readdirSync(runs) : [], []);
+});
+
+test('an office run on a tool that is not installed says so, not that it is not signed in', async () => {
+  const { runAsOffice } = await import('./office-run.ts');
+  const path = process.env.PATH;
+  process.env.PATH = nodeBin;
+  try {
+    const run = await withEnv({ OFFICE_AGENT: 'codex' }, () =>
+      runAsOffice('Draw a desk.', { system: 'You draw.', kind: 'office', timeoutMs: 60_000 })
+    );
+    assert.deepEqual(run, {
+      ok: false,
+      text: 'Codex is not installed. Install it in Setup, under Your AI.'
+    });
+  } finally {
+    process.env.PATH = path;
+  }
 });

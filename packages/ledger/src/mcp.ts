@@ -35,12 +35,19 @@ import {
   searchLedger,
   setDescription,
   staffer,
+  task,
+  withdrawAsk,
+  withdrawTask,
+  anyStaffer,
+  formerStaff,
   type GoAhead,
   record,
   roster,
+  tasksFrom,
   waitingPokes,
   type LedgerRow
 } from './office.ts';
+import { askReplaced, SAID_AS, taskSaid } from './desk-answers.ts';
 import {
   allGoals,
   goal,
@@ -50,7 +57,7 @@ import {
   updateGoal,
   type GoalView
 } from './goals.ts';
-import { goalWhen, HEALTH_WORDS, HORIZONS, STATUS_WORDS } from './goal-words.ts';
+import { GOAL_IS_LIVE, goalWhen, HEALTH_WORDS, HORIZONS, STATUS_WORDS } from './goal-words.ts';
 import {
   accessInRun,
   askAboveLevel,
@@ -62,10 +69,12 @@ import {
   ownToolsSaid
 } from './capabilities.ts';
 import { AGENT_NAMES, commandsOnline } from './agents.ts';
+import { currentPlatform } from './platform.ts';
 import {
   FOLDER_SAID,
+  parseLevel,
+  POSTAL_ID,
   grantWorks,
-  levelAtMost,
   LEVELS,
   NOT_OWN_TOOLS,
   OWN_SWITCHES,
@@ -73,7 +82,11 @@ import {
   SWITCH_NAMES,
   switchesSaid
 } from './access-words.ts';
-import { handOff } from './hand-offs.ts';
+import { handOff, type CarriedFile } from './hand-offs.ts';
+import { leavesLine, leavingRefused } from './leaving.ts';
+import { keepBugDraft } from './bug-drafts.ts';
+import { MANAGER_ROLE } from './managers.ts';
+import { parkOnTask } from './task-parking.ts';
 import {
   APPLIES_TO_MAX,
   CITE_FIRST,
@@ -89,12 +102,14 @@ import {
   notLed,
   parkThread,
   recentThreads,
+  PASS_ONLY_WORK,
   tellLead,
   threadsOn,
   workFile
 } from './threads.ts';
-import { THREADS_DIR, workName, workPath } from './work-paths.ts';
+import { INSTRUCTIONS, THREADS_DIR, workName, workPath } from './work-paths.ts';
 import { withFooter } from './mail-footer.ts';
+import { MAIL_FILES_MAX, mailAttachments } from './mail-attachments.ts';
 import {
   doesSomething,
   filterWords,
@@ -111,20 +126,37 @@ import {
   GITHUB_ID,
   searchRegistry
 } from './registry.ts';
-import type { GoalPlanItem, HireProposal } from './schema.ts';
+import { GOAL_STATUSES, MISSED_RUNS, type GoalPlanItem, type HireProposal } from './schema.ts';
 import type { OwnSwitch as OwnSwitchName } from './access-words.ts';
 import {
   clockTime,
   describe as describeSchedule,
   officeAt,
   officeDay,
+  SCHEDULE_RULE,
   WEEKDAYS,
   zone,
   zoneName
 } from './time.ts';
-import { hasTool, isGrantable } from './tools.ts';
-import { home } from './home.ts';
+import {
+  GRANTABLE_TOOLS,
+  hasTool,
+  isGrantable,
+  isOffered,
+  type OfficeToolId,
+  type RIDES_WITH,
+  type ToolRun
+} from './tools.ts';
+import { home, isOfficeFile, isWhereNamed } from './home.ts';
+import { trustSystemCertificates } from './certificates.ts';
 
+import {
+  advancedMode,
+  projectConnections,
+  projectWork,
+  requestProject
+} from './project-sessions.ts';
+trustSystemCertificates();
 const ME = process.env.STAFF_ID ?? '';
 const me = await staffer(ME);
 if (!me) throw new Error(`STAFF_ID "${ME}" names no Odd in this office`);
@@ -132,7 +164,7 @@ if (!me) throw new Error(`STAFF_ID "${ME}" names no Odd in this office`);
 const OWNER = await ownerName();
 /** The office's time zone in words, like "Pacific Time". */
 const ZONE = zoneName();
-const has = (tool: string) => hasTool(me.tools, tool);
+const has = (tool: OfficeToolId) => hasTool(me.tools, tool);
 /** This staffer's own folder. Files it names are relative to it. */
 const HOME = home('staff', ME);
 
@@ -141,6 +173,33 @@ const HOME = home('staff', ME);
  * the staffer, so a change made "because the owner asked" carries their real words.
  */
 const OWNER_SAID = process.env.OWNER_SAID || undefined;
+/**
+ * The files the owner attached to that message, set by the office: each one's
+ * tag in their message, its path in this Odd's folder, and the owner's own
+ * name for it. `tell_lead` takes every one to the lead with their words.
+ */
+const OWNER_FILES = ownerFiles(process.env.OWNER_FILES);
+// Each Gmail account is a connector of its own. With more than one, the Odd
+// names the one the email came to, and the reply goes out from it.
+const mailboxes = (await grantsFor(ME))
+  .filter((g) => g.connector.config.google === 'gmail')
+  .map((g) => ({ id: g.connectorId, account: g.connector.config.account }));
+/** This run, as the office tools' row conditions read it. */
+const RUN: ToolRun = {
+  gmail: mailboxes.length > 0,
+  // Project tools exist only while the owner keeps Advanced mode on.
+  project:
+    process.env.LESSON_RUN !== '1' &&
+    (await advancedMode()) &&
+    (await projectConnections(ME)).length > 0,
+  chat: OWNER_SAID !== undefined,
+  manager: me.role === MANAGER_ROLE
+};
+/**
+ * Whether this run is offered `tool` (`isOffered`). A tool with a condition is
+ * registered behind this, never behind a rule of its own.
+ */
+const offered = (tool: OfficeToolId) => isOffered(me.tools, tool, RUN);
 /**
  * The owner's note a follow-up carries out: their reason on an ask, what to
  * change, or their note on a task. Lessons may quote it; it is no go-ahead.
@@ -233,6 +292,17 @@ const attachArg = z
     `Files that go with it: one in your folder, e.g. ['notes/intake.md'], or one in the folder of a goal or work you are on, by its path from ${THREADS_DIR}/, e.g. ['${workName(12, 'paige/index.html')}']. Attach the file itself, never a copy. ${OWNER} sees them on their desk and edits a Markdown one from your folder right there, so do not tell them where to find it.`
   );
 
+/** A file an Odd names on a tool call: its office name and real path, or undefined when it cannot read it. */
+async function readableFile(p: string): Promise<{ name: string; real: string } | undefined> {
+  if (isAbsolute(p)) return undefined;
+  if (workPath(p)) {
+    const real = await workFile(ME, p);
+    return real ? { name: p, real } : undefined;
+  }
+  const name = ownFile(p);
+  return name ? { name, real: resolve(realpathSync(HOME), name) } : undefined;
+}
+
 /**
  * The attachments as names the owner's viewer opens (`workPath` for a file in
  * a thread's folder, else a path inside this staffer's folder), or why one is
@@ -243,11 +313,7 @@ async function attachable(
 ): Promise<{ paths: string[] } | { problem: string }> {
   const out: string[] = [];
   for (const p of paths) {
-    const name = isAbsolute(p)
-      ? undefined
-      : workPath(p)
-        ? (await workFile(ME, p)) && p
-        : ownFile(p);
+    const name = (await readableFile(p))?.name;
     if (!name)
       return {
         problem: `No file at ${p} that you can attach. Name a file in your folder by its path inside it, e.g. notes/intake.md, or one in the folder of a goal or work you are on from ${THREADS_DIR}/, e.g. ${workName(12, 'paige/index.html')}, never by its full path. Write it first if it is not there.`
@@ -257,15 +323,53 @@ async function attachable(
   return { paths: [...new Set(out)] };
 }
 
-const atArg = z.string().regex(/^\d\d:\d\d$/);
+const fileName = z
+  .string()
+  .max(240)
+  .regex(/^[\w.-]+(?:\/[\w.-]+)*$/)
+  .refine(
+    (s) => s.split('/').every((part) => part !== '.' && part !== '..'),
+    'Use a file name inside the work folder.'
+  );
+const jobFiles = z.object({
+  thread: z.number().int().positive().max(2147483647),
+  input: fileName
+    .optional()
+    .describe(
+      "A scheduled writer's result to read first, including its Odd's part, like clerk/wire.md."
+    ),
+  output: fileName.describe('The result to write inside your own part, like edition.md.'),
+  sources: z
+    .array(z.string().min(1).max(120))
+    .max(12)
+    .optional()
+    .describe(
+      'Tools needed to produce this file: connector ids or web. A checked input from another job needs no source account of its own.'
+    )
+});
+const planFiles = jobFiles.omit({ thread: true }).extend({
+  share: z
+    .boolean()
+    .optional()
+    .describe(
+      'Ask for permission to put material from the listed sources in only this result, readable by the Odds on this goal.'
+    )
+});
+const atArg = z.string().regex(SCHEDULE_RULE.oddAt);
 const scheduleArg = z.discriminatedUnion('every', [
-  z.object({ every: z.literal('minutes'), n: z.number().int().min(15) }),
+  z.object({ every: z.literal('minutes'), n: z.number().int().min(SCHEDULE_RULE.oddMinMinutes) }),
   z.object({ every: z.literal('day'), at: atArg }),
   z.object({ every: z.literal('weekday'), at: atArg }),
   z
     .object({ every: z.literal('week'), day: z.enum(WEEKDAYS), at: atArg })
     .describe('Once a week, e.g. { every: "week", day: "Fri", at: "16:00" }.')
 ]);
+const missedArg = z
+  .enum(MISSED_RUNS)
+  .optional()
+  .describe(
+    `What the job does with runs it missed while the office was off. 'latest' (the usual, for sweeps, reports and reminders): only the newest run matters. 'record': every missed period gets its own entry, filled later. Pick 'record' only when each run adds an entry to a series that must have no gaps, such as a daily count or a trend file.`
+  );
 
 /**
  * A file in this staffer's folder, as the path inside it to its real path, or
@@ -282,6 +386,160 @@ function ownFile(path: string): string | undefined {
     // Nothing at that path.
     return undefined;
   }
+}
+
+// `ownFile` gives the system's separator, so a step is split on both. A Mac's
+// and Windows's disks read `claude.md` as `CLAUDE.md`, so case does not count.
+const lowerInstructions = INSTRUCTIONS.map((n) => n.toLowerCase());
+const isInstructionFile = (name: string): boolean =>
+  name.split(/[\\/]/).some((step) => lowerInstructions.includes(step.toLowerCase()));
+
+/**
+ * The office name of a file a hand_off names by its full path: in this Odd's
+ * folder, its path inside it; in the office's folder of threads, its work name,
+ * since a hand-off's brief lists the work's files at their full paths. Any
+ * other name stays as it is.
+ */
+function officeName(p: string): string {
+  if (!isAbsolute(p)) return p;
+  const inside = (root: string) => {
+    const r = relative(root, p);
+    return r && !isAbsolute(r) && r.split(sep)[0] !== '..' ? r : undefined;
+  };
+  const own = inside(HOME);
+  if (own) return own;
+  const work = inside(home(THREADS_DIR));
+  return work ? `${THREADS_DIR}/${work.split(sep).join('/')}` : p;
+}
+
+/** Why a file cannot go with work an Odd passes on, by `hand_off` or `tell_lead`. */
+type Unfit = 'unread' | 'link' | 'instruction' | 'hidden' | 'office';
+
+/**
+ * A file named to go with work, as the office found it, or why it cannot go.
+ * `hand_off` and `tell_lead` refuse the same files, each in its own words.
+ */
+async function fitToCarry(
+  asked: string
+): Promise<
+  | { file: { name: string; real: string }; inWork?: { thread: number; inside: string } }
+  | { unfit: Unfit }
+> {
+  const file = await readableFile(asked);
+  if (!file) return { unfit: 'unread' };
+  const inWork = workPath(file.name);
+  // `ownFile` names the file where its real path is, so a link on the way,
+  // such as an attachments folder swapped for one, names another file.
+  // `workFile` refuses a link in the work already.
+  if (!inWork && !isWhereNamed({ realInside: file.name, named: asked })) return { unfit: 'link' };
+  if (isInstructionFile(file.name)) return { unfit: 'instruction' };
+  if (file.name.split(/[\\/]/).some((step) => step.startsWith('.'))) return { unfit: 'hidden' };
+  if (!inWork && isOfficeFile(file.name)) return { unfit: 'office' };
+  return { file, inWork };
+}
+
+/** The name a file from an Odd's own folder lands under in its part of the work. */
+const landingName = (name: string): string => name.replace(/[\\/]/g, '-');
+
+/** What `hand_off` says of a file it refuses, named as the Odd named it. */
+const HAND_OFF_UNFIT: Record<Unfit, (p: string) => string> = {
+  unread: (p) =>
+    `You cannot read ${p}. Name a file in your folder by its path inside it or its full path, or one in the folder of work you are on from ${THREADS_DIR}/, and call hand_off again.`,
+  link: (p) =>
+    `${p} is reached through a link, and a hand-off carries only a file where it really is. Name the file itself, and call hand_off again.`,
+  instruction: (p) =>
+    `${p} is an instruction file, and those never go with a hand-off. Say what your colleague needs in the brief, and call hand_off again.`,
+  hidden: (p) =>
+    `${p} is a hidden file, and those never go with a hand-off. Name another file, or leave it out, and call hand_off again.`,
+  office: (p) =>
+    `${p} is one of the office's own files, and those never go with a hand-off. Say what your colleague needs in the brief, and call hand_off again.`
+};
+
+/** Why a file the owner attached did not go to the lead with `tell_lead`, as the lead's note says it. */
+const TELL_LEAD_UNFIT: Record<Unfit, string> = {
+  unread: 'the office cannot read it',
+  link: 'it is reached through a link',
+  instruction: 'it is an instruction file',
+  hidden: 'it is a hidden file',
+  office: "it is one of the office's own files"
+};
+
+/**
+ * The files a hand_off names, as paths inside the folder of work `on` for
+ * those already there, and what to copy there for the rest, or why the
+ * hand-off cannot go.
+ */
+async function filesForHandOff(
+  named: string[],
+  on: number | undefined
+): Promise<{ here: string[]; carry: CarriedFile[] } | { problem: string }> {
+  const here: string[] = [];
+  const carry: CarriedFile[] = [];
+  // Each landing name to the file there: as the office found it, and as the Odd named it.
+  const landing = new Map<string, { name: string; named: string }>();
+  for (const p of named) {
+    const found = await fitToCarry(officeName(p));
+    if ('unfit' in found) return { problem: HAND_OFF_UNFIT[found.unfit](p) };
+    const { file, inWork } = found;
+    const inside = inWork && inWork.thread === on ? inWork.inside : undefined;
+    const name = landingName(file.name);
+    // Lower case, since a Mac's and Windows's disks hold those as one file.
+    const lands = (inside ?? `${ME}/${name}`).toLowerCase();
+    const first = landing.get(lands);
+    if (first?.name === file.name) continue;
+    if (first)
+      return {
+        problem: `Two of these files would land under one name: ${first.named} and ${p}. Rename one and call hand_off again.`
+      };
+    landing.set(lands, { name: file.name, named: p });
+    if (inside) here.push(inside);
+    else carry.push({ real: file.real, name, named: p });
+  }
+  return { here, carry };
+}
+
+/** The owner's attachments the office set, or none when it set nothing readable. */
+function ownerFiles(env: string | undefined): { tag: string; path: string; name: string }[] {
+  if (!env) return [];
+  try {
+    const read = z
+      .array(z.object({ tag: z.string(), path: z.string(), name: z.string() }))
+      .safeParse(JSON.parse(env));
+    return read.success ? read.data : [];
+  } catch {
+    // Not JSON: the office sets it, so this is no message of the owner's.
+    return [];
+  }
+}
+
+/**
+ * The files the owner attached to their message, as `tell_lead` takes them to
+ * the lead: what to copy, named by each one's tag, and why any cannot go. The
+ * same checks as `hand_off`'s files, and every file goes, not a pick. Each
+ * lands under the owner's name for it, its last part only, by the same rules:
+ * never a hidden name or an instruction file's.
+ */
+async function attachedForLead(): Promise<{
+  carry: CarriedFile[];
+  unfit: { named: string; why: string }[];
+}> {
+  const carry: CarriedFile[] = [];
+  const unfit: { named: string; why: string }[] = [];
+  for (const { tag, path, name } of OWNER_FILES) {
+    const found = await fitToCarry(path);
+    const plain = name.split(/[\\/]/).pop() ?? '';
+    const why =
+      'unfit' in found
+        ? found.unfit
+        : !plain || plain.startsWith('.')
+          ? 'hidden'
+          : isInstructionFile(plain)
+            ? 'instruction'
+            : undefined;
+    if (why) unfit.push({ named: tag, why: TELL_LEAD_UNFIT[why] });
+    else if ('file' in found) carry.push({ real: found.file.real, name: plain, named: tag });
+  }
+  return { carry, unfit };
 }
 
 /** What propose_hire and propose_goal_plan both take to describe one hire. */
@@ -303,7 +561,7 @@ const hireFields = {
     .array(z.string())
     .optional()
     .describe(
-      'Office tools beyond the ones every Odd has: search_ledger, give_owner_a_task, find_connectors, ask_for_access, edit_my_job, edit_my_description, hand_off, poke_owner, propose_hire, office_report. Leave out for the usual starters.'
+      `Office tools beyond the ones every Odd has: ${GRANTABLE_TOOLS.join(', ')}. Leave out for the usual starters.`
     ),
   appearance: z
     .string()
@@ -322,7 +580,8 @@ const hireFields = {
         .optional()
         .describe(
           `Put each result on ${OWNER}'s desk as a report. True when the job makes something for them to read.`
-        )
+        ),
+      missed: missedArg
     })
     .optional(),
   intake_file: z
@@ -406,7 +665,7 @@ const server = new McpServer({ name: 'office', version: '1.0.0' });
  * one, since an old name may say a word the Odd never reads.
  */
 function tool<Shape extends z.ZodRawShape>(
-  name: string,
+  name: OfficeToolId | keyof typeof RIDES_WITH,
   { description, inputSchema }: { description: string; inputSchema: Shape },
   run: ToolCallback<Shape>
 ) {
@@ -447,6 +706,11 @@ const notHanded = (why: string) => ({
   ...text(`Nothing was handed off yet. ${why}`),
   isError: true
 });
+/** A resume_at that parked nothing: an error, so the Odd cannot read it as parked. */
+const notParked = (why: string) => ({
+  ...text(`This work was not parked. ${why}`),
+  isError: true
+});
 const json = (v: unknown) => text(JSON.stringify(v, null, 2));
 const day = (d: Date | string) => officeDay(new Date(d));
 /** "Oct 30", in the office's time zone. */
@@ -455,6 +719,58 @@ const shortDay = (d: Date) =>
 const line = (r: LedgerRow) =>
   `- ${day(r.createdAt)} [${r.kind}] ${r.actor}: ${r.title}${r.reason ? ` (reason: ${r.reason})` : r.kind === 'decision' ? ' (no reason given)' : ''}`;
 
+// Connections are granted one at a time by the owner. An Odd can never
+// start a native process or type terminal keys through these tools.
+if (offered('my_project_sessions'))
+  tool(
+    'my_project_sessions',
+    {
+      description:
+        'See the project conversations the owner shared with you and the status and answers of your assignments.',
+      inputSchema: {}
+    },
+    async () => {
+      const sessions = await projectConnections(ME);
+      return json(
+        await Promise.all(
+          sessions.map(async (s) => ({
+            id: s.id,
+            title: s.title,
+            provider: s.agent,
+            work: (await projectWork(s.id))
+              .filter((r) => r.staffId === ME)
+              .map((r) => ({ id: r.id, state: r.state, answer: r.answer }))
+          }))
+        )
+      );
+    }
+  );
+if (offered('send_project_work'))
+  tool(
+    'send_project_work',
+    {
+      description:
+        'Give a shared native project session an assignment. Use a fresh UUID per assignment and reuse it on a retry. It waits for the owner to send it, unless the owner lets you send to that session without asking and you are at Act. Its result comes back as a report.',
+      inputSchema: {
+        session: z.string().uuid(),
+        key: z.string().uuid(),
+        prompt: z.string().trim().min(1).max(64000)
+      }
+    },
+    async (a) => {
+      if ((parseLevel(process.env.CEILING) ?? me.permission) === 'read')
+        return refused('This run can only read project work.');
+      const row = await requestProject({
+        id: a.key,
+        sessionId: a.session,
+        prompt: a.prompt,
+        staffId: ME,
+        threadId: THREAD_ID,
+        draft: (parseLevel(process.env.CEILING) ?? me.permission) !== 'act'
+      });
+      return json({ id: row.id, state: row.state });
+    }
+  );
 if (has('search_ledger'))
   tool(
     'search_ledger',
@@ -481,8 +797,7 @@ if (has('search_ledger'))
 
 // In a chat, the threads this Odd works on and does not lead (`threadsOn`):
 // what the owner asks there about one goes to its lead with tell_lead.
-const said = OWNER_SAID;
-const workingOn = said && has('tell_lead') ? await threadsOn(ME) : [];
+const workingOn = offered('tell_lead') ? await threadsOn(ME) : [];
 const goalRule = await goalWork(ME, workingOn);
 // A hub in a run on no thread, such as a chat or a job, names the thread an ask
 // or task is for, or null, so what it raises about a thread lands there.
@@ -495,8 +810,11 @@ const raisedArgs = {
           .number()
           .int()
           .nullable()
+          // Optional, so a run whose session kept this tool's older form, with
+          // no work, can still raise it: left out reads as for none of them.
+          .optional()
           .describe(
-            `The number of work you lead, as your instructions number it, when this is for it: it goes on that work, and ${OWNER}'s answer brings you back there. null when it is for none of them.`
+            `The number of work you lead, as your instructions number it, when this is for it: it goes on that work, and ${OWNER}'s answer brings you back there. null, or left out, when it is for none of them.`
           )
       }
     : {})
@@ -588,10 +906,31 @@ tool(
     if (!rows.length) return text('You have raised no asks.');
     return text(
       rows
-        .map(
-          (a) =>
-            `- #${a.id} ${a.status === 'revise' ? 'SENT BACK' : a.status.toUpperCase()}: ${a.title}${a.reason ? ` (${a.status === 'revise' ? 'change' : 'reason'}: ${a.reason})` : a.status === 'open' ? '' : ' (no reason given)'}`
+        .map((a) =>
+          askReplaced(a)
+            ? `- #${a.id} REPLACED: ${a.title}`
+            : `- #${a.id} ${a.status === 'revise' ? 'SENT BACK' : a.status.toUpperCase()}: ${a.title}${a.reason ? ` (${a.status === 'revise' ? 'change' : 'reason'}: ${a.reason})` : a.status === 'open' ? '' : ' (no reason given)'}`
         )
+        .join('\n')
+    );
+  }
+);
+
+tool(
+  'my_tasks',
+  {
+    description: `Each task you gave ${OWNER} and how it ended, with what they said on it.`,
+    inputSchema: {}
+  },
+  async () => {
+    const rows = await tasksFrom(ME);
+    if (!rows.length) return text('You have given no tasks.');
+    return text(
+      rows
+        .map((t) => {
+          const said = t.status === 'open' ? '' : taskSaid(t);
+          return `- #${t.id} ${(t.status === 'open' ? 'open' : SAID_AS[t.status]).toUpperCase()}: ${t.title}${said ? ` (${said})` : ''}`;
+        })
         .join('\n')
     );
   }
@@ -601,29 +940,36 @@ if (has('give_owner_a_task'))
   tool(
     'give_owner_a_task',
     {
-      description: `Give ${OWNER}, the human operator, a task: something only they can do. Steps are numbered and each is one action, written so anyone can follow them without guessing: name the button, the place, the exact thing. When a step opens a page, give its full address (https://mail.google.com/...), which the owner clicks; when they type or paste something, put exactly that in \`backticks\`, which the owner copies with one click (In the From box, type \`dmarc@example.com\`). If they must choose, pass choices and the task ends with them, e.g. for 'Should this kind of email reach you?' pass ['Yes, keep sending these', 'No, filter these out']. When they must fill in or read a file, write it in your folder and attach it: a step says 'Answer each question in intake.md below', never where the file lives. Never write steps to connect or reconnect a tool: ask_for_access and reconnect_access give the office's own.${raisedNote}`,
+      description: `Give ${OWNER}, the human operator, a task: something only they can do. A question with one answer needs no steps: give just the title and why, and they type the answer where it arrives. Steps are numbered and each is one action, written so anyone can follow them without guessing: name the button, the place, the exact thing. When a step opens a page, give its full address (https://mail.google.com/...), which the owner clicks; when they type or paste something, put exactly that in \`backticks\`, which the owner copies with one click (In the From box, type \`dmarc@example.com\`). If they must choose, pass choices and the task ends with them, e.g. for 'Should this kind of email reach you?' pass ['Yes, keep sending these', 'No, filter these out']. When you need their words, pass response, never a file for them to fill in. Starting text in response is only for a task whose job is to edit that text, such as a draft list, and then the title names what to edit (Correct the client list). A question gets an empty response, or none, so they type the answer: never prefill it with other text you hold. Attach files they should only read. Never write steps to connect or reconnect a tool: ask_for_access and reconnect_access give the office's own.${raisedNote}`,
       inputSchema: {
         title: z.string().max(140),
         why: z.string().describe('One or two sentences on why this is theirs to do.'),
         steps: z
           .array(z.string())
-          .min(1)
           .max(12)
+          .optional()
           .describe(
-            'One action per step. No "and then". A page to open as its full address; anything to type or paste in `backticks`.'
+            'One action per step. No "and then". A page to open as its full address; anything to type or paste in `backticks`. Leave out for a question with one answer.'
+          ),
+        response: z
+          .string()
+          .max(64000)
+          .optional()
+          .describe(
+            'Starting text only when the task is to edit it, and the title says so. Empty, or left out, for a question.'
           ),
         choices: z.array(z.string()).min(2).max(4).optional(),
         attach: attachArg,
         ...raisedArgs
       }
     },
-    async ({ title, why, steps, choices, attach, ...where }) => {
+    async ({ title, why, steps, response, choices, attach, ...where }) => {
       const on = await placed(where);
       if ('problem' in on) return refused(on.problem);
       const files = await attachable(attach);
       if ('problem' in files) return text(files.problem);
       const all = [
-        ...steps.map((s) => ({ text: s, done: false })),
+        ...(steps ?? []).map((s) => ({ text: s, done: false })),
         ...(choices
           ? [
               {
@@ -638,8 +984,10 @@ if (has('give_owner_a_task'))
         title,
         why,
         steps: all,
+        response,
         attach: files.paths,
         via: VIA,
+        ownerSaid: OWNER_SAID,
         ...on
       });
       return text(`Task ${t.id} is on ${OWNER}'s desk. The ledger records it when they finish it.`);
@@ -655,11 +1003,6 @@ const address = z
   .min(3)
   .max(320)
   .regex(/^[^\r\n,;]+$/, 'One address each, on one line.');
-// Each Gmail account is a connector of its own. With more than one, the Odd
-// names the one the email came to, and the reply goes out from it.
-const mailboxes = (await grantsFor(ME))
-  .filter((g) => g.connector.config.google === 'gmail')
-  .map((g) => ({ id: g.connectorId, account: g.connector.config.account }));
 const mailboxIds = mailboxes.map((m) => m.id) as [string, ...string[]];
 const mailboxArg = mailboxes.length
   ? (() => {
@@ -689,7 +1032,7 @@ function mailbox(
   return { connector: m.id, account: m.account };
 }
 
-if (has('propose_reply') && mailboxes.length)
+if (offered('propose_reply'))
   tool(
     'propose_reply',
     {
@@ -712,6 +1055,13 @@ if (has('propose_reply') && mailboxes.length)
           .max(400)
           .describe('One or two lines on the email it answers: who wrote and what they want.'),
         why: z.string().max(1000).describe('Why this reply, in one or two plain sentences.'),
+        attachments: z
+          .array(z.string())
+          .max(10)
+          .optional()
+          .describe(
+            `Files from your own folder that go with it, by their path inside it or their full path, like "attachments/20261110-081108-35bc-image.png". Files ${OWNER} attached in chat are in attachments/. Up to 10, 18 MB together. ${OWNER} sees each one and may take any off.`
+          ),
         account: mailboxArg,
         revises: revisesArg,
         ...raisedArgs
@@ -727,11 +1077,14 @@ if (has('propose_reply') && mailboxes.length)
       body,
       summary,
       why,
+      attachments = [],
       revises,
       ...where
     }) => {
       const box = mailbox(account);
       if ('problem' in box) return refused(box.problem);
+      const files = mailAttachments(ME, attachments);
+      if ('problem' in files) return refused(files.problem);
       const on = await placed(where);
       if ('problem' in on) return refused(on.problem);
       const more = to.length > 1 ? ` and ${to.length - 1} more` : '';
@@ -753,6 +1106,7 @@ if (has('propose_reply') && mailboxes.length)
           // The footer goes in now, where the owner sees it and may delete it.
           body: withFooter(body),
           summary,
+          ...(files.length ? { attachments: files } : {}),
           ...box
         },
         revises,
@@ -768,7 +1122,7 @@ if (has('propose_reply') && mailboxes.length)
 // then the office creates it in Gmail. Only for an Odd that holds Gmail at any
 // level, since it files mail the Odd read there.
 const filterText = z.string().trim().max(500).optional();
-if (has('propose_filter') && mailboxes.length)
+if (offered('propose_filter'))
   tool(
     'propose_filter',
     {
@@ -958,6 +1312,8 @@ if (has('ask_for_access'))
       );
       if (!found.connector) return text(`${found.problem} Use find_connectors.`);
       const conn = found.connector;
+      if (conn.id === POSTAL_ID && level !== 'read')
+        return refused('Physical mail only allows Read only access.');
       const product = conn.config.google;
       if (another_account && !product)
         return refused(`another_account is only for Gmail and Google Drive.`);
@@ -1083,7 +1439,7 @@ tool(
     const held = switchAskRefused(now, switches);
     if (held) return refused(held);
     const off = switchesOff(now, switches);
-    const online = commandsOnline(now.agent, process.platform, {
+    const online = commandsOnline(now.agent, currentPlatform(), {
       commands: now.commands || off.includes('commands'),
       web: now.web || off.includes('web')
     });
@@ -1106,7 +1462,7 @@ tool(
 tool(
   'reconnect_access',
   {
-    description: `A tool ${OWNER} already gave you stopped working: its tools fail to load, or it turns down its key or sign-in. This puts the office's own steps to connect it again on ${OWNER}'s desk, with a box for the new key and a Connect button, and no ask, since they said yes once. Never write those steps yourself with give_owner_a_task. Pass get_key only when the tool takes a key: how to get a new one, one action per step, naming the exact page and button.`,
+    description: `A tool ${OWNER} already gave you stopped working: its tools fail to load, or it turns down its key or sign-in. This puts the office's own steps to connect it again on ${OWNER}'s desk, with a box for the new key or a Sign in button, then a Connect button, and no ask, since they said yes once. Never write those steps yourself with give_owner_a_task. Pass get_key only when the tool takes a key: how to get a new one, one action per step, naming the exact page and button.`,
     inputSchema: {
       connector: z.string().describe('The id my_access lists.'),
       problem: z
@@ -1125,10 +1481,12 @@ tool(
   async ({ connector: id, problem, get_key = [] }) => {
     const r = await reconnectTask(ME, id, problem, get_key);
     if ('problem' in r) return text(r.problem);
+    if (r.already)
+      return text(
+        `Task ${r.task.id} to connect it is already on ${OWNER}'s desk. Point them to it.`
+      );
     return text(
-      r.already
-        ? `Task ${r.task.id} to connect it is already on ${OWNER}'s desk. Point them to it.`
-        : `Task ${r.task.id} is on ${OWNER}'s desk. You hear when they finish it.`
+      `Task ${r.task.id} is on ${OWNER}'s desk. You hear when they finish it.${r.keptOut ? ` ${id} takes no key, so your get_key steps were left out. Never tell ${OWNER} to paste a key for it.` : ''}`
     );
   }
 );
@@ -1146,7 +1504,7 @@ tool(
       rows
         .map(
           (j) =>
-            `## ${j.name}\n${describeSchedule(j.schedule)}${j.enabled ? '' : ', paused'}${j.report ? `, reports to ${OWNER}` : ''}\n\n${j.instructions}`
+            `## ${j.name}\n${describeSchedule(j.schedule)}${j.enabled ? '' : ', paused'}${j.report ? `, reports to ${OWNER}` : ''}, missed runs: ${j.missed}\n\n${j.instructions}${j.files ? `\nScheduled files: ${JSON.stringify(j.files)}` : ''}`
         )
         .join('\n\n')
     );
@@ -1160,7 +1518,7 @@ tool(
     inputSchema: {}
   },
   async () => {
-    const rows = (await goalsFor(ME)).filter((g) => g.status === 'active' || g.status === 'paused');
+    const rows = (await goalsFor(ME)).filter((g) => GOAL_IS_LIVE[g.status]);
     return text(
       rows.length ? rows.map((g) => goalText(g)).join('\n\n') : 'You serve no goals yet.'
     );
@@ -1170,7 +1528,7 @@ tool(
 tool(
   'log_progress',
   {
-    description: `Say how a goal you serve is going, once per run that moves it or shows it slipping. One line of evidence, with a number when there is one: "inbox at 14 on Friday, down from 40; a deadline pushed Tuesday's sort to Wednesday". ${OWNER}'s daily report reads these.`,
+    description: `Say how a goal you serve, or whose thread you lead, is going, once per run that moves it or shows it slipping. One line of evidence, with a number when there is one: "inbox at 14 on Friday, down from 40; a deadline pushed Tuesday's sort to Wednesday". ${OWNER}'s daily report reads these.`,
     inputSchema: {
       goal_id: z.number().int(),
       health: z
@@ -1256,14 +1614,19 @@ if (has('propose_goal_plan'))
                   name: z.string(),
                   instructions: z.string(),
                   schedule: scheduleArg,
-                  report: z.boolean().optional()
+                  report: z.boolean().optional(),
+                  missed: missedArg,
+                  files: planFiles.optional()
                 })
                 .optional(),
               change_job: z
                 .object({
                   name: z.string().describe('The job name, exactly as it is now.'),
+                  new_name: z.string().trim().min(1).max(80).optional(),
+                  files: planFiles.optional(),
                   instructions: z.string().optional(),
-                  schedule: scheduleArg.optional()
+                  schedule: scheduleArg.optional(),
+                  missed: missedArg
                 })
                 .optional()
             })
@@ -1302,7 +1665,13 @@ if (has('propose_goal_plan'))
           staff: x.staff,
           part: x.part,
           job: x.new_job,
-          editJob: x.change_job
+          editJob: x.change_job && {
+            name: x.change_job.name,
+            newName: x.change_job.new_name,
+            instructions: x.change_job.instructions,
+            schedule: x.change_job.schedule,
+            files: x.change_job.files
+          }
         });
       }
       for (const h of a.hires ?? []) {
@@ -1427,7 +1796,7 @@ if (has('update_goal'))
       description: `Change a goal: mark it met, paused, dropped or active again, or reword it. When ${OWNER} asks in chat, do it at once. Outside a chat, only to carry out an ask they approved, passing its id. To propose it, raise_ask first.`,
       inputSchema: {
         goal_id: z.number().int(),
-        status: z.enum(['active', 'paused', 'met', 'dropped']).optional(),
+        status: z.enum(GOAL_STATUSES).optional(),
         title: goalFields.title.optional(),
         why: goalFields.why,
         done_when: goalFields.done_when,
@@ -1468,20 +1837,33 @@ if (has('edit_my_job'))
   tool(
     'edit_my_job',
     {
-      description: `Change one of your own jobs: its steps, its schedule, or whether it reports to ${OWNER}. When ${OWNER} asks for a change in chat, make it at once, worded the way they asked, then tell them what changed. Outside a chat, only to carry out an ask they approved, passing its id. To propose a change, raise_ask with the exact new steps first.`,
+      description: `Change one of your own jobs: its name, steps, scheduled files, schedule, whether it reports to ${OWNER}, or what it does with runs it missed. When ${OWNER} asks for a change in chat, make it at once, worded the way they asked, then tell them what changed. Outside a chat, only to carry out an ask they approved, passing its id. To propose a change, raise_ask with the exact new steps first.`,
       inputSchema: {
         job: z.string().describe('The job name, exactly as my_jobs lists it.'),
+        new_name: z.string().trim().min(1).max(80).optional(),
+        files: jobFiles
+          .nullable()
+          .optional()
+          .describe(
+            'For recurring work on a thread you already serve. Null returns the job to independent work.'
+          ),
         instructions: z.string().optional().describe('The full new steps, numbered.'),
         schedule: scheduleArg.optional(),
         report: z.boolean().optional(),
+        missed: missedArg,
         approved_ask: approvedArg
       }
     },
-    async ({ job, instructions, schedule, report, approved_ask }) => {
+    async ({ job, new_name, instructions, schedule, report, missed, files, approved_ask }) => {
       const go = await goAhead(approved_ask);
       if ('problem' in go) return text(go.problem);
-      const j = await editOwnJob(ME, job, { instructions, schedule, report }, go);
-      return text(j ? `Changed "${job}".` : `You have no job named "${job}". Check my_jobs.`);
+      const j = await editOwnJob(
+        ME,
+        job,
+        { name: new_name, instructions, schedule, report, missed, files },
+        go
+      );
+      return text(j ? `Changed "${j.name}".` : `You have no job named "${job}". Check my_jobs.`);
     }
   );
 
@@ -1516,7 +1898,7 @@ if (HANDS_OFF.tool) {
   /** Each colleague's line, with the tools of this Odd's it lacks. */
   const lines = colleagues.map((c) => {
     const lacks = lacking(held, c.id, [ME]);
-    return `- ${c.id}: ${c.name}, ${c.role}. ${c.remit}${lacks.length ? ` Lacks ${toolNames(lacks.map(yours))}.` : ''}`;
+    return `- ${c.id}: ${c.name}, ${c.role}. ${c.remit}${lacks.length ? ` Lacks ${toolNames(lacks.map(yours))}.` : ''}${c.package ? ' Their replies come from New Altitude, so what you hand them leaves this computer.' : ''}`;
   });
   tool(
     'hand_off',
@@ -1540,7 +1922,14 @@ if (HANDS_OFF.tool) {
           .string()
           .min(1)
           .max(4000)
-          .describe('What to do, why, and what to send back, with full paths to any files.'),
+          .describe('What to do, why, and what to send back. Name any files in files.'),
+        files: z
+          .array(z.string())
+          .max(MAIL_FILES_MAX)
+          .optional()
+          .describe(
+            `Files the work needs: one in your folder, by its path inside it or its full path, or one in the folder of work you are on, from ${THREADS_DIR}/. Pictures and files ${OWNER} attached in chat are in attachments/ in your folder. They land in this work for your colleague. Never one from a tool your colleague lacks, without ${OWNER}'s yes.`
+          ),
         request: z
           .string()
           .min(1)
@@ -1570,7 +1959,7 @@ if (HANDS_OFF.tool) {
             })
       }
     },
-    async ({ to, title, brief, request, goal, continue_work }) => {
+    async ({ to, title, brief, files, request, goal, continue_work }) => {
       if (continue_work !== undefined && (request !== undefined || goal !== undefined))
         return notHanded(
           `Work ${continue_work} keeps its own request and goal. Leave out request and goal, put what is new in the brief, and call hand_off again.`
@@ -1584,12 +1973,15 @@ if (HANDS_OFF.tool) {
         const opens = await placed({});
         if ('problem' in opens) return notHanded(opens.problem);
       }
+      const picked = await filesForHandOff(files ?? [], on);
+      if ('problem' in picked) return notHanded(picked.problem);
       const r = await handOff({
         from: ME,
         to,
-        work: { title, brief },
+        work: { title, brief, ...(picked.here.length ? { files: picked.here } : {}) },
         thread: on !== undefined ? { id: on } : { title: request ?? title, goalId: goal },
-        run: RUN_KEY
+        run: RUN_KEY,
+        carry: picked.carry
       });
       if ('problem' in r) return notHanded(r.problem);
       const name = colleagues.find((c) => c.id === to)?.name ?? to;
@@ -1613,7 +2005,7 @@ if (HANDS_OFF.tool) {
     tool(
       'resume_at',
       {
-        description: `Pick work ${THREAD_ID} back up at a time you set: the office starts a fresh run of yours on it then, with its history. Use it when the next step has to wait for a time, not for a colleague or for ${OWNER}. A new time replaces the old. Then finish this run.`,
+        description: `Pick work ${THREAD_ID} back up at a time you set, or when a task ends: the office starts a fresh run of yours on it then, with its history. Use it when the next step has to wait for a time, or for a task on ${OWNER}'s desk on other work, not for a colleague or for ${OWNER} on this work. A new time or task replaces the old. Then finish this run.`,
         inputSchema: {
           at: z.string().optional().describe(`${ZONE}: "18:50" for today, or "2026-11-02 18:50".`),
           in_minutes: z
@@ -1622,10 +2014,26 @@ if (HANDS_OFF.tool) {
             .min(1)
             .max(10_080)
             .optional()
-            .describe('Instead of at: how many minutes from now.')
+            .describe('Instead of at: how many minutes from now.'),
+          after_task: z
+            .number()
+            .int()
+            .optional()
+            .describe(
+              `Instead of a time: the number of a task on ${OWNER}'s desk, on other work, that you gave or that is on work you are on. You pick this work up when they finish it or drop it.`
+            )
         }
       },
-      async ({ at, in_minutes }) => {
+      async ({ at, in_minutes, after_task }) => {
+        if (after_task !== undefined) {
+          if (at !== undefined || in_minutes !== undefined)
+            return notParked('Give after_task alone, or a time alone, not both.');
+          const parked = await parkOnTask(ME, THREAD_ID, after_task);
+          if ('problem' in parked) return notParked(parked.problem);
+          return text(
+            `Work ${THREAD_ID} picks back up when ${OWNER} finishes or drops "${parked.title}".`
+          );
+        }
         const when =
           in_minutes !== undefined
             ? new Date(Date.now() + in_minutes * 60_000)
@@ -1645,28 +2053,53 @@ if (HANDS_OFF.tool) {
     );
 }
 
-// Only in a chat, where the office set the owner's words, and only for threads
-// this Odd works on and does not lead: their words reach the lead, not its own.
-if (said && workingOn.length)
+// Only in a chat (`inChat` on its row), and only for threads this Odd works on
+// and does not lead: their words reach the lead as theirs, and the Odd's own
+// only as its reading.
+if (workingOn.length)
   tool(
     'tell_lead',
     {
-      description: `Pass what ${OWNER} just told you about work you are on to the Odd who leads it, which picks it back up with their words. Copy the part of their message about that work exactly: it goes as theirs. Then tell ${OWNER} you passed it on. The work you are on:\n${workingOn.map((t) => `- ${t.id}: ${t.title}, led by ${t.lead}`).join('\n')}`,
+      description: `Pass what ${OWNER} just told you about work you are on to the Odd who leads it, which picks it back up with their words. Copy the part of their message about that work exactly: it goes as theirs.${OWNER_FILES.length ? ` Every file they attached to it goes too, into your part of that work's folder.` : ''} Then tell ${OWNER} you passed it on. ${PASS_ONLY_WORK} The work you are on:\n${workingOn.map((t) => `- ${t.id}: ${t.title}, led by ${t.lead}`).join('\n')}`,
       inputSchema: {
         work: z.number().int().describe('The number of the work, from the list.'),
         words: z
           .string()
           .min(1)
           .max(4000)
-          .describe(`The part of ${OWNER}'s message about this work, copied exactly.`)
+          .describe(`The part of ${OWNER}'s message about this work, copied exactly.`),
+        reading: z
+          .string()
+          .min(1)
+          .max(600)
+          .describe(
+            'What you understood them to mean, in your own words. The lead reads it as yours, never as theirs.'
+          )
       }
     },
-    async ({ work, words }) => {
-      const r = await tellLead({ staffId: ME, threadId: work, owner: OWNER, said, words });
+    async ({ work, words, reading }) => {
+      const r = await tellLead({
+        staffId: ME,
+        threadId: work,
+        owner: OWNER,
+        // `inChat` offers it only where the office sets OWNER_SAID. With none,
+        // no words match, so tellLead refuses and nothing reaches the lead.
+        said: OWNER_SAID ?? '',
+        words,
+        reading,
+        exchange: process.env.CHAT_EXCHANGE || undefined,
+        files: await attachedForLead()
+      });
+      if ('problem' in r) return text(r.problem);
+      const files = r.files ?? [];
+      const went = files.filter((f) => 'at' in f).length;
+      const left = files.flatMap((f) => ('why' in f ? [`${f.named}, since ${f.why}`] : []));
       return text(
-        'problem' in r
-          ? r.problem
-          : `Passed to ${r.lead}, who picks work ${work} back up with ${OWNER}'s words.`
+        [
+          `Passed to ${r.lead}, who picks work ${work} back up with ${OWNER}'s words.`,
+          ...(went ? [`The ${went === 1 ? 'file' : `${went} files`} they attached went too.`] : []),
+          ...(left.length ? [`Did not go: ${left.join('; ')}. Tell ${OWNER} so.`] : [])
+        ].join(' ')
       );
     }
   );
@@ -1763,11 +2196,194 @@ if (has('propose_hire'))
     }
   );
 
+// Taking its own open asks and tasks off the owner's desk, only in a chat, on
+// the owner's own words. A withdrawn ask is a no by the office: its line goes
+// back where it came from, and no run reads it for a lesson (`withdrawAsk`).
+if (offered('withdraw'))
+  tool(
+    'withdraw',
+    {
+      description: `Take your own open asks and tasks off ${OWNER}'s desk, when ${OWNER} told you so in this chat: "clear your asks", "drop that task". Nothing it would have done happens, and a held call is never made. Use it only on ${OWNER}'s word, never to tidy up on your own; to change an item, raise a new one that revises it instead. The ids are in "Still on ${OWNER}'s desk from you", or my_asks.`,
+      inputSchema: {
+        asks: z.array(z.number().int()).max(200).optional().describe('Your open asks to take off.'),
+        tasks: z
+          .array(z.number().int())
+          .max(200)
+          .optional()
+          .describe('Your open tasks for them to take off.')
+      }
+    },
+    async ({ asks: askIds = [], tasks: taskIds = [] }) => {
+      if (!askIds.length && !taskIds.length) return refused('Name the asks or tasks to take off.');
+      // Offered only in a chat (`inChat` on its row), where the office sets OWNER_SAID.
+      const line = `${me.name} took it off your desk, as you said in chat: "${OWNER_SAID!.slice(0, 300)}"`;
+      const gone: string[] = [];
+      const left: string[] = [];
+      for (const id of new Set(askIds)) {
+        const a = await ask(id);
+        if (a?.staffId !== ME || a.status !== 'open') left.push(`ask ${id}`);
+        else await withdrawAsk(id, line).then(() => gone.push(`ask ${id}`));
+      }
+      for (const id of new Set(taskIds)) {
+        const t = await task(id);
+        if (t?.staffId !== ME || t.status !== 'open') left.push(`task ${id}`);
+        else await withdrawTask(id, line).then(() => gone.push(`task ${id}`));
+      }
+      return text(
+        [
+          gone.length ? `Took off ${OWNER}'s desk: ${gone.join(', ')}.` : 'Nothing was taken off.',
+          left.length ? `Not yours or not open, so left as it is: ${left.join(', ')}.` : ''
+        ]
+          .filter(Boolean)
+          .join(' ')
+      );
+    }
+  );
+
+// A bug report about Oddboro, only in a chat (`inChat` on its row). The office
+// puts the draft on this run's reply when the run ends (bug-drafts.ts), and
+// the owner's File this opens it in the report form. It files nothing.
+if (offered('draft_bug_report'))
+  tool(
+    'draft_bug_report',
+    {
+      description: `Draft a bug report about Oddboro itself, when ${OWNER} asks you to report a bug in this chat. Give a short title and the details: what happened, what they expected, and anything that helps fix it, such as the error. Under your reply, ${OWNER} gets File this, which opens the report form with your draft for them to review and edit. Nothing is filed until they choose there, so tell them to click File this. A second call in the same reply replaces the first draft.`,
+      inputSchema: {
+        // The report form's limits (TITLE_LIMIT and BODY_LIMIT in the office's bug-report.ts).
+        title: z.string().trim().min(1).max(256).describe('One line that names the bug.'),
+        body: z
+          .string()
+          .trim()
+          .min(1)
+          .max(65536)
+          .describe('The details, in plain words. Markdown is fine.')
+      }
+    },
+    async ({ title, body }) => {
+      // The office sets RUN_KEY for every run; with none, no reply could carry the draft.
+      if (!RUN_KEY)
+        return {
+          ...text('Nothing was drafted. This run has no reply to put it on.'),
+          isError: true
+        };
+      keepBugDraft(ME, RUN_KEY, { title, body });
+      return text(
+        `Drafted. ${OWNER} sees a File this bug report button under your reply, which opens the draft for them to review. Nothing is filed yet.`
+      );
+    }
+  );
+
+// Leaving the office (leaving.ts). Each only in a chat, on the owner's own
+// words (`inChat` on its row in tools.ts), and each only raises an ask: the
+// Odd leaves or comes back on the owner's yes alone.
+const leaveNote = `It lands on ${OWNER}'s desk as an ask, and nothing happens until they say yes. Use it only when ${OWNER} told you so in this chat, never on your own.`;
+
+if (offered('leave_office'))
+  tool(
+    'leave_office',
+    {
+      description: `${OWNER} told you to leave the office: ask them to confirm. On their yes you leave at once: off the floor, your jobs off, and what you have open on their desk withdrawn. Your history stays, and the ${MANAGER_ROLE} can bring you back. ${leaveNote}`,
+      inputSchema: {
+        why: z
+          .string()
+          .max(600)
+          .describe(
+            `What ${OWNER} said, in their words, and anything they should know before you go.`
+          )
+      }
+    },
+    async ({ why }) => {
+      const held = await leavingRefused('remove', ME);
+      if (held) return refused(held);
+      const { ask } = await raiseAsk(ME, {
+        ...RAISED_ON,
+        kind: 'remove',
+        odd: ME,
+        title: `Let ${me.name} go from the office`,
+        why,
+        ifApproved: leavesLine(me.name)
+      });
+      return text(
+        `Ask ${ask.id} is on ${OWNER}'s desk. Tell them you go once they say yes there, and not before.`
+      );
+    }
+  );
+
+if (offered('remove_odd')) {
+  // Listed here, as bring_back_odd lists the Odds that left, so the tool names
+  // no other tool the Odd may not hold to find an id.
+  const here = (await roster()).filter((p) => p.id !== ME && p.role !== MANAGER_ROLE);
+  tool(
+    'remove_odd',
+    {
+      description: `${OWNER} told you to let another Odd go: ask them to confirm. On their yes it leaves at once: off the floor, its jobs off, its open work handed back or withdrawn. Its history stays${offered('bring_back_odd') ? ', and you can bring it back with bring_back_odd' : ''}. Never the ${MANAGER_ROLE}. ${leaveNote} ${
+        here.length
+          ? `Odds you can ask about: ${here.map((p) => `${p.id} (${p.name}, ${p.role})`).join('; ')}.`
+          : 'No other Odd works here.'
+      }`,
+      inputSchema: {
+        odd: z.string().describe('The id of the Odd to let go, from the list above.'),
+        why: z.string().max(600).describe(`What ${OWNER} said, in their words.`)
+      }
+    },
+    async ({ odd, why }) => {
+      const held = await leavingRefused('remove', odd);
+      if (held) return refused(held);
+      const who = (await staffer(odd))!;
+      const { ask } = await raiseAsk(ME, {
+        ...RAISED_ON,
+        kind: 'remove',
+        odd,
+        title: `Let ${who.name} go from the office`,
+        why,
+        ifApproved: leavesLine(who.name)
+      });
+      return text(
+        `Ask ${ask.id} is on ${OWNER}'s desk. ${who.name} goes once they say yes there, and not before.`
+      );
+    }
+  );
+}
+
+if (offered('bring_back_odd')) {
+  const gone = await formerStaff();
+  tool(
+    'bring_back_odd',
+    {
+      description: `${OWNER} told you to bring back an Odd that left the office: ask them to confirm. On their yes it comes back as it was, with its jobs on again. What it had open when it left stays closed. ${leaveNote} ${
+        gone.length
+          ? `Odds that left, latest first: ${gone.map((p) => `${p.id} (${p.name}, ${p.role})`).join('; ')}.`
+          : 'No Odd has left this office.'
+      }`,
+      inputSchema: {
+        odd: z.string().describe('The id of the Odd to bring back, from the list above.'),
+        why: z.string().max(600).describe(`What ${OWNER} said, in their words.`)
+      }
+    },
+    async ({ odd, why }) => {
+      const held = await leavingRefused('bring_back', odd);
+      if (held) return refused(held);
+      const who = (await anyStaffer(odd))!;
+      const { ask } = await raiseAsk(ME, {
+        ...RAISED_ON,
+        kind: 'bring_back',
+        odd,
+        title: `Bring ${who.name} back to the office`,
+        why,
+        ifApproved: `${who.name} comes back as it was: its job description, tools, folders, lessons and files, with its jobs on again.`
+      });
+      return text(
+        `Ask ${ask.id} is on ${OWNER}'s desk. ${who.name} comes back once they say yes there, and not before.`
+      );
+    }
+  );
+}
+
 if (has('office_report'))
   tool(
     'office_report',
     {
-      description: `Everything the office did in a window: each Odd with its remit, its level (read, draft or act), its tool and what its own tools reach, its folders, the office tools it holds beyond the ones every Odd has, its outside tools (each with what it reaches, or why a run leaves it out), and its jobs and runs, asks open and decided, and tasks for ${OWNER} open and done. For the daily report. followUps is the work owed after ${OWNER} answered: carrying out an approved ask, reworking one they sent back, acting on their feedback on a report, or picking up after a task they finished, each with its outcome (done, failed, waiting on ${OWNER}, or null while still to do). Each run has a trigger: 'schedule' means its timer started it, 'manual' means ${OWNER} pressed Run now. Judge a job's timing by its schedule runs only; a manual run at any hour is expected. Every time is ${ZONE}, like the schedules.`,
+      description: `Everything the office did in a window: each Odd with its remit, its level (read, draft or act), its tool and what its own tools reach, its folders, the office tools it holds beyond the ones every Odd has, its outside tools (each with what it reaches, or why a run leaves it out), and its jobs and runs, asks open and decided, and tasks for ${OWNER} open and done. For the daily report. followUps is the work owed after ${OWNER} answered: carrying out an approved ask, reworking one they sent back, acting on their feedback on a report, or picking up after a task they finished, each with its outcome (done, failed, waiting on ${OWNER}, or null while still to do). Each run has a trigger: 'schedule' means its timer started it, 'manual' means ${OWNER} pressed Run now. For shared files, lastVerified records the timed file operations the office checked. A run summary alone never verifies a file, its claims, or delivery. Judge a job's timing by its schedule runs only; a manual run at any hour is expected. Every time is ${ZONE}, like the schedules.`,
       inputSchema: { hours: z.number().int().min(1).max(168).default(24) }
     },
     async ({ hours }) => {

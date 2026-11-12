@@ -132,6 +132,50 @@ test('a colleague who moved on while it walked is met where it went', () => {
   assert.equal(a.visiting, p);
 });
 
+const apart = (a: StaffActor, b: StaffActor) => {
+  const [ax, ay] = tileOf(a);
+  const [bx, by] = tileOf(b);
+  return Math.max(Math.abs(ax - bx), Math.abs(ay - by));
+};
+
+test('a colleague on the move is stopped within a tile, both talk a moment, then each goes on', () => {
+  const floor = floorOf();
+  const a = seated(floor, 'ada', ada);
+  const p = seated(floor, 'paige', paige);
+  assert.ok(a.visit(p));
+  until(() => tileOf(a)[0] >= 2, [a, p]);
+  // The colleague walks the other way along the same row, toward the desk at 5.
+  assert.ok(p.sendTo(third));
+  until(() => !a.moving, [a, p]);
+  assert.equal(a.visiting, p, 'stopped to talk');
+  assert.ok(apart(a, p) <= 1, 'within a tile');
+  const where = tileOf(p).join();
+  const x = p.x;
+  let still = true;
+  const stay = until(() => {
+    if (!a.moving) still &&= p.x === x && tileOf(p).join() === where;
+    return a.moving;
+  }, [a, p]);
+  assert.ok(stay > 1.9 && stay < 2.2, `talked ${stay} s`);
+  assert.ok(still, 'the colleague stood still for it');
+  assert.equal(a.visiting, undefined, 'on its way back');
+  until(() => !a.onTrip && !p.moving, [a, p]);
+  assert.deepEqual(tileOf(a), [1, 1], 'back on its own seat');
+  assert.equal(p.spotId, 'third', 'the colleague went on to where it was going');
+  assert.deepEqual(tileOf(p), [5, 1]);
+});
+
+test('a seated colleague is met beside its seat, and stays sat', () => {
+  const floor = floorOf();
+  const a = seated(floor, 'ada', ada);
+  const p = seated(floor, 'paige', paige);
+  assert.ok(a.visit(p));
+  until(() => !a.moving, [a, p]);
+  assert.deepEqual(tileOf(a), [8, 2], 'at the approach, not a corner early');
+  assert.equal(p.moving, false);
+  assert.deepEqual(tileOf(p), [8, 1]);
+});
+
 test('visits wait their turn behind the trip under way, up to three', () => {
   const floor = floorOf();
   const a = seated(floor, 'ada', ada);
@@ -199,15 +243,14 @@ test('an Odd off the floor, or with no way to the colleague, does not set off', 
   assert.equal(a.onTrip, false);
 });
 
-/** Moves the colleague at once to each desk in turn, each time a moment into the lead's walk to where it was. */
+/** Moves the colleague at once to each desk in turn, each time the lead has stepped onto its next tile. */
 function keepsMoving(a: StaffActor, p: StaffActor, desks: PlacedSpot[]) {
   for (const d of desks) {
-    const heading = p.meetAt.join();
-    for (let i = 0; i < 8; i++) for (const o of [a, p]) o.update(0.05);
+    const from = a.steps[0].join();
+    until(() => a.steps[0].join() !== from, [a, p]);
     assert.ok(a.moving, 'still on its way');
     assert.ok(p.sendTo(d));
     p.arrive();
-    until(() => tileOf(a).join() === heading, [a, p]);
   }
   until(() => standing(a), [a, p]);
 }
@@ -225,7 +268,7 @@ test('the way out follows a colleague who moved on twice, and meets it', () => {
   assert.deepEqual(tileOf(a), [8, 2], 'beside the colleague where it ended up');
 });
 
-test('after three turns the way out stops where it got to, stays, and goes back', () => {
+test('after three turns the way out keeps to where it was going, stays, and goes back', () => {
   const floor = floorOf();
   const a = seated(floor, 'ada', ada);
   const p = seated(floor, 'paige', paige);

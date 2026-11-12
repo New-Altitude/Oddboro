@@ -21,6 +21,15 @@
     rail?: Snippet;
     /** Space kept free at its edge, in px, for something docked there (the Odds rail). */
     inset?: number;
+    /** Paints over the other side panel, where the two overlap. */
+    onTop?: boolean;
+    /**
+     * Stretch across the screen, keeping this many px free at the far edge.
+     * Set, the panel takes a width of its own, remembered apart from `width`:
+     * the whole reach until the owner drags it narrower, and never past the
+     * reach. A change of the reach slides.
+     */
+    reach?: number;
   };
   let {
     side,
@@ -32,16 +41,32 @@
     storageKey,
     children,
     rail,
-    inset = 0
+    inset = 0,
+    onTop = false,
+    reach
   }: Props = $props();
+  let innerWidth = $state(1280);
+  /** The owner's width while reaching. None is the whole reach. */
+  let reachWidth = $state<number>();
+  /** The widest the panel goes while reaching: up to the reach, never under `min`. */
+  const reachMax = $derived(reach === undefined ? 0 : Math.max(min, innerWidth - 16 - reach));
+  /** The width shown now, in px, for the handle's value. */
+  const shown = $derived(reach === undefined ? width : Math.min(reachWidth ?? reachMax, reachMax));
+  const size = $derived(
+    reach === undefined
+      ? `min(${collapsed && rail ? RAIL : width}px, calc(100vw - ${24 + inset}px))`
+      : `${shown}px`
+  );
 
   onMount(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(storageKey) ?? 'null') as {
         width?: number;
         collapsed?: boolean;
+        reachWidth?: number;
       } | null;
       if (saved?.width) width = clamp(saved.width);
+      if (saved?.reachWidth) reachWidth = Math.max(min, saved.reachWidth);
       if (rail && typeof saved?.collapsed === 'boolean') collapsed = saved.collapsed;
     } catch {
       // No storage: the default width it is.
@@ -50,7 +75,7 @@
 
   function remember() {
     try {
-      localStorage.setItem(storageKey, JSON.stringify({ width, collapsed }));
+      localStorage.setItem(storageKey, JSON.stringify({ width, collapsed, reachWidth }));
     } catch {
       // Private window: the size lasts this visit only.
     }
@@ -64,13 +89,21 @@
     return (side === 'end') !== rtl ? -1 : 1;
   }
 
-  let drag: { x: number; w: number; sign: number } | undefined;
+  /** Set the width the owner chose: the reaching one while reaching, else the usual one. */
+  function resize(w: number) {
+    if (reach === undefined) return void (width = clamp(w));
+    const next = Math.round(Math.max(min, Math.min(w, reachMax)));
+    // Dragged all the way: the whole reach, which follows the chat or the rail.
+    reachWidth = next >= reachMax ? undefined : next;
+  }
+
+  let drag = $state<{ x: number; w: number; sign: number }>();
   function down(e: PointerEvent) {
-    drag = { x: e.clientX, w: width, sign: grows() };
+    drag = { x: e.clientX, w: shown, sign: grows() };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   }
   function move(e: PointerEvent) {
-    if (drag) width = clamp(drag.w + (e.clientX - drag.x) * drag.sign);
+    if (drag) resize(drag.w + (e.clientX - drag.x) * drag.sign);
   }
   function up() {
     if (!drag) return;
@@ -82,7 +115,7 @@
     const dir = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
     if (!dir) return;
     e.preventDefault();
-    width = clamp(width + dir * step * grows());
+    resize(shown + dir * step * grows());
     remember();
   }
 
@@ -92,13 +125,15 @@
   });
 </script>
 
+<svelte:window bind:innerWidth />
+
 <aside
   class="panel glass pointer-events-auto absolute top-4 bottom-4 flex rounded-2xl max-sm:top-3 max-sm:bottom-3"
   class:start-4={side === 'start'}
   class:end-4={side === 'end' && !inset}
-  style="inline-size: min({collapsed && rail ? RAIL : width}px, calc(100vw - {24 + inset}px)){inset
-    ? `; inset-inline-end: ${16 + inset}px`
-    : ''}"
+  class:z-10={onTop}
+  class:reaching={reach !== undefined && !drag}
+  style="inline-size: {size}{inset ? `; inset-inline-end: ${16 + inset}px` : ''}"
   aria-label={label}
 >
   {#if collapsed && rail}
@@ -112,9 +147,9 @@
       role="separator"
       aria-orientation="vertical"
       aria-label={`Resize the ${label.toLowerCase()}`}
-      aria-valuenow={width}
+      aria-valuenow={shown}
       aria-valuemin={min}
-      aria-valuemax={max}
+      aria-valuemax={reach === undefined ? max : reachMax}
       tabindex="0"
       onpointerdown={down}
       onpointermove={move}
@@ -164,5 +199,14 @@
   }
   .panel {
     overflow: visible;
+  }
+  /* The same 200 ms as the Odds rail, so the two move as one. */
+  .panel.reaching {
+    transition: inline-size 200ms ease;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .panel.reaching {
+      transition: none;
+    }
   }
 </style>

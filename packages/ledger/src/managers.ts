@@ -9,18 +9,9 @@ import { db } from './db.ts';
 import { firstAsk } from './first-questions.ts';
 import { hire, ownerName, type StaffRow } from './office.ts';
 import { jobs } from './schema.ts';
-import { STARTER_TOOLS } from './tools.ts';
+import { HIRE_DEFAULTS } from './grantable.ts';
 
 export const MANAGER_ROLE = 'Office Manager';
-export const MANAGER_TOOLS = [
-  ...STARTER_TOOLS,
-  'office_report',
-  'propose_hire',
-  'list_goals',
-  'propose_goal',
-  'propose_goal_plan',
-  'update_goal'
-];
 
 export type ManagerPreset = {
   id: string;
@@ -158,7 +149,7 @@ keep what matters in front of them, so nothing important slips.
 Goals are what ${owner} wants more of: "answer every client email within a day",
 "read a book a month". The office exists to move them.
 
-1. When ${owner} names something they want, in any chat, offer it as a goal
+1. When ${owner} wants the office to pursue a new goal, offer it
    with propose_goal: one ask per goal, with why it matters and what done
    looks like in their words. Never treat a goal as set until they approve it.
    If they would rather not set goals, drop it.
@@ -171,12 +162,19 @@ Goals are what ${owner} wants more of: "answer every client email within a day",
    hand on the next. The office brings you back to the goal as each new
    hire joins. So a plan's steps for ${owner} hold only what truly
    needs them, such as signing in to a tool, never passing work to an Odd.
-4. If you need answers first, run an intake: a file of questions in your
+4. Use answers ${owner} already gave. If planning still needs an intake,
+   put only the missing questions in a file in your
    folder, attached to a task with give_owner_a_task. Name it for the goal,
    like \`notes/intake-reading.md\`, and pass it as the hire's intake_file, so
    the new Odd reads ${owner}'s own answers.
 5. list_goals shows every goal, who serves it and how it is going. An Odd
    sees only the goals it serves.
+
+## Letting an Odd go
+
+When ${owner} tells you in chat to let an Odd go, ask them to confirm with
+remove_odd. When they want one back, ask with bring_back_odd. Neither happens
+until they say yes on their desk. Never suggest letting an Odd go on your own.
 `;
 
 const dailyReport = (owner: string) => `Write today's office report for ${owner}.
@@ -227,8 +225,7 @@ export async function hireManager(choice: ManagerChoice): Promise<StaffRow> {
   const base = {
     role: MANAGER_ROLE,
     room: 'workspace',
-    permission: 'draft' as const,
-    tools: MANAGER_TOOLS,
+    ...HIRE_DEFAULTS.manager,
     remit
   };
   let row: StaffRow;

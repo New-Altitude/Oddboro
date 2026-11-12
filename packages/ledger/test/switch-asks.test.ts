@@ -49,6 +49,9 @@ const sage = (run: string) => toolServer('sage', { RUN_KEY: run });
 const switchAsks = () => db.select().from(asks).where(eq(asks.kind, 'switch'));
 const row = async (id: number) => (await db.select().from(asks).where(eq(asks.id, id)))[0];
 const me = async () => (await db.select().from(staff).where(eq(staff.id, 'sage')))[0];
+// Codex's Run commands is fixed off on Windows (`COMMANDS_WHY`), as every other tool's is.
+const NO_SWITCH_ON_WINDOWS =
+  process.platform === 'win32' && 'no tool has the Run commands switch on Windows';
 const raise = (switches: ('commands' | 'web')[], place: { handOffId?: number } = {}) =>
   O.raiseAsk('sage', {
     kind: 'switch',
@@ -59,18 +62,22 @@ const raise = (switches: ('commands' | 'web')[], place: { handOffId?: number } =
     ...place
   }).then((r) => r.ask);
 
-test('the tool raises one ask for the switches that are off, and refuses a repeat from the same place', async () => {
-  await db.update(staff).set({ web: true }).where(eq(staff.id, 'sage'));
-  const c = await sage('k-raise');
-  const first = await call(c, { switches: ['commands', 'web'], why: 'To clone the repo.' });
-  assert.equal(first.error, false, first.text);
-  const [a] = await switchAsks();
-  assert.deepEqual(a.switches, ['commands']);
-  assert.equal(a.title, 'Turn on Run commands');
-  const again = await call(c, { switches: ['commands'], why: 'Again.' });
-  assert.ok(again.error && again.text.includes(`Your ask #${a.id}`), again.text);
-  assert.equal((await switchAsks()).length, 1);
-});
+test(
+  'the tool raises one ask for the switches that are off, and refuses a repeat from the same place',
+  { skip: NO_SWITCH_ON_WINDOWS },
+  async () => {
+    await db.update(staff).set({ web: true }).where(eq(staff.id, 'sage'));
+    const c = await sage('k-raise');
+    const first = await call(c, { switches: ['commands', 'web'], why: 'To clone the repo.' });
+    assert.equal(first.error, false, first.text);
+    const [a] = await switchAsks();
+    assert.deepEqual(a.switches, ['commands']);
+    assert.equal(a.title, 'Turn on Run commands');
+    const again = await call(c, { switches: ['commands'], why: 'Again.' });
+    assert.ok(again.error && again.text.includes(`Your ask #${a.id}`), again.text);
+    assert.equal((await switchAsks()).length, 1);
+  }
+);
 
 test('the tool refuses what is on already, and Run commands on a tool that never runs them, in plain words', async () => {
   await db.update(staff).set({ web: true }).where(eq(staff.id, 'sage'));
@@ -83,24 +90,28 @@ test('the tool refuses what is on already, and Run commands on a tool that never
   assert.deepEqual(await switchAsks(), []);
 });
 
-test('the owner says yes: the switches turn on with one ledger line, and the run that needs them starts', async () => {
-  const a = await raise(['commands', 'web']);
-  await O.decideAsk(a.id, 'approve', null);
-  const after = await me();
-  assert.equal(after.commands, true);
-  assert.equal(after.web, true);
-  assert.equal((await row(a.id)).status, 'approved');
-  const lines = await db.select().from(ledger);
-  assert.deepEqual(
-    lines.map((l) => l.title),
-    ['Let Sage run commands and browse the web']
-  );
-  const runs = await db.select().from(followUps).where(eq(followUps.askId, a.id));
-  assert.deepEqual(
-    runs.map((f) => f.kind),
-    ['carry_out']
-  );
-});
+test(
+  'the owner says yes: the switches turn on with one ledger line, and the run that needs them starts',
+  { skip: NO_SWITCH_ON_WINDOWS },
+  async () => {
+    const a = await raise(['commands', 'web']);
+    await O.decideAsk(a.id, 'approve', null);
+    const after = await me();
+    assert.equal(after.commands, true);
+    assert.equal(after.web, true);
+    assert.equal((await row(a.id)).status, 'approved');
+    const lines = await db.select().from(ledger);
+    assert.deepEqual(
+      lines.map((l) => l.title),
+      ['Let Sage run commands and browse the web']
+    );
+    const runs = await db.select().from(followUps).where(eq(followUps.askId, a.id));
+    assert.deepEqual(
+      runs.map((f) => f.kind),
+      ['carry_out']
+    );
+  }
+);
 
 test('a yes for an Odd that moved to a tool with no commands since it asked turns nothing on and leaves the ask open', async () => {
   const a = await raise(['commands']);
@@ -110,20 +121,24 @@ test('a yes for an Odd that moved to a tool with no commands since it asked turn
   assert.equal((await row(a.id)).status, 'open');
 });
 
-test('two runs asking for the same are twins: the desk shows the first, and one yes answers both', async () => {
-  const first = await raise(['commands', 'web']);
-  const twin = await raise(['web'], { handOffId: 7 });
-  const shown = (await O.desk()).asks.map((x) => x.id);
-  assert.ok(shown.includes(first.id) && !shown.includes(twin.id), 'the twin waits behind it');
-  await O.decideAsk(first.id, 'approve', null);
-  assert.equal((await row(twin.id)).status, 'approved');
-  const runs = await db.select().from(followUps);
-  assert.deepEqual(
-    runs.map((f) => f.askId),
-    [twin.id],
-    'one run, the hand-off twin, does the work'
-  );
-});
+test(
+  'two runs asking for the same are twins: the desk shows the first, and one yes answers both',
+  { skip: NO_SWITCH_ON_WINDOWS },
+  async () => {
+    const first = await raise(['commands', 'web']);
+    const twin = await raise(['web'], { handOffId: 7 });
+    const shown = (await O.desk()).asks.map((x) => x.id);
+    assert.ok(shown.includes(first.id) && !shown.includes(twin.id), 'the twin waits behind it');
+    await O.decideAsk(first.id, 'approve', null);
+    assert.equal((await row(twin.id)).status, 'approved');
+    const runs = await db.select().from(followUps);
+    assert.deepEqual(
+      runs.map((f) => f.askId),
+      [twin.id],
+      'one run, the hand-off twin, does the work'
+    );
+  }
+);
 
 test('an ask for more than the first is no twin', async () => {
   const web = await raise(['web']);

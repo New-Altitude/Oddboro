@@ -29,11 +29,14 @@ import {
 
 // After the office under test set its home and secret store, so the launch reads those.
 const { LAUNCHES } = await import('./cli.ts');
-const { clearGeminiKey, setGeminiKey } = await import('./gemini.ts');
+const { clearGeminiKey, mcpServers, setGeminiKey } = await import('./gemini.ts');
 
 await L.pg`insert into staff ${L.pg([
   { ...odd('gemma', 'Gemma'), agent: 'gemini' },
-  { ...odd('gina', 'Gina'), agent: 'gemini' }
+  { ...odd('gina', 'Gina'), agent: 'gemini' },
+  { ...odd('gwen', 'Gwen'), agent: 'gemini' },
+  { ...odd('gale', 'Gale'), agent: 'gemini' },
+  { ...odd('gail', 'Gail'), agent: 'gemini' }
 ])}`;
 
 const GEMINI_HOME = join(folder, 'gemini');
@@ -90,6 +93,19 @@ test("a Gemini run's settings pick the API key, skip every .env in its folder an
   assert.deepEqual(Object.keys(mcpServers ?? {}), ['office']);
   assert.equal(run.settingsMode, 0o600);
   assert.equal(run.runMode, 0o700);
+});
+
+test("a Gemini run's settings give a command server and a hosted one in the shape they always had", () => {
+  assert.deepEqual(
+    mcpServers({
+      office: { type: 'stdio', command: 'node', args: ['mcp.ts'], env: { RUN_KEY: 'k' } },
+      notes: { type: 'http', url: 'https://notes.example/mcp', headers: { Authorization: 'a' } }
+    }),
+    {
+      office: { command: 'node', args: ['mcp.ts'], env: { RUN_KEY: 'k' } },
+      notes: { httpUrl: 'https://notes.example/mcp', headers: { Authorization: 'a' } }
+    }
+  );
 });
 
 test("a Gemini run's folder goes when it ends, and one a run that died with the office left goes at the next run", async () => {
@@ -202,12 +218,12 @@ test("a Gemini Odd's next chat resumes the session its last one started", async 
   assert.deepEqual(next.args.slice(-2), ['--resume', '0a0a0a0a-0000-4000-8000-00000000ce01']);
 });
 
-test('a Gemini Odd is told it has file tools only, each given the full path, that Gemini runs no commands here, and that the owner can switch on the web', async () => {
+test('a Gemini Odd is told it has file tools only, each given the full path, that Gemini runs no commands here, and to ask for the web with ask_for_switch', async () => {
   const owner = await L.ownerName();
   const run = await chatOf('gemma');
   assert.ok(
     run.system.includes(
-      `Your own tools work on files only. No shell: Gemini can't run commands here. No web: ${owner} can switch on Browse the web in your Settings tab, under Office. Give each file tool the file's full path.`
+      `Your own tools work on files only. No shell: Gemini can't run commands here. No web: ask ${owner} to turn on Browse the web with ask_for_switch. Give each file tool the file's full path.`
     ),
     run.system
   );
@@ -276,6 +292,70 @@ test('once its list names this system, "Runs on" offers Gemini and an Odd moves 
     L.AGENT_PLATFORMS.gemini.runs = before;
     await patch('sam', { agent: 'claude' });
   }
+});
+
+test("after a failed run that took the owner's message, the resumed session hears that the run failed, not the message again", async () => {
+  // The stand-in names its session, then fails: the office saves the session, as for Claude Code.
+  assert.equal(await chatError('gwen', 'Plan the week. End in error'), 'Quota used up.');
+  const { args, message } = await chatOf('gwen', 'Still there?');
+  assert.deepEqual(args.slice(-2), ['--resume', '0a0a0a0a-0000-4000-8000-00000000ce01']);
+  assert.ok(!message.includes('Plan the week'), `the session heard its message again: ${message}`);
+  assert.match(
+    message,
+    new RegExp(`Your run on ${await L.ownerName()}'s last message you saw before this one failed`)
+  );
+});
+
+test('after a failed run that started nothing, the resumed session hears the message it never took, once', async () => {
+  await chatOf('gale');
+  // Google stood in for: it takes every key, since the key's trial is not under test here.
+  const fetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response('{}');
+  try {
+    // With no key the run starts nothing, so no session took the message.
+    clearGeminiKey();
+    assert.match(await chatError('gale', 'Plan the week.'), /no API key/);
+  } finally {
+    assert.deepEqual(await setGeminiKey(OFFICE_GEMINI_KEY), { ok: true });
+    globalThis.fetch = fetch;
+  }
+  const { args, message } = await chatOf('gale', 'Still there?');
+  assert.deepEqual(args.slice(-2), ['--resume', '0a0a0a0a-0000-4000-8000-00000000ce01']);
+  assert.ok(
+    message.includes(`so you never saw it:)\n${await L.ownerName()}: Plan the week.`),
+    message
+  );
+  assert.equal(message.split('Plan the week').length - 1, 1, 'the message was said more than once');
+  assert.ok(!message.includes('Your run on'), 'it heard of a run on a message it never took');
+});
+
+test("after a failed run that started nothing, then one that took the owner's message into the session, the resumed session hears both runs failed and that it saw both messages", async () => {
+  await chatOf('gail');
+  // Google stood in for: it takes every key, since the key's trial is not under test here.
+  const fetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response('{}');
+  try {
+    clearGeminiKey();
+    assert.match(await chatError('gail', 'Plan the week.'), /no API key/);
+  } finally {
+    assert.deepEqual(await setGeminiKey(OFFICE_GEMINI_KEY), { ok: true });
+    globalThis.fetch = fetch;
+  }
+  // This run resumes the session, hears "Plan the week." in its preface, names its session, then fails.
+  assert.equal(await chatError('gail', 'Book the hall. End in error'), 'Quota used up.');
+  const { args, message } = await chatOf('gail', 'Still there?');
+  assert.deepEqual(args.slice(-2), ['--resume', '0a0a0a0a-0000-4000-8000-00000000ce01']);
+  assert.ok(
+    !message.includes('never saw'),
+    `the session was told it never saw a message it holds: ${message}`
+  );
+  assert.ok(!message.includes('Plan the week'), `the session heard its message again: ${message}`);
+  assert.match(
+    message,
+    new RegExp(
+      `Your runs on ${await L.ownerName()}'s last 2 messages you saw before this one failed`
+    )
+  );
 });
 
 test('no test reached the keychain', () => {
