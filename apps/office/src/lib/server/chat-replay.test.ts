@@ -5,8 +5,18 @@
 // or in the preface when the replay cut it or the session resumed.
 // Run with `npm test -w @oddboro/office`.
 import assert from 'node:assert/strict';
-import { appendFileSync, mkdirSync, realpathSync, utimesSync, writeFileSync } from 'node:fs';
-import { test } from 'node:test';
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  utimesSync,
+  writeFileSync
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { after, test } from 'node:test';
 import { L, PATCH, chatOf, odd, onPlatform } from './office-under-test.ts';
 
 // After the office under test set its home: replay.ts loads the ledger, which reads it as it loads.
@@ -135,9 +145,12 @@ function newChat(id: string): void {
   );
   writeFileSync(home('seeds.md'), 'Sorted.');
 }
+// The owner gives an Odd folders outside the office, so these sit in a temp folder of their own.
+const givenFolders = mkdtempSync(join(tmpdir(), 'oddboro-given-'));
+after(() => rmSync(givenFolders, { recursive: true, force: true }));
 /** A folder outside the Odd's own, by its real path, with one file changed now. */
 function given(name: string): string {
-  const path = L.home('given-replay', name);
+  const path = join(givenFolders, name);
   mkdirSync(path, { recursive: true });
   writeFileSync(`${path}/${name}.md`, 'Changed.');
   return realpathSync(path);
@@ -158,7 +171,7 @@ test('the replay walks only the given folders the Odd may change that are still 
   // A write folder deleted since leaves the line about the Odd's own folder alone.
   newChat('dell');
   await L.pg`update staff set folders = ${JSON.stringify([
-    { path: L.home('given-replay', 'gone'), write: true }
+    { path: join(givenFolders, 'gone'), write: true }
   ])}::jsonb where id = 'dell'`;
   const dell = await chatOf('dell', 'Done?');
   assert.ok(

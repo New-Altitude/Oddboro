@@ -15,7 +15,7 @@ import {
 } from '@oddboro/ledger';
 import type { AskRow, FollowUpRow, GoalRow, ReportRow, TaskRow, Unparked } from '@oddboro/ledger';
 import { flat, ownerAnswers, pickedUpLine } from '@oddboro/ledger/desk-answers';
-import { workPath } from '@oddboro/ledger/work-paths';
+import { THREADS_DIR, workPath } from '@oddboro/ledger/work-paths';
 import { filterWords } from '@oddboro/ledger/filters';
 import { ACT_WRITE } from './house.ts';
 
@@ -188,7 +188,12 @@ function taskDoneBrief(
     ...(t.files.length
       ? [
           // A file from a thread's folder is named from the office's folder, so the run gets where it is.
-          `- ${t.row.responseVersion ? 'Reference files' : 'Attached, with anything they filled in'}: ${t.files.map((f) => (workPath(f) ? home(f) : f)).join(', ')}. Read each one first.`
+          `- ${t.row.responseVersion ? 'Reference files' : 'Attached, with anything they filled in'}: ${t.files
+            .map((f) => {
+              const w = workPath(f);
+              return w ? home(THREADS_DIR, String(w.thread), w.inside) : f;
+            })
+            .join(', ')}. Read each one first.`
         ]
       : []),
     ...(f.pickedUp ?? []).map((title) => `- ${pickedUpLine(title)}`),

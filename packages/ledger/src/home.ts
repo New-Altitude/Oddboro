@@ -32,7 +32,46 @@ function officeHome(): string {
   }
   return testHome;
 }
-export const home = (...parts: string[]): string => join(officeHome(), ...parts);
+/**
+ * Every name at the top of the office's folder: what each holds, and whether
+ * `npm run reset` moves it into the backup or leaves it (reset.ts). `home()`
+ * takes only these names, so a new folder fails the type check until it is
+ * declared here with what reset does with it. Thread folders move with the
+ * database that numbers them, so a new office never reuses an id over an old
+ * thread's files.
+ */
+export const OFFICE_ENTRIES = {
+  db: { holds: "The office's own database.", reset: 'move' },
+  staff: { holds: "Each Odd's folder.", reset: 'move' },
+  threads: { holds: "Each piece of work's folder, numbered by the database.", reset: 'move' },
+  office: { holds: "The office's design, looks and run files.", reset: 'move' },
+  // Moved so a reset starts over as if this computer never had an office; the
+  // sign-ins stay in the dated backup. The owner may still choose 'keep' (NEW-1734).
+  accounts: { holds: "Each AI tool's sign-ins.", reset: 'move' },
+  'owner-key': { holds: "The key the owner's page holds.", reset: 'move' },
+  backups: { holds: 'Where reset and updates put what they move.', reset: 'keep' },
+  bin: { holds: "The office's own Caddy.", reset: 'keep' },
+  caddy: { holds: "Caddy's settings and the copy of its root certificate.", reset: 'keep' },
+  'codex-tmp': { holds: "Each Codex run's temp folder.", reset: 'keep' },
+  data: { holds: "The owner's data the Odds read.", reset: 'keep' },
+  gemini: { holds: "The office's Gemini home.", reset: 'keep' },
+  grok: { holds: "Grok's home from before accounts.", reset: 'keep' },
+  codex: { holds: "Codex's home from before accounts, moved at start.", reset: 'keep' },
+  mcp: { holds: "Each run's tool server and settings files.", reset: 'keep' },
+  version: { holds: 'The version that last started, for its backup.', reset: 'keep' },
+  '.env': {
+    holds: "The office's settings; reset copies it aside and clears the office's own keys.",
+    reset: 'keep'
+  }
+} as const satisfies Record<string, { holds: string; reset: 'move' | 'keep' }>;
+export type OfficeEntry = keyof typeof OFFICE_ENTRIES;
+
+/** The office's folder, or a path inside it under one of its declared entries. */
+export function home(): string;
+export function home(entry: OfficeEntry, ...parts: string[]): string;
+export function home(...parts: string[]): string {
+  return join(officeHome(), ...parts);
+}
 
 /** Every account's folder: each coding tool's sign-ins, one folder each (accounts.ts). */
 export const accountsHome = (): string => home('accounts');
