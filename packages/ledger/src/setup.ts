@@ -10,11 +10,13 @@
 //   npm run setup -- --check       check everything, change nothing
 //   npm run setup -- --env <file>  check against a different .env, to try one out
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { checkDatabase, checkMachine, type Check } from './checks.ts';
 import { OFFICE_LOG, openUrl, restartService, serviceInstalled } from './platform.ts';
 import { ENV_FILE, readEnv } from './env.ts';
-import { OFFICE_PORT, OFFICE_URL } from './home.ts';
+import { home, OFFICE_PORT, OFFICE_URL } from './home.ts';
+import { OWNER_KEY_FILE, OWNER_PARAM, ownerCookie, ownerKey } from './owner-key.ts';
 
 const REPO = fileURLToPath(new URL('../../../', import.meta.url));
 const args = process.argv.slice(2);
@@ -97,12 +99,18 @@ else if (!(await npm(['run', 'service:install', '-w', 'apps/office']))) {
 }
 
 // The first start brings the tables up to date, so it can take a little while.
+// The office answers only its owner's key, so every request here sends it. The
+// office makes the key as it starts, before it answers, so until the file is
+// there the office is not up. Setup never reads it sooner, or it would make a
+// key of its own.
 let up = false;
 for (let i = 0; i < 120 && !up; i++) {
-  up = await fetch(OFFICE).then(
-    (r) => r.ok,
-    () => false
-  );
+  up =
+    existsSync(home(OWNER_KEY_FILE)) &&
+    (await fetch(OFFICE, { headers: { cookie: ownerCookie() } }).then(
+      (r) => r.ok,
+      () => false
+    ));
   if (!up) await new Promise((r) => setTimeout(r, 1000));
 }
 if (!up) {
@@ -113,14 +121,20 @@ if (!up) {
 }
 
 const probe = (url: string) =>
-  fetch(`${url}/api/setup/address?probe=1`, { signal: AbortSignal.timeout(3000) })
+  fetch(`${url}/api/setup/address?probe=1`, {
+    headers: { cookie: ownerCookie() },
+    signal: AbortSignal.timeout(3000)
+  })
     .then((r) => r.json() as Promise<{ office?: boolean }>)
     .then((r) => r.office === true)
     .catch(() => false);
 let opened = `http://${NAMES[1]}:${OFFICE_PORT}`;
 // HTTPS first, once the office's certificate is trusted here (the first card sets that up).
 // The office itself answers whether it is: it knows where its Caddy keeps the certificate.
-const secure = await fetch(`${OFFICE}/api/setup/address`, { signal: AbortSignal.timeout(5000) })
+const secure = await fetch(`${OFFICE}/api/setup/address`, {
+  headers: { cookie: ownerCookie() },
+  signal: AbortSignal.timeout(5000)
+})
   .then((r) => r.json() as Promise<{ secure?: boolean }>)
   .then((r) => r.secure === true)
   .catch(() => false);
@@ -135,7 +149,9 @@ for (const name of secure ? [] : NAMES) {
   }
 }
 if (secure) opened = `https://${NAMES[0]}`;
-await openUrl(opened);
+// The page takes its key from the address once and keeps it as a cookie. Only
+// the browser gets the key: the line below prints the address without it.
+await openUrl(`${opened}/?${OWNER_PARAM}=${ownerKey()}`);
 console.log(
   `\n${MARK.ok} ${bold('Ready.')} The office is open in your browser. Close this window whenever you like.\n  ${dim(opened)}\n`
 );

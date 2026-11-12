@@ -56,6 +56,7 @@ import {
 } from '@oddboro/ledger';
 import { writeEnv } from '@oddboro/ledger/env';
 import { fixedError } from '@oddboro/ledger/errors';
+import { ownerCookie } from '@oddboro/ledger/owner-key';
 import { HOSTS } from './hosts.ts';
 
 const SECURE = HOSTS[0];
@@ -66,9 +67,8 @@ const HTTP_ROUTE = 'oddboro';
 const HTTPS_ROUTE = 'oddboro-https';
 const TLS_POLICY = 'oddboro-tls';
 const LABEL = 'com.oddboro.caddy';
-const HOME = home();
-const OWN_CADDY = join(HOME, 'bin', WINDOWS ? 'caddy.exe' : 'caddy');
-const CADDYFILE = join(HOME, 'caddy', 'Caddyfile');
+const OWN_CADDY = home('bin', WINDOWS ? 'caddy.exe' : 'caddy');
+const CADDYFILE = home('caddy', 'Caddyfile');
 /** Where a Caddy run by this user keeps its own authority's root certificate. */
 const OWN_ROOT = join(
   MAC
@@ -82,7 +82,7 @@ const OWN_ROOT = join(
   'root.crt'
 );
 /** A copy of the root certificate, taken from Caddy's admin API when its own file is out of reach. */
-const COPIED_ROOT = join(HOME, 'caddy', 'root.crt');
+const COPIED_ROOT = home('caddy', 'root.crt');
 /** The system's list of trusted authorities on Linux: Debian and Arch, then Fedora. */
 const LINUX_BUNDLES = ['/etc/ssl/certs/ca-certificates.crt', '/etc/pki/tls/certs/ca-bundle.crt'];
 
@@ -99,7 +99,7 @@ async function rootCert(): Promise<string | undefined> {
     ? ((await r.json().catch(() => ({}))) as { root_certificate?: string }).root_certificate
     : undefined;
   if (pem) {
-    mkdirSync(join(HOME, 'caddy'), { recursive: true });
+    mkdirSync(home('caddy'), { recursive: true });
     writeFileSync(COPIED_ROOT, pem);
     return COPIED_ROOT;
   }
@@ -167,9 +167,13 @@ async function host(): Promise<string> {
   return r?.address === '127.0.0.1' ? SECURE : HOSTS[1];
 }
 
-/** Whether the address answers, and with this office rather than something else. */
-async function answers(url: string): Promise<boolean> {
-  const r = await get(`${url}/api/setup/address?probe=1`);
+/**
+ * Whether the address answers, and with this office rather than something else.
+ * It sends the owner's key: the office refuses any request without it, and a
+ * refusal here would read as an address that does not reach the office.
+ */
+export async function answers(url: string): Promise<boolean> {
+  const r = await get(`${url}/api/setup/address?probe=1`, { headers: { cookie: ownerCookie() } });
   if (!r?.ok) return false;
   return ((await r.json().catch(() => ({}))) as { office?: boolean }).office === true;
 }
@@ -187,7 +191,8 @@ function answersSecurely(name: string): Promise<boolean> {
         port: 443,
         servername: name,
         path: '/api/setup/address?probe=1',
-        headers: { host: name },
+        // The owner's key, as `answers` sends it.
+        headers: { host: name, cookie: ownerCookie() },
         rejectUnauthorized: false,
         timeout: 3000
       },
@@ -405,13 +410,13 @@ async function download(): Promise<string> {
     ?.split(/\s+/)[0];
   const got = createHash('sha512').update(tar).digest('hex');
   if (!want || want !== got) throw fixedError('The Caddy download did not match its checksum.');
-  mkdirSync(join(HOME, 'bin'), { recursive: true });
-  const file = join(HOME, 'bin', archive);
+  mkdirSync(home('bin'), { recursive: true });
+  const file = home('bin', archive);
   writeFileSync(file, tar);
   // Windows 10 and later ship bsdtar, which reads a zip as well.
   const unpack = WINDOWS
-    ? ['-xf', file, '-C', join(HOME, 'bin'), 'caddy.exe']
-    : ['-xzf', file, '-C', join(HOME, 'bin'), 'caddy'];
+    ? ['-xf', file, '-C', home('bin'), 'caddy.exe']
+    : ['-xzf', file, '-C', home('bin'), 'caddy'];
   if (!succeeded(await probe('tar', unpack, WAIT)))
     throw fixedError('The Caddy download would not unpack.');
   if (!WINDOWS) chmodSync(OWN_CADDY, 0o755);
@@ -434,7 +439,7 @@ async function download(): Promise<string> {
  */
 export function ownCaddyfile(system: System | undefined): string {
   return [
-    '# Written by the office: its address on this Mac.',
+    '# Written by the office: its address on this computer.',
     '{',
     '\tadmin off',
     '\tpersist_config off',
@@ -457,7 +462,7 @@ export function ownCaddyfile(system: System | undefined): string {
 /** The office's own Caddy, started now and at every login. */
 async function startOwn(): Promise<void> {
   const caddy = (await caddyBinary()) ?? (await download());
-  mkdirSync(join(HOME, 'caddy'), { recursive: true });
+  mkdirSync(home('caddy'), { recursive: true });
   writeFileSync(CADDYFILE, ownCaddyfile(SYSTEM));
   const started = await installService({
     label: LABEL,

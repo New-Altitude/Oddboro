@@ -292,16 +292,35 @@ async function smoke(): Promise<void> {
     // A held stdin, as the app gives it: the server quits when it closes.
     stdio: ['pipe', 'inherit', 'inherit']
   });
+  // The office answers only its owner's key, as a cookie named by its port.
+  // This script imports only Node's own modules, so like the app's shell it
+  // writes out the key file's name and the cookie's name itself;
+  // desktop-names.test.ts holds them to the office's.
+  const keyFile = join(home, 'owner-key');
+  const cookie = `oddboro-owner-${port}`;
   try {
     for (let i = 0; i < 90; i++) {
       await new Promise((r) => setTimeout(r, 1000));
-      const ok = await fetch(`http://127.0.0.1:${port}/`, {
-        signal: AbortSignal.timeout(2000)
-      }).then(
-        (r) => r.status < 500,
-        () => false
-      );
-      if (ok) return console.log(`Smoke: the staged office answered on ${port}.`);
+      // The office makes its key as it starts, before it answers: no file yet
+      // means it is still starting.
+      const key = existsSync(keyFile) ? readFileSync(keyFile, 'utf8').trim() : undefined;
+      const status =
+        key === undefined
+          ? undefined
+          : await fetch(`http://127.0.0.1:${port}/`, {
+              headers: { cookie: `${cookie}=${key}` },
+              signal: AbortSignal.timeout(2000)
+            }).then(
+              (r) => r.status,
+              () => undefined
+            );
+      if (status !== undefined) {
+        // A refusal of its own key, or a server error, is a broken office, not
+        // one still starting. The error names the status, never the key.
+        if (status === 403 || status >= 500)
+          throw new Error(`The staged office answered ${status} with its own key`);
+        return console.log(`Smoke: the staged office answered on ${port}.`);
+      }
       if (child.exitCode !== null) throw new Error(`The staged office exited (${child.exitCode})`);
     }
     throw new Error('The staged office never answered');

@@ -1,15 +1,19 @@
 // The office's own Caddyfile (`ownCaddyfile` in address.ts) on each system,
-// the look at port 80 (`port80`), and which of its commands may show a window.
+// the look at port 80 (`port80`), which of its commands may show a window, and
+// the owner's key on the office's own probe of its address (`answers`).
 // Run with `npm test -w @oddboro/office`.
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, mock, test } from 'node:test';
+import { ownerCookie } from '@oddboro/ledger/owner-key';
 import { openUrl, probe } from '@oddboro/ledger/platform';
-import { ownCaddyfile, port80, secureAddress } from './address.ts';
+import { answers, ownCaddyfile, port80, secureAddress } from './address.ts';
 
 const binds = (system: Parameters<typeof ownCaddyfile>[0]) =>
   ownCaddyfile(system)
@@ -139,4 +143,22 @@ test("on Windows, a command runs with no window unless it opens one the owner mu
     hides('the opener', (s) => s.args.includes(page)),
     'not set'
   );
+});
+
+test("the office's probe of its own address sends the owner's key, so the office's refusal of a keyless request does not read as an address that misses it", async () => {
+  const seen: (string | undefined)[] = [];
+  // As the office answers: the probe's reply to the owner's key, a refusal to anything else.
+  const stub = createServer((req, res) => {
+    seen.push(req.headers.cookie);
+    if (req.headers.cookie === ownerCookie()) res.end(JSON.stringify({ office: true }));
+    else res.writeHead(403).end();
+  });
+  await new Promise<void>((ready) => stub.listen(0, '127.0.0.1', ready));
+  try {
+    const { port } = stub.address() as AddressInfo;
+    assert.equal(await answers(`http://127.0.0.1:${port}`), true);
+    assert.deepEqual(seen, [ownerCookie()]);
+  } finally {
+    stub.close();
+  }
 });
