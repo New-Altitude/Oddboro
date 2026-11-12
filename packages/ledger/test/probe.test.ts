@@ -62,6 +62,19 @@ test('input reaches the command on stdin, then ends, so a command reading to the
   );
 });
 
+test('with no input, stdin still ends, so a command reading to the end returns before its time', async () => {
+  const reader =
+    'process.stdin.on("data", () => {}).on("end", () => process.stdout.write("read to the end"))';
+  const started = Date.now();
+  assert.deepEqual(await probe(process.execPath, ['-e', reader], { timeout: 10_000 }), {
+    status: 'ok',
+    out: 'read to the end',
+    err: ''
+  });
+  const took = Date.now() - started;
+  assert.ok(took < 5_000, `the command waited ${took} ms for stdin to end`);
+});
+
 test('a command that ignores SIGTERM is stopped at its time with the signal given, and timed out', async () => {
   // A stand-in that lives 30 s, far past its time, unless something kills it.
   const stubborn = join(folder, 'stubborn.mjs');
