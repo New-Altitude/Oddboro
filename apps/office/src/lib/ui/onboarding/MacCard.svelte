@@ -2,6 +2,7 @@
   import type { Check } from '@oddboro/ledger/checks';
   import type { System } from '@oddboro/ledger/platform';
   import { systemWords } from '@oddboro/ledger/system-words';
+  import { shownAddress, type Address } from '#lib/address.ts';
   import { call } from '../api.ts';
   import NotifyHelp from './NotifyHelp.svelte';
   import { browserNeeds } from './notify-help.ts';
@@ -61,14 +62,7 @@
   const TONE = { ok: 'text-moss', optional: 'text-ember', missing: 'text-coral' } as const;
 
   // The office's address, http://oddboro.localhost through Caddy, in
-  // whichever way this Mac allows (lib/server/address.ts).
-  type Address = { host: string } & (
-    | { state: 'ready'; url: string; secure: boolean; canSecure: boolean }
-    | { state: 'own'; installed: boolean }
-    | { state: 'shared' }
-    | { state: 'blocked'; holder: string }
-    | { state: 'unchecked' }
-  );
+  // whichever way this computer allows (lib/server/address.ts).
   let addr = $state<Address | undefined>();
   let addrBusy = $state(false);
   let addrProblem = $state('');
@@ -157,7 +151,7 @@
     <div class="mt-2 rounded-lg bg-raise px-3 py-2 text-sm">
       <div class="flex items-center gap-3">
         <span class="min-w-0 flex-1">
-          {addr.state === 'blocked' || addr.state === 'unchecked' ? `${addr.host}:4500` : addr.host}
+          {shownAddress(addr)}
           <span class="block text-xs text-muted">
             {#if addr.state === 'ready' && addr.secure}
               The office's address on {thisComputer}, secure. No port to remember.
@@ -173,7 +167,7 @@
               Your Caddy holds port 80. The office adds its site to it and leaves your config files
               alone.
             {:else if addr.state === 'unchecked'}
-              The office could not check what holds port 80 on this computer, so it keeps its port
+              The office could not check what holds port 80 on {thisComputer}, so it keeps its port
               in the address.
             {:else}
               {addr.holder} holds port 80, so the office keeps its port in the address.

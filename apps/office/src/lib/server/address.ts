@@ -57,6 +57,7 @@ import {
 import { writeEnv } from '@oddboro/ledger/env';
 import { fixedError } from '@oddboro/ledger/errors';
 import { ownerCookie } from '@oddboro/ledger/owner-key';
+import type { Address } from '#lib/address.ts';
 import { HOSTS } from './hosts.ts';
 
 const SECURE = HOSTS[0];
@@ -105,23 +106,6 @@ async function rootCert(): Promise<string | undefined> {
   }
   return existsSync(COPIED_ROOT) ? COPIED_ROOT : undefined;
 }
-
-/** How the address stands, with the name it uses. */
-export type Address = { host: string } & (
-  | {
-      state: 'ready';
-      url: string;
-      /** Served over HTTPS with a certificate this computer trusts. */
-      secure: boolean;
-      /** Served over HTTPS, waiting only for this computer to trust Caddy's authority. */
-      canSecure: boolean;
-    }
-  | { state: 'own'; installed: boolean }
-  | { state: 'shared' }
-  | { state: 'blocked'; holder: string }
-  /** The office could not look at port 80, so it keeps its port rather than guess. */
-  | { state: 'unchecked' }
-);
 
 /** No command here should take two minutes; one that hangs is stopped there. */
 const WAIT = { timeout: 120_000 };
@@ -256,6 +240,8 @@ const ANOTHER = 'another program';
 const PORT_80: Record<System, () => Promise<Port80>> = {
   // ss lists every listener, whoever runs it; lsof run without root misses
   // other users' programs. Without root ss names only this user's programs.
+  // It goes by name: distributions keep it in /usr/bin, /usr/sbin or /sbin,
+  // so no one path is safe.
   linux: async () => {
     const r = await probe('ss', ['-Hltnp', 'sport = :80'], WAIT);
     switch (r.status) {
@@ -274,8 +260,10 @@ const PORT_80: Record<System, () => Promise<Port80>> = {
       }
     }
   },
+  // macOS ships lsof only in /usr/sbin. By name it would run whichever lsof
+  // comes first on the PATH, which need not answer as Apple's does.
   mac: async () => {
-    const r = await probe('lsof', ['-nP', '-iTCP:80', '-sTCP:LISTEN', '-Fc'], WAIT);
+    const r = await probe('/usr/sbin/lsof', ['-nP', '-iTCP:80', '-sTCP:LISTEN', '-Fc'], WAIT);
     switch (r.status) {
       case 'ok':
         return {
@@ -354,15 +342,17 @@ async function caddyBinary(): Promise<string | undefined> {
 
 export async function address(): Promise<Address> {
   const name = await host();
+  // Every state carries the port: the page shows it when the office keeps it,
+  // and it moves with ODDBORO_PORT.
+  const at = { host: name, port: OFFICE_PORT };
   // Caddy, its login service and certificate trust are written for a Mac,
   // Linux and Windows; elsewhere the office stays at its port, which needs nothing.
-  if (!MAC && !LINUX && !WINDOWS)
-    return { host: name, state: 'blocked', holder: 'this system for now' };
+  if (!MAC && !LINUX && !WINDOWS) return { ...at, state: 'blocked', holder: 'this system for now' };
   if (await answers(`http://${name}`)) {
     const https = name === SECURE && (await answersSecurely(name));
     const secure = https && (await trusted());
     return {
-      host: name,
+      ...at,
       state: 'ready',
       url: `${secure ? 'https' : 'http'}://${name}`,
       secure,
@@ -372,15 +362,14 @@ export async function address(): Promise<Address> {
   const port = await port80();
   switch (port.status) {
     case 'unchecked':
-      return { host: name, state: 'unchecked' };
+      return { ...at, state: 'unchecked' };
     case 'free':
       if (!lowPortsAllowed())
-        return { host: name, state: 'blocked', holder: 'Linux (ports 80 and 443 need root)' };
-      return { host: name, state: 'own', installed: !!(await caddyBinary()) };
+        return { ...at, state: 'blocked', holder: 'Linux (ports 80 and 443 need root)' };
+      return { ...at, state: 'own', installed: !!(await caddyBinary()) };
     case 'held':
-      if (port.by === 'caddy' && (await admin('/config/'))?.ok)
-        return { host: name, state: 'shared' };
-      return { host: name, state: 'blocked', holder: port.by };
+      if (port.by === 'caddy' && (await admin('/config/'))?.ok) return { ...at, state: 'shared' };
+      return { ...at, state: 'blocked', holder: port.by };
     default: {
       const missed: never = port;
       throw new Error(`Port 80 came back as ${JSON.stringify(missed)}`);
@@ -537,7 +526,7 @@ async function addShared(): Promise<void> {
   }
 }
 
-/** Set the address up in whichever way this Mac allows, and check it answers. */
+/** Set the address up in whichever way this computer allows, and check it answers. */
 export async function setUpAddress(): Promise<Address> {
   const now = await address();
   if (now.state === 'own') {
