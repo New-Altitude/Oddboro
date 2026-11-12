@@ -2,8 +2,7 @@ import {
   hasOwnerKey,
   isExceptionPath,
   isOwnerKey,
-  NOT_THE_OWNER_PAGE,
-  NOT_THE_OWNER_TEXT,
+  notTheOwner,
   OWNER_PARAM,
   ownerKey
 } from '@oddboro/ledger/owner-key';
@@ -89,14 +88,10 @@ export function ownerOnlyMiddleware(
     next();
     return;
   }
-  res.statusCode = 403;
-  if (path.startsWith('/api/')) {
-    res.setHeader('content-type', 'text/plain; charset=utf-8');
-    res.end(NOT_THE_OWNER_TEXT);
-  } else {
-    res.setHeader('content-type', 'text/html; charset=utf-8');
-    res.end(NOT_THE_OWNER_PAGE);
-  }
+  const { status, type, body } = notTheOwner(path);
+  res.statusCode = status;
+  res.setHeader('content-type', type);
+  res.end(body);
 }
 
 /**

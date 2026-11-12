@@ -572,6 +572,8 @@ test('a device on the network through Caddy gets the refusal page, not the offic
   assert.equal(page.text, NOT_THE_OWNER_PAGE);
   const action = await send(ok, { ...caddy, path: '/api/goals' });
   assert.deepEqual([action.status, action.ran, action.text], [403, false, NOT_THE_OWNER_TEXT]);
+  // The same header the dev server's guard sends (vite-config.test.ts).
+  assert.equal(action.headers.get('content-type'), 'text/plain; charset=utf-8');
 });
 
 test("the key in the address lets the owner's browser in once and leaves the address clean", async () => {

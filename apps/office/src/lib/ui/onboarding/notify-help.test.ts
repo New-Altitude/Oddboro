@@ -1,7 +1,8 @@
 // The help Setup gives when the test notification did not show: each
 // system's own steps, in the app and out, with Open it only where the office
-// can open a settings page. NotifyHelp.svelte is compiled and rendered on the
-// server, as the page would show it. Run with `npm test -w @oddboro/office`.
+// can open a settings page, and what a browser's own notifications need.
+// NotifyHelp.svelte is compiled and rendered on the server, as the page would
+// show it. Run with `npm test -w @oddboro/office`.
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -11,7 +12,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { compile } from 'svelte/compiler';
 import { render } from 'svelte/server';
 import type { System } from '@oddboro/ledger/platform';
-import { notifyHelp } from './notify-help.ts';
+import { browserNeeds, notifyHelp } from './notify-help.ts';
 import type NotifyHelpComponent from './NotifyHelp.svelte';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -100,5 +101,14 @@ test('Linux out of the app keeps the notify-send line', () => {
     CHECK,
     'Oddboro sends them with notify-send, so your desktop needs a notification service. GNOME, KDE and most desktops have one built in.',
     'Send another test'
+  ]);
+});
+
+test("only a Mac is told the browser itself needs notifications on in the system's settings", () => {
+  assert.deepEqual((['mac', 'linux', 'windows', undefined] as const).map(browserNeeds), [
+    'On a Mac, the browser itself also needs notifications on in System Settings, Notifications.',
+    undefined,
+    undefined,
+    undefined
   ]);
 });

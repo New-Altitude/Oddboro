@@ -1,6 +1,7 @@
 // What Setup says when the owner did not see the test notification: each
-// system's own steps, in the app and out of it. A type import only, so the
-// page can load it.
+// system's own steps, in the app and out of it, and what a browser's own
+// notifications need on each system. A type import only, so the page can
+// load it.
 import type { System } from '@oddboro/ledger/platform';
 
 /** One step. `open` gets an Open it button, `test` is Send another test. */
@@ -57,6 +58,18 @@ const HELP: Record<System, { app: NotifyStep[]; repo: NotifyStep[] }> = {
     ]
   }
 };
+
+/** What a browser's own notifications need besides the site's permission, where the system asks for more. */
+const BROWSER_NEEDS: Record<System, string | undefined> = {
+  mac: 'On a Mac, the browser itself also needs notifications on in System Settings, Notifications.',
+  linux: undefined,
+  windows: undefined
+};
+
+/** The line for this system, or none, as on a system the office does not know. */
+export function browserNeeds(system: System | undefined): string | undefined {
+  return system ? BROWSER_NEEDS[system] : undefined;
+}
 
 /**
  * The steps for this system. Open it only where the office can open the

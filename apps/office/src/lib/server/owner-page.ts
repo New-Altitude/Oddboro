@@ -37,8 +37,7 @@ import {
   isExceptionPath,
   isGatewayPath,
   isOwnerKey,
-  NOT_THE_OWNER_PAGE,
-  NOT_THE_OWNER_TEXT,
+  notTheOwner,
   OWN_PROOF,
   OWNER_PARAM,
   ownerSetCookie,
@@ -132,14 +131,11 @@ function withoutKey(url: URL, setCookie: string | null): Response {
   return new Response(null, { status: 303, headers });
 }
 
-/** A program on an /api/ path gets a short refusal; a person on a page learns how to open the office. */
-const notTheOwner = (url: URL) =>
-  url.pathname.startsWith('/api/')
-    ? refuse(NOT_THE_OWNER_TEXT)
-    : new Response(NOT_THE_OWNER_PAGE, {
-        status: 403,
-        headers: { 'content-type': 'text/html; charset=utf-8' }
-      });
+/** The refusal of a request without the key (`notTheOwner`), judged on Kit's own path. */
+function refuseKeyless(url: URL): Response {
+  const { status, type, body } = notTheOwner(url.pathname);
+  return new Response(body, { status, headers: { 'content-type': type } });
+}
 
 /** The server's `handle`: every request passes here before a route sees it. */
 export const guardOffice: Handle = async ({ event, resolve }) => {
@@ -151,10 +147,10 @@ export const guardOffice: Handle = async ({ event, resolve }) => {
     // browser that holds the right one.
     if (hasOwnerKey(request.headers.get('cookie'))) {
       if (given !== null) return withoutKey(url, null);
-      if (!READS.has(request.method) && !fromOwnerPage(request)) return notTheOwner(url);
+      if (!READS.has(request.method) && !fromOwnerPage(request)) return refuseKeyless(url);
     } else if (given !== null && isOwnerKey(given)) {
       return withoutKey(url, ownerSetCookie());
-    } else return notTheOwner(url);
+    } else return refuseKeyless(url);
   }
   const chat =
     request.method === 'POST' && /^\/api\/staff\/[a-z0-9-]+\/chat\/?$/.test(url.pathname);

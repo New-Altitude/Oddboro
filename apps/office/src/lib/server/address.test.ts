@@ -1,5 +1,6 @@
 // The office's own Caddyfile (`ownCaddyfile` in address.ts) on each system,
-// the look at port 80 (`port80`), which of its commands may show a window, and
+// the look at port 80 (`port80`), which of its commands may show a window,
+// Make it secure on a system the office does not know (`secureAddress`), and
 // the owner's key on the office's own probe of its address (`answers`).
 // Run with `npm test -w @oddboro/office`.
 import assert from 'node:assert/strict';
@@ -11,8 +12,10 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, mock, test } from 'node:test';
+import { isHttpError } from '@sveltejs/kit';
 import { ownerCookie } from '@oddboro/ledger/owner-key';
 import { openUrl, probe } from '@oddboro/ledger/platform';
+import { POST as addressRoute } from '../../routes/api/setup/address/+server.ts';
 import { answers, ownCaddyfile, port80, secureAddress } from './address.ts';
 
 const binds = (system: Parameters<typeof ownCaddyfile>[0]) =>
@@ -143,6 +146,46 @@ test("on Windows, a command runs with no window unless it opens one the owner mu
     hides('the opener', (s) => s.args.includes(page)),
     'not set'
   );
+});
+
+test('on a system the office does not know, Make it secure runs nothing, and the setup route answers 502 with the words the owner sees', async () => {
+  const started: string[] = [];
+  mock.method(
+    childProcess,
+    'execFile',
+    (cmd: string, _args: string[], _options: object, done: (e: Error) => void) => {
+      started.push(cmd);
+      done(Object.assign(new Error('a stand-in that fails'), { code: 1 }));
+      return {};
+    }
+  );
+  // Caddy's admin API, asked for the root certificate, answers with one.
+  mock.method(globalThis, 'fetch', async () =>
+    Response.json({ root_certificate: 'a root certificate' })
+  );
+  syncBuiltinESMExports();
+  try {
+    const request = new Request('http://127.0.0.1/api/setup/address', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'secure' })
+    });
+    const answer = await on('freebsd', empty, () =>
+      // The route reads only the request, so the rest of Kit's event is left out.
+      Promise.resolve(addressRoute({ request } as Parameters<typeof addressRoute>[0])).then(
+        () => undefined,
+        (e: unknown) => e
+      )
+    );
+    assert.ok(isHttpError(answer), `the route answered ${String(answer)}`);
+    assert.deepEqual(
+      [answer.status, answer.body.message],
+      [502, 'The certificate was not trusted. Try again, and enter your password.']
+    );
+  } finally {
+    mock.restoreAll();
+    syncBuiltinESMExports();
+  }
+  assert.deepEqual(started, []);
 });
 
 test("the office's probe of its own address sends the owner's key, so the office's refusal of a keyless request does not read as an address that misses it", async () => {
