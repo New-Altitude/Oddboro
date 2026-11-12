@@ -1,3 +1,4 @@
+import { workAbout } from './run-state.ts';
 // The chat's append-only file and the owner's saved submissions. A turn is
 // kept before a runner starts. Uploads and imports use the same attachments
 // folder and ChatFile records as an older office's messages.
@@ -57,7 +58,8 @@ function inlineType(name: string, bytes: Uint8Array): string {
 export async function keepOwnerTurn(
   id: string,
   input: OwnerInput,
-  replyTo?: Pick<ChatRef, 'kind' | 'id'>
+  replyTo?: Pick<ChatRef, 'kind' | 'id'>,
+  aboutKey?: string
 ): Promise<ChatEntry> {
   const { turnId, message, source, files = [] } = input;
   if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(turnId))
@@ -91,7 +93,14 @@ export async function keepOwnerTurn(
   });
   const inputHash = createHash('sha256')
     .update(
-      JSON.stringify({ message, source, re: re && { kind: re.kind, id: re.id }, inline, kept })
+      JSON.stringify({
+        message,
+        source,
+        re: re && { kind: re.kind, id: re.id },
+        inline,
+        kept,
+        aboutKey
+      })
     )
     .digest('hex');
   const old = history(id).find((e) => e.from === 'owner' && e.turnId === turnId);
@@ -100,6 +109,8 @@ export async function keepOwnerTurn(
       throw new ChatInputError('This message ID already belongs to another message.');
     return old;
   }
+  const about = aboutKey ? workAbout(id, aboutKey) : undefined;
+  if (aboutKey && !about) throw new ChatInputError('That work is no longer running for this lead.');
   const attached: ChatFile[] = [
     ...kept,
     ...inline.map((f, i) => ({
@@ -114,6 +125,7 @@ export async function keepOwnerTurn(
     turnId,
     source,
     inputHash,
+    ...(about ? { about } : {}),
     ...(re ? { re } : {}),
     ...(attached.length ? { files: attached } : {})
   };

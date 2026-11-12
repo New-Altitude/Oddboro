@@ -207,7 +207,7 @@ test('a package from New Altitude installs as an Odd with its look, parts and he
   );
   // No coding tool ran for it, to draw a look or anything else, and its door was not asked.
   assert.ok(!heard.slice(told).some((e) => e.type === 'working' && row.id in e.working!));
-  assert.deepEqual([...L.runsGoing], []);
+  assert.deepEqual([...L.runsGoing.keys()], []);
   assert.equal(doorRequests().length, 0);
 });
 

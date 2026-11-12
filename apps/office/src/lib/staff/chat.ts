@@ -1,3 +1,4 @@
+import type { WorkAbout } from './work.ts';
 // A staffer's chat, as the office saves it and the page shows it. Safe to
 // import in the browser.
 import type { HandOffLine, HandOffStep, LessonLine, ThreadLine } from '@oddboro/ledger';
@@ -26,6 +27,9 @@ export type ChatEntry = {
   text: string;
   /** One owner submission and each attempt to answer it, across reloads. */
   turnId?: string;
+  runId?: string;
+  interrupted?: true;
+  about?: WorkAbout;
   source?: ChatSource;
   /** The input's digest makes a repeated import reuse its saved files. */
   inputHash?: string;
@@ -48,6 +52,7 @@ export type ChatEntry = {
 };
 /** What a chat's reply streams to the page, one server-sent event each. */
 export type ChatEvent =
+  | { type: 'reply'; runId: string; turnId: string }
   | { type: 'delta'; text: string }
   | { type: 'tool'; name: string }
   | { type: 'done'; text: string; choices?: string[] }

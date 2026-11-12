@@ -23,7 +23,7 @@
   import { when, workLine } from './format.ts';
   import { chatRequest, takeDraft, type Delivered } from './chat-about.svelte.ts';
   import type { StaffProfile } from '../staff/roster.ts';
-  import { runningFor, toolWords, type Work } from '../staff/work.ts';
+  import { runningFor, toolWords, type Work, type WorkAbout } from '../staff/work.ts';
   import type { ChatEntry, ChatEvent } from '../staff/chat.ts';
   import { counting, dayBreaks, fullDate, stamp, took } from './chat-lines.ts';
   import { serviceNames } from './service-names.svelte.ts';
@@ -165,12 +165,48 @@
   let lines = $state<Line[]>([]);
   let draft = $state('');
   let sending = $state(false);
+  let remoteBusy = $state(false);
+  let active = $state<{ runId: string; turnId: string }>();
+  let correcting = $state(false);
+  let stopping = $state(false);
+  let about = $state<WorkAbout>();
+  let newest = 0;
+
+  async function stop() {
+    if (!active || stopping) return;
+    const selected = active.runId;
+    stopping = true;
+    try {
+      await call(`/api/staff/${profile.id}/chat`, { runId: selected }, 'DELETE');
+      if (active?.runId === selected) active = undefined;
+      correcting = false;
+      if (!sending) load(profile.id);
+    } catch (err) {
+      refused = err instanceof Error ? err.message : String(err);
+    } finally {
+      stopping = false;
+    }
+  }
+
+  function direct(target: WorkAbout) {
+    chatRequest.work = target;
+    chatRequest.staff = target.leadId;
+  }
+
+  $effect(() => {
+    if (!visible || chatRequest.work?.leadId !== profile.id) return;
+    about = chatRequest.work;
+    chatRequest.work = undefined;
+    void tick().then(() => box?.focus());
+  });
   /**
    * What the owner sent while a reply was still coming: it goes once that
    * reply ends. A second Send while one waits joins it, so the Odd answers
    * both in one turn.
    */
-  let waiting = $state<{ text: string; re?: Delivered; files: ChatFile[] } | undefined>();
+  let waiting = $state<
+    { text: string; re?: Delivered; files: ChatFile[]; about?: WorkAbout } | undefined
+  >();
   let status = $state('');
   let loaded = $state(false);
   let list: HTMLDivElement | undefined = $state();
@@ -244,13 +280,17 @@
   function load(id: string) {
     fetch(`/api/staff/${id}/chat` satisfies ApiUrl)
       .then((r) => r.json())
-      .then((d: { history: ChatEntry[]; busy: boolean }) => {
-        // A message that started meanwhile is streaming into the list: keep it.
-        if (sending) return;
-        lines = d.history.map((h) => ({ ...h }));
-        loaded = true;
-        scrollDown();
-      })
+      .then(
+        (d: { history: ChatEntry[]; busy: boolean; reply?: { runId: string; turnId: string } }) => {
+          // A message that started meanwhile is streaming into the list: keep it.
+          if (sending) return;
+          remoteBusy = d.busy;
+          active = d.reply;
+          lines = d.history.map((h) => ({ ...h }));
+          loaded = true;
+          scrollDown();
+        }
+      )
       .catch(() => (loaded = true));
     call<PokeRow[]>(`/api/staff/${id}/pokes`)
       .then((p) => (upcoming = p))
@@ -290,6 +330,8 @@
   async function send(e: SubmitEvent) {
     e.preventDefault();
     const message = draft;
+    const instead = correcting ? active?.runId : undefined;
+    const target = about;
     if ((!message.trim() && !pending.length) || uploading) return;
     let files: ChatFile[] = [];
     if (pending.length) {
@@ -308,25 +350,37 @@
     draft = '';
     replyTo = undefined;
     clearTray();
-    if (sending) {
+    about = undefined;
+    correcting = false;
+    if ((sending || remoteBusy) && !instead) {
       waiting = waiting
         ? {
             text: [waiting.text, message].filter(Boolean).join('\n\n'),
             re: waiting.re ?? re,
-            files: [...waiting.files, ...files]
+            files: [...waiting.files, ...files],
+            about: waiting.about ?? target
           }
-        : { text: message, re, files };
+        : { text: message, re, files, about: target };
       scrollDown();
       return;
     }
-    await say(message, re, files);
+    await say(message, re, files, undefined, { instead, about: target });
   }
+
+  // A saved queue also waits for a reply started in another office window.
+  $effect(() => {
+    if (sending || remoteBusy || !waiting) return;
+    const next = waiting;
+    waiting = undefined;
+    void say(next.text, next.re, next.files, undefined, { about: next.about });
+  });
 
   /** Take back the message waiting to go: it returns to the box. */
   function unwait() {
     if (!waiting) return;
     draft = [waiting.text, draft.trim() && draft].filter(Boolean).join('\n\n');
     replyTo ??= waiting.re;
+    about ??= waiting.about;
     // Its files go back in the tray, already kept in the Odd's attachments folder.
     const text = draft;
     pending = [
@@ -362,7 +416,14 @@
   });
 
   /** Send one message and stream the reply into the chat. */
-  async function say(message: string, re?: Delivered, files: ChatFile[] = [], retry?: Line) {
+  async function say(
+    message: string,
+    re?: Delivered,
+    files: ChatFile[] = [],
+    retry?: Line,
+    context: { instead?: string; about?: WorkAbout } = {}
+  ) {
+    const generation = ++newest;
     const turnId = retry?.turnId ?? newTurnId();
     sending = true;
     status = 'Thinking';
@@ -370,7 +431,11 @@
       lines.push({
         from: 'owner',
         turnId,
-        source: { kind: 'chat' },
+        source:
+          context.instead && active
+            ? { kind: 'correction', id: active.turnId, revision: context.instead }
+            : { kind: 'chat' },
+        about: context.about,
         // Files alone are a message too: their tags say it, as the server writes it.
         text: message || files.map((f) => `[${f.tag}]`).join(' '),
         re,
@@ -391,6 +456,10 @@
             : {
                 turnId,
                 message,
+                instead:
+                  context.instead ??
+                  (retry?.source?.kind === 'correction' ? retry.source.revision : undefined),
+                about: context.about?.key ?? retry?.about?.key,
                 re: re && { kind: re.kind, id: re.id },
                 ...(files.length ? { files: files.map(({ tag, name }) => ({ tag, name })) } : {})
               }
@@ -409,7 +478,16 @@
           buffer = buffer.slice(cut + 2);
           if (!chunk.startsWith('data: ')) continue;
           const ev = JSON.parse(chunk.slice(6)) as ChatEvent;
-          if (ev.type === 'delta') {
+          if (generation !== newest) {
+            if (ev.type === 'done' || ev.type === 'error') {
+              reply.text = ev.type === 'done' ? ev.text : ev.message;
+              reply.pending = false;
+              reply.failed = ev.type === 'error' ? true : undefined;
+            }
+            continue;
+          }
+          if (ev.type === 'reply') active = ev;
+          else if (ev.type === 'delta') {
             reply.text += ev.text;
             status = '';
           } else if (ev.type === 'tool') status = toolWords(ev.name, serviceNames.byId);
@@ -431,16 +509,15 @@
       reply.failed = true;
     } finally {
       reply.pending = false;
-      sending = false;
-      status = '';
-      onend();
-      scrollDown();
-      const next = waiting;
-      waiting = undefined;
-      // What the owner sent meanwhile goes now; its reply reloads the chat after.
-      if (next) void say(next.text, next.re, next.files);
-      // Show what the reply changed: a report it read, a lesson it kept.
-      else if (!reply.failed) load(profile.id);
+      if (generation === newest) {
+        sending = false;
+        remoteBusy = false;
+        active = undefined;
+        status = '';
+        onend();
+        scrollDown();
+        load(profile.id);
+      }
     }
   }
 
@@ -1008,15 +1085,17 @@
 
   {#if work.length}
     <!-- What the Odd is working on now, one line each; a click opens In progress. -->
-    <button
+    <div
       class="flex flex-col gap-0.5 border-t border-hairline px-3 py-1.5 text-start text-xs text-muted transition-colors hover:bg-raise"
-      title="Open In progress"
-      onclick={onwork}
     >
       {#each work as w (w.id)}
         <span class="flex w-full min-w-0 items-center gap-1.5">
           <span class="size-1.5 shrink-0 rounded-full {w.queued ? 'bg-faint' : 'bg-ember'}"></span>
-          <span class="min-w-0 truncate text-ink">{w.label}</span>
+          <button
+            class="min-w-0 truncate text-ink hover:underline"
+            title="Open In progress"
+            onclick={onwork}>{w.label}</button
+          >
           <span class="shrink-0 text-faint"
             >· {w.toStart
               ? 'waiting to start'
@@ -1029,9 +1108,18 @@
               >· {w.doing ? toolWords(w.doing, serviceNames.byId) : 'Thinking'}</span
             >
           {/if}
+          {#if w.about && !w.queued}
+            {@const target = w.about}
+            <button
+              class="ms-auto min-w-0 truncate text-sea"
+              title={`Message ${target.lead} about ${target.title}`}
+              onclick={() => direct(target)}
+              >{target.kind === 'goal' ? target.title + ' · ' : ''}Message {target.lead}</button
+            >
+          {/if}
         </span>
       {/each}
-    </button>
+    </div>
   {/if}
 
   <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions: a focusable separator is the ARIA pattern for a keyboard-resizable pane. -->
@@ -1057,6 +1145,27 @@
         class="shrink-0 px-1 text-faint hover:text-coral"
         aria-label="Stop replying"
         onclick={() => (replyTo = undefined)}>✕</button
+      >
+    </div>
+  {/if}
+  {#if about}
+    <div class="flex gap-2 px-3 pb-1.5 text-xs text-muted">
+      <span>To {about.lead} about {about.kind}: {about.title}</span>
+      <button aria-label="Clear work selection" onclick={() => (about = undefined)}>✕</button>
+    </div>
+  {/if}
+  {#if active}
+    <div class="flex items-center justify-between gap-2 px-3 pb-1.5 text-xs text-muted">
+      <button
+        type="button"
+        class="text-sea"
+        disabled={stopping || !!about}
+        onclick={() => {
+          correcting = !correcting;
+          box?.focus();
+        }}>{correcting ? 'Keep this as a queued message' : 'Correct this reply'}</button
+      >
+      <button type="button" class="text-coral" disabled={stopping} onclick={stop}>Stop reply</button
       >
     </div>
   {/if}
@@ -1138,7 +1247,7 @@
           ><path d="M14.5 1.5 1.5 6.6l5.2 2.2 2.2 5.7z" /><path d="M14.5 1.5 6.7 8.8" /><path
             d="m6.7 8.8.2 3.7 2-1.9"
           /></svg
-        >{uploading ? 'Attaching' : 'Send'}
+        >{uploading ? 'Attaching' : correcting && active ? 'Send correction' : 'Send'}
       </button>
     </div>
   </form>

@@ -17,7 +17,7 @@ async function toStart(): Promise<Record<string, Work[]>> {
 test("a lead's pick-up after a task, and work it handed over, show as waiting to start until each starts", async () => {
   // Lena's chat hands Paige work, then gives the owner a task on that work.
   const chat = randomUUID();
-  L.runsGoing.add(chat);
+  L.reserveRun({ key: chat, staffId: 'lead', kind: 'chat' });
   const h = await L.handOff({
     from: 'lead',
     to: 'paige',
