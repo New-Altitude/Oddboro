@@ -7,7 +7,7 @@ import { NOT_SIGNED_IN } from './launch.ts';
 
 export async function missingChatSignIn(
   who: StaffRow,
-  failure: string
+  failure = ''
 ): Promise<ChatSignIn | undefined> {
   // A persona's chat answers through New Altitude, whose own access says what to renew.
   if (who.package) return;

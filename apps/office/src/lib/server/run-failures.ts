@@ -26,8 +26,8 @@ export const RUN_FAILURE: Record<UsageKind, readonly Landing[]> = {
   // (NEW-1660).
   chat: ['chat'],
   // The job's run is marked failed with the error, which its Jobs tab shows,
-  // but a failed job, run by the clock or by hand, never reaches the desk
-  // (NEW-1706).
+  // and a scheduled file job's first block also reaches the desk. Ordinary
+  // jobs and manual runs keep the existing ledger and Jobs behavior.
   job: ['ledger', 'jobs'],
   // `desk` holds only for work that serves no hand-off: a failure of work
   // that serves one goes back to the Odd that handed it instead
