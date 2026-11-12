@@ -1,3 +1,4 @@
+import { runsGoing } from './run-registry.ts';
 // What the office does with its tables. The office app and the staff tool
 // server both call these, so a rule lives in one place: an ask is decided only
 // here, a task is finished only here, and each writes its ledger row.
@@ -2049,7 +2050,7 @@ function waitsOnOwnRun(): SQL {
               and(
                 eq(threads.id, followUps.threadId),
                 eq(threads.hubId, followUps.staffId),
-                arrayOverlaps(threads.runs, [...runsGoing])
+                arrayOverlaps(threads.runs, [...runsGoing.keys()])
               )
             )
         )
@@ -2066,7 +2067,7 @@ function waitsOnOwnRun(): SQL {
  * the database: a restart ends every run, and so every hold, and nothing
  * waits forever.
  */
-export const runsGoing = new Set<string>();
+export { runsGoing, reserveRun, releaseRun } from './run-registry.ts';
 
 /** The wait a lead's run ended as it started: the task's title, or the time it was parked until. */
 export type Unparked = { task: string } | { at: Date };

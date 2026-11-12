@@ -9,7 +9,7 @@
 import { execFileSync } from 'node:child_process';
 import { readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { modelSection, runsGoing, type ModelUsage } from '@oddboro/ledger';
+import { currentPlatform, modelSection, runsGoing, type ModelUsage } from '@oddboro/ledger';
 import { cleanEnv } from './claude.ts';
 
 /** Where the owner signs a tool in for the office: beside the Odd's "Runs on" picker. */
@@ -198,7 +198,19 @@ export function shellEnv(temp: string): Record<string, string> {
  * process that already left the tree (its parent ended, so launchd took it)
  * is not found here.
  */
-export function stopGroups(pid: number): void {
+export function stopGroups(pid: number, signal: 'SIGTERM' | 'SIGKILL' = 'SIGTERM'): void {
+  if (currentPlatform() === 'win32') {
+    try {
+      execFileSync(
+        join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe'),
+        ['/PID', String(pid), '/T', '/F'],
+        { windowsHide: true, stdio: 'ignore' }
+      );
+    } catch {
+      // The run may already have exited.
+    }
+    return;
+  }
   const groups = new Set([pid]);
   try {
     const rows = execFileSync('ps', ['-axo', 'pid=,ppid=,pgid='], { encoding: 'utf8' })
@@ -221,7 +233,7 @@ export function stopGroups(pid: number): void {
   }
   for (const group of groups)
     try {
-      process.kill(-group, 'SIGTERM');
+      process.kill(-group, signal);
     } catch {
       // That group is gone already: nothing is left to stop.
     }

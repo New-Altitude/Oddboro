@@ -677,7 +677,7 @@ export async function runOf(id: number, ask?: number): Promise<Gave & { going: s
   // The stand-in's tool call comes before its result, so the run still goes.
   const seen = (e: { type: string; inProgress?: Record<string, { doing?: string }[]> }) => {
     if (e.type === 'working' && e.inProgress?.[f.staffId]?.some((w) => w.doing))
-      going = [...L.runsGoing];
+      going = [...L.runsGoing.keys()];
   };
   bus.on('event', seen);
   const r = await followThrough(f, ask ? await L.ask(ask) : undefined).finally(() =>
