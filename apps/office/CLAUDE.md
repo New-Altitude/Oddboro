@@ -1505,7 +1505,7 @@ with the owner's password in the macOS dialog (Make it secure; Windows asks in
 its own dialog and adds it to the owner's list, with no admin), because a
 browser shows notifications only on a secure page. Firefox keeps its own trusted
 list, and the card says so to Firefox users. `npm run setup` opens the secure
-address when it answers and is trusted.
+address when it is trusted and the office proves itself there through Caddy.
 
 ## Who the office answers
 
@@ -1540,8 +1540,11 @@ sends every action as JSON, body or not.
    checks, and the office's own requests to itself, send the cookie, and so
    does every request of the release smoke (`officeFetch` in
    `apps/desktop/scripts/driver.ts`). A wrong key in the address is refused
-   like none. The office's own look at its address sends no key: it proves
-   the address first (rule 3's `/api/office-proof`).
+   like none. No caller sends the key to an address before the office proves,
+   in that run, that it answers there (rule 3's `/api/office-proof`):
+   setup proves each address it may open (`setupAddress` in
+   `packages/ledger/src/setup-address.ts`), the smoke proves its office once
+   a run, and the office's own look at its address sends no key at all.
 3. A request without the key, a read included, reaches only an exact exception
    route (`EXCEPTION_ROUTES`, judged by `isExceptionPath` on the text the server
    routes on; SvelteKit decodes that text before it routes, and no exception

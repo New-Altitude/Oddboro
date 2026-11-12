@@ -363,7 +363,8 @@ async function smokeStage(): Promise<void> {
           throw new Error(
             `it exited ${server.exitCode}: ${readFileSync(r.log, 'utf8').slice(-800)}`
           );
-        // No key file yet rejects, and `until` reads that as not up yet.
+        // Not up yet, or not proven to be the office, rejects or is refused,
+        // and `until` reads that as not up yet.
         return (await officeFetch(r, '/api/update', {}, 2)).ok ? true : undefined;
       },
       90

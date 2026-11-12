@@ -1,11 +1,23 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { after, test } from 'node:test';
+import {
+  answerProof,
+  NONCE_PARAM,
+  OFFICE_PROOF_PATH
+} from '../../../packages/ledger/src/office-proof.ts';
 import {
   BASE,
   descendantsIn,
   loggedPids,
   pageHeaders,
   parseTasklist,
+  provenKey,
+  type Run,
   shellsIn
 } from '../scripts/driver.ts';
 
@@ -65,4 +77,61 @@ test('a shell counts by its program name too, as `ps -o comm` gives it', () => {
 test('a page-shaped write carries the Origin, and Sec-Fetch-Site when asked', () => {
   assert.deepEqual(pageHeaders(false), { origin: BASE, 'content-type': 'application/json' });
   assert.equal(pageHeaders(true)['sec-fetch-site'], 'same-origin');
+});
+
+/** A key in the shape the office makes, so no real key is ever near these tests. */
+const KEY = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8';
+
+/** A run whose home holds `key` as its key file, or no key file at all. */
+function runWith(key?: string): Run {
+  const home = mkdtempSync(join(tmpdir(), 'oddboro-driver-test-'));
+  after(() => rmSync(home, { recursive: true, force: true }));
+  if (key !== undefined) writeFileSync(join(home, 'owner-key'), key);
+  return { out: home, home, log: join(home, 'log'), env: {}, pids: new Set(), gone: new Set() };
+}
+
+/** A listener on a free 127.0.0.1 port that records every request, then answers with `handle`. */
+async function listen(handle: (req: IncomingMessage, res: ServerResponse) => void) {
+  const seen: string[] = [];
+  const server = createServer((req, res) => {
+    seen.push(JSON.stringify([req.url, req.rawHeaders]));
+    handle(req, res);
+  });
+  await new Promise<void>((ready) => server.listen(0, '127.0.0.1', ready));
+  after(() => server.close());
+  return { base: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, seen };
+}
+
+/** The office's proof route, for the key it holds. */
+const office = (key: string) => (req: IncomingMessage, res: ServerResponse) => {
+  const url = new URL(req.url ?? '/', 'http://office');
+  if (url.pathname !== OFFICE_PROOF_PATH) return void res.writeHead(404).end();
+  const { status, body } = answerProof(key, url.searchParams.get(NONCE_PARAM), null);
+  res.writeHead(status).end(body);
+};
+
+test('a run whose home has no key file, as an app older than the key, goes keyless and asks nothing first', async () => {
+  const listener = await listen(office(KEY));
+  assert.equal(await provenKey(runWith(), listener.base), undefined);
+  assert.deepEqual(listener.seen, []);
+});
+
+test('a squatter on the office’s port is never given the key: the run’s key is refused there', async () => {
+  const squatter = await listen((_req, res) => res.end('{"office":true}'));
+  await assert.rejects(provenKey(runWith(KEY), squatter.base), /is not the office/);
+  assert.equal(squatter.seen.length, 1);
+  for (const word of [KEY, 'oddboro-owner', 'cookie'])
+    assert.ok(!squatter.seen.join().toLowerCase().includes(word.toLowerCase()), word);
+});
+
+test('the office proves it holds the run’s key once a run, and again only for a new key', async () => {
+  const run = runWith(KEY);
+  const real = await listen(office(KEY));
+  assert.equal(await provenKey(run, real.base), KEY);
+  assert.equal(await provenKey(run, real.base), KEY);
+  assert.equal(real.seen.length, 1);
+  const newKey = KEY.replace('A', 'B');
+  writeFileSync(join(run.home, 'owner-key'), newKey);
+  await assert.rejects(provenKey(run, real.base), /is not the office/);
+  assert.equal(real.seen.length, 2);
 });

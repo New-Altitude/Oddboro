@@ -210,10 +210,11 @@ export const OUTBOUND: readonly Outbound[] = [
     yes: 'The owner searching for a connector, or granting an Odd find_connectors.'
   },
   {
-    file: 'packages/ledger/src/setup.ts',
-    calls: 3,
-    to: 'The office, on this computer.',
-    sends: 'Requests asking whether the office is up and how it can be reached.',
+    file: 'packages/ledger/src/setup-address.ts',
+    calls: 2,
+    to: 'The office, on this computer, at 127.0.0.1 once it proved it holds the key there (office-proof.ts).',
+    sends:
+      "Requests asking whether the office is up and whether https is set up, with the owner's key.",
     yes: 'The owner running setup; nothing leaves this computer.'
   },
   {

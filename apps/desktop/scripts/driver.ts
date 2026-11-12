@@ -23,6 +23,7 @@ import {
 import { connect } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { provesOffice } from '../../../packages/ledger/src/office-proof.ts';
 
 export const WIN = process.platform === 'win32';
 export const MAC = process.platform === 'darwin';
@@ -85,18 +86,39 @@ export async function until<T>(
   throw new Error(`no ${what} within ${secs} s`);
 }
 
-// The office answers only its owner's key, as a cookie named by its port. This
-// script imports only Node's own modules, so like the app's shell it writes
-// out the key file's name and the cookie's name itself;
+// The office answers only its owner's key, as a cookie named by its port. Like
+// the app's shell, this script writes out the key file's name and the
+// cookie's name itself, since it imports only Node's own modules and the
+// prover, which does too;
 // apps/office/src/lib/server/desktop-names.test.ts holds them to the office's.
 const OWNER_KEY_FILE = 'owner-key';
 const OWNER_COOKIE = `oddboro-owner-${PORT}`;
 
+/** Each run's key that the office at the run's port proved it holds. */
+const proven = new WeakMap<Run, string>();
+
 /**
- * Every request to the office this run started, with its owner's key read
- * from the run's home. The office makes the key's file as it starts, so with
- * no file yet this rejects, as an office that is not up yet does, and never
- * sends a request without the key. The error names the home, never the key.
+ * The owner's key from the run's home, once the office at `base` proved, in
+ * this run, that it holds it. Anything else on the port would otherwise get
+ * the key. Undefined when the home has no key file: an app older than the key
+ * never makes one and is asked without it, and a newer office makes the file
+ * before it answers. Rejects when what answers is not that office.
+ */
+export async function provenKey(r: Run, base: string): Promise<string | undefined> {
+  const file = join(r.home, OWNER_KEY_FILE);
+  const key = existsSync(file) ? readFileSync(file, 'utf8').trim() : '';
+  if (!key) return undefined;
+  if (proven.get(r) === key) return key;
+  if (!(await provesOffice(base, key, 'direct')))
+    throw new Error(`what answers at ${base} is not the office whose key is in ${r.home}`);
+  proven.set(r, key);
+  return key;
+}
+
+/**
+ * Every request to the office this run started, with its owner's key once
+ * the office proved it holds it (`provenKey`), and with none for an app older
+ * than the key. The error names the home, never the key.
  */
 export async function officeFetch(
   r: Run,
@@ -104,12 +126,10 @@ export async function officeFetch(
   init: { method?: string; headers?: Record<string, string>; body?: string } = {},
   secs = 20
 ): Promise<Response> {
-  const file = join(r.home, OWNER_KEY_FILE);
-  const key = existsSync(file) ? readFileSync(file, 'utf8').trim() : '';
-  if (!key) throw new Error(`no owner key in ${r.home} yet: the office has not started`);
+  const key = await provenKey(r, BASE);
   return fetch(BASE + path, {
     ...init,
-    headers: { ...init.headers, cookie: `${OWNER_COOKIE}=${key}` },
+    headers: key ? { ...init.headers, cookie: `${OWNER_COOKIE}=${key}` } : init.headers,
     signal: AbortSignal.timeout(secs * 1000)
   });
 }
@@ -435,7 +455,7 @@ export async function ready(app: ChildProcess, r: Run, secs = 120): Promise<numb
   const started = Date.now();
   let lookForDialog = 30_000;
   while (Date.now() - started < secs * 1000) {
-    // No key file yet rejects, and counts as not up yet.
+    // Not up yet, or not proven to be the office, rejects or is refused.
     const answered = await officeFetch(r, '/api/update', {}, 2).then(
       (res) => res.ok,
       () => false

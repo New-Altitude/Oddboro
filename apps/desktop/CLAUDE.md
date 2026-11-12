@@ -389,8 +389,11 @@ port 4590, database port 54590, a throwaway home and its own log
 (`ODDBORO_LOG`), and points `ODDBORO_UPDATE_URL` at an address that refuses,
 so the build never updates itself away. Every request it makes to the office
 carries the office's key as the cookie `oddboro-owner-4590`, read from
-`owner-key` in the run's home (`officeFetch` in `driver.ts`); until the office
-has made that file, it counts as still starting. The page's own fetch inside
+`owner-key` in the run's home (`officeFetch` in `driver.ts`), once the office
+on that port has proven it holds that key (`provenKey`, through
+`/api/office-proof`), once a run. What answers there without the proof is
+never sent the key, and counts as still starting. An app older than the key,
+whose home has no key file, is asked without one. The page's own fetch inside
 the real window needs nothing added: the window opened with the key. The
 port, home and log are its own; the secrets are not, so the office runs with no secret store
 (`ODDBORO_SECRETS=office`), always with `--stage` and off CI for the app, and
