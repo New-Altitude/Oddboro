@@ -1705,8 +1705,13 @@ the persona's voice.
    appearance. `proposedPersona` in `src/lib/persona.ts` matches by the
    proposal's `personaSlug`, or else by the whole display name as its name
    or role ("<Full Name> Persona"), never a first name, and two matches are
-   none. Signed out or with no match, the builder opens as before. Adding
-   the persona leaves the proposal open on the desk for the owner to deny.
+   none. Signed out or with no match, the builder opens as before. Add
+   sends the ask's id with the persona's sign-in (`POST
+/api/personas/[slug]`), the office keeps it in memory, and
+   `installPersona` approves the ask once the persona joins, with the note
+   "<Owner> added <Name>'s New Altitude persona instead of a new Odd." A
+   sign-in left unfinished, an install that fails, a restart or a later Add
+   without the ask leaves the proposal open.
 
 ## Running it always
 

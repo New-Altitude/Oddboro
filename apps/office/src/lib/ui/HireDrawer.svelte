@@ -62,9 +62,9 @@
       ondone();
   });
 
-  function hirePersona(slug: string) {
+  function hirePersona(slug: string, askId?: number) {
     hiring = slug;
-    void connect(slug);
+    void connect(slug, askId);
   }
 
   // A proposal that names a real person New Altitude offers as a persona shows
@@ -75,10 +75,14 @@
     ordinary ? undefined : suggestedPersona(from?.proposal, personas.state)
   );
 
-  /** Add the persona, as Setup's Add does, on the hire grid with it picked. */
+  /**
+   * Add the persona, as Setup's Add does, on the hire grid with it picked.
+   * The office answers the proposal once the persona joins, even if this
+   * window has closed by then.
+   */
   function addSuggested(slug: string) {
     path = 'persona';
-    hirePersona(slug);
+    hirePersona(slug, from?.askId);
   }
 
   function buildOrdinary(o: Offer) {

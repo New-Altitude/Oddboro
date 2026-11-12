@@ -5,6 +5,7 @@
 // /api/personas and on Check again, never on a timer.
 import { auth } from '@modelcontextprotocol/sdk/client/auth.js';
 import {
+  approveHire,
   hirePersona,
   ownerName,
   personaOdd,
@@ -100,6 +101,14 @@ const grant = (slug: string) => new PersonaGrant(slug);
  */
 const grantedThisRun = new Set<string>();
 
+/**
+ * By slug: the hire ask whose window added this persona in place of the
+ * proposed Odd. The persona's join answers it (`installPersona`). Only in
+ * memory, so a restart, a sign-in that never finishes, or an install that
+ * fails leaves the ask open on the desk. An Add without an ask forgets it.
+ */
+const proposals = new Map<string, number>();
+
 const NO_SUCH = 'New Altitude has no persona by that name.';
 const NOT_OFFERED = 'New Altitude does not offer this persona to your account.';
 const SIGN_IN_FIRST = 'Sign in to New Altitude first.';
@@ -112,8 +121,11 @@ export class NotOffered extends Error {
   }
 }
 
-/** Start a persona's own sign-in: the New Altitude page to open, or '' when a kept one still worked. */
-export async function startPersonaGrant(slug: string): Promise<{ url: string }> {
+/**
+ * Start a persona's own sign-in: the New Altitude page to open, or '' when a
+ * kept one still worked. `askId` is the hire ask its join answers.
+ */
+export async function startPersonaGrant(slug: string, askId?: number): Promise<{ url: string }> {
   if (!isSlug(slug)) throw new SignInRefused(NO_SUCH);
   requireSecretStore();
   const issuer = accountIssuer();
@@ -124,6 +136,8 @@ export async function startPersonaGrant(slug: string): Promise<{ url: string }> 
   if (listing.state === 'unreachable') throw new Error('the list of personas did not load');
   if (listing.state !== 'ok') throw new SignInRefused(SIGN_IN_FIRST);
   if (!listing.listed.some((l) => l.slug === slug)) throw new NotOffered();
+  if (askId === undefined) proposals.delete(slug);
+  else proposals.set(slug, askId);
   forgetOlderPages(personaId(slug));
   const p = grant(slug);
   const result = await auth(p, {
@@ -183,6 +197,7 @@ async function afterGrant(slug: string): Promise<void> {
 /** End a persona's sign-in at New Altitude and remove it here. Its Odd stays. */
 async function forgetPersonaGrant(slug: string): Promise<void> {
   grantedThisRun.delete(slug);
+  proposals.delete(slug);
   await exclusive(personaId(slug), async () => {
     await endSignIn(grant(slug), 'persona');
     // A delete the store refused keeps the name, so the next sign-out tries again.
@@ -347,8 +362,20 @@ export async function installPersona(slug: string): Promise<void> {
   } catch (e) {
     return problem(reason(e));
   }
-  sayInChat(row.id, offered.pkg.hello.replaceAll('{owner}', await ownerName()));
+  const owner = await ownerName();
+  sayInChat(row.id, offered.pkg.hello.replaceAll('{owner}', owner));
   emit({ type: 'persona', slug, joined: 'installed' });
+  // Added from a hire ask's window: the persona's join is the owner's answer to it.
+  const askId = proposals.get(slug);
+  proposals.delete(slug);
+  if (askId !== undefined)
+    await approveHire(
+      askId,
+      row.id,
+      `${owner} added ${offered.displayName}'s New Altitude persona instead of a new Odd.`
+    ).catch((e: unknown) =>
+      console.error(`[persona] proposal ${askId} for ${slug} stays open: ${reason(e)}`)
+    );
 }
 
 /** At Open the office: install each persona granted on the first visit's card. */

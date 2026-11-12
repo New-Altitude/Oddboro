@@ -801,7 +801,8 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   hiring, never by a follow-up run. A proposal may name an intake file, which
   the hire gets a copy of as `notes/intake.md`, a goal it serves, and the
   slug of a New Altitude persona it means (`personaSlug`), which the hire
-  window offers in place of a look-alike. The
+  window offers in place of a look-alike; that persona's join approves the
+  ask, with a note. The
   office approves a hire with `approveHire` (`src/goals.ts`), which links the
   goal in the transaction that approves the ask, so a link that fails leaves
   the proposal open and wakes nobody.
