@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import type { HireProposal } from '@oddboro/ledger';
 import {
   hasPersonaHint,
+  ordinaryFrom,
   proposalView,
   proposedPersona,
   suggestedPersona,
@@ -137,9 +138,47 @@ test('a proposal that may name a persona waits for the offers, and any other ope
   // Not answered yet: nothing shows, so the builder never flashes.
   assert.equal(proposalView(named, undefined), 'wait');
   assert.equal(proposalView(named, { state: 'ok', offers }), 'persona');
-  assert.equal(proposalView(named, { state: 'out' }), 'odd');
-  assert.equal(proposalView(named, { state: 'ok', offers: [rowan] }), 'odd');
+  assert.equal(proposalView(named, { state: 'ok', offers: [rowan] }), 'not-offered');
   // No hint, or no proposal: the builder at once.
   assert.equal(proposalView(proposal({}), undefined), 'odd');
   assert.equal(proposalView(undefined, undefined), 'odd');
+});
+
+test('a proposal that says it means a persona asks for the sign-in, or says why it cannot show one', () => {
+  const named = proposal({ name: 'Pat', role: 'Pat Q. Rivers Persona' });
+  const bySlug = proposal({ name: 'Mira', role: 'Advisor', personaSlug: 'pat-q-rivers' });
+  for (const p of [named, bySlug]) {
+    assert.equal(proposalView(p, { state: 'out' }), 'sign-in');
+    assert.equal(proposalView(p, { state: 'rescope' }), 'sign-in');
+    assert.equal(proposalView(p, { state: 'unreachable' }), 'unreachable');
+    assert.equal(proposalView(p, { state: 'ok', offers: [rowan] }), 'not-offered');
+    assert.equal(proposalView(p, { state: 'ok', offers }), 'persona');
+  }
+  // A whole name alone is a weaker hint: signed out or unreachable, the builder at once.
+  const weak = proposal({ name: 'Pat Rivers', role: 'Advisor' });
+  assert.equal(proposalView(weak, { state: 'out' }), 'odd');
+  assert.equal(proposalView(weak, { state: 'unreachable' }), 'odd');
+});
+
+test('the builder from a proposal that named a persona never carries the person', () => {
+  const blank = { name: '', role: '', appearance: '' };
+  assert.deepEqual(
+    ordinaryFrom({ name: 'Nate', role: 'Nate Jones Persona', appearance: 'Short hair, glasses' }),
+    blank
+  );
+  assert.deepEqual(
+    ordinaryFrom({ name: 'Nate', role: 'Advisor', appearance: 'Glasses', personaSlug: 'nate' }),
+    blank
+  );
+  // Matched by name alone: the person's own name and role go, the rest stays.
+  assert.deepEqual(
+    ordinaryFrom({ name: 'Pat Q. Rivers', role: 'Advisor', appearance: 'Tall' }, pat),
+    { name: '', role: 'Advisor', appearance: '' }
+  );
+  // Nothing of a persona: the proposal as it is.
+  assert.deepEqual(ordinaryFrom({ name: 'Mira', role: 'Mail Clerk', appearance: 'Tall' }), {
+    name: 'Mira',
+    role: 'Mail Clerk',
+    appearance: 'Tall'
+  });
 });

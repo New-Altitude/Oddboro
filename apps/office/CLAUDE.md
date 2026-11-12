@@ -1702,23 +1702,31 @@ the persona's voice.
    Altitude, so what is handed to it leaves this computer.
 8. A proposal for a real person. A hire window opened from a proposal that
    names a persona on offer shows that persona in place of the builder,
-   with Add, which starts the install on the hire grid with it picked, and
-   Build an ordinary Odd instead, which clears the person's name, role and
-   appearance. `proposedPersona` in `src/lib/persona.ts` matches by the
-   proposal's `personaSlug`, or else by the whole display name as its name
-   or role ("<Full Name> Persona"), never a first name, and two matches are
-   none. Signed out or with no match, the builder opens as before. Add
-   sends the ask's id with the persona's sign-in (`POST
-/api/personas/[slug]`), the office keeps it in memory, and
-   `installPersona` approves the ask once the persona joins, with the note
-   "<Owner> added <Name>'s New Altitude persona instead of a new Odd." A
-   sign-in left unfinished, an install that fails, a restart or a later Add
-   without the ask leaves the proposal open. A middle initial does not count
-   in a whole name, so "Nate Jones" matches "Nate B. Jones". A proposal
-   that may name a persona (`hasPersonaHint`: a slug, the word persona, or a
-   name of more than one word) shows a still placeholder until the offers
-   answer, so the builder never shows only to be replaced; after five
-   seconds with no answer the builder opens and stays (`proposalView`).
+   with Add, which starts the install on the hire grid with it picked.
+   `proposedPersona` in `src/lib/persona.ts` matches by the proposal's
+   `personaSlug`, or else by the whole display name as its name or role
+   ("<Full Name> Persona"), never a first name, and two matches are none. A
+   middle initial does not count, so "Nate Jones" matches "Nate B. Jones".
+   `proposalView` picks what the window shows:
+   - A proposal that may name a persona (`hasPersonaHint`: a slug, the word
+     persona, or a name of more than one word) shows a still placeholder
+     until the offers answer, so the builder never shows only to be
+     replaced. After five seconds with no answer the builder opens and stays.
+   - One that says it means a persona (`namesPersona`: a slug or the word
+     persona) and has no match asks for the New Altitude sign-in while
+     signed out (`AccountSignIn`; signing in reads the offers again), offers
+     Try again while New Altitude does not answer, and says so when the
+     list lacks the person.
+   - Any other proposal opens the builder, at once when it has no hint.
+   - Build an ordinary Odd instead is on every persona view. The builder it
+     opens, as the timeout's, never starts with the person's name, role or
+     appearance (`ordinaryFrom`).
+   - Add sends the ask's id with the persona's sign-in to
+     `POST /api/personas/[slug]`. The office keeps it in memory, and
+     `installPersona` approves the ask once the persona joins, with the note
+     "<Owner> added <Name>'s New Altitude persona instead of a new Odd." A
+     sign-in left unfinished, an install that fails, a restart or a later Add
+     without the ask leaves the proposal open.
 9. Who an Odd may propose. Each read of New Altitude's list
    (`readListing`) keeps the names and slugs on offer in memory
    (`persona-offered.ts`); signed out, or a list refused, keeps none, and an

@@ -23,7 +23,13 @@
   import { account } from './account.svelte.ts';
   import PersonaOffer from './PersonaOffer.svelte';
   import { connect, PersonaOffers, personas as asked } from './persona-offers.svelte.ts';
-  import { proposalView, suggestedPersona, withoutLikeness, type Offer } from '#lib/persona.ts';
+  import {
+    ordinaryFrom,
+    personaNamed,
+    proposalView,
+    suggestedPersona,
+    type Offer
+  } from '#lib/persona.ts';
   import { call } from './api.ts';
   import { wins } from './windows.svelte.ts';
   import type { StaffProfile } from '../staff/roster.ts';
@@ -68,22 +74,26 @@
   }
 
   // A proposal that names a real person New Altitude offers as a persona shows
-  // that persona in place of the builder, never a made-up look-alike. The
-  // owner may still build an ordinary Odd, without the person's likeness.
+  // that persona in place of the builder, never a made-up look-alike. One that
+  // says it means a persona New Altitude cannot show now asks for the sign-in,
+  // or says why. The owner may always build an ordinary Odd instead, without
+  // the person's likeness (`proposalView`, `ordinaryFrom`).
   let ordinary = $state(false);
+  const view = $derived(ordinary ? 'odd' : proposalView(from?.proposal, personas.state));
   const suggested = $derived(
-    ordinary ? undefined : suggestedPersona(from?.proposal, personas.state)
+    view === 'persona' ? suggestedPersona(from?.proposal, personas.state) : undefined
   );
+  /** The person a proposal that says it means a persona names, as it wrote them. */
+  const person = $derived(from ? personaNamed(from.proposal) : '');
   /** How long a proposal's window waits for the offers before it opens the builder. */
   const OFFERS_WAIT_MS = 5000;
   // Until the offers answer, a proposal that may name a persona shows a
   // still placeholder, never the builder. If they have not answered in a few
   // seconds, the builder opens and stays.
-  const waiting = $derived(!ordinary && proposalView(from?.proposal, personas.state) === 'wait');
   onMount(() => {
-    if (!waiting) return;
+    if (view !== 'wait') return;
     const t = setTimeout(() => {
-      if (!personas.state) ordinary = true;
+      if (!personas.state) buildOrdinary();
     }, OFFERS_WAIT_MS);
     return () => clearTimeout(t);
   });
@@ -98,8 +108,12 @@
     hirePersona(slug, from?.askId);
   }
 
-  function buildOrdinary(o: Offer) {
-    const plain = withoutLikeness({ name, role }, o);
+  /** The builder, with nothing of the person a proposal named (`ordinaryFrom`). */
+  function buildOrdinary(o?: Offer) {
+    const plain = ordinaryFrom(
+      { name, role, appearance, personaSlug: from?.proposal.personaSlug },
+      o
+    );
     name = plain.name;
     role = plain.role;
     appearance = plain.appearance;
@@ -377,9 +391,48 @@
       >
     </footer>
   </section>
-{:else if waiting}
+{:else if view === 'wait'}
   <section class="flex h-full min-h-0 flex-col gap-3 p-3" aria-label="Hire" aria-busy="true">
     <div class="h-28 rounded-xl bg-raise"></div>
+  </section>
+{:else if view === 'sign-in' || view === 'unreachable' || view === 'not-offered'}
+  <section
+    class="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-3 text-sm"
+    aria-label="Hire a persona"
+  >
+    <div class="flex flex-col gap-3 rounded-xl bg-raise p-3 text-xs">
+      {#if personas.state?.state === 'out'}
+        <!-- Signing in reads the offers again, so this turns into the persona or the line that it is not offered. -->
+        <AccountSignIn
+          ask={{
+            question: `${person} is a New Altitude persona`,
+            line: 'Sign in to New Altitude to add them.'
+          }}
+        />
+      {:else if view === 'not-offered'}
+        <p class="leading-relaxed text-ink">
+          New Altitude does not offer {person} to your account.
+        </p>
+      {:else if view === 'unreachable'}
+        <p class="leading-relaxed text-ink">
+          {person} is a New Altitude persona, and New Altitude could not be reached.
+        </p>
+        <button
+          class="self-start rounded-lg bg-sea px-3 py-2 font-medium text-night disabled:opacity-40"
+          disabled={personas.busy}
+          onclick={() => personas.load()}>Try again</button
+        >
+      {:else}
+        <!-- Signed in without the personas permission, or refused: its line and button. -->
+        <p class="leading-relaxed text-ink">{person} is a New Altitude persona.</p>
+        <PersonaOffer offers={personas} />
+      {/if}
+    </div>
+    <button
+      class="rounded-lg bg-raise px-3 py-2 text-ink hover:bg-sea/20"
+      onclick={() => buildOrdinary()}>Build an ordinary Odd instead</button
+    >
+    <p class="text-xs text-muted">An ordinary Odd gets a name and look of its own.</p>
   </section>
 {:else if suggested}
   <section

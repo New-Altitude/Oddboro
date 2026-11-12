@@ -84,22 +84,56 @@ export function proposedPersona(
  * Only such a proposal waits for the offers before its window shows anything.
  */
 export const hasPersonaHint = (p: Pick<HireProposal, 'name' | 'role' | 'personaSlug'>) =>
-  !!p.personaSlug?.trim() ||
-  /\bpersona\b/i.test(`${p.name} ${p.role}`) ||
-  whole(p.name).includes(' ');
+  namesPersona(p) || whole(p.name).includes(' ');
+
+/** Whether a proposal says outright that it means a persona: a slug, or the word persona. */
+export const namesPersona = (p: Pick<HireProposal, 'name' | 'role' | 'personaSlug'>) =>
+  !!p.personaSlug?.trim() || /\bpersona\b/i.test(`${p.name} ${p.role}`);
+
+/** The person a proposal that names a persona means, as it wrote them: its role without "Persona", or its name. */
+export const personaNamed = (p: Pick<HireProposal, 'name' | 'role'>) =>
+  /\bpersona\b/i.test(p.role)
+    ? p.role.replace(/\s*\bpersona\b\s*/gi, ' ').trim() || p.name
+    : p.name;
 
 /**
- * What a hire window opened from a proposal shows: the persona it names, the
- * builder, or, while the offers have not answered and the proposal may name
- * one, nothing yet, so the builder never shows only to be replaced.
+ * What a hire window opened from a proposal shows:
+ * - `wait`: the offers have not answered and the proposal may name a persona,
+ *   so the builder never shows only to be replaced;
+ * - `persona`: the persona it names, offered to this account;
+ * - for a proposal that says it means a persona (`namesPersona`): `sign-in`
+ *   while the account is signed out or lacks personas, `unreachable` while
+ *   New Altitude does not answer, and `not-offered` when the list lacks it;
+ * - `odd`: the builder.
  */
+export type ProposalView = 'wait' | 'persona' | 'sign-in' | 'unreachable' | 'not-offered' | 'odd';
+
 export function proposalView(
   proposal: HireProposal | undefined,
   offers: Offers | undefined
-): 'wait' | 'persona' | 'odd' {
+): ProposalView {
   if (!proposal) return 'odd';
   if (!offers) return hasPersonaHint(proposal) ? 'wait' : 'odd';
-  return suggestedPersona(proposal, offers) ? 'persona' : 'odd';
+  if (suggestedPersona(proposal, offers)) return 'persona';
+  if (!namesPersona(proposal)) return 'odd';
+  if (offers.state === 'ok') return 'not-offered';
+  return offers.state === 'unreachable' ? 'unreachable' : 'sign-in';
+}
+
+/**
+ * The builder's first name, role and appearance when the owner builds an
+ * ordinary Odd from a proposal: none of them from a proposal that says it
+ * means a persona, none of the person's own from one matched by name, and
+ * the proposal's own otherwise.
+ */
+export function ordinaryFrom(
+  p: Pick<HireProposal, 'name' | 'role' | 'personaSlug'> & { appearance: string },
+  matched?: Pick<Offer, 'displayName' | 'name'>
+): { name: string; role: string; appearance: string } {
+  if (namesPersona(p)) return { name: '', role: '', appearance: '' };
+  return matched
+    ? withoutLikeness(p, matched)
+    : { name: p.name, role: p.role, appearance: p.appearance };
 }
 
 /**
