@@ -10,5 +10,5 @@ out/
 .env*
 !.env.example
 
-# People and family data. Never tracked. See docs/hard-rules.md rule 9.
+# The private-words list and local-only files. Never tracked.
 data/

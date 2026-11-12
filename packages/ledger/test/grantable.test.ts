@@ -39,7 +39,9 @@ const heldBack: Capabilities = {
     {
       connector: { id: 'notion', name: 'Notion', readTools: ['search'] },
       level: 'act',
-      heldBack: 'above its level'
+      heldBack: 'above its level',
+      standing: [] as string[],
+      askFirst: [] as string[]
     } as Capabilities['outside'][number]
   ]
 };

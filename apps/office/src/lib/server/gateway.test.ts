@@ -15,7 +15,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { chatOf, folder, L, odd, secrets } from './office-under-test.ts';
+import { chatOf, folder, L, odd, request, secrets } from './office-under-test.ts';
 
 const { closeGateway, gateway, makeCall, openGateway } = await import('./gateway.ts');
 
@@ -35,7 +35,7 @@ const said = (text) => async () => ({ content: [{ type: 'text', text }] });
 server.registerTool('search', { annotations: { readOnlyHint: true } },
   said('found, key ' + (process.env.NOTES_KEY === ${JSON.stringify(KEY)} ? 'given' : 'missing')));
 server.registerTool('create_note', { annotations: { readOnlyHint: true } }, said('created'));
-server.registerTool('capture', { annotations: { readOnlyHint: false } }, said('captured'));
+server.registerTool('capture', { description: 'Capture a note.', annotations: { readOnlyHint: false } }, said('captured'));
 server.registerTool('wipe', {}, said('wiped'));
 await server.connect(new StdioServerTransport());
 `
@@ -94,7 +94,7 @@ test('Read only lists and passes on only the tools the server marks as reading',
   assert.equal(line.title, 'Read only for Notes no longer reaches create_note');
 });
 
-test('Read and write reaches every tool', async () => {
+test('Read and write reaches every tool, and the run keeps what each does for the owner', async () => {
   const { token } = openGateway([{ connector: await notes(), level: 'act' }], 60_000);
   const client = await connect(token);
   try {
@@ -109,6 +109,10 @@ test('Read and write reaches every tool', async () => {
     await client.close();
     await closeGateway(token);
   }
+  // Connected before descriptions were kept, the run's tool list fills them in.
+  const { toolNotes } = await notes();
+  assert.equal(toolNotes.capture, 'Capture a note.');
+  assert.equal(toolNotes.wipe, '');
 });
 
 test('a token that ended, or that never was, reaches nothing', async () => {
@@ -237,12 +241,26 @@ test("at Draft, Read and write passes reads on and holds each change for the own
   );
   const client = await connect(token);
   try {
-    // Every tool is listed, so the Odd can ask for a change at all.
-    assert.equal((await client.listTools()).tools.length, 4);
+    // Every tool is listed, so the Odd can ask for a change at all, and each
+    // that changes something asks why, for the owner's desk.
+    const listed = (await client.listTools()).tools;
+    assert.equal(listed.length, 4);
+    const asksWhy = listed.filter((t) =>
+      ['oddboro_title', 'oddboro_why'].every((k) => t.inputSchema.required?.includes(k))
+    );
+    assert.deepEqual(asksWhy.map((t) => t.name).sort(), ['capture', 'create_note', 'wipe']);
     assert.deepEqual(text(await client.callTool({ name: 'search' })), ['found, key given']);
+    // A change with no title or reason is refused, and nothing goes on the desk.
+    const bare = (await client.callTool({
+      name: 'capture',
+      arguments: { text: 'a thought', oddboro_why: 'No title.' }
+    })) as CallToolResult;
+    assert.equal(bare.isError, true);
+    assert.match(text(bare)[0], /^Nothing was held\. Call capture again with oddboro_title/);
+    const why = 'Saves the thought you had about the garden, as you asked.';
     const held = (await client.callTool({
       name: 'capture',
-      arguments: { text: 'a thought' }
+      arguments: { text: 'a thought', oddboro_title: 'Save your garden thought', oddboro_why: why }
     })) as CallToolResult;
     assert.notEqual(held.isError, true);
     assert.match(
@@ -252,7 +270,7 @@ test("at Draft, Read and write passes reads on and holds each change for the own
     // The same call again finds the one on the desk, and raises no second.
     const again = (await client.callTool({
       name: 'capture',
-      arguments: { text: 'a thought' }
+      arguments: { text: 'a thought', oddboro_title: 'Again', oddboro_why: 'Once more.' }
     })) as CallToolResult;
     assert.match(text(again)[0], /already on .*'s desk/);
   } finally {
@@ -260,9 +278,11 @@ test("at Draft, Read and write passes reads on and holds each change for the own
     await closeGateway(token);
   }
   const calls =
-    await L.pg`select id, title, call from asks where staff_id = 'dora' and kind = 'call'`;
+    await L.pg`select id, title, why, call from asks where staff_id = 'dora' and kind = 'call'`;
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].title, 'Use capture in Notes');
+  assert.equal(calls[0].title, 'Save your garden thought in Notes');
+  // The desk shows the Odd's title and reason, and the call itself carries neither.
+  assert.equal(calls[0].why, 'Saves the thought you had about the garden, as you asked.');
   assert.deepEqual(calls[0].call, {
     connector: 'notes',
     tool: 'capture',
@@ -549,4 +569,135 @@ test("a line that cannot be written is logged and never left unhandled, and the 
     logged.mock.calls.map((c) => c.arguments[0]),
     [`No Ledger line for ${id} not starting:`]
   );
+});
+
+test('at Draft, a tool the owner lets the Odd use without asking goes through, and the next held call lists it', async () => {
+  await L.pg`insert into staff ${L.pg({ ...odd('stan', 'Stan'), permission: 'draft' })}`;
+  const place = { staffId: 'stan', run: 'run-stan-1' };
+  const { token } = openGateway(
+    [{ connector: await notes(), level: 'act', waits: true, standing: ['capture'] }],
+    60_000,
+    place
+  );
+  const client = await connect(token);
+  try {
+    // Only the tools that still wait ask for the owner's title and reason.
+    const listed = (await client.listTools()).tools;
+    const asksWhy = listed.filter((t) => t.inputSchema.required?.includes('oddboro_why'));
+    assert.deepEqual(asksWhy.map((t) => t.name).sort(), ['create_note', 'wipe']);
+    // The standing tool reaches the service at once, with no ask.
+    assert.deepEqual(
+      text(await client.callTool({ name: 'capture', arguments: { text: 'staged' } })),
+      ['captured']
+    );
+    const held = (await client.callTool({
+      name: 'wipe',
+      arguments: { oddboro_title: 'Apply the change', oddboro_why: 'Makes the staged note real.' }
+    })) as CallToolResult;
+    assert.match(text(held)[0], /^Held for /);
+  } finally {
+    await client.close();
+    await closeGateway(token);
+  }
+  const calls = await L.pg`select call from asks where staff_id = 'stan' and kind = 'call'`;
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].call.tool, 'wipe');
+  assert.deepEqual(calls[0].call.before, [{ tool: 'capture', arguments: { text: 'staged' } }]);
+});
+
+test('a run with nowhere to put a change makes no call, standing yes or not', async () => {
+  const { token } = openGateway(
+    [{ connector: await notes(), level: 'act', waits: true, standing: ['capture'] }],
+    60_000
+  );
+  const client = await connect(token);
+  try {
+    const r = (await client.callTool({ name: 'capture', arguments: {} })) as CallToolResult;
+    assert.equal(r.isError, true);
+    assert.match(text(r)[0], /only reads/);
+  } finally {
+    await client.close();
+    await closeGateway(token);
+  }
+});
+
+test('at Act, a tool the owner set to ask first waits on the desk, and every other change goes through', async () => {
+  await L.pg`insert into staff ${L.pg({ ...odd('ace', 'Ace'), permission: 'act' })}`;
+  const place = { staffId: 'ace', run: 'run-ace-1' };
+  const { token } = openGateway(
+    [{ connector: await notes(), level: 'act', waits: false, askFirst: ['wipe'] }],
+    60_000,
+    place
+  );
+  const client = await connect(token);
+  try {
+    // Only the ask-first tool asks for the owner's title and reason.
+    const listed = (await client.listTools()).tools;
+    const asksWhy = listed.filter((t) => t.inputSchema.required?.includes('oddboro_why'));
+    assert.deepEqual(
+      asksWhy.map((t) => t.name),
+      ['wipe']
+    );
+    assert.deepEqual(text(await client.callTool({ name: 'capture', arguments: {} })), ['captured']);
+    const held = (await client.callTool({
+      name: 'wipe',
+      arguments: { oddboro_title: 'Clear the notes', oddboro_why: 'Ada asked to start fresh.' }
+    })) as CallToolResult;
+    assert.match(text(held)[0], /^Held for /);
+  } finally {
+    await client.close();
+    await closeGateway(token);
+  }
+  const calls = await L.pg`select call from asks where staff_id = 'ace' and kind = 'call'`;
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].call.tool, 'wipe');
+  assert.deepEqual(calls[0].call.before, [{ tool: 'capture', arguments: {} }]);
+});
+
+test('a held call lists only the calls made without asking since the last held one', async () => {
+  await L.pg`insert into staff ${L.pg({ ...odd('cy', 'Cy'), permission: 'draft' })}`;
+  const place = { staffId: 'cy', run: 'run-cy-1' };
+  const { token } = openGateway(
+    [{ connector: await notes(), level: 'act', waits: true, standing: ['capture'] }],
+    60_000,
+    place
+  );
+  const client = await connect(token);
+  const wipe = (n: number) =>
+    client.callTool({
+      name: 'wipe',
+      arguments: { n, oddboro_title: `Apply change ${n}`, oddboro_why: 'Makes it real.' }
+    });
+  try {
+    await client.callTool({ name: 'capture', arguments: { text: 'one' } });
+    await wipe(1);
+    // The same held call again changes nothing, and keeps nothing back from the next card.
+    await client.callTool({ name: 'capture', arguments: { text: 'two' } });
+    await wipe(1);
+    await wipe(2);
+    await wipe(3);
+  } finally {
+    await client.close();
+    await closeGateway(token);
+  }
+  const calls = await L.pg<{ call: { arguments: { n: number }; before?: unknown[] } }[]>`
+    select call from asks where staff_id = 'cy' and kind = 'call' order by id`;
+  assert.deepEqual(
+    calls.map((c) => [c.call.arguments.n, c.call.before ?? []]),
+    [
+      [1, [{ tool: 'capture', arguments: { text: 'one' } }]],
+      [2, [{ tool: 'capture', arguments: { text: 'two' } }]],
+      [3, []]
+    ]
+  );
+});
+
+test("opening a service's actions reads its tools now, and says whether anything changed", async () => {
+  // As if the service had remarked capture since the office last read it.
+  await L.pg`update connectors set tool_notes = ${JSON.stringify({ capture: 'Old words.' })}::jsonb where id = 'notes'`;
+  const open = async () =>
+    (await request('/api/services/[id]/tools', 'POST', { params: { id: 'notes' } })).json();
+  assert.deepEqual(await open(), { said: 'Tools updated: descriptions changed.', changed: true });
+  assert.equal((await notes()).toolNotes.capture, 'Capture a note.');
+  assert.deepEqual(await open(), { said: 'Up to date.', changed: false });
 });

@@ -39,12 +39,17 @@ export function personaNews(e: { slug: string; problem?: string }) {
 
 /**
  * Start the persona's own sign-in (Add and Reconnect). Its page opens; the
- * live line says when it is done.
+ * live line says when it is done. `askId` is the hire ask it is added in
+ * place of: its join answers that ask.
  */
-export async function connect(slug: string) {
+export async function connect(slug: string, askId?: number) {
   personas[slug] = { busy: true };
   try {
-    const { url } = await call<{ url: string }>(`/api/personas/${slug}`, undefined, 'POST');
+    const { url } = await call<{ url: string }>(
+      `/api/personas/${slug}`,
+      askId === undefined ? undefined : { askId },
+      'POST'
+    );
     // '' when a kept sign-in still worked: the live line brings the news.
     personas[slug] = url ? { waiting: url } : {};
     // Safari can block a window opened after an await, so the waiting state

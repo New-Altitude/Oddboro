@@ -731,8 +731,14 @@ test("a Grok Odd's run on a thread reads the thread's folder and writes only its
     `read_write = ${JSON.stringify([join(folder, 'accounts', 'grok', 'office', 'tmp'), part])}`
   ]);
   // The kernel shuts what `strict` reads that no Odd needs, by its real path.
-  for (const p of [join(homedir(), 'Library'), '/Library', '/tmp', '/var'].filter(existsSync))
+  // On Linux /tmp and /var stay open: Grok cannot start with either shut (`grokShut`).
+  const linux = process.platform === 'linux';
+  const shut = [join(homedir(), 'Library'), '/Library', ...(linux ? [] : ['/tmp', '/var'])];
+  for (const p of shut.filter(existsSync))
     assert.ok(run.profile?.includes(JSON.stringify(`${realpathSync(p)}/**`)), `${p} is not shut`);
+  if (linux)
+    for (const p of ['/tmp', '/var'])
+      assert.ok(!run.profile?.includes(JSON.stringify(`${p}/**`)), `${p} is shut on Linux`);
   assert.ok(
     run.profile?.includes(JSON.stringify(`${part}/**/.grok`)),
     'a planted .grok is not denied'

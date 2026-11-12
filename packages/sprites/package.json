@@ -12,6 +12,7 @@
     "./meta.json": "./dist/meta.json",
     "./dist/*": "./dist/*",
     "./look": "./src/look.ts",
+    "./mark": "./src/mark.ts",
     "./art": "./src/art.ts"
   },
   "scripts": {

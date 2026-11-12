@@ -157,6 +157,7 @@ import { ACT_WRITE, house, managerWork, stillOnDeskSection, whoIsHereSection } f
 import { NOT_SIGNED_IN, SIGN_IN_WHERE, type McpServer, type RunImage } from './launch.ts';
 import { notifyMac } from './notify.ts';
 import { OUTCOME_LINE, personaRun, voiced } from './persona-run.ts';
+import { offeredSection } from './persona-offered.ts';
 import { catchUp, NOW, parseSession, saveSession, sectionsOf } from './resume.ts';
 import { toolServerEnv } from './run-env-allow.ts';
 import { cut, officeEnv } from './run-env.ts';
@@ -262,8 +263,10 @@ export async function runHomeOf(who: StaffRow): Promise<string> {
  * reaches; `gate` is the run's token, closed when the run ends. The tool's own
  * allow list names the same tools, so either one alone holds. A write grant
  * at Draft lists every tool, and the gateway holds each change for the
- * owner's yes (`writesWait`), on the desk where `place` says; a run with no
- * place (a lesson run) changes nothing.
+ * owner's yes (`writesWait`), on the desk where `place` says, but for the
+ * tools the owner lets the Odd use without asking (`standing`), in any run
+ * with a place; a run with no place (a lesson run) changes nothing. At Act
+ * it holds only calls to the tools the owner set to ask first (`askFirst`).
  */
 async function access(who: StaffRow, ceiling: Level, ms: number, place?: CallPlace) {
   const office: McpServer = {
@@ -277,7 +280,13 @@ async function access(who: StaffRow, ceiling: Level, ms: number, place?: CallPla
   const servers: Record<string, McpServer> = { office };
   const allowed = ['mcp__office'];
   const caps = capped(await capabilities(who), ceiling);
-  const reach: { connector: ConnectorRow; level: Level; waits: boolean }[] = [];
+  const reach: {
+    connector: ConnectorRow;
+    level: Level;
+    waits: boolean;
+    standing: string[];
+    askFirst: string[];
+  }[] = [];
   for (const a of caps.outside) {
     if (a.heldBack) continue;
     const c = a.connector;
@@ -285,7 +294,13 @@ async function access(who: StaffRow, ceiling: Level, ms: number, place?: CallPla
       a.heldBack = 'sign-in ran out';
       continue;
     }
-    reach.push({ connector: c, level: a.level, waits: writesWait(a.level, caps.level) });
+    reach.push({
+      connector: c,
+      level: a.level,
+      waits: writesWait(a.level, caps.level),
+      standing: a.standing,
+      askFirst: a.askFirst
+    });
     if (a.level === 'act') allowed.push(`mcp__${c.id}`);
     else allowed.push(...c.readTools.map((t) => `mcp__${c.id}__${t}`));
   }
@@ -295,12 +310,10 @@ async function access(who: StaffRow, ceiling: Level, ms: number, place?: CallPla
 }
 
 /**
- * Who the staffer works for, built fresh each run: the owner, the people in
- * their life, its own intake, and the goals it serves, which are the only
- * goals it sees.
+ * Who the staffer works for, built fresh each run: the owner, its own intake,
+ * and the goals it serves, which are the only goals it sees.
  */
 async function whoFor(who: StaffRow, dir: string): Promise<string> {
-  const people = join(DATA, 'people.json');
   const serving = (await goalsFor(who.id)).filter((g) => g.status === 'active');
   const goalLine = (g: (typeof serving)[number]) => {
     const latest = g.progress[0];
@@ -321,7 +334,6 @@ async function whoFor(who: StaffRow, dir: string): Promise<string> {
     '## Who you work for',
     '',
     '- {owner}. This office is theirs, and runs on their Mac.',
-    existsSync(people) && `- The people in their life are listed in ${people}, which you may read.`,
     existsSync(join(dir, 'notes', 'intake.md')) &&
       "- {owner}'s own answers from when you were hired are in notes/intake.md. Read them before your first piece of work, and again whenever you are unsure what they want.",
     serving.length
@@ -487,6 +499,12 @@ async function prompt(
     (chat ? workOnBrief(on) : on.flatMap((story) => threadOnKnown({ story })).join('\n')) +
     (who.role === MANAGER_ROLE
       ? managerWork(existsSync(join(dir, 'notes', 'pending-judgments.md')))
+      : '') +
+    // An Odd that can propose a hire hears which real people it may propose as personas.
+    (hasTool(who.tools, 'propose_hire') || hasTool(who.tools, 'propose_goal_plan')
+      ? offeredSection(
+          new Set((await roster()).flatMap((o) => (o.package ? [o.package.slug] : [])))
+        )
       : '') +
     stillOnDeskSection(await stillOnDesk(who.id)) +
     house({
@@ -1393,7 +1411,7 @@ export async function followThrough(
           : edit
             ? editBrief(edit.path, edit.shown)
             : [
-                ...followUpBrief(f, a, r, task, g, also),
+                ...followUpBrief(f, a, r, task, g, also, who.permission),
                 ...(serves?.handOff && giver && thread
                   ? handOffContext({
                       h: serves.handOff,

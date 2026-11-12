@@ -7,9 +7,14 @@
 // pass `readsOnly` now, as the server marks them on this run, and that the
 // connector's stored list still names; Read and write reaches every tool. At
 // Draft, Read and write still lists every tool, but a call to one that changes
-// something goes on the owner's desk instead (`raiseCall`): the office makes
+// something goes on the owner's desk instead (`raiseCall`), with the Odd's
+// title and reason, which each such tool asks for (`forOwner`): the office makes
 // that exact call on their yes (`makeCall`), and the Odd hears the result in a
-// new run. The tool a run goes through (Claude Code, Codex, Grok) still gets
+// new run. A tool the owner lets the Odd use without asking (its standing yes)
+// goes straight through, and a call held after it lists it on the desk
+// (`before`), so a commit shows the change it applies. At Act every call goes
+// through but those to a tool the owner set to ask first, held the same way.
+// Each list is the exception to its level (`waitsFor`). The tool a run goes through (Claude Code, Codex, Grok) still gets
 // its own per-tool allow list too, so either one alone holds.
 import { randomBytes } from 'node:crypto';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -29,7 +34,7 @@ import {
   grantsFor,
   connector,
   GRANT_LABEL,
-  narrowReadTools,
+  refreshTools,
   OFFICE_URL,
   ownerName,
   raiseCall,
@@ -49,13 +54,20 @@ export const GATEWAY_PATH = '/api/gateway';
 
 /**
  * One outside tool a run holds, its connection made on first use and kept for
- * the run. `waits`: a write grant at Draft, whose changes wait for the owner.
+ * the run. `waits`: a write grant at Draft, whose changes wait for the owner,
+ * except calls to the tools in `standing`, which go through (standing.ts in the
+ * ledger). At Act only calls to the tools in `askFirst` wait. `made` keeps the
+ * changes that went through without asking since the last held call, so the
+ * next one held shows them, and starts again empty.
  * `toldNoStart`: the Ledger already says it could not start in this run.
  */
 type Held = {
   pmb?: string;
   level: Level;
   waits: boolean;
+  standing: Set<string>;
+  askFirst: Set<string>;
+  made: { tool: string; arguments: Record<string, unknown> }[];
   client?: Promise<Client>;
   tools?: Promise<Tool[]>;
   toldNoStart?: boolean;
@@ -79,7 +91,13 @@ const runs: Map<string, GatewayRun> = ((
  * which the token stops working even if the run never said it ended.
  */
 export function openGateway(
-  grants: { connector: ConnectorRow; level: Level; waits?: boolean }[],
+  grants: {
+    connector: ConnectorRow;
+    level: Level;
+    waits?: boolean;
+    standing?: string[];
+    askFirst?: string[];
+  }[],
   ms: number,
   place?: CallPlace,
   staffId = place?.staffId
@@ -91,7 +109,14 @@ export function openGateway(
     held: new Map(
       grants.map((g) => [
         g.connector.id,
-        { pmb: g.connector.config.pmb, level: g.level, waits: !!g.waits }
+        {
+          pmb: g.connector.config.pmb,
+          level: g.level,
+          waits: !!g.waits,
+          standing: new Set(g.standing),
+          askFirst: new Set(g.askFirst),
+          made: []
+        }
       ])
     ),
     until: now + ms + 60_000,
@@ -182,11 +207,20 @@ function clientOf(c: ConnectorRow, h: Held): Promise<Client> {
   return h.client;
 }
 
-/** Every tool the server lists, once per run. */
+/**
+ * Every tool the server lists, once per run. The stored list follows it
+ * (`refreshTools`): the owner's page, Read only's reach and each standing yes.
+ */
 function listed(c: ConnectorRow, h: Held): Promise<Tool[]> {
   h.tools ??= clientOf(c, h)
     .then((client) => client.listTools())
-    .then((r) => r.tools)
+    .then(async (r) => {
+      const now = r.tools.map((t) => ({ ...t, readOnly: onlyReads(c, t) }));
+      await refreshTools(c.id, now).catch((e: unknown) =>
+        console.error(`[gateway] ${c.id} tools not stored`, e)
+      );
+      return r.tools;
+    })
     .catch((e: unknown) => {
       h.tools = undefined;
       throw e;
@@ -195,20 +229,22 @@ function listed(c: ConnectorRow, h: Held): Promise<Tool[]> {
 }
 
 /**
- * The tools this grant reaches on this run. A stored Read only tool the
- * server no longer marks as reading, or whose name says it changes something,
- * leaves the stored list too, with a line in the Ledger (`narrowReadTools`).
+ * The tools this grant reaches on this run. Read only reaches a stored read
+ * tool the server still marks as reading: one it no longer marks leaves the
+ * stored list too, with a line in the Ledger (`refreshTools`), and a new one
+ * joins it, from the next run.
  */
 export async function reachable(c: ConnectorRow, h: Held): Promise<Tool[]> {
   const tools = await listed(c, h);
   if (c.id === POSTAL_ID) return postalTools(tools).filter((t) => c.readTools.includes(t.name));
   // A tool whose own permissions only read (AWS read only's role) holds itself.
   if (h.level === 'act' || c.config.readsByRole) return tools;
-  const named = tools.filter((t) => c.readTools.includes(t.name));
-  const gone = named.filter((t) => !readsOnly(t)).map((t) => t.name);
-  if (gone.length) await narrowReadTools(c.id, gone);
-  return named.filter(readsOnly);
+  return tools.filter((t) => c.readTools.includes(t.name) && readsOnly(t));
 }
+
+/** Whether a call to a tool that changes something waits for the owner: at Draft unless it has a standing yes, at Act only if they set it to ask first. */
+const waitsFor = (h: Held, name: string): boolean =>
+  h.waits ? !h.standing.has(name) : h.askFirst.has(name);
 
 const refusal = (text: string): CallToolResult => ({
   isError: true,
@@ -219,31 +255,95 @@ const refusal = (text: string): CallToolResult => ({
 const onlyReads = (c: ConnectorRow, t: Tool): boolean => !!c.config.readsByRole || readsOnly(t);
 
 /**
+ * At Draft, the words the Odd gives a call that will be held, for the owner's
+ * desk: a short title and why it makes the call. The gateway adds both to each
+ * tool that changes something (`forOwner`), and `hold` takes them out before
+ * the call is held, so the service never gets them.
+ */
+const TITLE = 'oddboro_title';
+const WHY = 'oddboro_why';
+/** The longest title the desk takes; a longer one is cut. */
+const TITLE_MAX = 80;
+
+/** A tool as a run at Draft lists it: one that changes something also takes `TITLE` and `WHY`. */
+function forOwner(t: Tool, c: ConnectorRow, owner: string): Tool {
+  const schema = t.inputSchema;
+  const kept = `The office shows it to ${owner} and never sends it to ${c.name}.`;
+  return {
+    ...t,
+    inputSchema: {
+      ...schema,
+      properties: {
+        ...schema.properties,
+        [TITLE]: {
+          type: 'string',
+          description: `What this call does, in a few plain words for ${owner}'s desk, such as "Book the intro call with Gabriel on Wed at 9 AM". Under ${TITLE_MAX} characters. ${kept}`
+        },
+        [WHY]: {
+          type: 'string',
+          description: `Why you make this call, for ${owner} to read on their desk before it is made: what it changes and why, in one or two plain sentences written to them. ${kept}`
+        }
+      },
+      required: [...(schema.required ?? []), TITLE, WHY]
+    }
+  };
+}
+
+const words = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+
+/**
  * Hold one call that changes something for the owner's yes: it goes on their
- * desk as a call ask, and the run hears that nothing has happened yet.
+ * desk as a call ask, with the Odd's title and reason, and the run hears that
+ * nothing has happened yet. A call missing either is refused, and nothing is held.
  */
 async function hold(
   c: ConnectorRow,
   name: string,
-  args: Record<string, unknown>,
-  place: CallPlace | undefined
+  given: Record<string, unknown>,
+  place: CallPlace | undefined,
+  h: Held
 ): Promise<CallToolResult> {
   if (!place)
     return refusal(
       `This run only reads, so it cannot ask to use ${name}. Say what you would change in your reply.`
     );
   const owner = await ownerName();
-  const words = await heldWordsFor(c, name, args);
-  const { ask, already } = await raiseCall(
-    place,
-    {
-      connector: c.id,
-      tool: name,
-      arguments: args,
-      ...(words ? { said: words.title, shown: words.items } : {})
-    },
-    c.name
-  );
+  const { [TITLE]: titled, [WHY]: said, ...args } = given;
+  const title = words(titled);
+  const why = words(said);
+  if (!title || !why)
+    return refusal(
+      `Nothing was held. Call ${name} again with ${TITLE}, what it does in a few plain words, and ${WHY}, why you make it in one or two plain sentences, both for ${owner}, who reads them on their desk.`
+    );
+  const read = await heldWordsFor(c, name, args);
+  // The calls since the last held one go on this card, and the next card
+  // starts from here. Taken now, so a call made while this one is raised
+  // waits for the next card.
+  const before = h.made;
+  h.made = [];
+  let raised: Awaited<ReturnType<typeof raiseCall>> | undefined;
+  try {
+    raised = await raiseCall(
+      place,
+      {
+        connector: c.id,
+        tool: name,
+        arguments: args,
+        ...(read ? { said: read.title, shown: read.items } : {}),
+        ...(before.length ? { before } : {})
+      },
+      c.name,
+      {
+        title: title.length > TITLE_MAX ? `${title.slice(0, TITLE_MAX - 1).trimEnd()}…` : title,
+        why
+      }
+    );
+  } finally {
+    // Not raised, or the same call was already on the desk with its own list:
+    // these wait for the next card.
+    if (!raised || raised.already) h.made = [...before, ...h.made];
+  }
+  const { ask, already } = raised;
   return {
     content: [
       {
@@ -315,7 +415,14 @@ export async function gateway(request: Request, id: string): Promise<Response> {
     { name: `oddboro-gateway-${id}`, version: '1.0.0' },
     { capabilities: { tools: {} } }
   );
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: await reachable(c, h) }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
+    const tools = await reachable(c, h);
+    if (!h.waits && !h.askFirst.size) return { tools };
+    const owner = await ownerName();
+    return {
+      tools: tools.map((t) => (onlyReads(c, t) || !waitsFor(h, t.name) ? t : forOwner(t, c, owner)))
+    };
+  });
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const name = req.params.name;
     const tool = (await reachable(c, h)).find((t) => t.name === name);
@@ -325,8 +432,15 @@ export async function gateway(request: Request, id: string): Promise<Response> {
           ? `${c.name} has no tool named ${name}.`
           : `${name} is not one you may use. Your ${c.name} access is ${GRANT_LABEL.read}, which reaches only the tools ${c.name} marks as only reading. Ask the owner for ${GRANT_LABEL.act} if the work needs it.`
       );
-    // At Draft, a change waits for the owner's yes on their desk.
-    if (h.waits && !onlyReads(c, tool)) return hold(c, name, req.params.arguments ?? {}, run.place);
+    // A change waits for the owner's yes on their desk: at Draft unless the
+    // owner lets this Odd use the tool without asking, at Act only if they set
+    // it to ask first. At Draft a run with no place (a lesson run) changes
+    // nothing, standing yes or not.
+    const args = req.params.arguments ?? {};
+    if (!onlyReads(c, tool)) {
+      if (waitsFor(h, name) || (h.waits && !run.place)) return hold(c, name, args, run.place, h);
+      h.made.push({ tool: name, arguments: args });
+    }
     const client = await clientOf(c, h);
     // As long as the run itself may take: the run's own time limit ends it first.
     return (await client.callTool(

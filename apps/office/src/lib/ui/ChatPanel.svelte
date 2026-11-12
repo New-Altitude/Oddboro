@@ -1340,33 +1340,44 @@
         {/if}
       {:else if line.item}
         {@const it = line.item}
+        {@const box = `block w-full rounded-2xl rounded-es-md bg-raise px-3 py-2 text-start text-sm ${
+          selected === keyOf(it) ? 'ring-1 ring-sea' : ''
+        }`}
         <div class="-mb-1 ms-1 text-[10px] tracking-[0.16em] text-sea uppercase">
           {KIND[it.kind]}
         </div>
         <div class="me-auto w-[85%]" data-item={keyOf(it)}>
-          <!-- Plain text, so the owner can select the title; Open on Desk is its own button. -->
-          <div
-            class="w-full rounded-2xl rounded-es-md bg-raise px-3 py-2 text-sm {selected ===
-            keyOf(it)
-              ? 'ring-1 ring-sea'
-              : ''}"
-            aria-current={selected === keyOf(it) ? 'true' : undefined}
-          >
+          {#snippet face()}
             <span class="block font-medium break-words text-ink">{it.title}</span>
-            <div class="flex flex-wrap items-baseline gap-x-3 text-xs">
+            <span class="flex flex-wrap items-baseline gap-x-3 text-xs">
               <span
                 class={it.status === 'open' || it.status === 'new' ? 'text-ember' : 'text-muted'}
                 >{STATUS[it.status] ?? it.status}</span
               >
               {#if opens(it)}
-                <button class="text-sea hover:text-ink" onclick={() => pick(it)}
+                <span class="text-sea"
                   >{it.kind === 'report' && !desk.reports.some((r) => r.id === it.id)
                     ? 'Open report'
-                    : 'Open on Desk'}</button
+                    : 'Open on Desk'}</span
                 >
               {/if}
+            </span>
+          {/snippet}
+          <!-- The whole card opens it, its title still selectable: a click that ends a selection opens nothing. Its controls sit below, outside the button. -->
+          {#if opens(it)}
+            <button
+              type="button"
+              class="{box} cursor-pointer select-text hover:bg-sea/10 focus-visible:ring-1 focus-visible:ring-sea focus-visible:outline-none"
+              aria-current={selected === keyOf(it) ? 'true' : undefined}
+              onclick={() => {
+                if (!window.getSelection()?.toString()) pick(it);
+              }}>{@render face()}</button
+            >
+          {:else}
+            <div class={box} aria-current={selected === keyOf(it) ? 'true' : undefined}>
+              {@render face()}
             </div>
-          </div>
+          {/if}
           {#if it.note}
             <p class="mt-1 px-3 text-xs whitespace-pre-wrap text-muted">{it.note}</p>
           {/if}

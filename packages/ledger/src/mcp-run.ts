@@ -62,7 +62,8 @@ const OWNER_SAID = process.env.OWNER_SAID || undefined;
 const OWNER_FILES = ownerFiles(process.env.OWNER_FILES);
 // Each Gmail account is a connector of its own. With more than one, the Odd
 // names the one the email came to, and the reply goes out from it.
-const mailboxes = (await grantsFor(ME))
+const held = await grantsFor(ME);
+const mailboxes = held
   .filter((g) => g.connector.config.google === 'gmail')
   .map((g) => ({ id: g.connectorId, account: g.connector.config.account }));
 /** This run, as the office tools' row conditions read it. */
@@ -73,6 +74,7 @@ const RUN: ToolRun = {
     process.env.LESSON_RUN !== '1' &&
     (await advancedMode()) &&
     (await projectConnections(ME)).length > 0,
+  write: held.some((g) => g.level === 'act'),
   chat: OWNER_SAID !== undefined,
   manager: me.role === MANAGER_ROLE
 };
@@ -470,6 +472,13 @@ const hireFields = {
     .optional()
     .describe(
       `An intake ${OWNER} filled in for this hire, a file in your folder. The new Odd gets a copy as notes/intake.md and reads their answers first-hand.`
+    ),
+  persona_slug: z
+    .string()
+    .max(80)
+    .optional()
+    .describe(
+      `When the hire is a real person New Altitude offers as a persona: its slug, if you know it. Set role to "<Full Name> Persona" either way.`
     )
 };
 const hireShape = z.object(hireFields);
@@ -491,7 +500,8 @@ function hireFrom(a: HireArgs): HireProposal | string {
     tools: a.office_tools?.filter(isGrantable),
     appearance: a.appearance,
     job: a.first_job,
-    intakeFile: intake
+    intakeFile: intake,
+    personaSlug: a.persona_slug?.trim() || undefined
   };
 }
 

@@ -14,14 +14,7 @@ import {
   type GoogleProduct,
   type Step
 } from './schema.ts';
-import {
-  GRANT_LABEL,
-  grantWorks,
-  LEVEL_LABEL,
-  POSTAL_ID,
-  POSTAL_NAME,
-  type Level
-} from './access-words.ts';
+import { grantWorks, POSTAL_ID, POSTAL_NAME, type Level } from './access-words.ts';
 import type { AskRow, TaskRow, GrantRow, ConnectorRow } from './office.ts';
 import { staffer } from './office-staff.ts';
 import { record } from './office-ledger.ts';
@@ -661,32 +654,13 @@ export async function bindPostalMailbox(
 export async function connectorReady(
   id: string,
   tools: string[],
-  readTools: string[]
+  readTools: string[],
+  toolNotes?: Record<string, string>
 ): Promise<void> {
   await db
     .update(connectors)
-    .set({ tools, readTools, readyAt: new Date() })
+    .set({ tools, readTools, readyAt: new Date(), ...(toolNotes ? { toolNotes } : {}) })
     .where(eq(connectors.id, id));
-}
-
-/**
- * Take tools out of what a Read only grant to a connector reaches, when they
- * no longer pass `readsOnly`: a connector the owner connected before the rule
- * held, or a server that changed its marks. Records which ones went and why,
- * so the owner can see it in the Ledger.
- */
-export async function narrowReadTools(id: string, gone: string[]): Promise<void> {
-  const c = await connector(id);
-  if (!c || !gone.length) return;
-  const keep = c.readTools.filter((t) => !gone.includes(t));
-  if (keep.length === c.readTools.length) return;
-  await db.update(connectors).set({ readTools: keep }).where(eq(connectors.id, id));
-  await record({
-    kind: 'access',
-    actor: 'office',
-    title: `${GRANT_LABEL.read} for ${c.name} no longer reaches ${gone.join(', ')}`,
-    body: `${c.name} does not mark ${gone.length === 1 ? 'it' : 'them'} as only reading, or the name says ${gone.length === 1 ? 'it changes' : 'they change'} something. ${GRANT_LABEL.act} reaches ${gone.length === 1 ? 'it' : 'them'}: at ${LEVEL_LABEL.draft} each use waits for your yes, and at ${LEVEL_LABEL.act} it goes.`
-  });
 }
 
 export async function grantsFor(
@@ -719,7 +693,8 @@ export async function setGrantLevel(
     throw new Error(`${who.name} holds ${who.permission}, so it cannot be given ${level}`);
   const [changed] = await db
     .update(grants)
-    .set({ level })
+    // Read only changes nothing: both exceptions go with write.
+    .set(level === 'read' ? { level, standing: [], askFirst: [] } : { level })
     .where(
       and(
         eq(grants.staffId, staffId),

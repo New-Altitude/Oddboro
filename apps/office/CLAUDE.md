@@ -240,7 +240,9 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    Folders tab's line. Plain Approve refuses a folder ask. A `switch` ask (an
    Odd's `ask_for_switch`) takes Turn on, which approves it and turns Run
    commands, Browse the web or both on for that Odd in one step, as the
-   Settings tab does. A `remove` ask (an Odd's `leave_office`, or the
+   Settings tab does. A `standing` ask (an Odd's `ask_for_standing_yes`)
+   takes Allow or Deny and no Iterate, and Allow puts the tools on the grant.
+   A `remove` ask (an Odd's `leave_office`, or the
    manager's `remove_odd`) takes Remove, and a `bring_back` ask (the
    manager's `bring_back_odd`) takes Bring back; both take Deny and no
    Iterate. An item a lead raised from a colleague's
@@ -358,8 +360,10 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    of its thread (`threadsFor`), where the thread began, even once it is
    continued: its title, when it began, where it stands in the same words as
    the Goals window (`workLine`) and anything waiting on the owner, with each
-   step on Open. A click on a desk item opens
-   it on the start side: on the Desk while it waits, else a report in its own
+   step on Open. A click anywhere on a desk item's card opens it: the card is
+   one button, its title still selectable, and a click that ends a selection
+   opens nothing; its controls sit below it, outside the button. It opens
+   on the start side: on the Desk while it waits, else a report in its own
    window (`ReportView.svelte`). A goal or plan card also takes a decision
    in chat, using the Desk's ask route and the same plan checkboxes. The
    manager's New goal box opens from the plus menu, starts empty and sets that exact title through the
@@ -494,8 +498,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    Its input grows with the text
    up to 60% of the chat, and the bar above it drags it taller; that height is
    remembered per viewer. Every run's system prompt opens with "Who you work
-   for" (`whoFor` in `staff.ts`): the owner, `data/people.json` when it
-   exists, the Odd's own `notes/intake.md` when it has one, and the active
+   for" (`whoFor` in `staff.ts`): the owner, the Odd's own `notes/intake.md` when it has one, and the active
    goals it serves with its part and the latest progress. An Odd sees only
    the goals it serves. Every run's "How the office works" (`house` in
    `src/lib/server/house.ts`) holds the rules every run keeps, whatever it is
@@ -585,14 +588,15 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    split from `OFFICE_TOOLS` by `toolGroups` in `src/lib/ui/tool-groups.ts`,
    and filtered by the same search); Folders
    (`FoldersList.svelte`) lists each folder with Can read and Can write side
-   by side; Services holds the outside tools, each with Read only and Read and write side by side, changed in place (`setGrantLevel`, PATCH on the access route): the tool stays signed in, and only Revoke forgets it. Choose a folder asks
+   by side; Services holds the outside tools, each with Read only and Read and write side by side, changed in place (`setGrantLevel`, PATCH on the access route): the tool stays signed in, and only Revoke (the trash can) forgets it, after Confirm in place of the row. Refresh beside it reads the service's tools now and says what changed. Actions (n), shut until opened, reads them too as it opens, saying only what changed, and lists every tool the grant reaches, those that change something first (`tools` from the access route), each with what it does in the service's own words (`connectors.toolNotes`, kept current with the rest of the stored tools, `refreshTools`). Each of those has Ask first and Without asking, with the Odd's level as the default: at Draft, Without asking lets the Odd call it with no desk item (PATCH with `tool` and `standing`, `setStanding` in the ledger); at Act, Ask first puts each call to it on the desk (PATCH with `tool` and `askFirst`, `setAskFirst`, and the gateway's `waitsFor`). A tool that only reads says so. Choose a folder asks
    `/api/folders/pick`, which opens the system's own picker on this computer
    (`src/lib/server/folder-picker.ts`: AppleScript on a Mac, PowerShell's
    Forms dialog on Windows, zenity or kdialog on Linux), one at a time; a
    cancel picks nothing, and where none can open the page says why and keeps
    the typed path. A picked folder starts at Can read and goes through the
-   same PATCH and `checkFolder` as a typed one. Each service there has
-   Rename, and an AWS tool already connected has Change role or Region
+   same PATCH and `checkFolder` as a typed one. Each service's name there
+   has a pencil that edits it in place, Enter or Save to keep and Escape to
+   drop (`ServiceName.svelte`), and an AWS tool already connected has Change role or Region
    (`ServiceActions.svelte`, `/api/services/[id]`), which puts its AWS step
    on the desk again from the office (`changeAwsTask`) and opens it. Under a
    grant the Odd's level does not allow, a line says so, with one click that
@@ -681,7 +685,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    work it leads or is on, in the Odd's own profile), the owner's data folder, the
    folders the owner gave it and the tool server's code, writes the given
    folders it may change (`readWrite`), and
-   shuts `~/Library`, `/Library`, `/tmp` and `/var`; Windows has none. Grok
+   shuts `~/Library`, `/Library`, and on a Mac `/tmp` and `/var` (Linux leaves those two open: Grok cannot start with either shut); Windows has none. Grok
    refuses every sandbox when `/var/run/docker.sock` is a link to a path off
    its own list (OrbStack, Colima, Rancher Desktop), so then the run gets a
    home of its own in Grok's home, whose `.docker/run` leads to the socket's
@@ -711,7 +715,10 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    (`codex-tmp/<run key>`) written, instruction files and the edited file
    never, and no network, Browse the web or not (`network` in the profile,
    from `commandsOnline`: with it on, Codex's commands reached the office's own
-   API and database on this Mac). The office carries its files
+   API and database on this Mac). On Linux Codex itself mounts `.codex` and
+   `.agents` read only at the top of each write folder, so those two exact paths
+   are left to it (`SELF_SHUT`), and no run reads an `AGENTS.md`
+   (`project_doc_max_bytes`), since a shut one failed the run's start. The office carries its files
    (`FILES_VIA_OFFICE`), so with Run commands off it has no shell. On Windows
    it never has one: Codex's own sandbox opened every Odd's folder to reads,
    so a run there is in Codex's read-only mode and Run commands stays locked
@@ -955,8 +962,13 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    `access.ts`, which starts a command's server with only the names a run
    may have, `outsideToolEnv` in `run-env-allow.ts`, and its own secrets),
    lists only the tools the grant reaches, refuses any other
-   call, and takes a tool that no longer passes `readsOnly` off the
-   connector's stored list with a Ledger line (`narrowReadTools`). A connector
+   call, and keeps the connector's stored tools in step with the list it got
+   (`refreshTools` in the ledger): new and dropped tools, Read only's reach
+   both ways, each tool's description, and a dropped or redescribed tool off each standing
+   yes, each change but a description with a Ledger line. The office does the
+   same when the owner opens a service's Actions on the Settings tab, and on
+   their Refresh (`/api/services/[id]/tools`, `refreshService`), never on a
+   timer. A connector
    that cannot start during a run gets one Ledger line naming it, per run, in
    the office's own words for why and never the error's text, which can repeat
    a key (`whyNoStart`); the run still gets the error itself. A write
@@ -965,8 +977,19 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    not pass `readsOnly` (or `readsByRole`) as a `call` ask on the desk
    (`raiseCall`), placed as the run's own asks are (`CallPlace`: its key,
    thread, hand-off and `via`); the same call still open is not raised twice,
-   and a lesson run, with no place, is refused one. The run hears that nothing
-   changed yet. The desk shows the tool and its exact inputs, with Make this
+   and a lesson run, with no place, is refused one. Each tool that changes
+   something is listed with a required `oddboro_title` and `oddboro_why`, the
+   Odd's short title and reason for the owner, which the gateway takes out of
+   the call and the desk shows as the ask's title (after the service's name,
+   unless the office reads one from the call, as for Gmail) and under Why; a
+   call without both is refused and holds nothing. The run hears that
+   nothing changed yet. A tool the Odd uses without asking (`grants.standing`,
+   the ledger's `standing.ts`) goes straight through in any run with a place,
+   is listed without the two fields, and each such call rides on the run's
+   next held call to that service (`before`), which the desk lists as "Made
+   without asking before this call", so a commit shows what it applies.
+   Each held call takes only the calls since the run's last one. The
+   desk shows the tool and its exact inputs, with Make this
    call: `/api/asks/[id]/call` makes that call itself (`makeCall`, once per
    ask even on a second click), then `approveCall` keeps the result and
    starts the Odd's `carry_out` run, which carries on with what it returned.
@@ -1712,6 +1735,40 @@ the persona's voice.
    same wait or problem. The chat prints the disclosure above the messages.
    `hand_off` tells a colleague that a persona's replies come from New
    Altitude, so what is handed to it leaves this computer.
+8. A proposal for a real person. A hire window opened from a proposal that
+   names a persona on offer shows that persona in place of the builder,
+   with Add, which starts the install on the hire grid with it picked.
+   `proposedPersona` in `src/lib/persona.ts` matches by the proposal's
+   `personaSlug`, or else by the whole display name as its name or role
+   ("<Full Name> Persona"), never a first name, and two matches are none. A
+   middle initial does not count, so "Nate Jones" matches "Nate B. Jones".
+   `proposalView` picks what the window shows:
+   - A proposal that may name a persona (`hasPersonaHint`: a slug, the word
+     persona, or a name of more than one word) shows a still placeholder
+     until the offers answer, so the builder never shows only to be
+     replaced. After five seconds with no answer the builder opens and stays.
+   - One that says it means a persona (`namesPersona`: a slug or the word
+     persona) and has no match asks for the New Altitude sign-in while
+     signed out (`AccountSignIn`; signing in reads the offers again), offers
+     Try again while New Altitude does not answer, and says so when the
+     list lacks the person.
+   - Any other proposal opens the builder, at once when it has no hint.
+   - Build an ordinary Odd instead is on every persona view. The builder it
+     opens, as the timeout's, never starts with the person's name, role or
+     appearance (`ordinaryFrom`).
+   - Add sends the ask's id with the persona's sign-in to
+     `POST /api/personas/[slug]`. The office keeps it in memory, and
+     `installPersona` approves the ask once the persona joins, with the note
+     "<Owner> added <Name>'s New Altitude persona instead of a new Odd." A
+     sign-in left unfinished, an install that fails, a restart or a later Add
+     without the ask leaves the proposal open.
+9. Who an Odd may propose. Each read of New Altitude's list
+   (`readListing`) keeps the names and slugs on offer in memory
+   (`persona-offered.ts`); signed out, or a list refused, keeps none, and an
+   unreachable New Altitude changes nothing. The system prompt of an Odd
+   holding `propose_hire` or `propose_goal_plan` gets one line from it
+   (`offeredSection`): who is on offer, to propose by `persona_slug`, and
+   who already works here. No run calls New Altitude for it.
 
 ## Running it always
 
@@ -1756,6 +1813,7 @@ the persona's voice.
 | `src/lib/account.ts`                  | The account and its states, shared by the server and the page                                                                         |
 | `src/lib/server/persona.ts`           | The personas New Altitude offers: sync, each persona's sign-in, install, Disconnect                                                   |
 | `src/lib/server/persona-package.ts`   | A persona's package checked before the office trusts it                                                                               |
+| `src/lib/server/persona-offered.ts`   | The names and slugs on offer at the last read, as one prompt line for an Odd that can propose a hire                                  |
 | `src/lib/server/persona-run.ts`       | A persona Odd's run: its hands, then its voice, and every word sent to its door                                                       |
 | `src/lib/server/persona-door.ts`      | The persona's door on New Altitude: its address, scope, what a turn sends and what comes back                                         |
 | `src/lib/persona.ts`                  | The offers, the quiet reasons and their lines, shared by the server and the page                                                      |

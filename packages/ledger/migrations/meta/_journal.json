@@ -204,6 +204,13 @@
       "when": 1794466440542,
       "tag": "0028_advanced_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1794504550995,
+      "tag": "0029_standing_yes",
+      "breakpoints": true
     }
   ]
 }

@@ -87,6 +87,8 @@ export const askReplaced = (a: { status: AskStatus; reason: string | null }): bo
  * - `odd_returns`: the Odd the ask names comes back as it was (`bringBack`).
  * - `catch_up`: the job the ask names owes a run for its missed periods
  *   (`oweCatchUp`), which the office clock starts.
+ * - `give_standing`: the tools the ask names went on the Odd's grant with the
+ *   yes (`giveStanding`), so its runs use them without asking.
  */
 export type Effect =
   | 'approval_work'
@@ -105,6 +107,7 @@ export type Effect =
   | 'odd_leaves'
   | 'odd_returns'
   | 'catch_up'
+  | 'give_standing'
   | { none: string };
 export type AskEffect = Exclude<Effect, 'task_done' | 'wake_parked'>;
 export type TaskEffect = Extract<
@@ -138,7 +141,8 @@ export type AskAnswer = {
   deny: readonly AskEffect[];
   /**
    * `refused`: the owner says yes or no and nobody reworks it, since the office
-   * raised it, or it lets an Odd go or brings one back.
+   * raised it, or it lets an Odd go, brings one back or lets one use named
+   * tools without asking.
    */
   iterate: readonly AskEffect[] | 'refused';
 };
@@ -212,7 +216,14 @@ export const OWNER_ANSWERS = {
     },
     // The office raised it, not the Odd named on it, and a no needs nothing done:
     // the job had already moved on to its next time.
-    catch_up: { approve: ['catch_up'], deny: [], iterate: 'refused' }
+    catch_up: { approve: ['catch_up'], deny: [], iterate: 'refused' },
+    // A yes or a no settles it: a no stands, so the Odd keeps asking for each call.
+    // Off a thread the yes still reaches the Odd: its next run's prompt names the tools.
+    standing: {
+      approve: ['give_standing', 'answer_back'],
+      deny: NO,
+      iterate: 'refused'
+    }
   } satisfies Record<AskKind, AskAnswer>,
   task: {
     done: {

@@ -260,6 +260,9 @@ test('Grok gets the web but never a shell', async () => {
   const on = await chatOf('gwen');
   assert.equal(after(on.args, '--tools'), 'todo_write,web_search,web_fetch');
   assert.equal(on.grokEnv?.GROK_WEB_FETCH, '1');
+  // Grok's sandbox asks before a fetch, and a headless run cannot answer.
+  assert.ok(on.args.join(' ').includes('--allow web_fetch'), on.args.join(' '));
+  assert.ok(!off.args.includes('web_fetch'), off.args.join(' '));
 });
 
 test('the system prompt says what the Odd reaches', async () => {

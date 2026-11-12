@@ -20,6 +20,7 @@ import {
 import { commandsHow } from './agents.ts';
 import { currentPlatform } from './platform.ts';
 import { bringBack, leavingRefused, removeOdd } from './leaving.ts';
+import { giveStanding } from './standing.ts';
 import { oweCatchUp } from './missed-runs.ts';
 import { type FolderAccess, type OwnSwitch } from './access-words.ts';
 import { filterWords, type GmailFilter } from './filter-words.ts';
@@ -131,13 +132,16 @@ export type CallPlace = {
 
 /**
  * An Odd at Draft called a tool that changes something: the gateway holds
- * the call and it goes on the desk as a `call` ask, showing the exact call.
- * The same call still open is not raised twice: the Odd hears the one there.
+ * the call and it goes on the desk as a `call` ask, showing the exact call,
+ * with the Odd's own title and reason (`odd`). The title the office reads from
+ * the call itself (`said`, Gmail's count of emails) comes first. The same call
+ * still open is not raised twice: the Odd hears the one there.
  */
 export async function raiseCall(
   place: CallPlace,
   call: HeldCall,
-  service: string
+  service: string,
+  odd: { title: string; why: string }
 ): Promise<{ ask: AskRow; already: boolean }> {
   const same = (r: AskRow) =>
     r.call?.connector === call.connector &&
@@ -151,8 +155,8 @@ export async function raiseCall(
   if (there) return { ask: there, already: true };
   const { ask } = await raiseAsk(place.staffId, {
     kind: 'call',
-    title: call.said ? `${call.said} in ${service}` : `Use ${call.tool} in ${service}`,
-    why: `Called while working at Drafts for your yes, so the office held it for you.`,
+    title: `${call.said ?? odd.title} in ${service}`,
+    why: odd.why,
     ifApproved: `The office makes this exact call to ${service}, and the work carries on with what it returns.`,
     call,
     handOffId: place.handOffId,
@@ -323,6 +327,9 @@ async function decide(
       claimed?.kind === 'switch' && decision === 'approve'
         ? await turnOnSwitches(tx, claimed)
         : undefined;
+    // The standing yes goes on the grant with the yes, or neither happens.
+    if (claimed && effectsOf(claimed.kind, decision).includes('give_standing'))
+      await giveStanding(tx, claimed);
     // A yes or a no answers the twins too, at the same moment (`answeredWith`).
     // Sending one back leaves them waiting for the new version's answer.
     const open =
@@ -394,9 +401,10 @@ async function decide(
   for (const effect of effectsOf(ask.kind, decision)) {
     if (typeof effect === 'object') continue;
     switch (effect) {
-      // Done before this loop: the caller's approval, and the held hand-off with the claim.
+      // Done before this loop: the caller's approval, and the held hand-off and the standing yes with the claim.
       case 'approval_work':
       case 'start_held':
+      case 'give_standing':
         break;
       case 'grant_access': {
         if (!ask.access) break;

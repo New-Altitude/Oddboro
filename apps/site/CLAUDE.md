@@ -73,7 +73,7 @@ access its job needs, and every claim rests on the office's real rules:
 | A lowered level makes a grant above it wait                           | `access()` skips it; `setPermission`'s comment                                  |
 | At act, a write grant uses that one tool without asking; revocable    | `revoke` in `office-access.ts`; the Odd's Settings › Services in `apps/office`  |
 | An Odd pokes the owner in chat at a time it sets                      | `poke_owner` in `packages/ledger/src/mcp-people.ts`                             |
-| Every Odd reads the people list, which stays on the owner's computer  | `readable` in `staff.ts`; hard rule 9                                           |
+| Every Odd reads the owner's data folder, on the owner's computer      | `readable` in `staff.ts`                                                        |
 
 An Odd has web search only when the owner turns on Browse the web for it,
 through its tool's own search and fetch; otherwise it has file tools only.
@@ -122,8 +122,8 @@ The art follows the theme too. Every image the hour changes has a night and a
 day render, and `app.css` names each one as an `--art-<file>` variable, keyed
 off `data-theme`, so a page fetches only the set it shows and a flip mid-page
 swaps the art with no reload. The hero reads its art off those variables, so a
-flip mid-animation keeps its place. Portraits, walks and `og.png` stay as they
-are: daylight, and night.
+flip mid-animation keeps its place. Portraits and walks stay as they are, in
+daylight.
 
 ## Commands
 
@@ -164,7 +164,6 @@ spec changes, and commit the result.
 | `bus-body.png`                    | The bus without its wheels, for What happens next                                      |
 | `bus-wheels.png`                  | The wheels alone, two frames, turning under `bus-body.png`                             |
 | `<name>.png`                      | An Odd's sheet, one row per pose (`scene.staff.rows`), four wide                       |
-| `og.png`                          | The Open Graph card, 1200 by 630, the front of the building at twice                   |
 | `portrait-<id>.png`               | A 48 by 48 portrait: the four managers and three more Odds                             |
 | `portrait-<id>-blink.png`         | The same portrait with its eyes shut                                                   |
 | `walk-<id>.png`                   | A manager's walk toward the viewer, four frames in a strip, daylight                   |
@@ -299,6 +298,12 @@ Each animation names its frame as `share` and its light, night or day, as
 owner picks both: when making a release's art, show the owner the frames in
 both lights and ask which one. `releases.ts` describes that
 frame as `shareAlt`.
+
+Every other page's link preview is `static/share.png`: the pixel O over the
+name on the park's grass, two managers to each side, and a tree at the top
+right. `scripts/share.ts` draws it from the real sprites when `npm run art`
+runs, and `Meta` uses it unless a page passes its own `image`. The homepage also
+carries a `WebSite` JSON-LD block, so Google names the site Oddboro in results.
 `scripts/gif.ts` writes the GIFs, with no dependency: median cut to 256
 colours, then LZW. A long one, like the README's office, stores only what
 changed since the frame before (`encodeGifChanges`).
@@ -309,6 +314,7 @@ changed since the frame before (`encodeGifChanges`).
 scripts/art.ts               The art generator. hero-office.json, vignette-office.json, manager-looks.json and persona-looks.json are its specs.
 scripts/paint.ts             Paints and lights the office's sprites for an hour of the day, for art.ts and office-gif.ts.
 scripts/office-gif.ts        The README's office: Main Street by day with eight Odds at work, as docs/office.gif.
+scripts/share.ts             The link preview, static/share.png, called by art.ts.
 scripts/release-art.ts       The releases page's GIFs, on the desk vignette. gif.ts encodes them.
 src/app.css                  The tokens (night, and the day overrides), the --art-* variables, the fonts, the motion classes.
 src/lib/theme.svelte.ts      The theme: the pick, localStorage, data-theme on <html>, following the system on Auto.
@@ -326,7 +332,7 @@ src/lib/hero/                Hero.svelte, HeadlineOdd.svelte, choreo.ts, scene.j
 src/lib/server/legal.ts      Renders src/content/legal/*.md with markdown-it at prerender.
 src/content/legal/           privacy.md and terms.md. The legal writer owns these.
 src/routes/                  /, /releases/, /connectors/open-brain/, /connectors/aws-*/, /privacy/, /terms/, /sitemap.xml. +layout.ts prerenders everything.
-static/                      logo.png (the mark, drawn by `npm run mark -w @oddboro/sprites`: favicon, header, footer), robots.txt, art/ (night) and art/day/.
+static/                      logo.png (favicon, header, footer, from `npm run mark -w @oddboro/sprites`), share.png (the link preview, from `npm run art`), robots.txt, art/ (night) and art/day/.
 ```
 
 ## Hosting

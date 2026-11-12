@@ -136,6 +136,9 @@ const FIRST_CONFIG = `# Oddboro's Codex home. Odds never read the owner's ~/.cod
   .map(([k, v]) => `${k} = ${toml(v)}`)
   .join('\n')}\n`;
 
+/** What Codex shuts itself at the top of each write folder on Linux (`filesystem`). */
+const SELF_SHUT = ['.codex', '.agents'];
+
 /** The one permission profile each run defines and uses. */
 const PROFILE = 'odd';
 
@@ -241,9 +244,19 @@ function developerReads(): string[] {
  * deny would stop git reading its config. Like every tool's git walls, these
  * shut git's usual places only, not every way code in a project can run
  * later (`REPO_RUNS` in files.ts).
+ *
+ * On Linux, Codex itself mounts `.codex` and `.agents` read only at the top
+ * of each write folder, an empty folder when there is none (measured with
+ * `codex sandbox` on 0.167.0). A deny on that exact path asks bubblewrap for
+ * a file there too, and every run then failed at its start ("Can't create
+ * file at <w>/.agents: Is a directory"). So Linux leaves out those two exact
+ * paths (`SELF_SHUT`); the deny on what is under them stays.
  */
 function filesystem(r: CodexRun, temp: string): Record<string, string> {
   const dev = devReads();
+  const selfShut = new Set(
+    currentPlatform() === 'linux' ? r.writes.flatMap((w) => SELF_SHUT.map((n) => `${w}/${n}`)) : []
+  );
   return {
     ':root': 'deny',
     ':minimal': 'read',
@@ -260,6 +273,7 @@ function filesystem(r: CodexRun, temp: string): Record<string, string> {
     ...Object.fromEntries(
       instructionPaths(r.writes)
         .flatMap(andBelow)
+        .filter((p) => !selfShut.has(p))
         .map((p) => [p, 'deny'])
     ),
     ...(r.edited ? Object.fromEntries(andBelow(r.edited).map((p) => [p, 'read'])) : {})
@@ -460,7 +474,13 @@ export function codexLaunch(r: CodexRun): CodexLaunch {
           ...set('permissions', {
             [PROFILE]: { filesystem: filesystem(r, temp), network: { enabled: r.network } }
           }),
-          ...set('default_permissions', PROFILE)
+          ...set('default_permissions', PROFILE),
+          // No AGENTS.md read at the start. On Linux Codex reads it through the
+          // run's sandbox, where the office shuts it; one run in two then met
+          // the deny's placeholder and failed ("failed to load AGENTS.md
+          // instructions: Permission denied", 0.167.0). The run's instructions
+          // come in `developer_instructions`, never in a file.
+          ...(currentPlatform() === 'linux' ? set('project_doc_max_bytes', 0) : [])
         ]),
     ...set('mcp_servers', mcpServers(r.servers, r.allowed)),
     ...(r.effort ? set('model_reasoning_effort', r.effort) : []),

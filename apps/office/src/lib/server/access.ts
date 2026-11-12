@@ -14,6 +14,9 @@ import {
   bindPostalMailbox,
   connector,
   connectorReady,
+  notesOf,
+  refreshTools,
+  type ToolChanges,
   readsOnly,
   setConnectorConfig,
   tickKey,
@@ -162,8 +165,20 @@ export async function confirmTools(id: string): Promise<void> {
   await connectorReady(
     id,
     tools.map((t) => t.name),
-    tools.filter((t) => t.readOnly).map((t) => t.name)
+    tools.filter((t) => t.readOnly).map((t) => t.name),
+    notesOf(tools)
   );
+}
+
+/**
+ * Ask a service for its tools now and bring the stored ones up to date: the
+ * owner's Refresh, and their opening its actions on the Settings tab.
+ */
+export async function refreshService(id: string): Promise<ToolChanges> {
+  const c = await connector(id);
+  // Connecting stores the first list (`confirmTools`); until then there is none to keep.
+  if (!c?.readyAt) throw new Error('Finish connecting it first');
+  return refreshTools(id, await listTools(id));
 }
 
 /**

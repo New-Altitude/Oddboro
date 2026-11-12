@@ -13,7 +13,15 @@ import {
   switchesSaid,
   zoneName
 } from '@oddboro/ledger';
-import type { AskRow, FollowUpRow, GoalRow, ReportRow, TaskRow, Unparked } from '@oddboro/ledger';
+import type {
+  AskRow,
+  FollowUpRow,
+  GoalRow,
+  Level,
+  ReportRow,
+  TaskRow,
+  Unparked
+} from '@oddboro/ledger';
 import { flat, ownerAnswers, pickedUpLine } from '@oddboro/ledger/desk-answers';
 import { workPath } from '@oddboro/ledger/work-paths';
 import { filterWords } from '@oddboro/ledger/filters';
@@ -47,7 +55,9 @@ export function followUpBrief(
   t?: { row: TaskRow; files: string[] },
   g?: GoalRow,
   /** Twins answered with `a` whose work this carry-out does too (`standsFor`). */
-  also: AskRow[] = []
+  also: AskRow[] = [],
+  /** The Odd's level: only at Draft is it offered a standing yes after a call. */
+  level?: Level
 ): string[] {
   switch (f.kind) {
     case 'resume':
@@ -59,7 +69,7 @@ export function followUpBrief(
     case 'task_done':
       return taskDoneBrief(f, r, t);
     case 'carry_out':
-      return carryOutBrief(f, a, also);
+      return carryOutBrief(f, a, also, level);
     case 'denied':
       return deniedBrief(f, a);
     case 'rework':
@@ -236,7 +246,12 @@ function askLinesOf(a?: AskRow): string[] {
     : [];
 }
 
-function carryOutBrief(f: FollowUpRow, a: AskRow | undefined, also: AskRow[]): string[] {
+function carryOutBrief(
+  f: FollowUpRow,
+  a: AskRow | undefined,
+  also: AskRow[],
+  level?: Level
+): string[] {
   // A connect task's end starts this run and wakes the work parked on that task at once.
   const askLines = [...askLinesOf(a), ...(f.pickedUp ?? []).map((t) => `- ${pickedUpLine(t)}`)];
   const alsoAnswers = (what: string) =>
@@ -293,7 +308,15 @@ function carryOutBrief(f: FollowUpRow, a: AskRow | undefined, also: AskRow[]): s
       '',
       '1. Carry on with the work that waited on it, using what it returned.',
       '2. If it failed, say so plainly and what you would try instead. Do not call it again without a reason {owner} would want.',
-      '3. If nothing more waited on it, stop there.'
+      '3. If nothing more waited on it, stop there.',
+      // Where a Draft Odd notices a stage-then-commit service, and offers to stop
+      // asking for the stage. At Act a standing yes changes nothing, and a call
+      // that failed made nothing to apply.
+      ...(level === 'draft' && a.call.result?.ok
+        ? [
+            `4. If this call only prepared a change (a preview, a staged edit, a draft) and another call makes it real, make that call now: it waits for {owner}'s yes as this one did. Then offer ask_for_standing_yes once for ${a.call.tool}, so {owner} approves only the call that makes a change real.`
+          ]
+        : [])
     ];
   return [
     `{owner} approved your ask #${a?.id}. Carry it out now.`,
