@@ -27,7 +27,6 @@
 // outlast it (`grokSignedOut`). Where the Mac's Docker socket is a link, the
 // run gets a home of its own so Grok's sandbox can start (`runHome`).
 // Windows has no Grok sandbox, so there the office's tools are the wall.
-import { spawn } from 'node:child_process';
 import {
   accessSync,
   chmodSync,
@@ -619,18 +618,16 @@ const renewing = new Map<string, Promise<void>>();
 function renew(h: GrokHome): Promise<void> {
   const going = renewing.get(h.dir);
   if (going) return going;
-  const next = new Promise<void>((done) => {
-    // Outside the sandbox, so on the home's own leader socket, never the owner's.
-    const child = spawn(grokCommand() ?? 'grok', ['models', '--leader-socket', h.leader], {
-      cwd: h.dir,
-      env: grokEnv(h),
-      stdio: 'ignore',
-      timeout: RENEW_MS,
-      killSignal: 'SIGKILL'
-    });
-    child.on('error', () => done());
-    child.on('close', () => done());
-  }).finally(() => renewing.delete(h.dir));
+  // Outside the sandbox, so on the home's own leader socket, never the owner's.
+  // How it ended does not matter: the caller reads `expires_at` either way.
+  const next = probe(grokCommand() ?? 'grok', ['models', '--leader-socket', h.leader], {
+    cwd: h.dir,
+    env: grokEnv(h),
+    timeout: RENEW_MS,
+    killSignal: 'SIGKILL'
+  })
+    .then(() => {})
+    .finally(() => renewing.delete(h.dir));
   renewing.set(h.dir, next);
   return next;
 }
