@@ -14,7 +14,15 @@ import { accessOf, ownTools } from './capabilities.ts';
 import { db } from './db.ts';
 import { currentPlatform } from './platform.ts';
 import { shownFolder, within } from './office.ts';
-import { connectors, followUps, grants, staff, type HandOff, type HeldHandOff } from './schema.ts';
+import {
+  connectors,
+  followUps,
+  grants,
+  staff,
+  staffGoals,
+  type HandOff,
+  type HeldHandOff
+} from './schema.ts';
 import type { Db } from './threads.ts';
 
 export type Tool = { id: string; name: string };
@@ -94,6 +102,22 @@ async function onThread(q: Db, from: string, threadId: number): Promise<string[]
     .from(followUps)
     .where(and(eq(followUps.threadId, threadId), eq(followUps.kind, 'hand_off')));
   return [...new Set([from, ...rows.map((r) => r.id)])];
+}
+
+/** Every Odd who can see files on this work, including goal assignments
+ * which have not had a hand-off yet. Former hand-offs still count as readers. */
+export async function fileReaders(t: { id: number; hubId: string; goalId: number | null }) {
+  const on = await onThread(db, t.hubId, t.id);
+  const assigned = t.goalId
+    ? await db
+        .select({ id: staffGoals.staffId })
+        .from(staffGoals)
+        .where(eq(staffGoals.goalId, t.goalId))
+    : [];
+  return {
+    readers: new Set([...on, ...assigned.map((p) => p.id)]),
+    assigned: new Set([t.hubId, ...assigned.map((p) => p.id)])
+  };
 }
 
 /**

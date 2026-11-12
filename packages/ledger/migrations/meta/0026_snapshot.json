@@ -1,5 +1,5 @@
 {
-  "id": "ca78213e-996f-4085-914e-78a905433484",
+  "id": "0a590740-a9ce-444d-b264-2cac486894b1",
   "prevId": "c64d7981-08e9-49f8-9eae-9becf5a49f50",
   "version": "7",
   "dialect": "postgresql",
@@ -306,18 +306,6 @@
         "switches": {
           "name": "switches",
           "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "level": {
-          "name": "level",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "office_tools": {
-          "name": "office_tools",
-          "type": "text[]",
           "primaryKey": false,
           "notNull": false
         },
@@ -1151,6 +1139,19 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true
+        },
+        "files": {
+          "name": "files",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "changed_at": {
+          "name": "changed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
         },
         "report": {
           "name": "report",
@@ -2064,6 +2065,12 @@
         "summary": {
           "name": "summary",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "checked_files": {
+          "name": "checked_files",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
