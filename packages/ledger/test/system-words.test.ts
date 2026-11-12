@@ -11,6 +11,7 @@ test('each system, and one the office does not know, gets the words Setup said b
     label: 'This computer',
     trustAsks: "It takes your computer's password, once.",
     trustWaiting: 'Waiting for your password',
+    trustFailed: 'The certificate was not trusted. Try again, and enter your password.',
     notFirefox: 'Chrome or Edge'
   };
   assert.deepEqual(systemWords('mac'), {
@@ -18,13 +19,15 @@ test('each system, and one the office does not know, gets the words Setup said b
     label: 'Your Mac',
     trustAsks: "It takes your Mac's password, once.",
     trustWaiting: 'Waiting for your password',
+    trustFailed: 'The certificate was not trusted. Try again, and enter your password.',
     notFirefox: 'Safari or Chrome'
   });
   assert.deepEqual(systemWords('linux'), computer);
   assert.deepEqual(systemWords('windows'), {
     ...computer,
     trustAsks: 'Windows asks you to confirm it, once.',
-    trustWaiting: 'Waiting for you to confirm'
+    trustWaiting: 'Waiting for you to confirm',
+    trustFailed: 'The certificate was not trusted. Try again, and confirm when Windows asks.'
   });
   assert.deepEqual(systemWords(undefined), computer);
 });
