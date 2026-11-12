@@ -12,8 +12,10 @@ import { CHAT_REQUEST_BYTES } from '../staff/chat-input.ts';
 //   only an exact exception route, each with its own proof: the app's shell
 //   reports updates to /api/update with the token it gave the server
 //   (`fromShell`), an Odd's run reaches its outside tools through
-//   /api/gateway with the token the office gave that run (`fromRun`), and a
-//   sign-in comes back to its page by GET, proved by the sign-in's own state.
+//   /api/gateway with the token the office gave that run (`fromRun`), a
+//   sign-in comes back to its page by GET, proved by the sign-in's own state,
+//   and a caller asks /api/office-proof by GET whether an address is this
+//   office, which answers a hash of the key and nothing else.
 //   Reads need the key too: a program on this computer must not read the office.
 // - The owner's page carries the key as a cookie. It gets it by opening any
 //   page once with the key in the address; the guard sets the cookie and
@@ -104,8 +106,8 @@ async function fits(request: Request, limit: number): Promise<boolean> {
 
 /**
  * Whether a request without the owner's key proves itself another way, on an
- * exact exception route: the shell's token, a run's token, or a sign-in page
- * by GET or HEAD.
+ * exact exception route: the shell's token, a run's token, or GET or HEAD of
+ * a sign-in page or the office's proof.
  */
 function provesItself(event: RequestEvent): boolean {
   // On a remote function call (`/_app/remote/...`), Kit takes `url.pathname`

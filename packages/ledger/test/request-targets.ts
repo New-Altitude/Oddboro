@@ -246,6 +246,12 @@ export const REQUEST_TARGETS: readonly RequestTarget[] = [
     why: "A connector's sign-in page, proved by the sign-in's state."
   },
   {
+    target: '/api/office-proof',
+    dev: 'passes',
+    office: 'passes',
+    why: 'The proof that an address is this office, by GET alone: it answers a fresh nonce with a hash of the key and holds nothing else.'
+  },
+  {
     target: '/api/gateway/notes',
     dev: 'passes',
     office: 'passes',

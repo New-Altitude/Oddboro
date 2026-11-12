@@ -1,26 +1,40 @@
 // The office's own Caddyfile (`ownCaddyfile` in address.ts) on each system,
 // the look at port 80 (`port80`), which of its commands may show a window,
 // what a failed Make it secure says on each system and on one the office does
-// not know (`secureAddress`), and
-// the owner's key on the office's own probe of its address (`answers`).
+// not know (`secureAddress`), the proxy header on every one of Caddy's
+// routes, and the office's look at its own address (`answers`), which proves
+// it without ever sending the owner's key.
 // Run with `npm test -w @oddboro/office`.
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:http';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, mock, test } from 'node:test';
 import { isHttpError } from '@sveltejs/kit';
-import { ownerCookie } from '@oddboro/ledger/owner-key';
+import { PROXY_HEADER, proxySecret } from '@oddboro/ledger/office-proof';
+import { OWNER_COOKIE, OWNER_PARAM, ownerKey } from '@oddboro/ledger/owner-key';
 import { openUrl, probe, type Probe, type System } from '@oddboro/ledger/platform';
+import { GET as proofRoute } from '../../routes/api/office-proof/+server.ts';
 import { POST as addressRoute } from '../../routes/api/setup/address/+server.ts';
-import { answers, ownCaddyfile, port80, secureAddress, type Port80 } from './address.ts';
+import {
+  answers,
+  keepAddress,
+  ownCaddyfile,
+  port80,
+  secureAddress,
+  type Port80
+} from './address.ts';
+
+/** A key in the shape the office makes, for the Caddyfile's text alone. */
+const KEY = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8';
+const SYSTEMS: System[] = ['mac', 'linux', 'windows'];
 
 const binds = (system: Parameters<typeof ownCaddyfile>[0]) =>
-  ownCaddyfile(system)
+  ownCaddyfile(system, KEY)
     .split('\n')
     .filter((l) => /^\s*(default_)?bind\b/.test(l));
 
@@ -28,6 +42,25 @@ test("the office's own Caddy listens on the loopback addresses only on Windows; 
   assert.deepEqual(binds('windows'), ['\tdefault_bind 127.0.0.1 [::1]']);
   assert.deepEqual(binds('mac'), []);
   assert.deepEqual(binds('linux'), []);
+});
+
+/** The value each `header_up` in a Caddyfile sets the proxy header to. */
+const headerUps = (caddyfile: string) =>
+  [...caddyfile.matchAll(/^\t\theader_up (\S+) "([^"]*)"$/gm)].map((m) => [m[1], m[2]]);
+
+test("every reverse_proxy in the office's own Caddyfile sets the proxy header from the key, on all three systems", () => {
+  for (const system of SYSTEMS) {
+    const caddyfile = ownCaddyfile(system, KEY);
+    const proxies = caddyfile.match(/^\treverse_proxy /gm) ?? [];
+    assert.ok(proxies.length > 0, system);
+    assert.deepEqual(
+      headerUps(caddyfile),
+      proxies.map(() => [PROXY_HEADER, `${proxySecret(KEY)} {http.request.scheme}`]),
+      system
+    );
+    assert.ok(!caddyfile.includes(KEY), `${system}: the Caddyfile holds the key itself`);
+    assert.notDeepEqual(headerUps(ownCaddyfile(system, `${KEY.slice(1)}A`)), headerUps(caddyfile));
+  }
 });
 
 const folder = mkdtempSync(join(tmpdir(), 'oddboro-port80-'));
@@ -306,20 +339,149 @@ test('when Make it secure fails, the setup route tells a Mac or Linux owner to e
   assert.deepEqual(started, ['osascript', 'pkexec', 'certutil.exe']);
 });
 
-test("the office's probe of its own address sends the owner's key, so the office's refusal of a keyless request does not read as an address that misses it", async () => {
-  const seen: (string | undefined)[] = [];
-  // As the office answers: the probe's reply to the owner's key, a refusal to anything else.
-  const stub = createServer((req, res) => {
-    seen.push(req.headers.cookie);
-    if (req.headers.cookie === ownerCookie()) res.end(JSON.stringify({ office: true }));
-    else res.writeHead(403).end();
+type Seen = { url?: string; headers: string[] };
+
+/** A listener on 127.0.0.1 at a free port that records every request whole. */
+async function listen(handle: (req: IncomingMessage, res: ServerResponse) => void) {
+  const seen: Seen[] = [];
+  const server = createServer((req, res) => {
+    seen.push({ url: req.url, headers: req.rawHeaders });
+    handle(req, res);
   });
-  await new Promise<void>((ready) => stub.listen(0, '127.0.0.1', ready));
+  await new Promise<void>((ready) => server.listen(0, '127.0.0.1', ready));
+  after(() => server.close());
+  return { port: (server.address() as AddressInfo).port, seen };
+}
+
+/** The office's proof route itself, answering at a listener. */
+async function office(req: IncomingMessage, res: ServerResponse) {
+  const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+  const headers = new Headers();
+  for (const [name, value] of Object.entries(req.headers))
+    if (typeof value === 'string') headers.set(name, value);
+  // The route reads only the address and the headers, so the rest of Kit's event is left out.
+  const answer = await proofRoute({ url, request: new Request(url, { headers }) } as Parameters<
+    typeof proofRoute
+  >[0]);
+  res.writeHead(answer.status).end(await answer.text());
+}
+
+/** A stand-in for the office's own Caddy: it sets the proxy header as its Caddyfile says, and hands the request to the office. */
+function caddy(scheme: 'http' | 'https') {
+  const [[name, value]] = headerUps(ownCaddyfile('mac', ownerKey()));
+  return (req: IncomingMessage, res: ServerResponse) => {
+    req.headers[name.toLowerCase()] = value.replace('{http.request.scheme}', scheme);
+    void office(req, res);
+  };
+}
+
+/** Nothing a listener saw holds the owner's key, its cookie or the address parameter that carries it. */
+function heldNoKey(...listeners: { seen: Seen[] }[]) {
+  const all = JSON.stringify(listeners.flatMap((l) => l.seen)).toLowerCase();
+  for (const word of [ownerKey(), OWNER_COOKIE, OWNER_PARAM, 'cookie'])
+    assert.ok(!all.includes(word.toLowerCase()), `a listener saw ${word}`);
+}
+
+test("a squatter on the office's address that answers 404 is not the office, and never sees the owner's key", async () => {
+  const squatter = await listen((_req, res) => res.writeHead(404).end());
+  assert.equal(await answers(`http://127.0.0.1:${squatter.port}`), false);
+  assert.equal(squatter.seen.length, 1);
+  heldNoKey(squatter);
+});
+
+test("a squatter that answers as the office's old probe did is not the office, and never sees the owner's key", async () => {
+  const squatter = await listen((_req, res) => res.end(JSON.stringify({ office: true })));
+  assert.equal(await answers(`http://127.0.0.1:${squatter.port}`), false);
+  heldNoKey(squatter);
+});
+
+test("the office through its Caddy is the office's address, and the office's own port, or a program that hands the proof to it, is not", async () => {
+  const through = await listen(caddy('http'));
+  assert.equal(await answers(`http://127.0.0.1:${through.port}`), true);
+  const direct = await listen((req, res) => void office(req, res));
+  assert.equal(await answers(`http://127.0.0.1:${direct.port}`), false);
+  heldNoKey(through, direct);
+});
+
+/**
+ * A stand-in for the owner's Caddy admin API, holding the office's routes by
+ * their ids. Gives every change the office asked of it.
+ */
+function adminApi(routes: Record<string, unknown>) {
+  const changes: { method: string; path: string; body: unknown }[] = [];
+  mock.method(globalThis, 'fetch', async (input: string, init: RequestInit = {}) => {
+    const path = new URL(input).pathname;
+    const method = init.method ?? 'GET';
+    if (method !== 'GET') {
+      changes.push({ method, path, body: JSON.parse(String(init.body)) });
+      return new Response('{}');
+    }
+    if (path === '/config/apps/http/servers')
+      return Response.json({ srv0: { listen: [':80'] }, srv1: { listen: [':443'] } });
+    const id = path.match(/^\/id\/(.+)$/)?.[1];
+    if (id && id in routes) return Response.json(routes[id]);
+    return new Response('not found', { status: 404 });
+  });
+  return changes;
+}
+
+/** A route as the office writes it, as far as these tests read it. */
+type ProxyRoute = {
+  '@id': string;
+  handle: { headers?: { request: { set: Record<string, string[]> } } }[];
+};
+
+/** Each route's proxy header, as the office sets it in the owner's Caddy. */
+const routeHeaders = (changes: { body: unknown }[]) =>
+  changes.map((c) => (c.body as ProxyRoute).handle[0].headers?.request.set);
+
+test("in the owner's Caddy the office adds its routes with the proxy header, replaces one whose header is stale, and leaves one that is current", async () => {
+  const was = process.env.OFFICE_ADDRESS;
+  process.env.OFFICE_ADDRESS = 'shared';
+  const [[, value]] = headerUps(ownCaddyfile('mac', ownerKey()));
+  const set = { [PROXY_HEADER]: [value] };
   try {
-    const { port } = stub.address() as AddressInfo;
-    assert.equal(await answers(`http://127.0.0.1:${port}`), true);
-    assert.deepEqual(seen, [ownerCookie()]);
+    // None there yet: both routes go first on the owner's servers.
+    const added = adminApi({ 'oddboro-tls': {} });
+    await keepAddress();
+    assert.deepEqual(
+      added.map((c) => [c.method, c.path]),
+      [
+        ['PUT', '/config/apps/http/servers/srv0/routes/0'],
+        ['PUT', '/config/apps/http/servers/srv1/routes/0']
+      ]
+    );
+    assert.deepEqual(routeHeaders(added), [set, set]);
+    const current = Object.fromEntries(
+      added.map((c) => [(c.body as ProxyRoute)['@id'], c.body as ProxyRoute])
+    );
+    mock.restoreAll();
+
+    // Left from an older key, or from a version before the header: each is replaced where it stands.
+    const stale = structuredClone(current);
+    stale.oddboro.handle[0].headers = {
+      request: { set: { [PROXY_HEADER]: ['an older secret {http.request.scheme}'] } }
+    };
+    delete stale['oddboro-https'].handle[0].headers;
+    const replaced = adminApi({ ...stale, 'oddboro-tls': {} });
+    await keepAddress();
+    assert.deepEqual(
+      replaced.map((c) => [c.method, c.path]),
+      [
+        ['PATCH', '/id/oddboro'],
+        ['PATCH', '/id/oddboro-https']
+      ]
+    );
+    assert.deepEqual(routeHeaders(replaced), [set, set]);
+    mock.restoreAll();
+
+    // Current: nothing changes.
+    const kept = adminApi({ ...current, 'oddboro-tls': {} });
+    await keepAddress();
+    assert.deepEqual(kept, []);
   } finally {
-    stub.close();
+    mock.restoreAll();
+    if (was === undefined) delete process.env.OFFICE_ADDRESS;
+    else process.env.OFFICE_ADDRESS = was;
   }
 });

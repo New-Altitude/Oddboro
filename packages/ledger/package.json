@@ -20,6 +20,7 @@
     "./errors": "./src/errors.ts",
     "./home": "./src/home.ts",
     "./owner-key": "./src/owner-key.ts",
+    "./office-proof": "./src/office-proof.ts",
     "./local-db": "./src/local-db.ts",
     "./upgrade": "./src/upgrade.ts",
     "./update-window": "./src/update-window.ts",

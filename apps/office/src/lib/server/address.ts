@@ -36,9 +36,9 @@
 import { createHash } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { request } from 'node:https';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import {
   IN_APP,
   LINUX,
@@ -52,13 +52,15 @@ import {
   installService,
   powershell,
   probe,
+  restartService,
   type Probe,
   type System
 } from '@oddboro/ledger';
 import { writeEnv } from '@oddboro/ledger/env';
 import { fixedError } from '@oddboro/ledger/errors';
 import { systemWords } from '@oddboro/ledger/system-words';
-import { ownerCookie } from '@oddboro/ledger/owner-key';
+import { PROXY_HEADER, provesOffice, proxySecret } from '@oddboro/ledger/office-proof';
+import { ownerKey } from '@oddboro/ledger/owner-key';
 import type { Address } from '#lib/address.ts';
 import { HOSTS } from './hosts.ts';
 
@@ -154,51 +156,21 @@ async function host(): Promise<string> {
 }
 
 /**
- * Whether the address answers, and with this office rather than something else.
- * It sends the owner's key: the office refuses any request without it, and a
- * refusal here would read as an address that does not reach the office.
+ * Whether the address is this office through Caddy, by the address's scheme.
+ * It sends no key: anything may hold port 80 or 443, so the office proves
+ * itself with a hash of the key (`provesOffice`). Over https this checks who
+ * answers, not the certificate; `trusted` checks that.
  */
-export async function answers(url: string): Promise<boolean> {
-  const r = await get(`${url}/api/setup/address?probe=1`, { headers: { cookie: ownerCookie() } });
-  if (!r?.ok) return false;
-  return ((await r.json().catch(() => ({}))) as { office?: boolean }).office === true;
+export function answers(url: string): Promise<boolean> {
+  return provesOffice(url, ownerKey(), url.startsWith('https:') ? 'proxy:https' : 'proxy:http');
 }
 
 /**
- * Whether the office answers over HTTPS. Node keeps its own list of trusted
- * authorities, not the system's, so this checks who answers, not the certificate;
- * `trusted` checks that.
+ * The value of the header Caddy sets on each request it hands the office: the
+ * key's proxy secret and the scheme the client used, which Caddy fills in.
+ * It replaces any copy a client sent, so only Caddy's own requests carry it.
  */
-function answersSecurely(name: string): Promise<boolean> {
-  return new Promise((done) => {
-    const req = request(
-      {
-        host: '127.0.0.1',
-        port: 443,
-        servername: name,
-        path: '/api/setup/address?probe=1',
-        // The owner's key, as `answers` sends it.
-        headers: { host: name, cookie: ownerCookie() },
-        rejectUnauthorized: false,
-        timeout: 3000
-      },
-      (res) => {
-        let body = '';
-        res.on('data', (c) => (body += c));
-        res.on('end', () => {
-          try {
-            done(res.statusCode === 200 && JSON.parse(body).office === true);
-          } catch {
-            done(false);
-          }
-        });
-      }
-    );
-    req.on('error', () => done(false));
-    req.on('timeout', () => req.destroy());
-    req.end();
-  });
-}
+const proxyHeaderValue = (key: string) => `${proxySecret(key)} {http.request.scheme}`;
 
 /** Whether this computer trusts Caddy's authority, so browsers accept its certificates. */
 async function trusted(): Promise<boolean> {
@@ -351,7 +323,7 @@ export async function address(): Promise<Address> {
   // Linux and Windows; elsewhere the office stays at its port, which needs nothing.
   if (!MAC && !LINUX && !WINDOWS) return { ...at, state: 'blocked', holder: 'this system for now' };
   if (await answers(`http://${name}`)) {
-    const https = name === SECURE && (await answersSecurely(name));
+    const https = name === SECURE && (await answers(`https://${name}`));
     const secure = https && (await trusted());
     return {
       ...at,
@@ -427,8 +399,16 @@ async function download(): Promise<string> {
  * what keeps an Odd's commands off this computer is the deny list each run gets
  * (`macAddresses` in sandbox.ts). Linux was not measured, so it gets no bind
  * either.
+ *
+ * Every `reverse_proxy` sets the proxy header from `key`, so the office can
+ * tell a request through its Caddy from one straight to its port.
  */
-export function ownCaddyfile(system: System | undefined): string {
+export function ownCaddyfile(system: System | undefined, key: string): string {
+  const proxy = [
+    `\treverse_proxy ${UPSTREAM} {`,
+    `\t\theader_up ${PROXY_HEADER} "${proxyHeaderValue(key)}"`,
+    '\t}'
+  ];
   return [
     '# Written by the office: its address on this computer.',
     '{',
@@ -440,21 +420,37 @@ export function ownCaddyfile(system: System | undefined): string {
     '',
     `${SECURE} {`,
     '\ttls internal',
-    `\treverse_proxy ${UPSTREAM}`,
+    ...proxy,
     '}',
     '',
     `${HOSTS.map((h) => `http://${h}`).join(', ')} {`,
-    `\treverse_proxy ${UPSTREAM}`,
+    ...proxy,
     '}',
     ''
   ].join('\n');
 }
 
+/**
+ * Writes the office's own Caddyfile from the current key, when its text
+ * differs. Readable by the owner alone, as the key file is: it holds the
+ * key's proxy secret. The mode goes on after every write, since
+ * writeFileSync's mode applies only when it makes the file. True when it wrote.
+ */
+function writeCaddyfile(): boolean {
+  const text = ownCaddyfile(SYSTEM, ownerKey());
+  const same = existsSync(CADDYFILE) && readFileSync(CADDYFILE, 'utf8') === text;
+  if (!same) {
+    mkdirSync(home('caddy'), { recursive: true });
+    writeFileSync(CADDYFILE, text, { mode: 0o600 });
+  }
+  chmodSync(CADDYFILE, 0o600);
+  return !same;
+}
+
 /** The office's own Caddy, started now and at every login. */
 async function startOwn(): Promise<void> {
   const caddy = (await caddyBinary()) ?? (await download());
-  mkdirSync(home('caddy'), { recursive: true });
-  writeFileSync(CADDYFILE, ownCaddyfile(SYSTEM));
+  writeCaddyfile();
   const started = await installService({
     label: LABEL,
     args: [caddy, 'run', '--config', CADDYFILE, '--adapter', 'caddyfile'],
@@ -464,7 +460,21 @@ async function startOwn(): Promise<void> {
 }
 
 type Servers = Record<string, { listen?: string[] }>;
-const proxy = [{ handler: 'reverse_proxy', upstreams: [{ dial: UPSTREAM }] }];
+type Route = { '@id': string; match: { host: string[] }[]; handle: object[]; terminal: true };
+
+/** One of the office's routes in the owner's Caddy, with the proxy header from the current key. */
+const route = (id: string, hosts: string[]): Route => ({
+  '@id': id,
+  match: [{ host: hosts }],
+  handle: [
+    {
+      handler: 'reverse_proxy',
+      upstreams: [{ dial: UPSTREAM }],
+      headers: { request: { set: { [PROXY_HEADER]: [proxyHeaderValue(ownerKey())] } } }
+    }
+  ],
+  terminal: true
+});
 
 /** The server in the owner's Caddy listening on a port, by name. */
 const onPort = (servers: Servers, port: number) =>
@@ -473,7 +483,7 @@ const onPort = (servers: Servers, port: number) =>
   )?.[0];
 
 /** Put a route first on the owner's server for a port, or on a server of the office's own. */
-async function addRoute(servers: Servers, port: number, route: object, own: object) {
+async function addRoute(servers: Servers, port: number, route: Route, own: object) {
   const name = onPort(servers, port);
   const r = name
     ? await put(`/config/apps/http/servers/${name}/routes/0`, route)
@@ -498,6 +508,21 @@ async function addPolicy(): Promise<void> {
     throw new Error(`Your Caddy did not take the office's certificate: ${await r?.text()}`);
 }
 
+/**
+ * Put one of the office's routes in place: added when missing, and replaced
+ * where it stands when it differs, as one left from an older key or an
+ * older version does. A stale proxy header would fail every proof through it.
+ */
+async function keepRoute(servers: Servers, port: number, want: Route, own: object) {
+  const at = `/id/${want['@id']}`;
+  const r = await admin(at);
+  if (!r?.ok) return addRoute(servers, port, want, own);
+  if (isDeepStrictEqual(await r.json().catch(() => undefined), want)) return;
+  const patched = await admin(at, { method: 'PATCH', body: JSON.stringify(want) });
+  if (!patched?.ok)
+    throw new Error(`Your Caddy did not take the office's site: ${await patched?.text()}`);
+}
+
 /** The office's site, added to the owner's own Caddy through its admin API. */
 async function addShared(): Promise<void> {
   const servers = ((await (
@@ -505,27 +530,15 @@ async function addShared(): Promise<void> {
   )
     ?.json()
     .catch(() => undefined)) ?? {}) as Servers;
-  if (!(await admin(`/id/${HTTP_ROUTE}`))?.ok)
-    await addRoute(
-      servers,
-      80,
-      { '@id': HTTP_ROUTE, match: [{ host: HOSTS }], handle: proxy, terminal: true },
-      {
-        listen: [':80'],
-        routes: [{ '@id': HTTP_ROUTE, match: [{ host: HOSTS }], handle: proxy, terminal: true }],
-        automatic_https: { disable: true }
-      }
-    );
+  const http = route(HTTP_ROUTE, HOSTS);
+  await keepRoute(servers, 80, http, {
+    listen: [':80'],
+    routes: [http],
+    automatic_https: { disable: true }
+  });
   if (!(await admin(`/id/${TLS_POLICY}`))?.ok) await addPolicy();
-  if (!(await admin(`/id/${HTTPS_ROUTE}`))?.ok) {
-    const route = {
-      '@id': HTTPS_ROUTE,
-      match: [{ host: [SECURE] }],
-      handle: proxy,
-      terminal: true
-    };
-    await addRoute(servers, 443, route, { listen: [':443'], routes: [route] });
-  }
+  const https = route(HTTPS_ROUTE, [SECURE]);
+  await keepRoute(servers, 443, https, { listen: [':443'], routes: [https] });
 }
 
 /** Set the address up in whichever way this computer allows, and check it answers. */
@@ -598,11 +611,26 @@ export async function secureAddress(): Promise<Address> {
 }
 
 /**
- * The owner's Caddy forgets the office's site when it reloads its own config:
- * put it back. Runs when the office starts and when a page loads, and costs
- * a few requests to the admin API.
+ * Keeps the office's address in step with its key. Runs when the office
+ * starts and when a page loads.
+ *
+ * - Its own Caddy: the Caddyfile is written from the current key, so after a
+ *   reset made a new key, Caddy restarts on the new file and its header
+ *   matches again. An unchanged file costs one read.
+ * - The owner's Caddy forgets the office's site when it reloads its own
+ *   config, and holds an old header after a new key: put it back. That costs
+ *   a few requests to the admin API.
  */
 export async function keepAddress(): Promise<void> {
-  if (IN_APP || process.env.OFFICE_ADDRESS !== 'shared') return;
-  await addShared().catch(() => {});
+  if (IN_APP) return;
+  if (process.env.OFFICE_ADDRESS === 'own') {
+    try {
+      if (writeCaddyfile() && !(await restartService(LABEL)))
+        console.error('[address] Caddy did not restart on its new Caddyfile');
+    } catch (e) {
+      console.error('[address] the Caddyfile could not be written', e);
+    }
+  }
+  // A Caddy that is down or refuses is tried again on the next page load.
+  if (process.env.OFFICE_ADDRESS === 'shared') await addShared().catch(() => {});
 }

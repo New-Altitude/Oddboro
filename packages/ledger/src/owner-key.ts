@@ -4,11 +4,12 @@
 // Both guards (the office's `guardOffice` and the dev server's `ownerOnly`)
 // call the one rule here, so they cannot drift apart.
 //
-// It imports only Node's own modules and home.ts, so the dev server's config
+// It imports only Node's own modules, home.ts and office-proof.ts, so the dev server's config
 // can load it without the office's server modules.
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { home, OFFICE_PORT, type OfficeEntry } from './home.ts';
+import { OFFICE_PROOF_PATH } from './office-proof.ts';
 
 export const OWNER_KEY_FILE = 'owner-key' satisfies OfficeEntry;
 /** Named by the office's port: a browser scopes cookies by host, not port, so two offices on 127.0.0.1 would share one name. */
@@ -94,11 +95,17 @@ export function hasOwnerKey(cookieHeader: string | null): boolean {
 export const GATEWAY_PATH = '/api/gateway';
 /** Where the app's shell reports an update, with its own token. */
 export const UPDATE_PATH = '/api/update';
-/** The sign-in pages a request reaches without the key, by GET or HEAD: the sign-in's own `state` proves it. */
-export const OWN_PROOF = ['/account/callback', '/connect/callback'] as const;
+/**
+ * The routes a request reaches without the key by GET or HEAD alone, each
+ * proved by what it asks: a sign-in page by the sign-in's own `state`, and
+ * the office's proof by a fresh nonce, which it answers with a hash of the key
+ * and nothing else (`office-proof.ts`).
+ */
+export const OWN_PROOF = ['/account/callback', '/connect/callback', OFFICE_PROOF_PATH] as const;
 /**
  * Every route a request without the owner's key may reach, as route ids, each
- * proved its own way: the shell's token, a run's token, a sign-in's state.
+ * proved its own way: the shell's token, a run's token, a sign-in's state,
+ * the office's proof.
  * isExceptionPath is built from this list and nothing else.
  */
 export const EXCEPTION_ROUTES = [UPDATE_PATH, `${GATEWAY_PATH}/[connector]`, ...OWN_PROOF] as const;

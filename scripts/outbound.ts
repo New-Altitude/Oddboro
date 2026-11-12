@@ -63,11 +63,19 @@ export const OUTBOUND: readonly Outbound[] = [
   },
   {
     file: 'apps/office/src/lib/server/address.ts',
-    calls: 6,
+    calls: 5,
     to: "Caddy's admin and the office's own address on this computer, GitHub for Caddy's release and checksums, and the name server this computer uses, for the office's address.",
     sends:
       "The office's Caddy settings, kept on this computer, a download request for Caddy, and the name local.oddboro.com to look up.",
     yes: "The owner setting up the office's address in Setup."
+  },
+  {
+    file: 'packages/ledger/src/office-proof.ts',
+    calls: 3,
+    to: "The name server this computer uses, for an address's name, then only this computer's own 127.0.0.1 and ::1, for the office's proof.",
+    sends:
+      "The name to look up, and a request for the proof holding a fresh random nonce. Never the owner's key.",
+    yes: "The owner opening or setting up the office's address, which is what each caller does."
   },
   {
     file: 'apps/office/src/lib/floor/engine.ts',

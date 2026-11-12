@@ -1473,7 +1473,16 @@ from Caddy's releases (checked against the published checksum) if the Mac has
 none. With the owner's Caddy on port 80 it adds two routes and a certificate
 policy through Caddy's admin API (127.0.0.1:2019, with an explicit origin, which
 that API wants), touches none of their files, and adds them again when the
-office starts and when a page loads (`keepAddress`). With anything else on port
+office starts and when a page loads (`keepAddress`). Whether an address is
+this office is proven, never assumed, and the key never goes to it first:
+the office asks `/api/office-proof` there with a fresh nonce and checks the
+answer against its key. Caddy, the office's own or the owner's, sets a header
+holding a hash of the key on every request it hands the office, so an answer
+through Caddy differs from one straight from the office's port, and a program
+on port 80 that hands only the proof to the office fails. The Caddyfile holds
+that hash, so the office writes it readable by the owner alone, and as it
+starts it rewrites it and restarts its Caddy when a new key changed it; in the
+owner's Caddy it replaces a route whose header is stale. With anything else on port
 80 it stays at the office's own port; on Windows that is often http.sys, Windows' own web
 server. Port 80 is looked at with `ss` on Linux, `lsof` on a Mac and
 PowerShell on Windows, each through `probe`. A look that fails, times out or
@@ -1526,14 +1535,21 @@ sends every action as JSON, body or not.
    checks, and the office's own requests to itself, send the cookie, and so
    does every request of the release smoke (`officeFetch` in
    `apps/desktop/scripts/driver.ts`). A wrong key in the address is refused
-   like none.
+   like none. The office's own look at its address sends no key: it proves
+   the address first (rule 3's `/api/office-proof`).
 3. A request without the key, a read included, reaches only an exact exception
    route (`EXCEPTION_ROUTES`, judged by `isExceptionPath` on the text the server
-   routes on, never decoded again), each with its own proof. `/api/update`
+   routes on; SvelteKit decodes that text before it routes, and no exception
+   route or route parameter matches a `%`, so the guard and the router read
+   it the same), each with its own proof. `/api/update`
    takes the shell's token (`fromShell` in `src/lib/server/update.ts`).
    `/api/gateway/<id>` takes a run's token (`fromRun` in `gateway.ts`).
    `/account/callback` and `/connect/callback` take GET or HEAD, sent back by
-   the service's sign-in page, proved by the sign-in's own state. Anything else
+   the service's sign-in page, proved by the sign-in's own state.
+   `/api/office-proof` takes GET or HEAD with a fresh nonce and answers a hash
+   of the key, the nonce and the listener it came through, and nothing else.
+   It is how a caller proves an address is this office before it sends the
+   key there (`provesOffice` in `@oddboro/ledger/office-proof`). Anything else
    gets 403: a short line for an `/api/` path, a page saying how to open the
    office for any other.
 4. With the key, anything but GET, HEAD and OPTIONS must also come from the
