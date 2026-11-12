@@ -23,6 +23,13 @@
   import { account } from './account.svelte.ts';
   import PersonaOffer from './PersonaOffer.svelte';
   import { connect, PersonaOffers, personas as asked } from './persona-offers.svelte.ts';
+  import {
+    ordinaryFrom,
+    personaNamed,
+    proposalView,
+    suggestedPersona,
+    type Offer
+  } from '#lib/persona.ts';
   import { call } from './api.ts';
   import { wins } from './windows.svelte.ts';
   import type { StaffProfile } from '../staff/roster.ts';
@@ -41,7 +48,8 @@
   let { rooms, from, id, onhired, ondone }: Props = $props();
 
   // Hire opens on a choice: make an Odd, or hire a persona New Altitude offers
-  // the owner's account. A proposal is always an Odd, so it skips the choice.
+  // the owner's account. A proposal skips the choice: it opens on the builder,
+  // or on the persona it names (`suggested`).
   // A window keeps the proposal it opened with, so its first value is the one.
   let path = $state<'choose' | 'odd' | 'persona'>(untrack(() => from) ? 'odd' : 'choose');
   // The offers, read once the account is signed in, so the list is ready when
@@ -60,9 +68,56 @@
       ondone();
   });
 
-  function hirePersona(slug: string) {
+  function hirePersona(slug: string, askId?: number) {
     hiring = slug;
-    void connect(slug);
+    void connect(slug, askId);
+  }
+
+  // A proposal that names a real person New Altitude offers as a persona shows
+  // that persona in place of the builder, never a made-up look-alike. One that
+  // says it means a persona New Altitude cannot show now asks for the sign-in,
+  // or says why. The owner may always build an ordinary Odd instead, without
+  // the person's likeness (`proposalView`, `ordinaryFrom`).
+  let ordinary = $state(false);
+  const view = $derived(ordinary ? 'odd' : proposalView(from?.proposal, personas.state));
+  const suggested = $derived(
+    view === 'persona' ? suggestedPersona(from?.proposal, personas.state) : undefined
+  );
+  /** The person a proposal that says it means a persona names, as it wrote them. */
+  const person = $derived(from ? personaNamed(from.proposal) : '');
+  /** How long a proposal's window waits for the offers before it opens the builder. */
+  const OFFERS_WAIT_MS = 5000;
+  // Until the offers answer, a proposal that may name a persona shows a
+  // still placeholder, never the builder. If they have not answered in a few
+  // seconds, the builder opens and stays.
+  onMount(() => {
+    if (view !== 'wait') return;
+    const t = setTimeout(() => {
+      if (!personas.state) buildOrdinary();
+    }, OFFERS_WAIT_MS);
+    return () => clearTimeout(t);
+  });
+
+  /**
+   * Add the persona, as Setup's Add does, on the hire grid with it picked.
+   * The office answers the proposal once the persona joins, even if this
+   * window has closed by then.
+   */
+  function addSuggested(slug: string) {
+    path = 'persona';
+    hirePersona(slug, from?.askId);
+  }
+
+  /** The builder, with nothing of the person a proposal named (`ordinaryFrom`). */
+  function buildOrdinary(o?: Offer) {
+    const plain = ordinaryFrom(
+      { name, role, appearance, personaSlug: from?.proposal.personaSlug },
+      o
+    );
+    name = plain.name;
+    role = plain.role;
+    appearance = plain.appearance;
+    ordinary = true;
   }
 
   const STEPS = ['Who', 'Where', 'Job description', 'Model', 'First job', 'Review'];
@@ -289,7 +344,12 @@
         <ul class="grid grid-cols-2 gap-3">
           {#each personas.state.offers as o (o.slug)}
             {@const mine = asked[o.slug]}
-            <li class="flex flex-col items-center gap-2 rounded-xl bg-raise p-3 text-center">
+            <li
+              class="flex flex-col items-center gap-2 rounded-xl bg-raise p-3 text-center {o.slug ===
+              hiring
+                ? 'ring-1 ring-sea'
+                : ''}"
+            >
               <img src={o.portrait} alt="" class="size-16 rounded-md [image-rendering:pixelated]" />
               <div>
                 <p class="font-semibold text-ink">{o.displayName}</p>
@@ -325,10 +385,93 @@
       {/if}
     </div>
     <footer class="flex gap-2 border-t border-hairline p-3">
-      <button class="rounded-lg bg-raise px-3 py-2 text-sm" onclick={() => (path = 'choose')}
-        >Back</button
+      <button
+        class="rounded-lg bg-raise px-3 py-2 text-sm"
+        onclick={() => (path = from ? 'odd' : 'choose')}>Back</button
       >
     </footer>
+  </section>
+{:else if view === 'wait'}
+  <section class="flex h-full min-h-0 flex-col gap-3 p-3" aria-label="Hire" aria-busy="true">
+    <div class="h-28 rounded-xl bg-raise"></div>
+  </section>
+{:else if view === 'sign-in' || view === 'unreachable' || view === 'not-offered'}
+  <section
+    class="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-3 text-sm"
+    aria-label="Hire a persona"
+  >
+    <div class="flex flex-col gap-3 rounded-xl bg-raise p-3 text-xs">
+      {#if personas.state?.state === 'out'}
+        <!-- Signing in reads the offers again, so this turns into the persona or the line that it is not offered. -->
+        <AccountSignIn
+          ask={{
+            question: `${person} is a New Altitude persona`,
+            line: 'Sign in to New Altitude to add them.'
+          }}
+        />
+      {:else if view === 'not-offered'}
+        <p class="leading-relaxed text-ink">
+          New Altitude does not offer {person} to your account.
+        </p>
+      {:else if view === 'unreachable'}
+        <p class="leading-relaxed text-ink">
+          {person} is a New Altitude persona, and New Altitude could not be reached.
+        </p>
+        <button
+          class="self-start rounded-lg bg-sea px-3 py-2 font-medium text-night disabled:opacity-40"
+          disabled={personas.busy}
+          onclick={() => personas.load()}>Try again</button
+        >
+      {:else}
+        <!-- Signed in without the personas permission, or refused: its line and button. -->
+        <p class="leading-relaxed text-ink">{person} is a New Altitude persona.</p>
+        <PersonaOffer offers={personas} />
+      {/if}
+    </div>
+    <button
+      class="rounded-lg bg-raise px-3 py-2 text-ink hover:bg-sea/20"
+      onclick={() => buildOrdinary()}>Build an ordinary Odd instead</button
+    >
+    <p class="text-xs text-muted">An ordinary Odd gets a name and look of its own.</p>
+  </section>
+{:else if suggested}
+  <section
+    class="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-3 text-sm"
+    aria-label="Hire a persona"
+  >
+    <div class="flex gap-3 rounded-xl bg-raise p-3">
+      <img
+        src={suggested.portrait}
+        alt=""
+        class="size-16 shrink-0 rounded-md [image-rendering:pixelated]"
+      />
+      <div class="flex min-w-0 flex-col gap-2 text-xs">
+        <div>
+          <p class="text-sm font-semibold text-ink">{suggested.displayName}</p>
+          {#if suggested.jobTitle}<p class="text-muted">{suggested.jobTitle}</p>{/if}
+        </div>
+        <p class="leading-relaxed text-ink">
+          {suggested.displayName} is available as a New Altitude persona. Add the persona instead of building
+          an Odd that looks like them.
+        </p>
+        <p class="leading-relaxed text-muted">{suggested.disclosure}</p>
+      </div>
+    </div>
+    {#if suggested.joined === 'installed'}
+      <p class="text-xs leading-relaxed text-ink">{suggested.name} already works in your office.</p>
+    {:else}
+      <button
+        class="rounded-lg bg-sea px-3 py-2 font-medium text-night"
+        onclick={() => addSuggested(suggested.slug)}>Add {suggested.name}</button
+      >
+    {/if}
+    <button
+      class="rounded-lg bg-raise px-3 py-2 text-ink hover:bg-sea/20"
+      onclick={() => buildOrdinary(suggested)}>Build an ordinary Odd instead</button
+    >
+    <p class="text-xs text-muted">
+      An ordinary Odd gets a name and look of its own, not {suggested.displayName}'s.
+    </p>
   </section>
 {:else}
   <section class="flex h-full min-h-0 flex-col" aria-label="Hire an Odd">

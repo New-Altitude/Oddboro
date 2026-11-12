@@ -589,6 +589,13 @@ const hireFields = {
     .optional()
     .describe(
       `An intake ${OWNER} filled in for this hire, a file in your folder. The new Odd gets a copy as notes/intake.md and reads their answers first-hand.`
+    ),
+  persona_slug: z
+    .string()
+    .max(80)
+    .optional()
+    .describe(
+      `When the hire is a real person New Altitude offers as a persona: its slug, if you know it. Set role to "<Full Name> Persona" either way.`
     )
 };
 const hireShape = z.object(hireFields);
@@ -610,7 +617,8 @@ function hireFrom(a: HireArgs): HireProposal | string {
     tools: a.office_tools?.filter(isGrantable),
     appearance: a.appearance,
     job: a.first_job,
-    intakeFile: intake
+    intakeFile: intake,
+    personaSlug: a.persona_slug?.trim() || undefined
   };
 }
 
@@ -2172,7 +2180,7 @@ if (has('propose_hire'))
   tool(
     'propose_hire',
     {
-      description: `Propose a new Odd to ${OWNER}. Write the job description to a file in your folder first, then pass its path. It lands on their desk as an ask; approving it opens the hire window filled in with this, and they hire from there. They may edit the file before they hire, so the window reads it then. One hire per ask. For a hire that serves a goal, use propose_goal_plan instead.${raisedNote}`,
+      description: `Propose a new Odd to ${OWNER}. Write the job description to a file in your folder first, then pass its path. It lands on their desk as an ask; approving it opens the hire window filled in with this, and they hire from there. They may edit the file before they hire, so the window reads it then. One hire per ask. For a real person New Altitude offers as a persona, propose them by persona_slug or full name: ${OWNER} adds the real persona from the hire window, and the office never builds a look-alike of a real person. For a hire that serves a goal, use propose_goal_plan instead.${raisedNote}`,
       inputSchema: {
         ...hireFields,
         why: z.string().describe('Why this hire, in one to three sentences.'),
