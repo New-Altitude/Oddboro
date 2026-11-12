@@ -340,7 +340,7 @@ fn open_main(app: &AppHandle, url: &Url) {
             if matches!(payload.event(), PageLoadEvent::Finished) {
                 server::note(
                     &env::log_file(),
-                    &format!("office page loaded: {}", payload.url()),
+                    &format!("office page loaded: {}", without_owner_key(payload.url())),
                 );
             }
         })
@@ -375,6 +375,28 @@ fn with_owner_key(url: &Url, key: &str) -> Url {
     let mut keyed = url.clone();
     keyed.query_pairs_mut().append_pair(OWNER_PARAM, key);
     keyed
+}
+
+/// `url` with the owner's key taken out, and the rest of it kept. The log
+/// sits outside the office's folder, and a page the office refuses keeps the
+/// key in its address.
+fn without_owner_key(url: &Url) -> Url {
+    let pairs: Vec<_> = url.query_pairs().collect();
+    let kept: Vec<_> = pairs
+        .iter()
+        .filter(|(name, _)| name != OWNER_PARAM)
+        .collect();
+    // Writing the pairs back can change how they are escaped, so an address
+    // without the key stays exactly as it came.
+    if kept.len() == pairs.len() {
+        return url.clone();
+    }
+    let mut plain = url.clone();
+    plain.set_query(None);
+    if !kept.is_empty() {
+        plain.query_pairs_mut().extend_pairs(kept);
+    }
+    plain
 }
 
 /// What a new window opens in the default browser: an address on the
@@ -560,5 +582,29 @@ mod tests {
         }
         let office = url("http://127.0.0.1:4500/files/a");
         assert_eq!(browser_url(&home, &office, None), office);
+    }
+
+    #[test]
+    fn a_logged_address_loses_the_key_and_keeps_everything_else() {
+        assert_eq!(
+            without_owner_key(&url(
+                "http://127.0.0.1:4500/files/a?download=1&oddboro-key=k&view=list#top"
+            ))
+            .as_str(),
+            "http://127.0.0.1:4500/files/a?download=1&view=list#top"
+        );
+        assert_eq!(
+            without_owner_key(&url("http://127.0.0.1:4500/?oddboro-key=k")).as_str(),
+            "http://127.0.0.1:4500/"
+        );
+        let home = url("http://127.0.0.1:4500/files/a?download=1#top");
+        assert_eq!(without_owner_key(&with_owner_key(&home, "k")), home);
+        for plain in [
+            "http://127.0.0.1:4500/",
+            "http://127.0.0.1:4500/files/a?download=1#top",
+            "http://127.0.0.1:4500/?q=a%20b",
+        ] {
+            assert_eq!(without_owner_key(&url(plain)).as_str(), plain, "{plain}");
+        }
     }
 }
