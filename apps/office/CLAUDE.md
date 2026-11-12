@@ -1080,7 +1080,8 @@ pieces under 3,900 bytes a line, so no value is on a command line.
 11. The job clock (`src/lib/server/jobs.ts`, started from `hooks.server.ts`)
     keeps one timer for the soonest due job, poke or parked thread, resets on
     any change to the jobs, pokes or threads table, and looks at the time at least every ten minutes because macOS
-    stops timers in sleep. A run's result goes in the ledger, and on the owner's
+    stops timers in sleep. A look that fails, as when the database does not
+    answer, is logged and tried again in 30 seconds. A run's result goes in the ledger, and on the owner's
     desk as a report when the job says so. Each run records its trigger:
     `schedule` when the timer started it, `manual` when the owner pressed Run now.
     `job-run.ts` uses the shared runner and live slots.
