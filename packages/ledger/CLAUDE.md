@@ -425,8 +425,9 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   on their own inside the office (never sending: the question says nothing
   leaves without the owner's yes), and what to hear about between morning
   reports. Each has three to five answers to tap, the default first (draft and
-  bring it to them; only what needs them). The office
-  asks the next question itself; the manager reads all three answers and keeps
+  bring it to them; only what needs them). An answer outside the choices runs the
+  manager at once. For a suggested first or second answer the office replies
+  to the choice and asks the next question; the manager reads all three answers and keeps
   each about how the office works as a lesson for every Odd.
   `test/managers.test.ts` holds every manager to it.
 - A new hire with a job gets a `first_day` follow-up (`startFirstDay`) that
