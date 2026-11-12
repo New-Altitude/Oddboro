@@ -65,17 +65,24 @@ export type Probe =
 
 /**
  * Run a command to its end and say how it went, with what it printed. No
- * shell and no window, and no time limit unless `timeout` (in ms) gives one.
+ * shell, and no time limit unless `timeout` (in ms) gives one. On Windows no
+ * window either, unless `showWindow`: some commands open a window the owner
+ * must see, such as the browser or a dialog asking them to confirm, and
+ * hiding the command can hide that window too.
  */
 export function probe(
   cmd: string,
   args: readonly string[],
-  o: { timeout?: number; env?: NodeJS.ProcessEnv; cwd?: string } = {}
+  o: { timeout?: number; env?: NodeJS.ProcessEnv; cwd?: string; showWindow?: true } = {}
 ): Promise<Probe> {
+  const { showWindow, ...options } = o;
   return new Promise((done) => {
     try {
-      execFile(cmd, args, { ...o, encoding: 'utf8', windowsHide: true }, (e, out, err) =>
-        done(e ? ended(e, out, err) : { status: 'ok', out, err })
+      execFile(
+        cmd,
+        args,
+        { ...options, encoding: 'utf8', ...(showWindow ? {} : { windowsHide: true }) },
+        (e, out, err) => done(e ? ended(e, out, err) : { status: 'ok', out, err })
       );
     } catch (e) {
       // A file this system cannot run (ENOEXEC) throws here rather than in the
@@ -119,31 +126,30 @@ export function powershellSync(script: string, env: Record<string, string> = {},
   });
 }
 
-/** Run a PowerShell script: whether it succeeded, and what it printed. */
-export async function powershell(
-  script: string,
-  env: Record<string, string> = {}
-): Promise<{ ok: boolean; out: string }> {
-  const r = await probe('powershell.exe', [...POWERSHELL, '-Command', psScript(script)], {
+/** Run a PowerShell script and say how it went, with what it printed. */
+export function powershell(script: string, env: Record<string, string> = {}): Promise<Probe> {
+  return probe('powershell.exe', [...POWERSHELL, '-Command', psScript(script)], {
     env: { ...process.env, ...env },
     timeout: 120_000
   });
+}
+
+/** Whether a PowerShell script succeeded. */
+async function ps(script: string, env: Record<string, string> = {}): Promise<boolean> {
+  const r = await powershell(script, env);
   switch (r.status) {
     case 'ok':
-      return { ok: true, out: r.out.trim() };
+      return true;
     case 'failed':
-      return { ok: false, out: r.out.trim() };
     case 'missing':
     case 'timeout':
-      return { ok: false, out: '' };
+      return false;
     default: {
       const missed: never = r;
       throw new Error(`PowerShell came back as ${JSON.stringify(missed)}`);
     }
   }
 }
-const ps = async (script: string, env: Record<string, string> = {}) =>
-  (await powershell(script, env)).ok;
 
 /**
  * Each system's opener: the program, then any words it needs before what it
@@ -159,12 +165,24 @@ const OPENER: Record<System, [string, ...string[]]> = {
 const [OPEN, ...OPEN_WORDS] = OPENER[SYSTEM ?? 'linux'];
 
 /**
- * Open a URL in the owner's browser, and say whether the opener took it. Not
- * through `probe`: on Windows its hidden window would pass through rundll32
- * to the program the URL opens, which could then open hidden.
+ * Open a URL in the owner's browser, and say whether the opener took it. Its
+ * window shows: on Windows a hidden one would pass through rundll32 to the
+ * program the URL opens, which could then open hidden.
  */
-export function openUrl(url: string): Promise<boolean> {
-  return new Promise((done) => execFile(OPEN, [...OPEN_WORDS, url], (e) => done(!e)));
+export async function openUrl(url: string): Promise<boolean> {
+  const r = await probe(OPEN, [...OPEN_WORDS, url], { showWindow: true });
+  switch (r.status) {
+    case 'ok':
+      return true;
+    case 'failed':
+    case 'missing':
+    case 'timeout':
+      return false;
+    default: {
+      const missed: never = r;
+      throw new Error(`The opener came back as ${JSON.stringify(missed)}`);
+    }
+  }
 }
 
 /**

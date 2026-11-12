@@ -32,7 +32,6 @@
 // goes in the owner's own list of authorities, which Windows confirms in its
 // own dialog with no admin. Windows' own web server (http.sys, behind IIS and
 // some other services) often holds port 80, and then the office stays at its port.
-import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -47,9 +46,12 @@ import {
   OFFICE_PORT,
   SYSTEM,
   WINDOWS,
+  currentSystem,
   home,
   installService,
   powershell,
+  probe,
+  type Probe,
   type System
 } from '@oddboro/ledger';
 import { writeEnv } from '@oddboro/ledger/env';
@@ -117,12 +119,28 @@ export type Address = { host: string } & (
   | { state: 'own'; installed: boolean }
   | { state: 'shared' }
   | { state: 'blocked'; holder: string }
+  /** The office could not look at port 80, so it keeps its port rather than guess. */
+  | { state: 'unchecked' }
 );
 
-const run = (cmd: string, args: string[]) =>
-  new Promise<{ ok: boolean; out: string }>((done) =>
-    execFile(cmd, args, { timeout: 120_000 }, (e, out) => done({ ok: !e, out: String(out ?? '') }))
-  );
+/** No command here should take two minutes; one that hangs is stopped there. */
+const WAIT = { timeout: 120_000 };
+
+/** Whether a command ran and succeeded. Failing, missing and running out of time all mean no. */
+function succeeded(r: Probe): boolean {
+  switch (r.status) {
+    case 'ok':
+      return true;
+    case 'failed':
+    case 'missing':
+    case 'timeout':
+      return false;
+    default: {
+      const missed: never = r;
+      throw new Error(`A command came back as ${JSON.stringify(missed)}`);
+    }
+  }
+}
 
 const get = (url: string, init?: RequestInit) =>
   fetch(url, { ...init, signal: AbortSignal.timeout(3000) }).catch(() => undefined);
@@ -195,17 +213,17 @@ function answersSecurely(name: string): Promise<boolean> {
 async function trusted(): Promise<boolean> {
   const root = await rootCert();
   if (!root) return false;
-  if (MAC) return (await run('security', ['verify-cert', '-c', root])).ok;
+  if (MAC) return succeeded(await probe('security', ['verify-cert', '-c', root], WAIT));
   // Trusted when the owner's or the computer's list of authorities holds it.
   if (WINDOWS)
-    return (
+    return succeeded(
       await powershell(
         '$t = (New-Object Security.Cryptography.X509Certificates.X509Certificate2($env:ODDBORO_ROOT)).Thumbprint; if (-not (Get-ChildItem Cert:\\CurrentUser\\Root, Cert:\\LocalMachine\\Root | Where-Object Thumbprint -eq $t)) { exit 1 }',
         { ODDBORO_ROOT: root }
       )
-    ).ok;
+    );
   const bundle = LINUX_BUNDLES.find((b) => existsSync(b));
-  return !!bundle && (await run('openssl', ['verify', '-CAfile', bundle, root])).ok;
+  return !!bundle && succeeded(await probe('openssl', ['verify', '-CAfile', bundle, root], WAIT));
 }
 
 /** Linux lets ordinary users bind ports below this one; Caddy needs 80 and 443. */
@@ -218,26 +236,114 @@ function lowPortsAllowed(): boolean {
   }
 }
 
-/** What holds port 80, by program name, if anything. */
-async function port80(): Promise<string | undefined> {
-  if (WINDOWS) {
+/** What holds port 80: nothing, a program by name, or the office could not look. */
+export type Port80 = { status: 'free' } | { status: 'held'; by: string } | { status: 'unchecked' };
+
+const FREE: Port80 = { status: 'free' };
+const UNCHECKED: Port80 = { status: 'unchecked' };
+/** The holder's name when the check sees a listener but not whose it is. */
+const ANOTHER = 'another program';
+
+/**
+ * Each system's look at port 80. A check that cannot run, or that fails, says
+ * so: reading it as free would offer a Caddy that then cannot start.
+ */
+const PORT_80: Record<System, () => Promise<Port80>> = {
+  // ss lists every listener, whoever runs it; lsof run without root misses
+  // other users' programs. Without root ss names only this user's programs.
+  linux: async () => {
+    const r = await probe('ss', ['-Hltnp', 'sport = :80'], WAIT);
+    switch (r.status) {
+      case 'ok': {
+        const line = r.out.split('\n').find((l) => l.trim());
+        if (!line) return FREE;
+        return { status: 'held', by: /users:\(\("([^"]+)"/.exec(line)?.[1] ?? ANOTHER };
+      }
+      case 'failed':
+      case 'missing':
+      case 'timeout':
+        return UNCHECKED;
+      default: {
+        const missed: never = r;
+        throw new Error(`ss came back as ${JSON.stringify(missed)}`);
+      }
+    }
+  },
+  mac: async () => {
+    const r = await probe('lsof', ['-nP', '-iTCP:80', '-sTCP:LISTEN', '-Fc'], WAIT);
+    switch (r.status) {
+      case 'ok':
+        return {
+          status: 'held',
+          by:
+            r.out
+              .split('\n')
+              .find((l) => l.startsWith('c'))
+              ?.slice(1) || ANOTHER
+        };
+      // lsof exits 1 with nothing printed when nothing listens.
+      case 'failed':
+        return r.code === 1 && !r.out.trim() ? FREE : UNCHECKED;
+      case 'missing':
+      case 'timeout':
+        return UNCHECKED;
+      default: {
+        const missed: never = r;
+        throw new Error(`lsof came back as ${JSON.stringify(missed)}`);
+      }
+    }
+  },
+  windows: async () => {
     const r = await powershell(
       'Get-NetTCPConnection -LocalPort 80 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 | ForEach-Object { (Get-Process -Id $_.OwningProcess).ProcessName }'
     );
-    // Process 4, "System", is http.sys, Windows' own web server.
-    return r.out === 'System' ? "Windows' own web server (http.sys)" : r.out || undefined;
+    switch (r.status) {
+      case 'ok': {
+        const name = r.out.trim();
+        if (!name) return FREE;
+        // Process 4, "System", is http.sys, Windows' own web server.
+        return {
+          status: 'held',
+          by: name === 'System' ? "Windows' own web server (http.sys)" : name
+        };
+      }
+      case 'failed':
+      case 'missing':
+      case 'timeout':
+        return UNCHECKED;
+      default: {
+        const missed: never = r;
+        throw new Error(`PowerShell came back as ${JSON.stringify(missed)}`);
+      }
+    }
   }
-  const r = await run('lsof', ['-nP', '-iTCP:80', '-sTCP:LISTEN', '-Fc']);
-  return r.out
-    .split('\n')
-    .find((l) => l.startsWith('c'))
-    ?.slice(1);
+};
+
+/** What holds port 80 on this system. A system the office does not know is not checked. */
+export function port80(): Promise<Port80> {
+  const system = currentSystem();
+  return system ? PORT_80[system]() : Promise.resolve(UNCHECKED);
 }
 
 /** A Caddy already on this Mac: Homebrew's or anyone's on the PATH, else the office's own. */
 async function caddyBinary(): Promise<string | undefined> {
-  const found = (await run(WINDOWS ? 'where.exe' : 'which', ['caddy'])).out.split(/\r?\n/)[0];
-  if (found?.trim()) return found.trim();
+  const r = await probe(WINDOWS ? 'where.exe' : 'which', ['caddy'], WAIT);
+  switch (r.status) {
+    case 'ok': {
+      const found = r.out.split(/\r?\n/)[0]?.trim();
+      if (found) return found;
+      break;
+    }
+    // Not found, or no way to look: the office's own, if it has one.
+    case 'failed':
+    case 'missing':
+    case 'timeout':
+      break;
+    default: {
+      const missed: never = r;
+      throw new Error(`The look for Caddy came back as ${JSON.stringify(missed)}`);
+    }
+  }
   return existsSync(OWN_CADDY) ? OWN_CADDY : undefined;
 }
 
@@ -258,12 +364,23 @@ export async function address(): Promise<Address> {
       canSecure: https && !secure && !!(await rootCert())
     };
   }
-  const holder = await port80();
-  if (!holder && !lowPortsAllowed())
-    return { host: name, state: 'blocked', holder: 'Linux (ports 80 and 443 need root)' };
-  if (!holder) return { host: name, state: 'own', installed: !!(await caddyBinary()) };
-  if (holder === 'caddy' && (await admin('/config/'))?.ok) return { host: name, state: 'shared' };
-  return { host: name, state: 'blocked', holder };
+  const port = await port80();
+  switch (port.status) {
+    case 'unchecked':
+      return { host: name, state: 'unchecked' };
+    case 'free':
+      if (!lowPortsAllowed())
+        return { host: name, state: 'blocked', holder: 'Linux (ports 80 and 443 need root)' };
+      return { host: name, state: 'own', installed: !!(await caddyBinary()) };
+    case 'held':
+      if (port.by === 'caddy' && (await admin('/config/'))?.ok)
+        return { host: name, state: 'shared' };
+      return { host: name, state: 'blocked', holder: port.by };
+    default: {
+      const missed: never = port;
+      throw new Error(`Port 80 came back as ${JSON.stringify(missed)}`);
+    }
+  }
 }
 
 /** Download the official Caddy for this computer's system and chip, checked against its published checksum. */
@@ -295,7 +412,8 @@ async function download(): Promise<string> {
   const unpack = WINDOWS
     ? ['-xf', file, '-C', join(HOME, 'bin'), 'caddy.exe']
     : ['-xzf', file, '-C', join(HOME, 'bin'), 'caddy'];
-  if (!(await run('tar', unpack)).ok) throw fixedError('The Caddy download would not unpack.');
+  if (!succeeded(await probe('tar', unpack, WAIT)))
+    throw fixedError('The Caddy download would not unpack.');
   if (!WINDOWS) chmodSync(OWN_CADDY, 0o755);
   return OWN_CADDY;
 }
@@ -431,35 +549,54 @@ export async function setUpAddress(): Promise<Address> {
   return address();
 }
 
+const quote = (p: string) => `'${p.replaceAll("'", "'\\''")}'`;
+
 /**
- * Trust Caddy's authority on this Mac, so browsers accept the office's
- * certificate. macOS asks for the owner's password in its own dialog.
+ * Each system's way to trust the root certificate at `root`. Each asks the
+ * owner in the system's own dialog, so its window must show.
+ */
+const TRUST_ROOT: Record<System, (root: string) => Promise<Probe>> = {
+  mac: (root) =>
+    probe(
+      'osascript',
+      [
+        '-e',
+        'on run argv',
+        '-e',
+        'do shell script (item 1 of argv) with prompt "Oddboro wants to trust its own certificate, so your browser opens the office securely." with administrator privileges',
+        '-e',
+        'end run',
+        `security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ${quote(root)}`
+      ],
+      WAIT
+    ),
+  // pkexec shows the desktop's own password dialog. p11-kit's trust (Arch,
+  // Fedora) adds it to the system list; Debian and Ubuntu use update-ca-certificates.
+  linux: (root) =>
+    probe(
+      'pkexec',
+      [
+        'sh',
+        '-c',
+        `if command -v trust >/dev/null; then trust anchor --store ${quote(root)}; else cp ${quote(root)} /usr/local/share/ca-certificates/oddboro-caddy.crt && update-ca-certificates; fi`
+      ],
+      WAIT
+    ),
+  // Windows adds it to the owner's own list after its own dialog asks them,
+  // with no admin. That dialog is certutil's window, so it is not hidden.
+  windows: (root) =>
+    probe('certutil.exe', ['-user', '-addstore', 'Root', root], { ...WAIT, showWindow: true })
+};
+
+/**
+ * Trust Caddy's authority on this computer, so browsers accept the office's
+ * certificate. The system asks the owner in its own dialog.
  */
 export async function secureAddress(): Promise<Address> {
   const root = await rootCert();
   if (!root) throw fixedError('Caddy has not made its certificate yet. Try again in a moment.');
-  const q = (p: string) => `'${p.replaceAll("'", "'\\''")}'`;
-  // Windows adds it to the owner's own list after its own dialog asks them, with no admin.
-  const r = WINDOWS
-    ? await run('certutil.exe', ['-user', '-addstore', 'Root', root])
-    : MAC
-      ? await run('osascript', [
-          '-e',
-          'on run argv',
-          '-e',
-          'do shell script (item 1 of argv) with prompt "Oddboro wants to trust its own certificate, so your browser opens the office securely." with administrator privileges',
-          '-e',
-          'end run',
-          `security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ${q(root)}`
-        ])
-      : // pkexec shows the desktop's own password dialog. p11-kit's trust (Arch,
-        // Fedora) adds it to the system list; Debian and Ubuntu use update-ca-certificates.
-        await run('pkexec', [
-          'sh',
-          '-c',
-          `if command -v trust >/dev/null; then trust anchor --store ${q(root)}; else cp ${q(root)} /usr/local/share/ca-certificates/oddboro-caddy.crt && update-ca-certificates; fi`
-        ]);
-  if (!r.ok)
+  const system = currentSystem();
+  if (!system || !succeeded(await TRUST_ROOT[system](root)))
     throw fixedError('The certificate was not trusted. Try again, and enter your password.');
   return address();
 }
