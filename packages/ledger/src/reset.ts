@@ -3,7 +3,7 @@
 // staff's homes, the threads' folders and the office's notes move into a
 // dated folder under ~/.oddboro/backups, and .env is copied there before its
 // office settings are cleared. A database .env named stays as it was, just no longer used.
-// The family files in data/ stay where they are. Asks for the word "reset"
+// The files in data/ stay where they are. Asks for the word "reset"
 // before it moves anything.
 //
 //   npm run reset

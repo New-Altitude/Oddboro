@@ -496,8 +496,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    Its input grows with the text
    up to 60% of the chat, and the bar above it drags it taller; that height is
    remembered per viewer. Every run's system prompt opens with "Who you work
-   for" (`whoFor` in `staff.ts`): the owner, `data/people.json` when it
-   exists, the Odd's own `notes/intake.md` when it has one, and the active
+   for" (`whoFor` in `staff.ts`): the owner, the Odd's own `notes/intake.md` when it has one, and the active
    goals it serves with its part and the latest progress. An Odd sees only
    the goals it serves. Every run's "How the office works" (`house` in
    `src/lib/server/house.ts`) holds the rules every run keeps, whatever it is

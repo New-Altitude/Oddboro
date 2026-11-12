@@ -62,14 +62,15 @@ without touching the engine. A new kind of room is different: the office
 designer furnishes each kind in code, so a new kind starts at `ROOM_KINDS` and
 its furnishing in the same file.
 
-## 9. Family data never reaches a tracked file.
+## 9. Personal names and accounts stay out of tracked files.
 
-The office holds the owner's family data: names, birthdays, schedules. The
-code is open source, so the risk is that data landing in a commit. It lives
-in the gitignored `data/` folder, and `scripts/check-private.ts` fails on any
-private word in a tracked file. Every Odd reads that folder, whichever AI tool
-it runs on: which tool that is, and so who sees what it reads, is the owner's
-choice per Odd.
+The repo is public, so anything in a tracked file is public too. A person's
+name or an account name in a commit stays in its history after the line is
+gone. `scripts/check-private.ts` fails when a word from
+`data/private-words.txt` appears in a tracked file or file name, and git
+ignores `data/`, so the list itself stays private. The office is for any
+owner, so the rule guards the repo, not what an owner keeps in their own
+office. (Decided 2026-11-12.)
 
 ## 10. Every `CLAUDE.md` is named in its nearest ancestor.
 
