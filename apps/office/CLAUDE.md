@@ -1577,10 +1577,13 @@ sends every action as JSON, body or not.
    in an editor and runs before the handle. `noEditorLaunch` in
    `vite.config.ts` refuses it with 403, always: nothing in the office uses it.
 
-The key stops a program on this computer only when it cannot read
-`~/.oddboro`. A program running as the owner can read it, as it can read the
-database beside it. `npm run reset` moves it aside, so the next start makes a
-new one.
+The key does not keep out every program on this computer. A program running
+as the owner can read it, as it can read the database beside it. And a
+browser scopes cookies by host, not by port. So once the browser holds the key
+for a name, it sends the key to whatever already holds, or later holds, port
+80 at that name, and any page can start that visit. https with a Secure cookie
+is the full fix, and a tracked follow-up. `npm run reset` moves the key aside,
+so the next start makes a new one.
 
 ## Diagnostics
 

@@ -6,8 +6,7 @@ import { realpath, writeFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { OFFICE_PORT } from '@oddboro/ledger/home';
-import { provesOffice } from '@oddboro/ledger/office-proof';
-import { ownerCookie, ownerKey } from '@oddboro/ledger/owner-key';
+import { OWNER_COOKIE, provenOwnerKey } from '@oddboro/ledger/owner-key';
 
 const [address, directory] = process.argv.slice(2);
 if (!address || !directory)
@@ -25,11 +24,9 @@ assert.equal(
   "Set ODDBORO_PORT and ODDBORO_HOME to the test office's port and home."
 );
 // The key goes only to an office that proved it holds it: anything else on
-// the port would otherwise be handed it.
-assert.ok(
-  await provesOffice(office.origin, ownerKey(), 'direct'),
-  `What answers at ${office.origin} is not the office whose key is in ODDBORO_HOME.`
-);
+// the port would otherwise be handed it. The key is the one the test office
+// made; with none, this stops before sending anything.
+const officeKey = await provenOwnerKey(office.origin);
 const folder = await realpath(directory);
 const api = async <T>(action: string, fields: Record<string, unknown> = {}): Promise<T> => {
   const response = await fetch(new URL('/api/project-sessions', office), {
@@ -37,7 +34,7 @@ const api = async <T>(action: string, fields: Record<string, unknown> = {}): Pro
     headers: {
       Origin: office.origin,
       'Content-Type': 'application/json',
-      cookie: ownerCookie()
+      cookie: `${OWNER_COOKIE}=${officeKey}`
     },
     body: JSON.stringify({ action, ...fields })
   });

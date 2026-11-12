@@ -9,7 +9,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { home, OFFICE_PORT, type OfficeEntry } from './home.ts';
-import { OFFICE_PROOF_PATH } from './office-proof.ts';
+import { OFFICE_PROOF_PATH, provesOffice } from './office-proof.ts';
 
 export const OWNER_KEY_FILE = 'owner-key' satisfies OfficeEntry;
 /** Named by the office's port: a browser scopes cookies by host, not port, so two offices on 127.0.0.1 would share one name. */
@@ -31,6 +31,37 @@ export function ownerKey(): string {
   if (cached !== undefined) return cached;
   const file = home(OWNER_KEY_FILE);
   if (!existsSync(file)) makeKey(file);
+  return readKey(file);
+}
+
+/**
+ * The key a running office made, or undefined when its folder has none. It
+ * never makes one: a key made by a tool that only talks to the office is not
+ * the office's, fails the office's proof and stays behind in its folder.
+ */
+export function storedOwnerKey(): string | undefined {
+  if (cached !== undefined) return cached;
+  const file = home(OWNER_KEY_FILE);
+  return existsSync(file) ? readKey(file) : undefined;
+}
+
+/**
+ * The key a running office made, once the office at `origin` proved it holds
+ * it, for a tool that talks to that office from outside. With no key file it
+ * throws before any request goes, and it throws when what answers is not that
+ * office, so the key never goes to anything else on the port.
+ */
+export async function provenOwnerKey(origin: string): Promise<string> {
+  const key = storedOwnerKey();
+  if (key === undefined)
+    throw new Error(`${home()} holds no owner key. Start the office there first.`);
+  if (!(await provesOffice(origin, key, 'direct')))
+    throw new Error(`What answers at ${origin} is not the office whose key is in ${home()}.`);
+  return key;
+}
+
+/** The key in `file`, checked for its shape and kept for the rest of the process. */
+function readKey(file: string): string {
   const key = readFileSync(file, 'utf8').trim();
   // An empty or damaged key would let a cookie holding the same text in. The
   // office refuses to start on one rather than guess.
