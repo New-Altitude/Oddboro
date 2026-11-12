@@ -387,7 +387,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends xvfb xauth dbus-x11 gnome-keyring \
             libsecret-tools "$fuse" webkit2gtk-driver imagemagick xdotool
           rustup toolchain install stable --profile minimal
-          cargo install tauri-driver --locked
+          cargo install tauri-driver --locked --version 2.1.0
 
       - name: Smoke test the build
         if: runner.os != 'Linux'
