@@ -703,7 +703,9 @@ export const grants = pgTable(
      * Act: a call to one waits on the desk as every change does at Draft.
      * Each list is the exception to its level, so both keep their tools as
      * the level moves. A tool the service drops stays here, so one that comes
-     * back by that name still asks first (`setAskFirst`).
+     * back by that name still asks first, and the tools it adds in the same
+     * refresh join it, in case one is the same tool renamed (`setAskFirst`,
+     * `refreshTools`).
      */
     askFirst: text().array().notNull().default([]),
     askId: integer().references(() => asks.id),

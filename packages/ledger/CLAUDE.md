@@ -711,7 +711,9 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   gateway holds each call to one of those tools as at Draft. Each list is the
   exception to its level and keeps its tools as the level moves; read only
   ends both. A tool the service drops stays on ask first, so one that comes
-  back by that name still waits, and `standingAsked` refuses a standing ask
+  back by that name still waits, and the tools that change something it added
+  in the same refresh ask first too, since a rename is a drop and an add
+  (`refreshTools`, one ledger line). `standingAsked` refuses a standing ask
   for one.
 - A service's stored tools follow what it lists now (`refreshTools` in
   `src/office-service-tools.ts`): the tool list, what Read only reaches, each

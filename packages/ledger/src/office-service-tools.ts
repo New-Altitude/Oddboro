@@ -1,10 +1,10 @@
 // A service's stored tools kept in step with what it lists now: the tool list,
-// what Read only reaches, what each tool does, and each standing yes to a tool
-// the service dropped.
+// what Read only reaches, what each tool does, each standing yes to a tool
+// the service dropped, and Ask first carried to the tools that may replace one.
 import { and, eq, exists, isNotNull, ne } from 'drizzle-orm';
 import { db } from './db.ts';
 import { connectors, grants } from './schema.ts';
-import { GRANT_LABEL, LEVEL_LABEL, POSTAL_ID } from './access-words.ts';
+import { GRANT_LABEL, LEVEL_LABEL, POSTAL_ID, settingsTab } from './access-words.ts';
 import type { ConnectorRow } from './office.ts';
 import { staffer } from './office-staff.ts';
 import { record } from './office-ledger.ts';
@@ -27,6 +27,11 @@ export type ToolChanges = {
   notes: boolean;
   /** Each Odd that lost a standing yes to a tool the service dropped, with those tools. */
   standing: { staffId: string; tools: string[] }[];
+  /**
+   * Each Odd with an Ask first tool the service dropped (`from`) while it added
+   * tools that change something (`to`), which now ask first too.
+   */
+  askFirst: { staffId: string; from: string[]; to: string[] }[];
 };
 
 /** A refresh's changes in a few words for the owner, or that nothing changed. */
@@ -44,14 +49,24 @@ const sameNotes = (a: Record<string, string>, b: Record<string, string>): boolea
   Object.keys(a).length === Object.keys(b).length &&
   Object.entries(a).every(([k, v]) => b[k] === v);
 
-const NONE: ToolChanges = { added: [], gone: [], read: [], unread: [], notes: false, standing: [] };
+const NONE: ToolChanges = {
+  added: [],
+  gone: [],
+  read: [],
+  unread: [],
+  notes: false,
+  standing: [],
+  askFirst: []
+};
 
 /**
  * Bring a connector's stored tools up to date with what its service lists
  * now: the tool list, what Read only reaches (the same rule as connecting,
  * both ways), and what each tool does. A tool the service dropped leaves each
  * Odd's standing yes, so a new tool by that name waits for the owner's yes.
- * Writes, and says so in the Ledger, only when something changed. Each run
+ * A dropped tool stays on Ask first, and since a service that renames a tool
+ * drops one name and adds another, the tools it added that change something
+ * ask first too: a rename never lets a high-risk tool through. Writes, and says so in the Ledger, only when something changed. Each run
  * that lists the tools calls it, and so do the owner's Refresh, the office's
  * start and its daily look (the office's access.ts). Physical mail keeps
  * the three reads the office picked at setup (`bindPostalMailbox`).
@@ -71,8 +86,10 @@ export async function refreshTools(id: string, listed: ListedTool[]): Promise<To
       read: reads.filter((t) => !c.readTools.includes(t)),
       unread: c.readTools.filter((t) => !reads.includes(t)),
       notes: !sameNotes(notes, c.toolNotes),
-      standing: []
+      standing: [],
+      askFirst: []
     };
+    const addedChanges = ch.added.filter((t) => !reads.includes(t));
     if (!ch.added.length && !ch.gone.length && !ch.read.length && !ch.unread.length && !ch.notes)
       return { c, ch };
     await tx
@@ -82,12 +99,18 @@ export async function refreshTools(id: string, listed: ListedTool[]): Promise<To
     if (ch.gone.length)
       for (const g of await tx.select().from(grants).where(eq(grants.connectorId, id))) {
         const lost = g.standing.filter((t) => ch.gone.includes(t));
-        if (!lost.length) continue;
+        const firm = g.askFirst.filter((t) => ch.gone.includes(t));
+        const to = firm.length ? addedChanges.filter((t) => !g.askFirst.includes(t)) : [];
+        if (!lost.length && !to.length) continue;
         await tx
           .update(grants)
-          .set({ standing: g.standing.filter((t) => !lost.includes(t)) })
+          .set({
+            standing: g.standing.filter((t) => !lost.includes(t)),
+            askFirst: [...g.askFirst, ...to]
+          })
           .where(and(eq(grants.staffId, g.staffId), eq(grants.connectorId, id)));
-        ch.standing.push({ staffId: g.staffId, tools: lost });
+        if (lost.length) ch.standing.push({ staffId: g.staffId, tools: lost });
+        if (to.length) ch.askFirst.push({ staffId: g.staffId, from: firm, to });
       }
     return { c, ch };
   });
@@ -130,6 +153,15 @@ export async function refreshTools(id: string, listed: ListedTool[]): Promise<To
       actor: 'office',
       title: `${who?.name ?? s.staffId} asks again before using ${s.tools.join(', ')} in ${c.name}`,
       body: `${c.name} no longer lists ${them(s.tools)}, so a tool that comes back by that name waits for your yes.`
+    });
+  }
+  for (const m of ch.askFirst) {
+    const who = (await staffer(m.staffId))?.name ?? m.staffId;
+    await record({
+      kind: 'access',
+      actor: 'office',
+      title: `Moved ${who}'s Ask first in ${c.name} to ${m.to.join(', ')}`,
+      body: `${c.name} no longer lists ${m.from.join(', ')}, which you set to ask first, and added ${m.to.join(', ')}. It may be the same tool under a new name, so ${m.to.length === 1 ? 'it asks' : 'they ask'} first too. Change it on ${settingsTab(`${who}'s`)}, under Services.`
     });
   }
   return ch;

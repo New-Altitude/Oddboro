@@ -85,3 +85,47 @@ test('the office keeps current only connected services an Odd holds', async () =
   assert.ok(ids.includes('cal'));
   assert.ok(!ids.includes('gmail'), 'gmail is not connected here, and no Odd holds it');
 });
+
+test('a service that drops an Ask first tool and adds one moves the Ask first to it, and says so', async () => {
+  await db.delete(ledger);
+  await db.insert(staff).values({
+    id: 'ace',
+    name: 'Ace',
+    role: 'Assistant',
+    remit: 'Tests.',
+    variant: 'a',
+    portrait: 'a',
+    permission: 'act',
+    desk: 'You are Ace.'
+  });
+  await db.insert(connectors).values({
+    id: 'mail',
+    name: 'Mail',
+    description: 'A mailbox.',
+    kind: 'http',
+    tools: ['search', 'delete_message'],
+    readTools: ['search'],
+    readyAt: new Date()
+  });
+  await db
+    .insert(grants)
+    .values({ staffId: 'ace', connectorId: 'mail', level: 'act', askFirst: ['delete_message'] });
+  // The service renamed delete_message, and added a read beside it.
+  await refreshTools('mail', [
+    { name: 'search', readOnly: true },
+    { name: 'list_labels', readOnly: true },
+    { name: 'trash_message', readOnly: false }
+  ]);
+  const [g] = await db.select().from(grants).where(eq(grants.connectorId, 'mail'));
+  // The old name stays, so it still asks first if it comes back; a read never waits.
+  assert.deepEqual(g.askFirst, ['delete_message', 'trash_message']);
+  assert.ok((await titles()).includes("Moved Ace's Ask first in Mail to trash_message"));
+  // With nothing on Ask first, a dropped tool moves nothing.
+  await db.update(grants).set({ askFirst: [] }).where(eq(grants.connectorId, 'mail'));
+  await refreshTools('mail', [
+    { name: 'search', readOnly: true },
+    { name: 'remove_message', readOnly: false }
+  ]);
+  const [after] = await db.select().from(grants).where(eq(grants.connectorId, 'mail'));
+  assert.deepEqual(after.askFirst, []);
+});
