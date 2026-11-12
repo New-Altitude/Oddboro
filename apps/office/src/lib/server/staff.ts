@@ -1105,14 +1105,17 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
       }
     }
   };
+  let started = false;
   const end = await drive(
-    () =>
-      spawn(cmd, [...before, ...launch.args], {
+    () => {
+      started = true;
+      return spawn(cmd, [...before, ...launch.args], {
         cwd: dir,
         env: launch.env,
         detached: ownsGroup(launch),
         windowsHide: true
-      }),
+      });
+    },
     launch,
     sink,
     {
@@ -1123,7 +1126,7 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
   );
   clock.going = false;
   const ended = toolEnded(who, end, opts);
-  const stderr = end.outcome === 'failed' ? end.stderr : '';
+  const stderr = end.outcome === 'done' ? '' : end.stderr;
   // A Claude Code that refuses the open network fails this run: the owner
   // is told plainly, and from now on this office's Claude Code runs keep
   // their commands off the internet (`holdNetwork`).
@@ -1148,13 +1151,13 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
     void closeGateway(gate);
     if (end.session && opts.sessionFile)
       saveSession(opts.sessionFile, { sessionId: end.session, seen: sections, home: toolDir });
-    // Past its time limit while it got ready: `run` has ended it and told the
-    // owner, and the driver started nothing.
-    if (clock.over)
+    // The time limit passed while it got ready, so the driver started nothing.
+    if (end.outcome === 'timeout' && !started)
       console.error(
         `${who.name}'s ${opts.kind} run was ready only after its time limit, so ${tool} never started.`
       );
-    else if (!r.interrupted)
+    // `over` says `run` already told the owner the run hit its time limit, so they hear it once.
+    if (!clock.over && !r.interrupted)
       opts.onEvent?.(r.ok ? { type: 'done', text: r.text } : { type: 'error', message: r.text });
   } catch (e) {
     console.error(`${who.name}'s run ended, but tidying up after it failed:`, e);

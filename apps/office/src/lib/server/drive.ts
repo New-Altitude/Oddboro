@@ -14,17 +14,17 @@ import { stopGroups, type ResultFacts, type RunEvent } from './launch.ts';
 export type RunEnd =
   /** `text`: the result's text, as the tool sent it. `spoken`: the streamed text joined as it came, else the last whole message. */
   | { outcome: 'done'; text?: string; spoken: string; session?: string }
-  /** Every failure carries the tool's stderr, which a caller reads for the network refusal. */
+  /** Every end but `done` carries the tool's stderr, which a caller reads for the network refusal. */
   | {
       outcome: 'failed';
       why: { tool: string } | { exit: number | null } | { start: string } | { result: ResultFacts };
       stderr: string;
       session?: string;
     }
-  | { outcome: 'timeout'; session?: string }
-  | { outcome: 'stopped'; session?: string }
+  | { outcome: 'timeout'; stderr: string; session?: string }
+  | { outcome: 'stopped'; stderr: string; session?: string }
   /** The Odd left the office (`stopRuns` aborts with 'left'). */
-  | { outcome: 'left'; session?: string };
+  | { outcome: 'left'; stderr: string; session?: string };
 
 /** What the caller hears as the run goes, in order. The end comes as `RunEnd`, and `error` events go to its stderr. */
 export type Sink = {
@@ -82,8 +82,8 @@ async function reportLeftBehind(pids: number[], tool: string): Promise<void> {
     );
 }
 
-const stoppedBy = (signal: AbortSignal): RunEnd =>
-  signal.reason === 'left' ? { outcome: 'left' } : { outcome: 'stopped' };
+const stoppedBy = (signal: AbortSignal, stderr: string): RunEnd =>
+  signal.reason === 'left' ? { outcome: 'left', stderr } : { outcome: 'stopped', stderr };
 
 /**
  * Run one launch to its end. `start` spawns the tool, with `detached` from
@@ -109,9 +109,9 @@ export function drive(
   };
   // staff.ts's order: a stop the owner asked for wins over a deadline that also passed.
   const over: RunEnd | undefined = o.signal.aborted
-    ? stoppedBy(o.signal)
+    ? stoppedBy(o.signal, '')
     : o.deadline <= Date.now()
-      ? { outcome: 'timeout' }
+      ? { outcome: 'timeout', stderr: '' }
       : undefined;
   if (over) {
     tidy();
@@ -169,13 +169,13 @@ export function drive(
     const timer = setTimeout(
       () => {
         stopped = stop();
-        finish(heard() ?? { outcome: 'timeout' });
+        finish(heard() ?? { outcome: 'timeout', stderr });
       },
       Math.max(0, o.deadline - Date.now())
     );
     const interrupted = () => {
       stopped = stop();
-      finish(stoppedBy(o.signal));
+      finish(stoppedBy(o.signal, stderr));
     };
     o.signal.addEventListener('abort', interrupted, { once: true });
 

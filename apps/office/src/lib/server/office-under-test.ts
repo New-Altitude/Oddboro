@@ -40,7 +40,8 @@ const port = await new Promise<number>((done) => {
 // settings. It takes the markers every stand-in takes (`SHARED`, below). A
 // message whose last line says "Refuse the open
 // network", in a run whose sandbox opens every host, gets the words Claude
-// Code's binary refuses that with, on stderr, and exit 1, after any hold.
+// Code's binary refuses that with, on stderr, and exit 1, after any hold;
+// "Refuse the open network and wait." says the same words, then never ends.
 // Only the last line, since a later prompt can quote an earlier message.
 // "Succeed with an error." ends on a success result that says is_error, and
 // "Succeed with no text." on a success result with no text.
@@ -174,6 +175,7 @@ function answer() {
     settings().sandbox?.network?.allowedDomains?.includes('*')
   ) {
     process.stderr.write('Overly broad patterns like "*" are not allowed\\n');
+    if (lastLine().includes('and wait.')) return void setInterval(() => {}, 60_000);
     process.exit(1);
   }
   reply();
@@ -194,15 +196,19 @@ function reply() {
   answered = true;
   const args = process.argv.slice(2);
   const after = (flag) => args[args.indexOf(flag) + 1];
+  // A staff run passes the servers as a file, read here while the run goes; the office's own runs pass them inline.
+  const config = after('--mcp-config');
+  const mcp = JSON.parse(config.startsWith('{') ? config : fs.readFileSync(config, 'utf8'));
   const gave = {
     args,
     envNames: Object.keys(process.env).sort(),
-    // The office passes the servers as a file, read here while the run goes.
-    mcp: JSON.parse(fs.readFileSync(after('--mcp-config'), 'utf8')),
-    env: JSON.parse(fs.readFileSync(after('--mcp-config'), 'utf8')).mcpServers.office.env,
-    // A staff run's settings and system prompt come in files, read here while the run goes.
+    mcp,
+    env: mcp.mcpServers.office?.env,
+    // A staff run's settings and system prompt come in files, read here while the run goes; the office's own runs pass both inline.
     claudeSettings: settings(),
-    system: fs.readFileSync(after('--append-system-prompt-file'), 'utf8'),
+    system: args.includes('--append-system-prompt-file')
+      ? fs.readFileSync(after('--append-system-prompt-file'), 'utf8')
+      : after('--append-system-prompt'),
     message,
     added,
     claudeMds: process.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS ?? null,
