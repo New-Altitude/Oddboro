@@ -57,5 +57,6 @@ test('starting over lists every office entry it moves, the sign-ins and the key 
     .map(([name]) => name);
   assert.deepEqual(listed.toSorted(), moved.toSorted());
   assert.ok(listed.includes('accounts') && listed.includes('owner-key'), block.join('\n'));
+  assert.ok(!listed.includes('project-sessions'), block.join('\n'));
   assert.match(run.stdout, /Nothing moved\.\n$/);
 });

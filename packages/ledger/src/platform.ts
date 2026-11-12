@@ -68,22 +68,37 @@ export type Probe =
  * shell, and no time limit unless `timeout` (in ms) gives one. On Windows no
  * window either, unless `showWindow`: some commands open a window the owner
  * must see, such as the browser or a dialog asking them to confirm, and
- * hiding the command can hide that window too.
+ * hiding the command can hide that window too. `input` goes to the command's
+ * stdin, which then closes, so a command that reads to the end never waits.
+ * Text passed this way stays out of the process list.
  */
 export function probe(
   cmd: string,
   args: readonly string[],
-  o: { timeout?: number; env?: NodeJS.ProcessEnv; cwd?: string; showWindow?: true } = {}
+  o: {
+    timeout?: number;
+    env?: NodeJS.ProcessEnv;
+    cwd?: string;
+    showWindow?: true;
+    input?: string;
+    maxBuffer?: number;
+  } = {}
 ): Promise<Probe> {
-  const { showWindow, ...options } = o;
+  const { showWindow, input, ...options } = o;
   return new Promise((done) => {
     try {
-      execFile(
+      const child = execFile(
         cmd,
         args,
         { ...options, encoding: 'utf8', ...(showWindow ? {} : { windowsHide: true }) },
         (e, out, err) => done(e ? ended(e, out, err) : { status: 'ok', out, err })
       );
+      if (input !== undefined) {
+        // A command can exit before it reads, such as one with no sign-in. The
+        // pipe then fails, and the callback above already says how it ended.
+        child.stdin?.on('error', () => {});
+        child.stdin?.end(input);
+      }
     } catch (e) {
       // A file this system cannot run (ENOEXEC) throws here rather than in the
       // callback. Anything else thrown here is a wrong argument, so it rejects.

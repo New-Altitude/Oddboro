@@ -1,4 +1,4 @@
-import { currentPlatform } from './platform.ts';
+import { currentSystem, type System } from './platform.ts';
 import type { IBasePtyForkOptions, IPty } from 'node-pty';
 
 // node-pty is an optional native library. It loads only when the owner opens a
@@ -23,19 +23,32 @@ type WindowsPty = IPty & {
   _agent: { inSocket: { destroy(): void }; _conoutSocketWorker: { dispose(): void } };
 };
 
+type Spawn = typeof import('node-pty').spawn;
+type Open = (spawn: Spawn, file: string, args: string[], options: IBasePtyForkOptions) => IPty;
+
+const plain: Open = (spawn, file, args, options) => spawn(file, args, options);
+
+/** How each system opens a terminal. A system the office does not know opens it plainly. */
+const OPEN: Record<System, Open> = {
+  mac: plain,
+  linux: plain,
+  windows: (spawn, file, args, options) => {
+    const terminal = spawn(file, args, { ...options, useConptyDll: true }) as WindowsPty;
+    terminal.onExit(() => {
+      // The child is already gone. Release its input pipe and output worker
+      // without sending a kill to a process ID that Windows could have reused.
+      terminal._agent.inSocket.destroy();
+      terminal._agent._conoutSocketWorker.dispose();
+    });
+    return terminal;
+  }
+};
+
 export async function openProjectTerminal(
   file: string,
   args: string[],
   options: IBasePtyForkOptions
 ): Promise<IPty> {
   const { spawn } = await nodePty();
-  if (currentPlatform() !== 'win32') return spawn(file, args, options);
-  const terminal = spawn(file, args, { ...options, useConptyDll: true }) as WindowsPty;
-  terminal.onExit(() => {
-    // The child is already gone. Release its input pipe and output worker
-    // without sending a kill to a process ID that Windows could have reused.
-    terminal._agent.inSocket.destroy();
-    terminal._agent._conoutSocketWorker.dispose();
-  });
-  return terminal;
+  return OPEN[currentSystem() ?? 'linux'](spawn, file, args, options);
 }

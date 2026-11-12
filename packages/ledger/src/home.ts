@@ -53,11 +53,21 @@ export const OFFICE_ENTRIES = {
   bin: { holds: "The office's own Caddy.", reset: 'keep' },
   caddy: { holds: "Caddy's settings and the copy of its root certificate.", reset: 'keep' },
   'codex-tmp': { holds: "Each Codex run's temp folder.", reset: 'keep' },
+  'file-checks': {
+    holds: "Each scheduled file job's temp folder, removed when its run ends.",
+    reset: 'keep'
+  },
   data: { holds: "The owner's data the Odds read.", reset: 'keep' },
   gemini: { holds: "The office's Gemini home.", reset: 'keep' },
   grok: { holds: "Grok's home from before accounts.", reset: 'keep' },
   codex: { holds: "Codex's home from before accounts, moved at start.", reset: 'keep' },
   mcp: { holds: "Each run's tool server and settings files.", reset: 'keep' },
+  // Kept: each session's id is a random UUID, so a new office never reuses a
+  // folder, and one left after a reset is only an unused folder.
+  'project-sessions': {
+    holds: "Each connected project session's Claude Code plugin and inbox.",
+    reset: 'keep'
+  },
   version: { holds: 'The version that last started, for its backup.', reset: 'keep' },
   '.env': {
     holds: "The office's settings; reset copies it aside and clears the office's own keys.",

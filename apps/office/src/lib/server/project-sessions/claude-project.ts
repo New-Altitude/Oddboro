@@ -1,5 +1,3 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { join, dirname } from 'node:path';
 import {
   cpSync,
@@ -14,6 +12,8 @@ import {
 } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { home, STAFF_SERVER, type ProjectSession, type ProjectRequest } from '@oddboro/ledger';
+import { AGENT_NAMES } from '@oddboro/ledger/agents';
+import { probe } from '@oddboro/ledger/platform';
 import { nativeCommand, nativeEnv } from './native.ts';
 import { savedClaudeSessions } from './claude-sessions.ts';
 type Active = {
@@ -25,20 +25,46 @@ type Active = {
   status?: string;
   waitingFor?: string;
 };
-export async function claudeProjects(folder: string) {
+/**
+ * What the owner reads when Claude Code cannot list a project's conversations.
+ * The project-sessions route shows a thrown message as it is, so a raw error
+ * from starting the command (its path, ENOENT) never reaches the owner.
+ */
+export const CLAUDE_LIST_FAILED = {
+  missing: `${AGENT_NAMES.claude} is not installed on this computer.`,
+  failed: `${AGENT_NAMES.claude} could not list this project's conversations. Try again.`
+};
+
+/** The Claude Code sessions running in `folder`, from `claude agents --json`. */
+async function claudeAgents(folder: string): Promise<string> {
   const [exe, prefix] = nativeCommand('claude');
+  const r = await probe(exe, [...prefix, 'agents', '--json', '--cwd', folder], {
+    env: nativeEnv(),
+    cwd: folder,
+    timeout: 10000,
+    maxBuffer: 4_000_000
+  });
+  switch (r.status) {
+    case 'ok':
+      return r.out;
+    case 'missing':
+      throw new Error(CLAUDE_LIST_FAILED.missing);
+    case 'failed':
+    case 'timeout':
+      throw new Error(CLAUDE_LIST_FAILED.failed);
+    default: {
+      const missed: never = r;
+      throw new Error(`claude agents came back as ${JSON.stringify(missed)}`);
+    }
+  }
+}
+
+export async function claudeProjects(folder: string) {
   const [history, processes] = await Promise.all([
     savedClaudeSessions(folder),
-    promisify(execFile)(exe, [...prefix, 'agents', '--json', '--cwd', folder], {
-      env: nativeEnv(),
-      cwd: folder,
-      timeout: 10000,
-      maxBuffer: 4_000_000
-    })
+    claudeAgents(folder)
   ]);
-  const active = (JSON.parse(processes.stdout) as Active[]).filter(
-    (a) => a.cwd === folder && a.sessionId
-  );
+  const active = (JSON.parse(processes) as Active[]).filter((a) => a.cwd === folder && a.sessionId);
   const rows = new Map(
     history
       .filter((h) => !h.cwd || h.cwd === folder)

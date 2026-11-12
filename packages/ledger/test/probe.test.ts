@@ -49,3 +49,15 @@ test('a command that ends cleanly is ok, with what it printed', async () => {
     err: ''
   });
 });
+
+test('input reaches the command on stdin, then ends, so a command reading to the end returns', async () => {
+  const echo =
+    'let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => process.stdout.write(s))';
+  assert.deepEqual(
+    await probe(process.execPath, ['-e', echo], {
+      input: 'A title\nand "quoted" details',
+      timeout: 10_000
+    }),
+    { status: 'ok', out: 'A title\nand "quoted" details', err: '' }
+  );
+});
