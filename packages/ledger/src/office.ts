@@ -2,6 +2,7 @@ import { runsGoing } from './run-registry.ts';
 // What the office does with its tables. The office app and the staff tool
 // server both call these, so a rule lives in one place: an ask is decided only
 // here, a task is finished only here, and each writes its ledger row.
+import { proposedProjectWork } from './project-sessions.ts';
 import {
   and,
   arrayOverlaps,
@@ -3794,6 +3795,7 @@ export async function readReport(id: number): Promise<void> {
 // The desk: everything waiting on the owner
 
 export type Desk = {
+  projectWork: Awaited<ReturnType<typeof proposedProjectWork>>;
   /** The latest answers, kept apart from the items waiting on the owner. */
   recent: Pick<LedgerRow, 'id' | 'title' | 'reason'>[];
   asks: AskRow[];
@@ -3812,7 +3814,7 @@ export type Desk = {
 
 export async function desk(): Promise<Desk> {
   const later = alias(ledger, 'later');
-  const [a, t, r, f, recent] = await Promise.all([
+  const [a, t, r, f, recent, projectWork] = await Promise.all([
     db
       .select()
       .from(asks)
@@ -3864,12 +3866,14 @@ export async function desk(): Promise<Desk> {
         )
       )
       .orderBy(desc(ledger.createdAt), desc(ledger.id))
-      .limit(5)
+      .limit(5),
+    proposedProjectWork()
   ]);
   // A twin waits behind the first ask it repeats, and the owner's answer to
   // that one answers it too (`asksNoMore`, `decide`).
   const shown = a.filter((x) => !a.some((first) => first.id < x.id && asksNoMore(first, x)));
   return {
+    projectWork,
     recent,
     asks: shown,
     tasks: t,

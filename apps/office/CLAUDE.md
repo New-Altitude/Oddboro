@@ -1580,8 +1580,8 @@ account.
    and span again and sends them through the office's own transport, so the
    gate applies to them too.
 6. Traces: about one in ten (`TRACE_SAMPLE_RATE`). `QUIET_ROUTES` are never
-   traced: `/api/events` stays open as long as the page, `/api/update` is the
-   shell's poll, and the relay would trace itself.
+   traced: the office and project event streams stay open, project commands carry
+   terminal input, `/api/update` is the shell's poll, and the relay would trace itself.
 7. `instrumentation.server.ts` loads before the server, so
    `src/lib/server/diagnostics.ts` and `src/lib/server/hosts.ts` import
    nothing that brings in Postgres.
@@ -1776,8 +1776,9 @@ the persona's voice.
   fills the screen, and panning stops at the edge.
 - The page loads the floor's PixiJS code with `import()` as it mounts
   (`src/lib/floor/index.ts`), and the Office designer and an Odd's usage
-  charts load when opened, so the first page carries none of PixiJS or
-  layerchart. Import a floor module's values only through `index.ts`; a
+  charts load when opened, and `Markdown.svelte` loads markdown-it with the
+  first text it shows (plain text until then), so the first page carries
+  none of PixiJS, layerchart or markdown-it. Import a floor module's values only through `index.ts`; a
   type import is free.
 - Third-party packages go under `devDependencies` in `package.json`, even
   the ones the office runs: the build bundles those, and the app ships only
@@ -1854,3 +1855,30 @@ used; `chat-sign-in.ts` reads that account. Its retry is the chat's own
 Retry reply on the saved turn, so the earlier failed reply stays in
 history. Access cards come from database deliveries, never the Odd's chat
 file.
+
+The Projects window and its local controller live in
+`src/lib/ui/ProjectSessions.svelte` and `src/lib/server/project-sessions/`.
+Projects is a window in the start panel (`openProject` in
+`windows.svelte.ts`). While it is in front on a wide screen, the panel
+stretches to 8 px short of the Odd's panel, else of the Odds rail
+(`projectsReach` in `+page.svelte`, `reach` on `SidePanel.svelte`), the desk
+pill hides, and the music keeps its usual width. Its handle still drags: the
+width it leaves is Projects' own (`reachWidth`, kept beside the panel's usual
+width), from `min` up to that reach, and dragged all the way it follows the
+reach again. Another tab in front brings the usual width back. While the rail is wide
+(hovered, focused or ⌘K: `onwiden` on `OddsRail.svelte`), the panel steps
+back to the wide rail's edge, in the rail's own 200 ms, so every Odd stays in
+view. Its sessions run down the start side as a listbox; the selected one's
+terminal fills the rest, and its details fold out over the terminal. The
+terminal refits at once and sends the session its size only once it settles
+(`ProjectTerminal.svelte`).
+They sit behind Advanced mode (`owner.advanced_at`), which the owner turns on
+in Setup's Advanced section (`AdvancedSection.svelte`, `PUT
+/api/setup/advanced`) after one warning. The page holds it in `advanced` in
+`windows.svelte.ts`: off, the top bar and the chat's plus menu offer no
+Projects. Off, `/api/project-sessions` and its event stream answer 403
+(`ADVANCED_OFF`), and turning it off ends every open stream
+(`detachProjectViews`). Find existing reads Claude Code's own session files
+(`claude-sessions.ts`); the terminal loads `node-pty` only when it opens. See
+[project sessions](../../docs/project-sessions.md) for native clients,
+handover and recovery.
