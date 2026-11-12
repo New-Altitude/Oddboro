@@ -1,9 +1,10 @@
 // Tasks an Odd gives the owner, from giving one to finishing it.
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import { db } from './db.ts';
 import { parkedWork, wakeOnTask, type TaskEnded } from './task-parking.ts';
 import { keepRun, raisedOn, type Db } from './threads.ts';
 import { attachments, tasks, threads, type InChat, type Step } from './schema.ts';
+import { stepsToGo } from './tools.ts';
 import {
   OWN_RUN,
   ownerAnswers,
@@ -27,6 +28,7 @@ export async function giveTask(
     title: string;
     why: string;
     steps: (string | Step)[];
+    response?: string;
     attach?: string[];
     /** Given while working on this hand-off: the owner's answer goes back to it. */
     handOffId?: number;
@@ -56,6 +58,7 @@ export async function giveTask(
         title: t.title,
         why: t.why,
         steps,
+        response: t.response,
         handOffId: t.handOffId,
         threadId: t.threadId,
         via: t.via,
@@ -143,6 +146,37 @@ export async function tickKey(key: string): Promise<void> {
         .where(eq(tasks.id, t.id));
 }
 
+export class TaskResponseConflict extends Error {}
+
+/**
+ * Start from a file attached to the task, or save the owner's edit to the
+ * version they opened. A task with no response yet takes its first at version 0.
+ */
+export async function saveTaskResponse(id: number, version: number | 'start', text: string) {
+  const start = version === 'start';
+  const next = start ? 0 : version + 1;
+  const [saved] = await db
+    .update(tasks)
+    .set({ response: text, responseVersion: next })
+    .where(
+      and(
+        eq(tasks.id, id),
+        eq(tasks.status, 'open'),
+        start ? isNull(tasks.response) : eq(tasks.responseVersion, version)
+      )
+    )
+    .returning();
+  if (saved) return saved;
+  const t = await task(id);
+  if (!t || t.status !== 'open') throw new TaskResponseConflict('This task is closed.');
+  // A retry after a lost reply returns the same version. Opening a response never resets it.
+  if (t.response !== null && (start || (t.responseVersion === next && t.response === text)))
+    return t;
+  throw new TaskResponseConflict(
+    'The response changed. Review the saved words before saving again.'
+  );
+}
+
 /**
  * What an ended task starts (`OWNER_ANSWERS`), and whether a run on the task's
  * own work picks up among it (`OWN_RUN`). `finishTask` and a failed run giving
@@ -190,13 +224,20 @@ async function ownRunOf(
   return { work: own?.title ?? null };
 }
 
+/** The owner's words on an ended task: the response they saved when they finished it, then their note. */
+const taskAnswer = (t: TaskRow): string | null =>
+  [t.status === 'done' && t.responseVersion ? t.response : null, t.note]
+    .filter(Boolean)
+    .join('\n\n') || null;
+
 export async function finishTask(
   id: number,
   done: boolean,
   note: string | null,
-  inChat = false
+  o: { inChat?: boolean; responseVersion?: number } = {}
 ): Promise<boolean> {
-  return db.transaction(async (q) => {
+  const { inChat = false, responseVersion } = o;
+  const finished = await db.transaction(async (q) => {
     const [t] = await q
       .update(tasks)
       .set({ status: done ? 'done' : 'dropped', note: note || null, doneAt: new Date() })
@@ -205,6 +246,15 @@ export async function finishTask(
     if (!t) return false;
     const owner = await ownerName(q);
     const answers = ownerAnswers(t.steps).map((a) => `${a.step} ${a.answer}`);
+    if (done && t.response !== null) {
+      if (!t.responseVersion || responseVersion !== t.responseVersion)
+        throw new TaskResponseConflict(
+          'Review and save your response before marking this task done.'
+        );
+      if (stepsToGo(t.steps))
+        throw new TaskResponseConflict('Finish the required steps before marking this task done.');
+    }
+    const words = taskAnswer(t);
     await record(
       {
         kind: 'work',
@@ -212,9 +262,9 @@ export async function finishTask(
         title: `${done ? 'Done' : 'Dropped'} by ${owner}: ${t.title}`,
         // Answers first: search_ledger shows the first 400 characters, and a long why would cut them off.
         body: [...answers, t.why].join('\n'),
-        // A choice the owner tapped is their answer when they wrote no note.
+        // Their saved response and note are their answer, or a choice they tapped when they wrote neither.
         reason:
-          t.note ??
+          words ??
           (ownerAnswers(t.steps)
             .map((a) => a.answer)
             .join('\n') ||
@@ -228,7 +278,7 @@ export async function finishTask(
       {
         ended: done ? 'done' : 'dropped',
         owner,
-        said: `${owner} ${done ? 'finished' : 'dropped'} "${t.title}"${t.note ? `: ${t.note}` : '.'}`
+        said: `${owner} ${done ? 'finished' : 'dropped'} "${t.title}"${words ? `: ${words}` : '.'}`
       },
       q,
       inChat && t.staffId
@@ -237,6 +287,9 @@ export async function finishTask(
     );
     return true;
   });
+  if (finished || !done || !responseVersion) return finished;
+  const t = await task(id);
+  return t?.status === 'done' && t.responseVersion === responseVersion;
 }
 
 /**
@@ -289,7 +342,11 @@ async function taskEnded(
         break;
       // Work on another thread that waited on this task, whoever gave it.
       case 'wake_parked':
-        await wakeOnTask(t, { ended: how.ended, owner: how.owner, ownRun }, q);
+        await wakeOnTask(
+          { ...t, note: taskAnswer(t) },
+          { ended: how.ended, owner: how.owner, ownRun },
+          q
+        );
         break;
       default:
         effect satisfies never;

@@ -162,6 +162,8 @@ export {
   tickStep,
   untickStep,
   tickKey,
+  TaskResponseConflict,
+  saveTaskResponse,
   finishTask,
   tasksFrom
 } from './office-tasks.ts';

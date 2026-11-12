@@ -1,9 +1,21 @@
 // The owner works a task: tick a step, undo one, answer a choice,
-// run a step's action, or finish it. Finishing writes the ledger row that credits the owner.
+// run a step's action, save its response, or finish it. Finishing writes the ledger row that credits the owner.
 // `chat` on a finish says the owner answered on the task's card in its Odd's
 // chat, so the run the answer starts replies there too.
 import { error, json } from '@sveltejs/kit';
-import { AWS_SECRETS_ID, connector, finishTask, task, tickStep, untickStep } from '@oddboro/ledger';
+import {
+  AWS_SECRETS_ID,
+  connector,
+  finishTask,
+  saveTaskResponse,
+  TaskResponseConflict,
+  taskFiles,
+  task,
+  tickStep,
+  untickStep
+} from '@oddboro/ledger';
+import { readStaffFile } from '#lib/server/files.ts';
+import { workPath } from '@oddboro/ledger/work-paths';
 import { confirmTools, hostedSignIn, listTools } from '#lib/server/access.ts';
 import {
   awsRoles,
@@ -31,6 +43,9 @@ type Body = {
   done?: boolean;
   note?: string;
   chat?: boolean;
+  response?: string;
+  version?: number;
+  from?: string;
   startUrl?: string;
   ssoRegion?: string;
   region?: string;
@@ -42,15 +57,60 @@ type Body = {
 
 const text = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
 
+export const GET: RequestHandler = async ({ params }) => {
+  const t = await task(Number(params.id));
+  if (!t) error(404, 'No such task');
+  return json({ response: t.response, responseVersion: t.responseVersion });
+};
+
 export const POST: RequestHandler = async ({ params, request }) => {
   const id = Number(params.id);
   const t = await task(id);
   if (!t) error(404, 'No such task');
   const b = (await request.json().catch(() => ({}))) as Body;
-  if (b.op === 'finish') {
-    const finished = await finishTask(id, b.done !== false, text(b.note) || null, b.chat === true);
-    if (!finished) error(409, 'This task was already answered');
-    return json({ ok: true });
+  try {
+    if ((b.op === 'start-response' || b.op === 'response') && (!t.staffId || t.askId))
+      error(400, 'This task uses its own steps.');
+    if (b.op === 'start-response') {
+      // A response starts empty on its first save, so starting one is only ever from a file.
+      let content = '';
+      if (t.response === null) {
+        if (
+          typeof b.from !== 'string' ||
+          !workPath(b.from) ||
+          !t.staffId ||
+          !(await taskFiles(id)).includes(b.from)
+        )
+          error(400, 'Choose a shared file attached to this task.');
+        try {
+          content = (await readStaffFile(t.staffId, b.from)).content;
+        } catch {
+          error(400, 'Could not open the attached file.');
+        }
+        if (content.length > 64000) error(400, 'This file is too long for a task response.');
+      }
+      const started = await saveTaskResponse(id, 'start', content);
+      return json({ response: started.response, responseVersion: started.responseVersion });
+    }
+    if (b.op === 'response') {
+      if (typeof b.response !== 'string' || !b.response.trim() || b.response.length > 64000)
+        error(400, 'Write a response of up to 64,000 characters.');
+      if (!Number.isSafeInteger(b.version) || b.version! < 0)
+        error(400, 'Open the response first.');
+      const saved = await saveTaskResponse(id, b.version!, b.response);
+      return json({ response: saved.response, responseVersion: saved.responseVersion });
+    }
+    if (b.op === 'finish') {
+      const finished = await finishTask(id, b.done !== false, text(b.note) || null, {
+        inChat: b.chat === true,
+        responseVersion: b.version
+      });
+      if (!finished) error(409, 'This task was already answered');
+      return json({ ok: true });
+    }
+  } catch (e) {
+    if (e instanceof TaskResponseConflict) error(409, e.message);
+    throw e;
   }
   const step = typeof b.index === 'number' ? t.steps[b.index] : undefined;
   if (!step) error(400, 'No such step');

@@ -227,20 +227,28 @@ test('the Desk lists each decision and answer once', async () => {
   ]);
 });
 
-test("a task answered in chat gets the Odd's reply there, under the task, once", async () => {
+test("a task answered in chat's response editor gets the Odd's reply there, under the task, once", async () => {
   const q = await L.giveTask('paige', {
     title: 'What hour does your studio day start?',
     why: 'To set the reminders.',
     steps: []
   });
+  // A plain question has no response yet: the chat opens its editor empty.
+  assert.equal(q.response, null);
   assert.deepEqual(chatAnswer(q, false), { steps: [] });
-  const note = '9 AM, Monday to Friday.';
-  await post(tasks.POST, q.id, { op: 'finish', done: true, note, chat: true });
+  const words = '9 AM, Monday to Friday.\nNot {owner} holidays.';
+  // As Save and finish does: save the words at the version opened, then finish with it, from the chat.
+  const saved = await post(tasks.POST, q.id, { op: 'response', version: 0, response: words });
+  assert.deepEqual(await saved.json(), { response: words, responseVersion: 1 });
+  await post(tasks.POST, q.id, { op: 'finish', done: true, version: 1, chat: true });
   assert.equal((await L.task(q.id))?.status, 'done');
+  // The saved words are the answer the Desk lists.
+  assert.equal((await L.desk()).recent.find((d) => d.title.endsWith(q.title))?.reason, words);
   const before = (await answersIn('paige')).length;
   const { f, r } = await runFollowUp({ task: q.id });
   assert.deepEqual(f.chatCard, { kind: 'task', id: q.id, title: q.title });
   assert.equal(r.outcome, 'done', r.text);
+  assert.ok((JSON.parse(r.text) as { message: string }).message.endsWith(words));
   const lines = await answersIn('paige');
   assert.equal(lines.length, before + 1);
   const line = lines.at(-1)!;

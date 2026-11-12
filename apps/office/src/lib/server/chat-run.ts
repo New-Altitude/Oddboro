@@ -22,7 +22,7 @@ import { run, runHomeOf, type Run } from './staff.ts';
 import { chatRun } from './run-state.ts';
 import { addToChat, history, keepOwnerTurn, ChatInputError } from './chat-turns.ts';
 import { attachedFiles, filesNow } from './chat-files.ts';
-import { replyBrief } from './chat-delivery.ts';
+import { replyBrief, savedTaskWords } from './chat-delivery.ts';
 import { sessionIdIn } from './resume.ts';
 import { changedSince, replay, replayed, replayedAt, replaySince } from './replay.ts';
 import {
@@ -220,7 +220,8 @@ export async function replyToOwnerTurn(
         ownerSaid: message,
         literal: [
           message,
-          ...(files.length ? [attachedBrief(files).replaceAll('{owner}', await ownerName())] : [])
+          ...(files.length ? [attachedBrief(files).replaceAll('{owner}', await ownerName())] : []),
+          ...(re?.taskResponse ? [savedTaskWords(re.taskResponse)] : [])
         ].join('\n\n'),
         chatBefore: past,
         ownerFiles: attached,

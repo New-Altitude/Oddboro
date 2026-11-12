@@ -153,6 +153,8 @@ export type Delivery = {
   at: Date;
   /** open, approved, denied, revise, done, dropped, or for a report new or read. */
   status: string;
+  /** A saved task response opens from its chat card, including after completion. */
+  responseVersion?: number;
   /** When the owner decided an ask or finished or dropped a task. */
   decidedAt?: Date | null;
   /** The owner's words on a decided ask or finished task. */
@@ -182,6 +184,7 @@ export async function deliveries(staffId: string, limit = 200): Promise<Delivery
         at: tasks.createdAt,
         status: tasks.status,
         note: tasks.note,
+        responseVersion: tasks.responseVersion,
         decidedAt: tasks.doneAt
       })
       .from(tasks)

@@ -250,6 +250,17 @@ export const isGrantable = (id: string): id is OfficeToolId => GRANTABLE.has(id)
 export const hasTool = (granted: readonly string[], id: string) =>
   OFFICE_TOOLS.some((t) => t.id === id && (t.always || granted.includes(id)));
 
+/**
+ * A step the office does something for: a sign-in, a secret, a tool list or
+ * a choice, and the sign-in's step that ticks itself when it lands (it shares
+ * the sign-in's `oauth:` key). The task cannot be done without these. Every
+ * other step is a checklist the owner may tick or not.
+ */
+export const mustDo = (s: Step): boolean => !!s.action || !!s.key?.startsWith('oauth:');
+
+/** How many steps still hold up Mark done. */
+export const stepsToGo = (steps: Step[]): number =>
+  steps.filter((s) => mustDo(s) && !s.done).length;
 /** What about a run decides which office tools it is offered, beyond what its Odd holds. */
 export type ToolRun = {
   /** The Odd holds Gmail, at any level. */

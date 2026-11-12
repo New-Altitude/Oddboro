@@ -7,7 +7,7 @@
 // edits, or one still drawing, waits for the owner to say so.
 import type { HireProposal } from '@oddboro/ledger';
 
-export type FileRef = { staff: string; path: string };
+export type FileRef = { staff: string; path: string; readOnly?: boolean };
 export type ReportRef = { id: number; staff: string; title: string };
 export type HireFrom = { askId: number; staff: string; proposal: HireProposal };
 /** Which lessons the Lessons window shows: those for every Odd, those one Odd follows, or all. */
@@ -73,7 +73,11 @@ export const openReport = (report: ReportRef) =>
   open({ id: `report:${report.id}`, kind: 'report', report });
 
 export const openFile = (file: FileRef) =>
-  open({ id: `file:${file.staff}:${file.path}`, kind: 'file', file });
+  open({
+    id: `${file.readOnly ? 'reference' : 'file'}:${file.staff}:${file.path}`,
+    kind: 'file',
+    file
+  });
 
 /** A hire window: one per proposal, or a fresh one for a hire from scratch. */
 export function openHire(from?: HireFrom): void {
