@@ -17,7 +17,7 @@ import {
   ENVELOPE_PATH,
   items,
   ofType,
-  PAGE,
+  page,
   recorder,
   sender,
   tempOffice,
@@ -58,11 +58,11 @@ after(() => {
 
 const send = sender(hooks.handle);
 
-const answer = (a: string) =>
+const answer = async (a: string) =>
   send({
     route: '/api/diagnostics',
     method: 'PUT',
-    headers: { ...PAGE, 'content-type': 'application/json' },
+    headers: { ...(await page()), 'content-type': 'application/json' },
     body: a,
     resolve: answerRoute.PUT as Route
   });
@@ -107,11 +107,18 @@ test('nothing leaves until the owner says yes, and an error arrives once they do
 test('a report carries no IP, cookie, header, body, query string, hostname, username or home folder', async () => {
   await answer('{"answer":"yes"}');
   const from = door.got.length;
+  const owner = await page();
   await send({
     route: '/api/goals',
     method: 'POST',
     path: `/api/goals?code=${QUERY}`,
-    headers: { ...PAGE, cookie: `c=${COOKIE}`, 'x-custom': HEADER, 'sentry-trace': traceHeader() },
+    headers: {
+      ...owner,
+      // The test's own cookie joins the owner's: the page sends both.
+      cookie: `${owner.cookie}; c=${COOKIE}`,
+      'x-custom': HEADER,
+      'sentry-trace': traceHeader()
+    },
     body: BODY,
     resolve: throwing(() => new Error(`T2 failed in ${homedir()}`))
   });
@@ -124,7 +131,8 @@ test('a report carries no IP, cookie, header, body, query string, hostname, user
   });
   for (const g of got) {
     const bytes = g.url + g.body;
-    for (const mark of [COOKIE, HEADER, BODY, QUERY, userInfo().username, homedir()])
+    const key = owner.cookie.split('=')[1];
+    for (const mark of [COOKIE, key, HEADER, BODY, QUERY, userInfo().username, homedir()])
       assert.ok(!bytes.includes(mark), mark);
     // The system's own name and version are kept; a computer named after its
     // system (`cachyos`) shows there, and nowhere else.
@@ -232,7 +240,7 @@ test("every span container the door gets tells Sentry never to infer the owner's
   await send({
     route: '/api/diagnostics/envelope',
     method: 'POST',
-    headers: { ...PAGE, 'content-type': 'application/x-sentry-envelope' },
+    headers: { ...(await page()), 'content-type': 'application/x-sentry-envelope' },
     body: pageSpans.map((x) => JSON.stringify(x)).join('\n'),
     resolve: relayRoute.POST as Route
   });

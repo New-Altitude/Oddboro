@@ -81,8 +81,20 @@ export type Sent = {
   resolve?: Route;
 };
 
-/** What the owner's page sends with an action. */
-export const PAGE = { 'sec-fetch-site': 'same-origin', origin: 'http://127.0.0.1:4500' };
+/**
+ * What the owner's page sends: its key's cookie, and the headers the browser
+ * adds to an action. Called after `tempOffice`, never as the harness loads:
+ * home.ts reads where the office is as it loads, so owner-key.ts is imported
+ * here only once the test has set that, and the key is the temp office's.
+ */
+export async function page(): Promise<Record<string, string>> {
+  const { ownerCookie } = await import('@oddboro/ledger/owner-key');
+  return {
+    'sec-fetch-site': 'same-origin',
+    origin: 'http://127.0.0.1:4500',
+    cookie: ownerCookie()
+  };
+}
 
 export const throwing =
   (error: () => unknown): Route =>

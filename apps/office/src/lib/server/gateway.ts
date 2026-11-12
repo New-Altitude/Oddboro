@@ -41,8 +41,7 @@ import {
 import { heldWordsFor, upstream } from './access.ts';
 import type { McpServer } from './launch.ts';
 import { ODD_META } from './google/http.ts';
-
-export const GATEWAY_PATH = '/api/gateway';
+import { GATEWAY_PATH } from '@oddboro/ledger/owner-key';
 
 /**
  * One outside tool a run holds, its connection made on first use and kept for

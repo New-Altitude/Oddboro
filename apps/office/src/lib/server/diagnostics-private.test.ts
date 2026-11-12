@@ -13,7 +13,7 @@ import type { ErrorEvent } from '@sentry/core';
 import type { Folders } from '#lib/diagnostics.ts';
 import {
   ofType,
-  PAGE,
+  page,
   recorder,
   sender,
   tempOffice,
@@ -273,7 +273,7 @@ test('a report carries no owner name, Odd name, chat line, email or home path fr
   const relayed = await send({
     route: '/api/diagnostics/envelope',
     method: 'POST',
-    headers: { ...PAGE, 'content-type': 'application/x-sentry-envelope' },
+    headers: { ...(await page()), 'content-type': 'application/x-sentry-envelope' },
     body: pageEnvelope(),
     // Typed for its own route's event, which is the one the harness builds.
     resolve: relayRoute.POST as Route
@@ -494,7 +494,7 @@ async function relayedFrames(origin: string, urls: string[]): Promise<unknown[][
     origin,
     route: '/api/diagnostics/envelope',
     method: 'POST',
-    headers: { ...PAGE, origin, 'content-type': 'application/x-sentry-envelope' },
+    headers: { ...(await page()), origin, 'content-type': 'application/x-sentry-envelope' },
     body: envelope,
     resolve: relayRoute.POST as Route
   });

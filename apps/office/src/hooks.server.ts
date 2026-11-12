@@ -9,7 +9,9 @@
 // happens however the app ends, Force Quit included. On a Mac it keeps its
 // secrets through the app's shell, over those same pipes (`useShellSecrets`).
 // Every route and API request passes `guardOffice` first: the office's own
-// names, and actions only from the owner's page (`#lib/server/owner-page.ts`).
+// names, then the owner's key (only an exact exception route, with its own
+// proof, takes a request without it), and actions only from the owner's page
+// (`#lib/server/owner-page.ts`).
 // Files built into the page (scripts, styles, images) are served before it.
 // Then Sentry's handle, which traces the request when the owner said yes to diagnostics.
 import { sequence, type ServerInit } from '@sveltejs/kit/hooks';
@@ -17,6 +19,7 @@ import { handleErrorWithSentry, sentryHandle } from '@sentry/sveltekit';
 import { LOCAL, whenOddLeaves } from '@oddboro/ledger';
 import { trustSystemCertificates } from '@oddboro/ledger/certificates';
 import { startLocalDatabase } from '@oddboro/ledger/local-db';
+import { ownerKey } from '@oddboro/ledger/owner-key';
 import { useShellSecrets } from '@oddboro/ledger/secrets';
 import { bringUpToDate } from '@oddboro/ledger/upgrade';
 import { keepAddress } from '#lib/server/address.ts';
@@ -42,6 +45,11 @@ if (process.env.ODDBORO_APP) {
 }
 
 export const init: ServerInit = async () => {
+  // First, so the owner's key exists before anything can ask for it. The app's
+  // shell waits for any answer from the office, then reads the key's file
+  // once, and in the app nothing else makes the file. In a release Kit runs
+  // this before the server listens.
+  ownerKey();
   // In the Mac app the shell keeps the secrets; this process alone asks it.
   await useShellSecrets();
   if (LOCAL) await startLocalDatabase();

@@ -13,7 +13,7 @@ import { fakeNewAltitude } from './fake-new-altitude.ts';
 import {
   ENVELOPE_PATH,
   ofType,
-  PAGE,
+  page,
   recorder,
   sender,
   tempOffice,
@@ -101,11 +101,11 @@ const heldToken = (): string =>
   (JSON.parse(store.get(SIGN_IN) ?? '{}') as { tokens?: { access_token?: string } }).tokens
     ?.access_token ?? '';
 
-const signOut = () =>
+const signOut = async () =>
   send({
     route: '/api/account',
     method: 'DELETE',
-    headers: PAGE,
+    headers: await page(),
     resolve: accountRoute.DELETE as Route
   });
 
@@ -117,7 +117,7 @@ test('signed out, a report to New Altitude is not sent; signed in, it is', async
   const yes = await send({
     route: '/api/diagnostics',
     method: 'PUT',
-    headers: { ...PAGE, 'content-type': 'application/json' },
+    headers: { ...(await page()), 'content-type': 'application/json' },
     body: '{"answer":"yes"}',
     resolve: answerRoute.PUT as Route
   });
@@ -149,7 +149,7 @@ test("every report to New Altitude carries the account's access token, and no bo
   const relayed = await send({
     route: '/api/diagnostics/envelope',
     method: 'POST',
-    headers: { ...PAGE, 'content-type': 'application/x-sentry-envelope' },
+    headers: { ...(await page()), 'content-type': 'application/x-sentry-envelope' },
     body: pageReport.map((x) => JSON.stringify(x)).join('\n'),
     resolve: relayRoute.POST as Route
   });
