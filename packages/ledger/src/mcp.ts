@@ -69,7 +69,8 @@ import {
   ownToolsSaid
 } from './capabilities.ts';
 import { AGENT_NAMES, commandsOnline } from './agents.ts';
-import { currentPlatform } from './platform.ts';
+import { currentPlatform, currentSystem } from './platform.ts';
+import { computerWord } from './system-words.ts';
 import {
   FOLDER_SAID,
   grantWorks,
@@ -1987,7 +1988,7 @@ if (has('poke_owner')) {
   tool(
     'poke_owner',
     {
-      description: `Send ${OWNER} a chat message later, once: a check-in after something they planned, or a nudge before it. Write the exact message now, in your voice, short; the office delivers it at that time as a chat from you, with a notification on their Mac. Use it when ${OWNER} asks ("check in on me in an hour"), or when your job says to; in_minutes 0 sends it now. One poke per minute: a new one at the same time replaces the old. Not for anything that needs their yes; that is raise_ask.`,
+      description: `Send ${OWNER} a chat message later, once: a check-in after something they planned, or a nudge before it. Write the exact message now, in your voice, short; the office delivers it at that time as a chat from you, with a notification on their ${computerWord(currentSystem())}. Use it when ${OWNER} asks ("check in on me in an hour"), or when your job says to; in_minutes 0 sends it now. One poke per minute: a new one at the same time replaces the old. Not for anything that needs their yes; that is raise_ask.`,
       inputSchema: {
         message: z.string().min(1).max(500).describe(`Exactly what ${OWNER} reads.`),
         at: z.string().optional().describe(`${ZONE}: "18:50" for today, or "2026-11-02 18:50".`),
