@@ -16,11 +16,17 @@
     level: FolderAccess;
     /** Whether the editor is open. */
     changing: boolean;
+    picking?: boolean;
   };
-  let { name, path = $bindable(), level = $bindable(), changing = $bindable() }: Props = $props();
+  let {
+    name,
+    path = $bindable(),
+    level = $bindable(),
+    changing = $bindable(),
+    picking = $bindable(false)
+  }: Props = $props();
 
   const ACCESS: FolderAccess[] = ['read', 'write'];
-  let picking = $state(false);
   /** Why no picker opens here, or why picking failed: the typed path stays. */
   let problem = $state('');
 

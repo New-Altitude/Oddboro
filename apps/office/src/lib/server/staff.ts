@@ -251,7 +251,8 @@ export async function chatLog(id: string): Promise<ChatEntry[]> {
       )
     ];
   });
-  return [...history(id), ...items, ...threads, ...handOffs, ...kept].sort((a, b) =>
+  const messages = history(id).map(({ item: _item, ...message }) => message);
+  return [...messages, ...items, ...threads, ...handOffs, ...kept].sort((a, b) =>
     a.at.localeCompare(b.at)
   );
 }
@@ -1342,9 +1343,11 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
           }
         } else if (e.type === 'result') {
           const r: Run =
-            e.subtype === 'success'
-              ? { ok: true, text: String(e.result ?? reply).trim() }
-              : { ok: false, text: endedEarly(who.agent, e) };
+            e.subtype !== 'success'
+              ? { ok: false, text: endedEarly(who.agent, e) }
+              : e.is_error === true
+                ? { ok: false, text: String(e.result ?? 'The run failed.') }
+                : { ok: true, text: String(e.result ?? reply).trim() };
           // A streamed chat takes no more words after its result. Words added
           // too late for this turn get a turn of their own before Claude Code
           // ends, so a run that took any ends when Claude Code does.

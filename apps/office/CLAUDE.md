@@ -1752,3 +1752,14 @@ the persona's voice.
   how an action went is built from the server's result (NEW-1709). Add a
   lint that fails on a promise nobody awaits or catches; that brings ESLint,
   a new dependency, so the change says why.
+
+## Access from chat
+
+`ChatAccessAsk.svelte` uses the Desk's folder and switch handlers, sent
+with `chat: true` so the run the answer starts replies under the card. A
+broad folder keeps its warning and needs the same Accept as the Desk. A
+failed chat can offer `ChatSignInCard.svelte` for the account that run
+used; `chat-sign-in.ts` reads that account. Its retry is the chat's own
+Retry reply on the saved turn, so the earlier failed reply stays in
+history. Access cards come from database deliveries, never the Odd's chat
+file.

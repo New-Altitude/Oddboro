@@ -206,7 +206,12 @@ hand-off or number, which ledger tests and the office's format test share.
   counts only when it matches, so each yes covers one carry-out run. Never take
   the owner's words or an approval from a tool argument alone.
 - `deliveries(staffId)` lists every ask, task and report an Odd put on the
-  desk, with where each stands; the office shows them in its chat.
+  desk, with where each stands; the office shows them in its chat. A folder
+  or switch ask also carries its folder (shown, as the Desk shows it), its
+  switches and its why, so the chat can show the card. Answering it still
+  goes through `giveFolder`, or approval and `turnOnSwitches`, as on the
+  Desk, and `chat` reaches only the carry-out of the ask answered there. No
+  migration.
   `replyToReport` is the owner's feedback, given as a chat reply: it marks the
   report read and records a decision.
 - A follow-up (carry out an approved ask, rework one the owner sent back, pick
