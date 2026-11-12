@@ -25,10 +25,12 @@ import {
   jobs,
   staff,
   staffGoals,
+  chatCardOf,
   type GoalDraft,
   type GoalHealth,
   type GoalPlanItem,
-  type GoalStatus
+  type GoalStatus,
+  type InChat
 } from './schema.ts';
 import { MANAGER_ROLE, goalReview } from './managers.ts';
 import { HORIZONS } from './goal-words.ts';
@@ -171,7 +173,12 @@ type ChatGoalRequest = { managerId: string; requestId: string };
 
 export class GoalRequestConflict extends Error {}
 
-async function setGoal(tx: Tx, d: GoalDraft, source?: number | ChatGoalRequest): Promise<GoalRow> {
+async function setGoal(
+  tx: Tx,
+  d: GoalDraft,
+  source?: number | ChatGoalRequest,
+  answered?: InChat
+): Promise<GoalRow> {
   const chat = typeof source === 'object' ? source : undefined;
   const askId = typeof source === 'number' ? source : undefined;
   const m = await manager(tx);
@@ -205,7 +212,8 @@ async function setGoal(tx: Tx, d: GoalDraft, source?: number | ChatGoalRequest):
       staffId: m.id,
       kind: 'goal',
       goalId: row.id,
-      threadId: await goalThread(tx, row.id, m.id)
+      threadId: await goalThread(tx, row.id, m.id),
+      chatCard: chatCardOf(m.id, answered)
     });
   }
   return row;
@@ -336,16 +344,26 @@ export async function logProgress(
   return row;
 }
 
-/** A goal ask approved: the goal is set, and the manager plans it. */
-export async function approveGoal(askId: number, reason: string | null): Promise<GoalRow> {
+/**
+ * A goal ask approved: the goal is set, and the manager plans it. Approved
+ * on its card in the manager's chat (`inChat`), the planning run replies there.
+ */
+export async function approveGoal(
+  askId: number,
+  reason: string | null,
+  inChat = false
+): Promise<GoalRow> {
   const a = await ask(askId);
   if (a?.kind !== 'goal' || !a.goal || a.status !== 'open')
     throw fixedError('That goal is no longer open');
   const draft = a.goal;
+  const chat: InChat | undefined = inChat
+    ? { staffId: a.staffId, card: { kind: 'ask', id: a.id, title: a.title } }
+    : undefined;
   let set: GoalRow | undefined;
   await approveAsk(askId, reason, {
     link: async (_, tx) => {
-      set = await setGoal(tx, draft, askId);
+      set = await setGoal(tx, draft, askId, chat);
     }
   });
   if (!set) throw fixedError('That goal is no longer open');
@@ -365,12 +383,14 @@ const itemLabel = (names: Map<string, string>) => (i: GoalPlanItem) =>
  * which the page opens in the hire window, and the owner's own steps a task on
  * their desk. Only then does the answer bring the plan's Odd back to the goal's
  * thread to lead the work, so its run finds all of it. Hiring one of the plan's
- * hires answers its ask, and that brings the Odd back there again.
+ * hires answers its ask, and that brings the Odd back there again. Approved
+ * on its card in the Odd's chat (`inChat`), that pick-up replies there.
  */
 export async function approvePlan(
   askId: number,
   picks: number[],
-  reason: string | null
+  reason: string | null,
+  inChat = false
 ): Promise<{ hires: AskRow[] }> {
   const a = await ask(askId);
   if (a?.kind !== 'plan' || !a.plan || a.status !== 'open')
@@ -425,7 +445,8 @@ export async function approvePlan(
           steps: plan.ownerSteps,
           byOffice: true
         });
-    }
+    },
+    inChat
   });
   if (!approved) throw fixedError('That plan is no longer open');
   return { hires };
