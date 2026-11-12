@@ -162,6 +162,13 @@
       "when": 1794450839871,
       "tag": "0022_chat_goals",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1794452751392,
+      "tag": "0023_ask_level",
+      "breakpoints": true
     }
   ]
 }
