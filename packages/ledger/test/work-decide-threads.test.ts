@@ -595,10 +595,13 @@ test("existing work held on a new window ask points heldBy at that ask's ref, no
   assert.deepEqual(held2?.status === 'open' && held2.park, { on: 'window', at: RESETS, ask: 9 });
 });
 
-test('a hand-off on new work names the work, its run and its carried files by Inserted refs', () => {
+test('a hand-off on new work names the work, its run and its carried files by Inserted refs, and its run points at the work by ref', () => {
   const rows = handOffRows();
   const taken = changed(decide(rows, handOff({ open: { title: TITLE, hubId: 'ada' } }), NOW));
   assert.deepEqual(taken.result, { id: { ref: 'run 1' }, thread: { ref: 'thread' }, left: 7 });
+  // The draft's id for the new work is a guess the database does not keep, so the run points at its ref.
+  const runPut = taken.put.find((p) => p.table === 'followUps');
+  assert.deepEqual(runPut && 'ref' in runPut && runPut.points, { threadId: 'thread' });
   assert.deepEqual(taken.outside, [
     { kind: 'carryFiles', threadId: { ref: 'thread' }, from: 'ada', files: [notesFile] }
   ]);

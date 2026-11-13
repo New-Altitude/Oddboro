@@ -295,6 +295,7 @@ export function handOff(r: Model, e: EventOf<'handedOff'>): void {
   );
   x.handOff = 'taken';
   meet(e.carry.length > 0 ? 'a hand-off taken with files' : 'a hand-off taken');
+  if ('open' in e.thread) meet('a hand-off taken on new work');
 }
 
 /** A colleague passes the owner's own words about work it is on to that work's lead, who picks it up once. */

@@ -8,7 +8,14 @@ import { fixedError } from '../errors.ts';
 import { chatCardOf, type HandOff, type InChat, type Outcome } from '../schema.ts';
 import type { LiveKind, OwedRun } from './events.ts';
 import { SERVES_NO_THREAD } from './kinds.ts';
-import { putAll, type Draft, type Fresh, type Inserted, type WorkRows } from './snapshot.ts';
+import {
+  insertedRef,
+  putAll,
+  type Draft,
+  type Fresh,
+  type Inserted,
+  type WorkRows
+} from './snapshot.ts';
 import type { FollowUp, FollowUpBase, Thread, ThreadBase } from './state.ts';
 
 /** A colleague's run on work a lead handed it. */
@@ -107,11 +114,15 @@ export function newRun(
 
 /**
  * Adds a run, and settles the thread it works on, as `addFollowUp` does: so a
- * thread's holder and status never fall behind its runs. Returns the run's ref.
+ * thread's holder and status never fall behind its runs. A run on work this
+ * change opens points at the work's ref. Returns the run's ref.
  */
 export function addRun(d: Draft, run: Fresh<FollowUp>, now: Date): Inserted {
   const ref = `run ${d.ids.size}`;
-  putAll(d, [{ table: 'followUps', ref, insert: run }]);
+  const thread = run.threadId === null ? undefined : insertedRef(d, 'threads', run.threadId);
+  putAll(d, [
+    { table: 'followUps', ref, insert: run, ...(thread && { points: { threadId: thread } }) }
+  ]);
   if (run.threadId !== null) settle(d, run.threadId, now);
   return { ref };
 }
