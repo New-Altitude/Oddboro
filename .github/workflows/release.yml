@@ -427,9 +427,12 @@ jobs:
         with:
           node-version-file: .nvmrc
 
+      # The builds alone: the smoke job's results are artifacts of this run
+      # too, and check-release.ts refuses any folder that is not a build.
       - uses: actions/download-artifact@v4
         with:
           path: ${{ runner.temp }}/built
+          pattern: '{mac,linux-*,windows-*}'
 
       - name: Test the release check
         run: node --test apps/desktop/test/*.test.ts
