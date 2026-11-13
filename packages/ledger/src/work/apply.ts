@@ -1,7 +1,9 @@
 // Writing a decided change: the one place the work core writes the office's
 // rows. A thread, run, ask or task is written whole through its serializer
-// in state.ts, so no write leaves a stale column behind, and a new row's id
-// fields that name another new row, or an effect's id, are filled in by ref.
+// in state.ts, so no write leaves a stale column behind, and a row's id
+// fields that name a new row, or an effect's id, are filled in by ref. The
+// decider's own guess at a new row's id never reaches the database: another
+// transaction may have taken that id first.
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { fixedError } from '../errors.ts';
 import { carryFiles } from '../hand-offs.ts';
@@ -21,7 +23,7 @@ import {
 import type { Tx } from '../threads.ts';
 import { nextRun } from '../time.ts';
 import type { LiveKind } from './events.ts';
-import type { Change, Outside, Put } from './snapshot.ts';
+import type { Change, Inserted, Outside, Put } from './snapshot.ts';
 import {
   askRow,
   followUpRow,
@@ -35,11 +37,31 @@ import {
 /** The id each `ref` in a change stands for: a new row's, or the one a `perKind` effect returned. */
 type Ids = Map<string, number | string>;
 
+/** The real id of a row a change names: one it inserted, by its ref, or one already there. */
+type RealId = (row: number | Inserted) => number;
+
+/**
+ * Each written change's real ids, so an entry reads them from the change
+ * the transition hands back, whose `apply` returns nothing.
+ */
+const written = new WeakMap<Change, RealId>();
+
+/**
+ * The real ids of the rows a written change's result names, which the entry
+ * gives its caller in place of the refs.
+ */
+export function realIds(change: Change): RealId {
+  const real = written.get(change);
+  if (!real) throw fixedError('A change was read for its ids before it was written.');
+  return real;
+}
+
 /**
  * Write a change inside the transition's transaction. The `perKind` effects
  * run first, in order, since a put may point at the id one returns; then the
  * puts, in order; then the other writes outside the four tables, in order,
- * since attachments point at a new ask or task. Any throw rolls all of it back.
+ * since attachments point at a new ask or task. Any throw rolls all of it
+ * back, a hand-off's files that cannot be carried included.
  */
 export async function applyWork(tx: Tx, change: Change): Promise<void> {
   const ids: Ids = new Map();
@@ -51,7 +73,9 @@ export async function applyWork(tx: Tx, change: Change): Promise<void> {
     if (made) keep(ids, o.effect.name, made.id);
   }
   for (const p of change.put) await put(tx, p, ids);
-  for (const o of change.outside) await outside(tx, o, ids);
+  const real: RealId = (row) => (typeof row === 'number' ? row : idOf(ids, row.ref));
+  for (const o of change.outside) await outside(tx, o, real);
+  written.set(change, real);
 }
 
 function keep(ids: Ids, ref: string, id: number | string): void {
@@ -74,7 +98,7 @@ async function put(tx: Tx, p: Put, ids: Ids): Promise<void> {
         return updated(
           await tx
             .update(threads)
-            .set(columns(threadRow(p.row)))
+            .set(pointed(columns(threadRow(p.row)), p.points, ids))
             .where(eq(threads.id, p.row.id))
             .returning({ id: threads.id })
         );
@@ -87,7 +111,7 @@ async function put(tx: Tx, p: Put, ids: Ids): Promise<void> {
         return updated(
           await tx
             .update(followUps)
-            .set(liveColumns(p.row))
+            .set(pointed(liveColumns(p.row), p.points, ids))
             .where(eq(followUps.id, p.row.id))
             .returning({ id: followUps.id })
         );
@@ -100,7 +124,7 @@ async function put(tx: Tx, p: Put, ids: Ids): Promise<void> {
         return updated(
           await tx
             .update(asks)
-            .set(columns(askRow(p.row)))
+            .set(pointed(columns(askRow(p.row)), p.points, ids))
             .where(eq(asks.id, p.row.id))
             .returning({ id: asks.id })
         );
@@ -113,7 +137,7 @@ async function put(tx: Tx, p: Put, ids: Ids): Promise<void> {
         return updated(
           await tx
             .update(tasks)
-            .set(columns(taskRow(p.row)))
+            .set(pointed(columns(taskRow(p.row)), p.points, ids))
             .where(eq(tasks.id, p.row.id))
             .returning({ id: tasks.id })
         );
@@ -152,7 +176,7 @@ function liveColumns(f: FollowUp): Omit<ReturnType<typeof followUpRow>, 'id' | '
 const isRetired = (kind: FollowUp['kind']): kind is RetiredKind =>
   RETIRED_KINDS.some((r) => r === kind);
 
-/** A new row's id fields set from the refs `points` names. Each field is a column. */
+/** A row's id fields set from the refs `points` names. Each field is a column. */
 function pointed<R extends object>(
   values: R,
   points: Partial<Record<string, string>> | undefined,
@@ -169,7 +193,7 @@ function updated(rows: unknown[]): void {
   if (rows.length !== 1) throw fixedError('A change wrote a row that is not there.');
 }
 
-async function outside(tx: Tx, o: Outside, ids: Ids): Promise<void> {
+async function outside(tx: Tx, o: Outside, real: RealId): Promise<void> {
   switch (o.kind) {
     case 'perKind':
       // Run before the puts, in `applyWork`.
@@ -225,14 +249,16 @@ async function outside(tx: Tx, o: Outside, ids: Ids): Promise<void> {
       return;
     }
     case 'carryFiles':
-      // Inside the transaction, so a copy refused or failing rolls the change back.
-      carryFiles(o.threadId, o.from, o.files);
+      // Inside the transaction, so a copy refused or failing rolls the change
+      // back, and its error, the refusal's words, reaches the entry.
+      carryFiles(real(o.threadId), o.from, o.files);
       return;
     case 'record':
       await record(o.line, tx);
       return;
     case 'attachments': {
-      const to = 'ask' in o.to ? { askId: idOf(ids, o.to.ask) } : { taskId: idOf(ids, o.to.task) };
+      const to =
+        'ask' in o.to ? { askId: real({ ref: o.to.ask }) } : { taskId: real({ ref: o.to.task }) };
       if (o.paths.length)
         await tx.insert(attachments).values(
           o.paths.map((path) => ({

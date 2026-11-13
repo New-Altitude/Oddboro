@@ -2,15 +2,15 @@
 // An event names the rows it starts from; the loader adds every row its
 // decider can reach from them, takes the locks in `LOCK_ORDER`, and reads
 // the rows again under those locks, so the decider judges what it holds.
-import { and, eq, inArray, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { fixedError } from '../errors.ts';
-import { MANAGER_ROLE } from '../managers.ts';
+import { manager } from '../goals.ts';
 import type { StaffRow } from '../office.ts';
 import { gaveFolder, switchesOff } from '../office-folders.ts';
 import { networkNote } from '../office-staff.ts';
 import { ownerName } from '../office-usage.ts';
 import { runsGoing } from '../run-registry.ts';
-import { asks, followUps, staff, tasks, threads } from '../schema.ts';
+import { asks, followUps, planLimits, staff, tasks, threads, type HandOff } from '../schema.ts';
 import { sharing } from '../sharing.ts';
 import type { Tx } from '../threads.ts';
 import { lockRows } from '../transition.ts';
@@ -44,7 +44,9 @@ export const queuedRows: SQL = and(
  * the work each ask, task and run is on. It reads the rows in `only` alone,
  * not the work they are on. It may write rows of the tables in `update`,
  * which are locked for update instead of share. `ends` are the tasks it may
- * end, whose parked work it wakes.
+ * end, whose parked work it wakes. `window` is the usage window as read under
+ * the plan's lock, with the id of its ask, and `everyOdd` reads every Odd's
+ * name, past the Odds locked.
  */
 type Seeds = {
   followUps?: number[];
@@ -55,13 +57,23 @@ type Seeds = {
   only?: { asks?: number[]; tasks?: number[] };
   update?: ('staff' | 'asks' | 'tasks')[];
   ends?: number[];
+  window?: { share: number; resetsAt: Date | null; ask: number | undefined };
+  everyOdd?: true;
 };
 
 const one = <T>(id: T | null | undefined): T[] => (id == null ? [] : [id]);
 
+/** The plan's one row, the Claude plan's windows, as `notePlan` keeps it. */
+const PLAN = 'claude';
+/** `WINDOW_MS` in ../usage-window.ts: a window that resets at a time began this long before it. */
+const WINDOW_MS = 5 * 3_600_000;
+
 /**
  * A kind of event added to `WorkEvent` fails the type check here until it
- * names its rows. Each reads what it needs to name them before any lock.
+ * names its rows. Each reads what it needs to name them before any lock but
+ * the plan's, which comes first in `LOCK_ORDER`: only a hand-off holds work
+ * for the usage window, and it does so under that lock, so a read made under
+ * it sees every hold.
  */
 const SEEDS: {
   [K in WorkEvent['kind']]: (tx: Tx, e: EventOf<K>) => Seeds | Promise<Seeds>;
@@ -139,8 +151,89 @@ const SEEDS: {
     const open = await openTaskIds(tx, e.staffId);
     return { only: { tasks: open }, update: ['tasks'], ends: open };
   },
-  goalStatusChanged: () => ({})
+  goalStatusChanged: () => ({}),
+  handedOff: async (tx, e) => {
+    await lockRows(tx, 'plan_limits', [PLAN], 'update');
+    const window = await windowNow(tx);
+    return {
+      threads: 'id' in e.thread ? [e.thread.id] : [],
+      staff: [e.from, e.to],
+      // This window's ask, which a hold points at, unless the owner let hand-offs run.
+      only: { asks: one(window?.ask) },
+      window,
+      // A new window ask names the Odds on the plan, and goes under the manager.
+      everyOdd: true
+    };
+  },
+  toldLead: (_, e) => ({ threads: [e.threadId], staff: [e.staffId] }),
+  parked: (_, e) => ({ threads: [e.threadId], tasks: 'task' in e.on ? [e.on.task] : [] }),
+  clockWoke: async (tx, { threadId }) => {
+    await lockRows(tx, 'plan_limits', [PLAN], 'share');
+    const [t] = await tx
+      .select({ heldBy: threads.heldBy })
+      .from(threads)
+      .where(eq(threads.id, threadId));
+    const ask = t?.heldBy ?? undefined;
+    // Every thread the window's ask holds, since it leaves the desk once it holds none.
+    const held = ask === undefined ? [] : await idsOf(tx, threads, eq(threads.heldBy, ask));
+    return { threads: [threadId, ...held], asks: one(ask), update: ['asks'] };
+  },
+  oddRemoved: async (tx, { staffId }) => {
+    // Its own asks, and any other ask about it.
+    const open = await tx
+      .select({ id: asks.id, staffId: asks.staffId, held: asks.held })
+      .from(asks)
+      .where(and(eq(asks.status, 'open'), or(eq(asks.staffId, staffId), eq(asks.odd, staffId))));
+    const given = await openTaskIds(tx, staffId);
+    return {
+      // Each ask's Odd hears its withdrawal, and a held hand-off names its colleague.
+      staff: [staffId, ...open.flatMap((a) => [a.staffId, ...one(a.held?.to)])],
+      threads: await idsOf(
+        tx,
+        threads,
+        and(eq(threads.hubId, staffId), ne(threads.status, 'stopped'))
+      ),
+      asks: open.map((a) => a.id),
+      tasks: given,
+      followUps: await idsOf(tx, followUps, and(eq(followUps.staffId, staffId), queuedRows)),
+      update: ['staff', 'asks', 'tasks'],
+      ends: given
+    };
+  },
+  oddBroughtBack: async (tx, { staffId }) => {
+    const twins = await tx
+      .select({ id: asks.id, staffId: asks.staffId })
+      .from(asks)
+      .where(and(eq(asks.status, 'open'), eq(asks.odd, staffId), eq(asks.kind, 'bring_back')));
+    return {
+      staff: [staffId, ...twins.map((a) => a.staffId)],
+      asks: twins.map((a) => a.id),
+      update: ['staff', 'asks']
+    };
+  }
 };
+
+/**
+ * The usage window as the last run reported it, and this window's ask, the
+ * last one raised since the window began, as `holdForWindow` in
+ * ../usage-window.ts reads them. Read under the plan's lock.
+ */
+async function windowNow(tx: Tx): Promise<Seeds['window']> {
+  const [w] = await tx.select().from(planLimits).where(eq(planLimits.id, PLAN));
+  if (!w) return undefined;
+  const resets = w.fiveHourResetsAt;
+  const [asked] = resets
+    ? await tx
+        .select({ id: asks.id })
+        .from(asks)
+        .where(
+          and(eq(asks.kind, 'window'), gt(asks.createdAt, new Date(resets.getTime() - WINDOW_MS)))
+        )
+        .orderBy(desc(asks.id))
+        .limit(1)
+    : [];
+  return { share: w.fiveHour, resetsAt: resets, ask: asked?.id };
+}
 
 /**
  * Load and lock what the event's decider reads. Each thread the event can
@@ -218,17 +311,26 @@ export async function loadWork(tx: Tx, e: WorkEvent): Promise<WorkRows> {
   const odds = await tx
     .select()
     .from(staff)
-    .where(inArray(staff.id, [...named]));
+    .where(seeds.everyOdd ? undefined : inArray(staff.id, [...named]));
+  // The office's one manager, though another Odd may hold the role too.
+  const boss = (await manager(tx))?.id;
   const asked = e.kind === 'askDecided' ? rows.asks.find((a) => a.id === e.id) : undefined;
+  const windowAsk = rows.asks.find((a) => a.id === seeds.window?.ask);
 
   return {
-    staff: new Map(odds.map((s): [string, Odd] => [s.id, oddOf(s)])),
+    staff: new Map(odds.map((s): [string, Odd] => [s.id, oddOf(s, boss)])),
     threads: new Map(rows.threads.map((t) => [t.id, t])),
     followUps: new Map(rows.followUps.map((f) => [f.id, f])),
     asks: new Map(rows.asks.map((a) => [a.id, a])),
     tasks: new Map(rows.tasks.map((k) => [k.id, k])),
-    // No decider of a run, an ask or a task reads the usage window.
-    window: null,
+    // Only a hand-off reads the usage window.
+    window: seeds.window
+      ? {
+          share: seeds.window.share,
+          resetsAt: seeds.window.resetsAt,
+          ask: windowAsk ? { id: windowAsk.id, status: windowAsk.status } : null
+        }
+      : null,
     runsGoing: new Set(runsGoing.keys()),
     owner: await ownerName(tx),
     prepared:
@@ -239,8 +341,20 @@ export async function loadWork(tx: Tx, e: WorkEvent): Promise<WorkRows> {
             asked,
             odds.find((s) => s.id === asked.staffId)
           )
-        : {}
+        : e.kind === 'handedOff'
+          ? { sharing: await handOffSharing(tx, e) }
+          : {}
   };
+}
+
+/**
+ * What a hand-off carries if it is taken, from access as it is now. New work
+ * has no colleague on it yet: no thread has id 0, so `sharing` finds none.
+ */
+function handOffSharing(tx: Tx, e: EventOf<'handedOff'>): Promise<HandOff> {
+  const { title, brief, files } = e.work;
+  const threadId = 'id' in e.thread ? e.thread.id : 0;
+  return sharing(tx, { from: e.from, to: e.to, title, brief, files, threadId });
 }
 
 /**
@@ -278,14 +392,15 @@ async function prepareYes(
   return {};
 }
 
-function oddOf(s: typeof staff.$inferSelect): Odd {
+/** An Odd as the deciders read it. `boss` is the office's manager's id. */
+function oddOf(s: typeof staff.$inferSelect, boss: string | undefined): Odd {
   return {
     id: s.id,
     name: s.name,
     leftAt: s.leftAt,
     level: s.permission,
     agent: s.agent,
-    manager: s.role === MANAGER_ROLE
+    manager: s.id === boss
   };
 }
 
@@ -349,7 +464,7 @@ async function reachOf(tx: Tx, seeds: Seeds): Promise<Reach> {
 /** The ids of a table's rows that `where` picks. */
 async function idsOf(
   tx: Tx,
-  table: typeof asks | typeof tasks | typeof followUps,
+  table: typeof threads | typeof asks | typeof tasks | typeof followUps,
   where: SQL | undefined
 ): Promise<number[]> {
   const rows: { id: number }[] = await tx.select({ id: table.id }).from(table).where(where);
