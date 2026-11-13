@@ -175,9 +175,8 @@ export function ownRunOf(rows: WorkRows, t: Task): OwnRun | undefined {
     !(t.status === 'dropped' && t.withdrawn);
   const ownRuns = effects.some(
     (e) =>
-      typeof e === 'string' &&
-      (OWN_RUN[e] === 'always' ||
-        (OWN_RUN[e] === 'on its work, else its Odd' && (ownThread !== null || toItsOdd)))
+      OWN_RUN[e] === 'always' ||
+      (OWN_RUN[e] === 'on its work, else its Odd' && (ownThread !== null || toItsOdd))
   );
   if (!ownRuns) return undefined;
   const own = ownThread === null ? undefined : rows.threads.get(ownThread);

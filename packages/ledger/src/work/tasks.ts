@@ -186,7 +186,6 @@ export function taskEnded(
   const ownRun = parked.length ? ownRunOf(d.rows, ended) : undefined;
   const pickedUp = parked.length ? parked.map((p) => p.title) : undefined;
   for (const effect of effects) {
-    if (typeof effect === 'object') continue;
     switch (effect) {
       // No run follows a dropped task: the answer itself goes back. To a
       // thread or a hand-off it carries no chat card, as today.

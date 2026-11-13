@@ -114,10 +114,7 @@ export type Effect =
   | 'give_standing'
   | { none: string };
 export type AskEffect = Exclude<Effect, 'task_done' | 'wake_parked'>;
-export type TaskEffect = Extract<
-  Effect,
-  'carry_out' | 'task_done' | 'answer_back' | 'wake_parked' | { none: string }
->;
+export type TaskEffect = Extract<Effect, 'carry_out' | 'task_done' | 'answer_back' | 'wake_parked'>;
 
 /**
  * Whether each effect of a task's end starts a run of the task's own: always;
@@ -133,10 +130,7 @@ export const OWN_RUN = {
   task_done: 'always',
   answer_back: 'on its work, else its Odd',
   wake_parked: 'never'
-} as const satisfies Record<
-  Exclude<TaskEffect, { none: string }>,
-  'always' | 'on its work, else its Odd' | 'never'
->;
+} as const satisfies Record<TaskEffect, 'always' | 'on its work, else its Odd' | 'never'>;
 
 export type AskAnswer = {
   /**
