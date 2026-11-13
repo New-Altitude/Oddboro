@@ -643,7 +643,7 @@ test("a done or dropped task, a done task with no Odd, and a goal's pause, met o
       other: ['task_done', 'wake_parked'],
       noOdd: ['wake_parked']
     },
-    dropped: ['answer_back', 'wake_parked', { none: 'NEW-1703' }]
+    dropped: ['answer_back', 'wake_parked']
   });
   const steps: Step[] = [{ text: 'Do it', done: false }];
   // A connect task from Ada's access ask.
@@ -674,7 +674,7 @@ test("a done or dropped task, a done task with no Odd, and a goal's pause, met o
   await finishTask(nobodys.id, true, null);
   assert.deepEqual(await reached(mark), []);
 
-  // A dropped task goes back to the thread it was given on, and on none reaches nobody.
+  // A dropped task goes back to the thread it was given on, and on none wakes the Odd that gave it.
   for (const onThread of [true, false]) {
     const threadId = onThread ? await thread() : undefined;
     const t = await giveTask('ada', {
@@ -685,7 +685,7 @@ test("a done or dropped task, a done task with no Odd, and a goal's pause, met o
     });
     mark = await markNow();
     await finishTask(t.id, false, 'Not needed.');
-    const want = onThread ? ['resume:ada'] : [];
+    const want = onThread ? ['resume:ada'] : ['answered:ada'];
     assert.deepEqual(await reached(mark), want, onThread ? 'on a thread' : 'on none');
   }
 
@@ -701,6 +701,17 @@ test("a done or dropped task, a done task with no Odd, and a goal's pause, met o
       status
     );
   }
+});
+
+test('dropping a task given on no work wakes the Odd that gave it, once, with the drop and the note', async () => {
+  const t = await giveTask('ada', { title: 'Book the van', why: 'w', steps: ['Book it'] });
+  const mark = await markNow();
+  assert.equal(await finishTask(t.id, false, 'not now'), true);
+  assert.deepEqual(await reached(mark), ['answered:ada']);
+  const woke = await db.select().from(followUps).where(eq(followUps.taskId, t.id));
+  assert.equal(woke.length, 1);
+  assert.equal(woke[0].kind, 'answered');
+  assert.match(woke[0].note ?? '', /dropped "Book the van": not now/);
 });
 
 test("only a choice step's answer counts as what the owner said", () => {

@@ -1,9 +1,8 @@
 // Connectors and grants: giving, changing and taking back access to a tool.
-import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
 import { db } from './db.ts';
 import { deleteSecret, getSecret } from './secrets.ts';
 import { fixedError } from './errors.ts';
-import { wakeOnTask } from './task-parking.ts';
 import { type Tx } from './threads.ts';
 import {
   connectors,
@@ -18,8 +17,10 @@ import { grantWorks, POSTAL_ID, POSTAL_NAME, type Level } from './access-words.t
 import type { AskRow, TaskRow, GrantRow, ConnectorRow } from './office.ts';
 import { staffer } from './office-staff.ts';
 import { record } from './office-ledger.ts';
-import { giveTask } from './office-tasks.ts';
+import { task } from './office-tasks.ts';
 import { ownerName } from './office-usage.ts';
+import { transitionWork } from './work/apply.ts';
+import type { EventOf, NewTask } from './work/events.ts';
 
 // Access
 
@@ -123,23 +124,20 @@ export async function reconnectTask(
     .from(grants)
     .where(and(eq(grants.staffId, staffId), eq(grants.connectorId, conn.id)));
   if (!grant) return { problem: `You were never given ${conn.name}. Use ask_for_access.` };
-  const open = await db
-    .select()
-    .from(tasks)
-    .where(and(eq(tasks.status, 'open'), eq(tasks.staffId, staffId)));
-  const waiting = open.find((t) =>
-    t.steps.some((st) => st.action && 'connector' in st.action && st.action.connector === conn.id)
-  );
-  if (waiting) return { task: waiting, already: true, keptOut: false };
   const takesKey = secretNames(conn).some((n) => n !== 'oauth');
-  const steps = connectSteps(conn, true);
-  const task = await giveTask(staffId, {
-    title: `Reconnect ${conn.name} for ${who.name}`,
-    why: problem,
-    steps: [...(takesKey ? getKey : []), ...steps],
-    byOffice: true
-  });
-  return { task, already: false, keptOut: !takesKey && getKey.length > 0 };
+  const { row, already } = await giveConnectTask(
+    {
+      staffId,
+      title: `Reconnect ${conn.name} for ${who.name}`,
+      why: problem,
+      steps: [
+        ...(takesKey ? getKey : []).map((text) => ({ text, done: false })),
+        ...connectSteps(conn, true)
+      ]
+    },
+    { connector: conn.id }
+  );
+  return { task: row, already, keptOut: !already && !takesKey && getKey.length > 0 };
 }
 
 /**
@@ -150,16 +148,33 @@ export async function reconnectTask(
 export async function changeAwsTask(connectorId: string): Promise<TaskRow> {
   const conn = await connector(connectorId);
   if (!conn || !isAws(conn.id)) throw new Error('Only an AWS tool has a role and Region to change');
-  const open = await db.select().from(tasks).where(eq(tasks.status, 'open'));
-  const waiting = open.find((t) =>
-    t.steps.some((st) => st.action?.kind === 'aws' && st.action.connector === conn.id)
+  const { row } = await giveConnectTask(
+    {
+      staffId: null,
+      title: `Change the role or Region for ${conn.name}`,
+      why: `You asked to change the AWS role or Region ${conn.name} uses.`,
+      steps: connectSteps(conn, true)
+    },
+    { connector: conn.id, aws: true }
   );
-  if (waiting) return waiting;
-  return giveTask(null, {
-    title: `Change the role or Region for ${conn.name}`,
-    why: `You asked to change the AWS role or Region ${conn.name} uses.`,
-    steps: connectSteps(conn, true)
-  });
+  return row;
+}
+
+/**
+ * Give a connect task in the office's name, unless an open one with a step
+ * for the tool answers it (`oneOpen`): the check and the insert are one
+ * transition, so two at once give one task.
+ */
+async function giveConnectTask(
+  t: NewTask,
+  oneOpen: NonNullable<EventOf<'taskGiven'>['oneOpen']>
+): Promise<{ row: TaskRow; already: boolean }> {
+  const went = await transitionWork({ kind: 'taskGiven', task: t, oneOpen });
+  if ('refused' in went) throw new Error(went.refused);
+  const already = went.change.result?.already;
+  const row = await task(already ?? went.real({ ref: 'task' }));
+  if (!row) throw fixedError('A task was given that is not there.');
+  return { row, already: already !== undefined };
 }
 
 /** The longest name the owner can give a service. */
@@ -510,29 +525,14 @@ function secretNames(c: Pick<ConnectorRow, 'kind' | 'config'>, all = false): str
   ];
 }
 
-/** Drop the open tasks whose steps connect a tool, for one staffer or for all of them. */
+/**
+ * Drop the open tasks whose steps connect a tool, for one staffer or for all
+ * of them, and wake the work parked on each, in one transaction.
+ */
 async function dropConnectTasks(id: string, staffId?: string): Promise<void> {
-  const open = await db
-    .select()
-    .from(tasks)
-    .where(
-      staffId ? and(eq(tasks.status, 'open'), eq(tasks.staffId, staffId)) : eq(tasks.status, 'open')
-    );
-  const stale = open.filter((t) =>
-    t.steps.some((s) => s.action && 'connector' in s.action && s.action.connector === id)
-  );
-  if (!stale.length) return;
-  await db
-    .update(tasks)
-    .set({ status: 'dropped' })
-    .where(
-      inArray(
-        tasks.id,
-        stale.map((t) => t.id)
-      )
-    );
-  const owner = await ownerName();
-  for (const t of stale) await wakeOnTask(t, { ended: 'dropped', owner });
+  const went = await transitionWork({ kind: 'connectTasksDropped', connector: id, staffId });
+  // The decider drops what is open and never refuses.
+  if ('refused' in went) throw fixedError('Dropping connect tasks was refused.');
 }
 
 /**

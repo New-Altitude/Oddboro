@@ -332,8 +332,9 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   from `0024_task_response`, saved by `saveTaskResponse`
   against the version they opened, so a stale save never overwrites newer
   words). Finishing one needs its latest saved version; that text is the
-  owner's answer (`taskAnswer`), and the `task_done` run gets it word for word. A dropped task starts nothing,
-  unless it was given on a hand-off or a thread (below).
+  owner's answer (`taskAnswer`), and the `task_done` run gets it word for word. A dropped task's answer goes
+  back to the hand-off or thread it was given on (below); given on neither,
+  it wakes the Odd that gave it, once, as an `answered` run.
   A denied ask with a reason also starts a `denied` follow-up: the Odd reads
   the reason, keeps a lesson if it says how to work from now on, and never
   carries the ask out. It serves no hand-off and joins no thread

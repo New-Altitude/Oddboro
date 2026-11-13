@@ -25,6 +25,7 @@ import {
   RETIRED_KINDS,
   type Ask
 } from './state.ts';
+import { connects } from './tasks.ts';
 import { TWINNED } from './twins.ts';
 
 /**
@@ -127,12 +128,21 @@ const SEEDS: {
       update: yes && (a.kind === 'switch' || a.kind === 'folder') ? ['staff', 'asks'] : ['asks']
     };
   },
-  taskGiven: async (tx, { task, oneOpen }) => ({
-    staff: one(task.staffId),
-    threads: one(task.threadId),
-    // The open tasks, the Odd's own when it has one, an open connect task among them answering this one.
-    only: { tasks: oneOpen ? await openTaskIds(tx, task.staffId ?? undefined) : [] }
-  }),
+  taskGiven: async (tx, { task, oneOpen }) => {
+    // Under READ COMMITTED, two transactions could each find no open connect
+    // task and each insert one, so one for the same tool waits on the other.
+    // Taken before any row lock, as `lockDesk` is.
+    if (oneOpen)
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${`connect:${oneOpen.connector}`}))`
+      );
+    return {
+      staff: one(task.staffId),
+      threads: one(task.threadId),
+      // The open tasks, the Odd's own when it has one, an open connect task among them answering this one.
+      only: { tasks: oneOpen ? await openTaskIds(tx, task.staffId ?? undefined) : [] }
+    };
+  },
   taskEnded: async (tx, e) => {
     const [t] = await tx.select().from(tasks).where(eq(tasks.id, e.id));
     if (!t) return {};
@@ -146,8 +156,13 @@ const SEEDS: {
     };
   },
   connectTasksDropped: async (tx, e) => {
-    const open = await openTaskIds(tx, e.staffId);
-    return { only: { tasks: open }, update: ['tasks'], ends: open };
+    // Only the tool's own tasks, so a park on any other open task cannot fail the drop.
+    const open = await tx
+      .select({ id: tasks.id, steps: tasks.steps })
+      .from(tasks)
+      .where(openTasksOf(e.staffId));
+    const stale = open.filter((t) => connects(t, e.connector)).map((t) => t.id);
+    return { only: { tasks: stale }, update: ['tasks'], ends: stale };
   },
   goalStatusChanged: () => ({}),
   handedOff: async (tx, e) => {
@@ -485,12 +500,12 @@ async function parkedIds(tx: Tx, taskIds: number[]): Promise<number[]> {
 }
 
 /** The open tasks, only this Odd's when one is named. */
+const openTasksOf = (staffId: string | undefined): SQL | undefined =>
+  and(eq(tasks.status, 'open'), staffId === undefined ? undefined : eq(tasks.staffId, staffId));
+
+/** Their ids. */
 const openTaskIds = (tx: Tx, staffId: string | undefined): Promise<number[]> =>
-  idsOf(
-    tx,
-    tasks,
-    and(eq(tasks.status, 'open'), staffId === undefined ? undefined : eq(tasks.staffId, staffId))
-  );
+  idsOf(tx, tasks, openTasksOf(staffId));
 
 /**
  * The asks the owner's one answer settled with `from`: of a twinned kind,

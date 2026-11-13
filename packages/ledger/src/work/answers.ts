@@ -137,10 +137,9 @@ export function wakeParked(
 }
 
 /**
- * What an ended task starts (`OWNER_ANSWERS`), as `taskEnd` in
- * office-tasks.ts works it out: the access ask a tool's connect task came
- * from, the effects of how it ended, and the work it is on, its own or its
- * ask's. `taskEnded` and `ownRunOf` both read it, so parked work hears of the
+ * What an ended task starts (`OWNER_ANSWERS`): the access ask a tool's
+ * connect task came from, the effects of how it ended, and the work it is
+ * on, its own or its ask's. `taskEnded` and `ownRunOf` both read it, so parked work hears of the
  * same run that starts.
  */
 export function taskEffects(
@@ -162,9 +161,9 @@ export function taskEffects(
 
 /**
  * The run on an ended task's own work that `wakeParked` tells parked work
- * of, if one picks up, as `ownRunOf` in office-tasks.ts works it out: whether
- * the task's end starts a run there (`OWN_RUN`), and never on stopped work or
- * work whose lead left the office, which runs nothing.
+ * of, if one picks up: whether the task's end starts a run there
+ * (`OWN_RUN`), and never on stopped work or work whose lead left the office,
+ * which runs nothing.
  */
 export function ownRunOf(rows: WorkRows, t: Task): OwnRun | undefined {
   const { effects, ownThread } = taskEffects(rows, t);

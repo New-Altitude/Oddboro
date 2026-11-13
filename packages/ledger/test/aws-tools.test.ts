@@ -127,3 +127,18 @@ test('the owner renames a service, and the Services list shows who holds it', as
   assert.deepEqual(stripe?.odds, [{ id: 'cole', name: 'Cole', level: 'read' }]);
   assert.equal(stripe?.aws, false);
 });
+
+test('two role or Region changes at once give one open task', async () => {
+  const awsSteps = async () =>
+    (await db.select().from(tasks).where(eq(tasks.status, 'open'))).filter((t) =>
+      t.steps.some((s) => s.action?.kind === 'aws' && s.action.connector === AWS_READ_ID)
+    );
+  assert.deepEqual(await awsSteps(), [], 'no change is on the desk yet');
+  const both = await Promise.all([changeAwsTask(AWS_READ_ID), changeAwsTask(AWS_READ_ID)]);
+  const open = await awsSteps();
+  assert.equal(open.length, 1);
+  assert.deepEqual(
+    both.map((t) => t.id),
+    [open[0].id, open[0].id]
+  );
+});

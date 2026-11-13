@@ -33,7 +33,7 @@ import { hasLeft, LEFT_RAISES_NOTHING, oweRun, raisedOn } from './threads.ts';
 import { sameWanted, TWINNED } from './twins.ts';
 
 /** Whether a step of the task connects this tool; with `aws`, only an AWS step counts. */
-const connects = (t: Task, connector: string, aws = false): boolean =>
+export const connects = (t: Pick<Task, 'steps'>, connector: string, aws = false): boolean =>
   t.steps.some(
     (s) =>
       !!s.action &&
@@ -131,8 +131,8 @@ const parkedOn = (rows: WorkRows, taskId: number): Thread[] =>
 
 /**
  * The owner finished or dropped a task, or the office or its Odd took it off
- * the desk (`withdrawn`), as `finishTask` and `taskEnded` in office-tasks.ts
- * and `withdrawTask` in office-decide.ts do. What its end starts follows its
+ * the desk (`withdrawn`), as `finishTask` in office-tasks.ts and
+ * `withdrawTask` in office-decide.ts end it. What its end starts follows its
  * row in `OWNER_ANSWERS` (`taskEffects`). Work parked on it wakes, and each
  * run that picks up is told of the other, so neither does the other's part.
  */

@@ -293,7 +293,7 @@ test('a proposal sent back in chat gets the reworked reply in chat', async () =>
   assert.equal(line?.text, r.text);
 });
 
-test('a no with no reason in chat, to an ask on no work, wakes its Odd once with the answer, replying under the card', async () => {
+test('a no with no reason in chat to an ask on no work, or a task dropped in chat on no work, wakes its Odd once with the answer, replying under the card', async () => {
   const { ask } = await L.raiseAsk('paige', {
     title: 'Book the hall for Friday',
     why: 'For the meeting.',
@@ -308,6 +308,17 @@ test('a no with no reason in chat, to an ask on no work, wakes its Odd once with
   assert.equal(lines.length, before + 1);
   assert.deepEqual(lines.at(-1)?.re, { kind: 'ask', id: ask.id, title: ask.title });
   assert.equal(lines.at(-1)?.text, r.text);
+
+  const q = await L.giveTask('paige', { title: 'Order the chairs', why: 'w', steps: [] });
+  await post(tasks.POST, q.id, { op: 'finish', done: false, note: 'Not now.', chat: true });
+  const card = { kind: 'task', id: q.id, title: q.title };
+  const dropped = await runFollowUp({ task: q.id });
+  assert.equal(dropped.f.kind, 'answered');
+  assert.deepEqual(dropped.f.chatCard, card);
+  const after = await answersIn('paige');
+  assert.equal(after.length, lines.length + 1);
+  assert.deepEqual(after.at(-1)?.re, card);
+  assert.equal(after.at(-1)?.text, dropped.r.text);
 });
 
 test('a failed run on a chat answer says so in one line under the card', async () => {

@@ -792,11 +792,15 @@ test('finishing a task wakes the thread parked on it once, and a dropped task wa
   assert.equal((told[0].note ?? '').split('\n').length, 1, 'answers() splits a note on newlines');
   assert.equal((await threadOf(dropped.work)).resumeOnTask, null);
 
-  // Work that ended another way while parked stays ended.
+  // Work that ended another way while parked stays ended. An ended thread
+  // keeps the park it had, as the owner's answer past the hand-off limit leaves it.
   const ended = await ownWork('ended');
   const frame = await aTask(ended.lead, 'Frame the banner');
   await parksOn(ended.lead, ended.work, frame.id);
-  await db.update(threads).set({ endedAt: new Date() }).where(eq(threads.id, ended.work));
+  await db
+    .update(threads)
+    .set({ status: 'done', endedAt: new Date() })
+    .where(eq(threads.id, ended.work));
   await O.finishTask(frame.id, true, null);
   assert.deepEqual(await onThread(ended.work, 'resume'), []);
 });

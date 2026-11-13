@@ -229,7 +229,7 @@ export const OWNER_ANSWERS = {
       /** A task no Odd gave the owner. */
       noOdd: ['wake_parked']
     },
-    dropped: ['answer_back', 'wake_parked', { none: 'NEW-1703' }]
+    dropped: ['answer_back', 'wake_parked']
   } satisfies {
     done: Record<'fromAccess' | 'other' | 'noOdd', readonly TaskEffect[]>;
     dropped: readonly TaskEffect[];
