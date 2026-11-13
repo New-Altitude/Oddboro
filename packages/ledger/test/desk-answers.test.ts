@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { eq, max } from 'drizzle-orm';
+import { eq, max, sql } from 'drizzle-orm';
 import {
   ASK_KINDS,
   asks,
@@ -706,6 +706,59 @@ test("a plan yes's hire asks, job changes and owner task commit with its answer,
   });
   const mark = await markNow();
   await assert.rejects(approvePlan(ask.id, [0, 1], null), /Two jobs have that name/);
+  assert.equal((await askRow(ask.id))?.status, 'open');
+  assert.deepEqual(await reached(mark), []);
+  const hires = await db.select().from(asks).where(eq(asks.kind, 'hire'));
+  assert.deepEqual(
+    hires.filter((h) => h.hire?.goal?.id === goalId),
+    []
+  );
+});
+
+// The lead's run reads the plan's hire asks, so they are written in the yes's
+// transaction, before that run is queued. The other test fails the plan on a job
+// change, which the yes's transaction makes before any hire ask.
+test('a plan yes whose hire ask cannot be written leaves the plan open, writes no hire ask and queues no run for its lead', async () => {
+  const goalId = await aGoal('Sell rye');
+  const { ask } = await raiseAsk('ada', {
+    title: 'Plan the rye sale',
+    why: 'w',
+    ifApproved: 'i',
+    kind: 'plan',
+    plan: {
+      goalId,
+      items: [
+        {
+          kind: 'hire',
+          hire: {
+            name: 'Cy',
+            role: 'Baker',
+            permission: 'draft',
+            remit: 'Bakes.',
+            jobDescriptionFile: 'baker.md'
+          },
+          part: 'Bakes the loaves'
+        }
+      ]
+    }
+  });
+  await db.execute(
+    sql.raw(
+      `create function refuse_hire() returns trigger as $$ begin if new.kind = 'hire' then raise exception 'hire refused'; end if; return new; end $$ language plpgsql`
+    )
+  );
+  await db.execute(
+    sql.raw(
+      'create trigger refuse_hire before insert on asks for each row execute function refuse_hire()'
+    )
+  );
+  const mark = await markNow();
+  try {
+    await assert.rejects(approvePlan(ask.id, [0], null), /Failed query: insert into "asks"/);
+  } finally {
+    await db.execute(sql.raw('drop trigger refuse_hire on asks'));
+    await db.execute(sql.raw('drop function refuse_hire()'));
+  }
   assert.equal((await askRow(ask.id))?.status, 'open');
   assert.deepEqual(await reached(mark), []);
   const hires = await db.select().from(asks).where(eq(asks.kind, 'hire'));
