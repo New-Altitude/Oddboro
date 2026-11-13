@@ -75,7 +75,7 @@ export const OUTCOME_TITLE: Record<FollowUpKind, Record<Outcome, string>> = {
 export const CUT_OFF_RESULT =
   'The office restarted while this was running, so it may be half done. Check it, then ask the Odd to finish it.';
 
-type LiveRun = Extract<FollowUp, { kind: LiveKind }>;
+export type LiveRun = Extract<FollowUp, { kind: LiveKind }>;
 /** The park a lead's claim lifted, which a failed run gives back. */
 type Lifted = Extract<RunState, { is: 'running' }>['unparked'];
 
@@ -162,7 +162,7 @@ export function runClaimed(
   const park = t?.status === 'open' && t.hubId === f.staffId ? t.park : undefined;
   const lifted: Lifted =
     park?.on === 'task' ? { task: park.task } : park?.on === 'time' ? { at: park.at } : null;
-  const run: FollowUp = { ...f, run: { is: 'running', startedAt: now, unparked: lifted } };
+  const run: LiveRun = { ...f, run: { is: 'running', startedAt: now, unparked: lifted } };
   const d = draft(rows);
   putAll(d, [{ table: 'followUps', row: run }]);
   if (t?.status === 'open' && lifted)

@@ -16,6 +16,7 @@ const { ASK_KINDS, asks, followUps, jobs, ledger, pokes, reports, staff, tasks }
 const { OWNER_ANSWERS } = await import('../src/desk-answers.ts');
 const { eq } = await import('drizzle-orm');
 const O = await import('../src/office.ts');
+const H = await import('../src/hand-offs.ts');
 const L = await import('../src/leaving.ts');
 const { MANAGER_ROLE } = await import('../src/managers.ts');
 const { HIRE_DEFAULTS } = await import('../src/grantable.ts');
@@ -39,6 +40,7 @@ beforeEach(async () => {
     'attachments',
     'tasks',
     'asks',
+    'threads',
     'reports',
     'pokes',
     'runs',
@@ -236,4 +238,102 @@ test('every kind whose yes moves an Odd refuses a yes it cannot carry out, and s
     });
     assert.equal((await askOf(ask.id)).status, 'open', kind);
   }
+});
+
+// Rico leads work it handed Bea; Bea's result comes back to Rico's pick-up.
+type Row = typeof followUps.$inferSelect;
+const followUp = async (id: number): Promise<Row> =>
+  (await db.select().from(followUps).where(eq(followUps.id, id)))[0];
+
+/** Rico hands Bea a step on new work, and Bea's run starts on it. */
+async function handsBea(): Promise<Row> {
+  await db.insert(staff).values(odd('bea', 'Bea'));
+  const r = await H.handOff({
+    from: 'rico',
+    to: 'bea',
+    work: { title: 'Draw the map', brief: 'Draw it.' },
+    thread: { title: 'The map' }
+  });
+  assert.ok('id' in r, JSON.stringify(r));
+  assert.ok(await O.startFollowUp(r.id));
+  return followUp(r.id);
+}
+/** Rico's pick-ups of what Bea sent back, oldest first. */
+const ricosPickUps = async (): Promise<Row[]> =>
+  (await db.select().from(followUps).where(eq(followUps.staffId, 'rico')))
+    .filter((f) => f.kind === 'handed_back')
+    .sort((a, b) => a.id - b.id);
+/** Bea's run raises an ask on the step, as raise_ask does there. */
+const beaAsks = async (h: Row) =>
+  (
+    await O.raiseAsk('bea', {
+      title: 'Buy ink',
+      why: 'The map needs it.',
+      ifApproved: 'I buy it.',
+      handOffId: h.id,
+      threadId: h.threadId ?? undefined
+    })
+  ).ask;
+const pokesOf = (id: string) => db.select().from(pokes).where(eq(pokes.staffId, id));
+
+test("a lead removed while it picks up a colleague's result leaves nothing on the desk, and the colleague pokes the owner", async () => {
+  const h = await handsBea();
+  await O.finishFollowUp(h, 'Draw the map', 'done', 'Drew it.');
+  const [back] = await ricosPickUps();
+  assert.ok(await O.startFollowUp(back.id));
+  assert.equal(await L.removeOdd('rico'), undefined);
+  // The office stops the run as Rico leaves, and records it as stopped.
+  await O.finishFollowUp(back, 'Draw the map', 'failed', 'Stopped.');
+  assert.deepEqual(await db.select().from(reports).where(eq(reports.staffId, 'rico')), []);
+  assert.deepEqual(
+    (await pokesOf('bea')).map((p) => p.message),
+    [
+      'Bea finished "Draw the map", but could not hand it back to Rico because Rico is no longer here.'
+    ]
+  );
+});
+
+test("no 'could not hand it back' poke when the hand-back is the owner's own answer", async () => {
+  const h = await handsBea();
+  const ask = await beaAsks(h);
+  await O.finishFollowUp(h, 'Draw the map', 'waiting', 'Asked for ink.');
+  const [waited] = await ricosPickUps();
+  assert.ok(await O.startFollowUp(waited.id));
+  await O.finishFollowUp(waited, 'Draw the map', 'done', 'Waiting on the ink.');
+  await O.decideAsk(ask.id, 'deny', null);
+  const [, answer] = await ricosPickUps();
+  // Only the answered mark keeps this one from poking: it ended failed, not waiting.
+  assert.equal(answer.handOff?.answered, true);
+  assert.equal(answer.handOff?.outcome, 'failed');
+  assert.equal(await L.removeOdd('rico'), undefined);
+  assert.equal((await followUp(answer.id)).outcome, 'failed');
+  assert.deepEqual(await pokesOf('bea'), []);
+});
+
+test("no poke when the colleague's run ended waiting", async () => {
+  const h = await handsBea();
+  await beaAsks(h);
+  await O.finishFollowUp(h, 'Draw the map', 'waiting', 'Asked for ink.');
+  const [waiting] = await ricosPickUps();
+  assert.equal(waiting.handOff?.outcome, 'waiting');
+  assert.notEqual(waiting.handOff?.answered, true);
+  assert.equal(await L.removeOdd('rico'), undefined);
+  assert.equal((await followUp(waiting.id)).outcome, 'failed');
+  assert.deepEqual(await pokesOf('bea'), []);
+});
+
+test('an Odd brought back does not start work its leaving already failed', async () => {
+  const [r] = await db
+    .insert(followUps)
+    .values({ staffId: 'rico', kind: 'first_day', note: null })
+    .returning();
+  assert.equal(await L.removeOdd('rico'), undefined);
+  assert.equal((await followUp(r.id)).outcome, 'failed');
+  assert.equal(await L.bringBack('rico'), undefined);
+  assert.deepEqual(
+    (await O.followUpsToDo()).map((f) => f.id),
+    []
+  );
+  assert.equal(await O.startFollowUp(r.id), undefined);
+  assert.equal((await followUp(r.id)).startedAt, null);
 });

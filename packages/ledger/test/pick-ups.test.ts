@@ -142,6 +142,25 @@ test('a no that comes while the colleague still runs goes back, and its run endi
   assert.equal(line.status, 'failed');
 });
 
+test('an ask tied to its hand-off alone, with no thread, still counts: a no while the colleague runs leaves its waiting end nothing stale to send', async () => {
+  const h = await give('paige', 'Price the hall');
+  assert.ok(await O.startFollowUp(h.id));
+  // `raises` also links the thread, which reaches the ask a second way.
+  const { ask } = await O.raiseAsk('paige', {
+    title: 'Call the hall',
+    why: 'The work needs it.',
+    ifApproved: 'I do it.',
+    handOffId: h.id
+  });
+  await O.decideAsk(ask.id, 'deny', null);
+  await O.finishFollowUp(h, 'Price the hall', 'waiting', 'Asked to call the hall.');
+  const backs = await onThread(h.threadId ?? 0, 'handed_back');
+  assert.deepEqual(
+    backs.map((b) => [b.handOff?.outcome, !!b.handOff?.answered]),
+    [['failed', true]]
+  );
+});
+
 test("a yes that comes while the colleague still runs starts its carry-out only once that run ends, and only the carry-out's result goes back", async () => {
   const h = await give('rex', 'Draft the invite');
   assert.ok(await O.startFollowUp(h.id));
@@ -1187,6 +1206,36 @@ test('a lead run that ended a park on a task fails after the task was dropped: t
     /dropped "Print the flyer", the task you parked this work on, so it will not be finished\. Decide what comes of the work now\.$/
   );
   assert.equal((await threadOf(work)).resumeOnTask, null);
+});
+
+test('a failed run that gives back a park on a task that ended wakes the work in the same transaction', async () => {
+  const { work, task, back } = await liftedPark('fails-wake-refused', 'Fold the flyer');
+  await O.finishTask(task.id, true, null);
+  // The wake's own write fails, wherever the code makes it. Written with the
+  // run's end, it takes the end with it, so the run can end again; written
+  // after, the run has ended and nothing wakes the work again.
+  await db.execute(
+    sql.raw(`create function refuse_wake() returns trigger language plpgsql as $$
+      begin
+        if new.thread_id = ${work} and new.kind = 'resume' then raise exception 'wake refused'; end if;
+        return new;
+      end $$`)
+  );
+  await db.execute(
+    sql.raw(
+      'create trigger refuse_wake before insert on follow_ups for each row execute function refuse_wake()'
+    )
+  );
+  try {
+    // The database's own error, which drizzle wraps as the cause of its own.
+    await assert.rejects(fails(back), (err: Error) => /wake refused/.test(String(err.cause)));
+  } finally {
+    await db.execute(sql.raw('drop trigger refuse_wake on follow_ups'));
+    await db.execute(sql.raw('drop function refuse_wake()'));
+  }
+  assert.equal((await byId(back.id)).outcome, null, 'the run did not end without its wake');
+  assert.equal(await fails(back), true);
+  assert.equal((await onThread(work, 'resume')).length, 1);
 });
 
 test('a lead run that ended a park on a task and ends waiting on the owner leaves the park ended, so the task wakes nothing', async () => {

@@ -414,7 +414,7 @@ type Reach = {
   staff: Set<string>;
   asks: Set<number>;
   tasks: Set<number>;
-  /** The `hand_off` runs that the asks and tasks reached serve. */
+  /** The event's own `hand_off` runs, and those that the asks and tasks reached serve. */
   handOffs: Set<number>;
 };
 
@@ -442,7 +442,12 @@ async function reachOf(tx: Tx, seeds: Seeds): Promise<Reach> {
     ...taskRows.flatMap((k) => one(k.askId))
   ];
   const askRows = await tx.select().from(asks).where(inArray(asks.id, askIds));
-  const handOffs = [...askRows, ...taskRows].flatMap((r) => one(r.handOffId));
+  // A hand-off run reaches its own asks and tasks by `handOffId`, which a
+  // row raised with no thread gives no other way in.
+  const handOffs = [
+    ...runs.filter((f) => f.kind === 'hand_off').map((f) => f.id),
+    ...[...askRows, ...taskRows].flatMap((r) => one(r.handOffId))
+  ];
   const origins = await tx.select().from(followUps).where(inArray(followUps.id, handOffs));
   const threadIds = new Set([
     ...(seeds.threads ?? []),
