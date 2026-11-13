@@ -71,6 +71,11 @@ function answeredAll(r: Model, handOffId: number): boolean {
 export function queue(r: Model, e: Extract<WorkEvent, { kind: 'runQueued' }>): void {
   r.owedSent.add(OWED.indexOf(e));
   const o = e.run;
+  // An Odd that left is owed nothing (R10): its leaving failed every run it had.
+  if (left(r, o.staffId)) {
+    meet('a run owed to an Odd that left');
+    return;
+  }
   const raisedOn = o.askId === undefined ? null : (askOf(r, o.askId)?.threadId ?? null);
   const threadId = o.threadId ?? (SERVES_NO_THREAD[o.kind] ? null : raisedOn);
   const open = threadId !== null && r.threads.get(threadId)?.status === 'open';

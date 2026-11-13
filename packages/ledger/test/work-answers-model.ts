@@ -120,17 +120,20 @@ export const DECISIONS = Object.keys(STATUS_OF) as Decision[];
 /**
  * An answer reaches a thread's lead, as today: it joins the lead's oldest
  * queued resume there, a line, or starts one; nothing for a lead that left.
- * The chat card goes only to a lead whose chat it is, and a join takes it.
+ * With no line (a time park's wake) a join adds nothing and a new resume has
+ * no note. The chat card goes only to a lead whose chat it is, and a join takes it.
  */
-function answerLead(
+export function answerLead(
   r: Model,
   threadId: number,
-  marker: string,
+  marker: string | null,
   o: { askId?: number; chat?: Chat } = {}
 ): number | undefined {
   const lead = r.threads.get(threadId)!.hub;
   const leadLeft = left(r, lead);
-  r.expected.delivered.push({ lead, threadId, kind: 'resume', marker, leadLeft });
+  // A wake with no line leaves no marker to find, so R13 checks its row instead.
+  if (marker !== null)
+    r.expected.delivered.push({ lead, threadId, kind: 'resume', marker, leadLeft });
   if (leadLeft) {
     meet('an answer for a lead that left');
     return undefined;
@@ -142,7 +145,7 @@ function answerLead(
     .sort((a, b) => a.id - b.id);
   const waiting = mine.find((f) => f.is === 'queued');
   if (waiting) {
-    waiting.lines++;
+    if (marker !== null) waiting.lines++;
     meet("an answer joining a lead's queued pick-up");
     if (card) {
       waiting.card = card;
@@ -157,7 +160,14 @@ function answerLead(
   );
   return insert(
     r,
-    newRun({ staffId: lead, kind: 'resume', threadId, askId: o.askId ?? null, card, lines: 1 })
+    newRun({
+      staffId: lead,
+      kind: 'resume',
+      threadId,
+      askId: o.askId ?? null,
+      card,
+      lines: marker === null ? 0 : 1
+    })
   );
 }
 
@@ -326,6 +336,12 @@ const count = (r: Model, key: string) => r.raised.set(key, (r.raised.get(key) ??
 
 export function raise(r: Model, a: NewAsk): void {
   count(r, raiseKey(a));
+  // An Odd that left puts nothing on the desk (R10), whatever its run still does.
+  if (left(r, a.staffId)) {
+    r.expected.refused = 'not taken';
+    meet('an ask raised by an Odd that left');
+    return;
+  }
   // The generator holds one call, so an open call of the same Odd is the same call.
   const same =
     a.kind === 'call'
@@ -374,7 +390,8 @@ export const KINDS: Record<
     yes: Step[];
     no: Step[];
     sendBack: boolean;
-    unheard?: (o: { yes: boolean; reason: string | null }) => boolean;
+    /** `handsOn`: the ask holds a hand-off that goes with a yes, its colleague still here. */
+    unheard?: (o: { yes: boolean; reason: string | null; handsOn: boolean }) => boolean;
   }
 > = {
   approval: { yes: ['carryOut'], no: NO, sendBack: true },
@@ -383,12 +400,12 @@ export const KINDS: Record<
   hire: { yes: ['back'], no: NO, sendBack: true },
   goal: { yes: ['planning', 'back'], no: NO, sendBack: true },
   plan: { yes: ['planning', 'back'], no: NO, sendBack: true },
-  // A yes with no words is heard through the held hand-off's result.
+  // A yes with no words is heard through the held hand-off's result, when one goes.
   hand_offs: {
     yes: ['held', 'handOffs'],
     no: ['handOffs', 'lesson'],
     sendBack: false,
-    unheard: (o) => o.yes && !o.reason
+    unheard: (o) => o.yes && !o.reason && o.handsOn
   },
   // The office's own: a yes reaches the held work's leads, and a no nobody.
   window: { yes: ['window'], no: [], sendBack: false, unheard: () => true },
@@ -522,7 +539,8 @@ function hearAsk(
     const key = k.handOffId ? `hand-off ${k.handOffId}` : `thread ${k.threadId}`;
     groups.set(key, [...(groups.get(key) ?? []), k]);
   }
-  const excepted = KINDS[a.kind].unheard?.({ yes: o.yes, reason: o.reason }) ?? false;
+  const handsOn = !!a.held && !left(r, a.held.to);
+  const excepted = KINDS[a.kind].unheard?.({ yes: o.yes, reason: o.reason, handsOn }) ?? false;
   const starts = steps.some((s) => s === 'carryOut' || s === 'carryOuts' || s === 'rework');
   for (const group of groups.values()) {
     const g = group[0];
@@ -563,8 +581,13 @@ function hearAsk(
   }
 }
 
-/** A held hand-off starts as the first of a new round; done or failed work opens again for it. */
+/**
+ * A held hand-off starts as the first of a new round; done or failed work
+ * opens again for it. One for a colleague that left since never goes (R10):
+ * its lead hears so (`answerHandOffs`).
+ */
 function handOn(r: Model, threadId: number, held: NonNullable<AskRec['held']>): void {
+  if (left(r, held.to)) return;
   const t = r.threads.get(threadId)!;
   if (t.status === 'done' || t.status === 'failed') {
     t.status = 'open';
@@ -581,7 +604,10 @@ function handOn(r: Model, threadId: number, held: NonNullable<AskRec['held']>): 
   );
 }
 
-/** A no stops the work and tells its lead; a yes tells the lead only when the owner wrote something. */
+/**
+ * A no stops the work and tells its lead; a yes tells the lead only when the
+ * owner wrote something, or when its held hand-off's colleague left since.
+ */
 function answerHandOffs(
   r: Model,
   a: AskRec,
@@ -592,6 +618,8 @@ function answerHandOffs(
     t.status = 'stopped';
     t.park = { on: 'none' };
     meet('a no to more hand-offs stops the work');
+  } else if (a.held && left(r, a.held.to)) {
+    meet('a yes to a hand-off held for a colleague that left');
   } else if (a.held && !o.reason) return;
   answerLead(r, t.id, o.marker, { askId: a.id });
 }
@@ -608,6 +636,11 @@ function answerWindow(r: Model, a: AskRec): void {
 export function give(r: Model, e: EventOf<'taskGiven'>): void {
   const k = e.task;
   count(r, giveKey(k));
+  if (k.staffId !== null && left(r, k.staffId)) {
+    r.expected.refused = 'not taken';
+    meet('a task given by an Odd that left');
+    return;
+  }
   const one = e.oneOpen;
   const there = one
     ? [...r.tasks.values()]

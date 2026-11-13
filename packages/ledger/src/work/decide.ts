@@ -6,6 +6,9 @@ import type { Decided } from '../transition.ts';
 import { goalStatusChanged } from './answers.ts';
 import { askDecided, askRaised } from './asks.ts';
 import type { EventOf, WorkEvent, WorkResults } from './events.ts';
+import { handedOff, toldLead } from './hand-offs.ts';
+import { oddBroughtBack, oddRemoved } from './leaving.ts';
+import { clockWoke, parked } from './parking.ts';
 import { runClaimed, runFinished, runQueued, staleRunsClosed } from './runs.ts';
 import type { Change, WorkRows } from './snapshot.ts';
 import { connectTasksDropped, taskEnded, taskGiven } from './tasks.ts';
@@ -28,7 +31,13 @@ const DECIDERS: { [K in Kind]: Decider<K> } = {
   taskGiven,
   taskEnded,
   connectTasksDropped,
-  goalStatusChanged
+  goalStatusChanged,
+  parked,
+  clockWoke,
+  oddRemoved,
+  oddBroughtBack,
+  handedOff,
+  toldLead
 };
 
 /** What the rows and the time make of one event: a refusal, or the change and what follows its commit. */

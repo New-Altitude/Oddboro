@@ -82,11 +82,12 @@ export function filled<E extends object, N extends object>(empty: E, named: N): 
  * One row written whole: an existing row's new state, or a new row. A new
  * row has a `ref`, its name in this change. `points` names, per id field, the
  * `ref` of a new row or a `perKind` effect whose id that field takes, so rows
- * written together can point at each other before any has an id.
+ * written together can point at each other before any has an id. An existing
+ * row may point too, as work already open does at the window ask that holds it.
  */
 export type Put = {
   [T in keyof Tables]:
-    | { table: T; row: Tables[T] }
+    | { table: T; row: Tables[T]; points?: Partial<Record<Links[T], string>> }
     | {
         table: T;
         ref: string;
@@ -94,6 +95,9 @@ export type Put = {
         points?: Partial<Record<Links[T], string>>;
       };
 }[keyof Tables];
+
+/** A row this change inserts, by its `ref`: the apply gives it its id. */
+export type Inserted = { ref: string };
 
 /** A line for the Ledger, as `record` takes it. */
 export type LedgerLine = Parameters<typeof record>[0];
@@ -114,7 +118,8 @@ export type Outside =
   /** The Odd leaves at `at`, its jobs off, as a removal does. */
   | { kind: 'leave'; staffId: string; at: Date }
   | { kind: 'comeBack'; staffId: string }
-  | { kind: 'carryFiles'; threadId: number; from: string; files: CarriedFile[] }
+  /** Into `from`'s part of the work, which may be a thread this change opens. */
+  | { kind: 'carryFiles'; threadId: number | Inserted; from: string; files: CarriedFile[] }
   /** Only where the line is written inside the transaction today. */
   | { kind: 'record'; line: LedgerLine }
   /** The files an Odd attached, inserted with the new ask or task they point at (its put's `ref`). */
@@ -173,22 +178,30 @@ function copy(rows: WorkRows): WorkRows {
 function putOne(rows: WorkRows, p: Put, ids: Map<string, number>): number {
   const map = rows[p.table] as Map<number, Tables[typeof p.table]>;
   if ('row' in p) {
-    map.set(p.row.id, p.row);
+    map.set(p.row.id, pointed({ ...p.row }, p.points, ids));
     return p.row.id;
   }
   if (ids.has(p.ref)) throw fixedError('Two rows in one change share a ref.');
   const id = Math.max(0, ...map.keys()) + 1;
   // A new row's state is its insert with the id it got and each id it points at.
-  const row = { ...p.insert, id } as Tables[typeof p.table];
-  for (const [field, ref] of Object.entries(p.points ?? {})) {
-    const to = ids.get(ref);
+  map.set(id, pointed({ ...p.insert, id } as Tables[typeof p.table], p.points, ids));
+  ids.set(p.ref, id);
+  return id;
+}
+
+/** `row`, which the caller owns, with each id field `points` names set to the id its ref got. */
+function pointed<R extends Tables[keyof Tables]>(
+  row: R,
+  points: Partial<Record<string, string>> | undefined,
+  ids: Map<string, number>
+): R {
+  for (const [field, ref] of Object.entries(points ?? {})) {
+    const to = ref === undefined ? undefined : ids.get(ref);
     if (to === undefined)
       throw fixedError('A row in a change points at a ref no earlier put made.');
     pointAt(row, field, to);
   }
-  map.set(id, row);
-  ids.set(p.ref, id);
-  return id;
+  return row;
 }
 
 /** Sets one id field a new row points with. A window park keeps its ask in the park, not a column. */
@@ -204,8 +217,9 @@ function pointAt(row: Tables[keyof Tables], field: string, id: number): void {
  * A change being decided, step by step. Each step reads `rows`, the loaded
  * rows as the puts so far leave them, so a helper sees what the steps before
  * it wrote. A later put of a row this change inserts folds into that insert,
- * so the change writes each new row once. `outside` is fixed when the draft
- * starts, so a put can point at a `perKind` effect's ref from the first step.
+ * so the change writes each new row once. Its `perKind` effects are fixed
+ * when the draft starts, so a put can point at one's ref from the first step;
+ * `foldIn` adds other outside writes.
  */
 export type Draft = {
   readonly loaded: WorkRows;
@@ -224,16 +238,44 @@ export function putAll(d: Draft, puts: readonly Put[]): void {
   for (const p of puts) {
     const inserted = 'row' in p ? insertOf(d, p) : undefined;
     if (inserted && 'row' in p) {
-      // Its points stay; the row's own id fields hold the same ids they give.
+      // Its points stay, with any this put adds; the row's own id fields hold the same ids they give.
       const { id: _, ...insert } = p.row;
-      d.put[inserted.at] = { ...inserted.put, insert } as Put;
+      const points =
+        inserted.put.points || p.points ? { ...inserted.put.points, ...p.points } : undefined;
+      d.put[inserted.at] = { ...inserted.put, insert, ...(points && { points }) } as Put;
       putOne(rows, p, d.ids);
       continue;
     }
-    putOne(rows, p, d.ids);
-    d.put.push(p);
+    const kept = 'row' in p ? pointsKept(d, p) : p;
+    putOne(rows, kept, d.ids);
+    d.put.push(kept);
   }
   d.rows = rows;
+}
+
+/**
+ * `p` with the points the last put of the same loaded row made, each whose
+ * field still holds the id its ref got: so a later step that writes the row
+ * again, such as a settle, still points at the row this change inserts.
+ */
+function pointsKept(d: Draft, p: Extract<Put, { row: unknown }>): Put {
+  const last = [...d.put]
+    .reverse()
+    .find((q) => 'row' in q && q.table === p.table && q.row.id === p.row.id);
+  const kept = Object.entries(last?.points ?? {}).filter(
+    ([field, ref]) =>
+      ref !== undefined && !(p.points && field in p.points) && idAt(p.row, field) === d.ids.get(ref)
+  );
+  if (!kept.length) return p;
+  // The same put, pointing as the one before it did.
+  return { ...p, points: { ...Object.fromEntries(kept), ...p.points } } as Put;
+}
+
+/** The id one field of a row holds, as `pointAt` sets it. */
+function idAt(row: Tables[keyof Tables], field: string): unknown {
+  if (field === 'heldBy')
+    return 'park' in row && row.park.on === 'window' ? row.park.ask : undefined;
+  return Reflect.get(row, field);
 }
 
 /** The insert in this draft that gave `p`'s row its id, if one did. */
@@ -246,6 +288,39 @@ function insertOf(
     (q) => 'ref' in q && q.table === p.table && d.ids.get(q.ref) === p.row.id
   );
   return at < 0 ? undefined : { at, put: d.put[at] as Extract<Put, { ref: string }> };
+}
+
+/**
+ * Puts the change another decider made of `d.rows` into `d`, so one event
+ * makes several decisions in order, each by its own family's decider. Each
+ * ref the change names becomes `<tag> <ref>`, so two folded changes never
+ * share one. A `perKind` effect cannot fold in: the ids made up for them are
+ * fixed when the draft starts.
+ */
+export function foldIn(d: Draft, change: Change, tag: string): void {
+  const named = new Set(change.put.flatMap((p) => ('ref' in p ? [p.ref] : [])));
+  const renamed = (ref: string) => (named.has(ref) ? `${tag} ${ref}` : ref);
+  for (const o of change.outside) {
+    if (o.kind === 'perKind')
+      throw fixedError('A change with writes of its own cannot fold into another.');
+    d.outside.push(
+      o.kind === 'attachments'
+        ? { ...o, to: 'ask' in o.to ? { ask: renamed(o.to.ask) } : { task: renamed(o.to.task) } }
+        : o.kind === 'carryFiles' && typeof o.threadId === 'object'
+          ? { ...o, threadId: { ref: renamed(o.threadId.ref) } }
+          : o
+    );
+  }
+  putAll(
+    d,
+    change.put.map((p): Put => {
+      const points = p.points
+        ? Object.fromEntries(Object.entries(p.points).map(([field, ref]) => [field, renamed(ref)]))
+        : undefined;
+      // The same put under its new names: only `ref` and `points` change.
+      return { ...p, ...('ref' in p && { ref: renamed(p.ref) }), ...(points && { points }) } as Put;
+    })
+  );
 }
 
 /** The finished change. */

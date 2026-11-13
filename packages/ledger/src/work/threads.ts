@@ -8,7 +8,7 @@ import { fixedError } from '../errors.ts';
 import { chatCardOf, type HandOff, type InChat, type Outcome } from '../schema.ts';
 import type { LiveKind, OwedRun } from './events.ts';
 import { SERVES_NO_THREAD } from './kinds.ts';
-import { putAll, type Draft, type Fresh, type WorkRows } from './snapshot.ts';
+import { putAll, type Draft, type Fresh, type Inserted, type WorkRows } from './snapshot.ts';
 import type { FollowUp, FollowUpBase, Thread, ThreadBase } from './state.ts';
 
 /** A colleague's run on work a lead handed it. */
@@ -17,6 +17,18 @@ export const isHandOff = (f: FollowUp | undefined): f is HandOffRow => f?.kind =
 
 /** Whether an Odd left the office. One the rows do not hold reads as here, as `leadLeft` reads a missing row. */
 export const hasLeft = (rows: WorkRows, id: string): boolean => !!rows.staff.get(id)?.leftAt;
+
+/**
+ * What an Odd that has left hears when it raises an ask or gives a task: its
+ * run may still be finishing as the owner lets it go, and nothing it raises
+ * then may wait on the desk for an Odd who is gone.
+ */
+export const LEFT_RAISES_NOTHING =
+  'You have left the office, so nothing you raise reaches the Desk.';
+
+/** What the lead hears of work an Odd that left never started. */
+export const leftBeforeStarting = (name: string): string =>
+  `${name} left the office before starting this.`;
 
 /**
  * Whether something raised on a thread is still open on the owner's desk: an
@@ -93,10 +105,15 @@ export function newRun(
   };
 }
 
-/** Adds a run, and settles the thread it works on, as `addFollowUp` does: so a thread's holder and status never fall behind its runs. */
-export function addRun(d: Draft, run: Fresh<FollowUp>, now: Date): void {
-  putAll(d, [{ table: 'followUps', ref: `run ${d.ids.size}`, insert: run }]);
+/**
+ * Adds a run, and settles the thread it works on, as `addFollowUp` does: so a
+ * thread's holder and status never fall behind its runs. Returns the run's ref.
+ */
+export function addRun(d: Draft, run: Fresh<FollowUp>, now: Date): Inserted {
+  const ref = `run ${d.ids.size}`;
+  putAll(d, [{ table: 'followUps', ref, insert: run }]);
   if (run.threadId !== null) settle(d, run.threadId, now);
+  return { ref };
 }
 
 /**
@@ -250,18 +267,18 @@ export function stopThread(d: Draft, threadId: number, now: Date): void {
  * One hand-off taken on a thread, `used` the count of its round so far with
  * this one: the `hand_off` run of `to`, carrying what `sharing()` gave for it.
  * An open thread keeps its park; done or failed work opens again with none.
- * A stopped thread stays stopped, as `startHeld` leaves it.
+ * A stopped thread stays stopped, as `startHeld` leaves it. Returns the run's ref.
  */
 export function handOn(
   d: Draft,
   h: { threadId: number; to: string; handOff: HandOff; used: number },
   now: Date
-): void {
+): Inserted {
   const t = d.rows.threads.get(h.threadId);
   if (!t) throw fixedError('A hand-off was taken on work the rows do not hold.');
   const next = REOPENS.includes(t.status) ? reopened(t) : t;
   putAll(d, [{ table: 'threads', row: { ...next, handOffsUsed: h.used } }]);
-  addRun(
+  return addRun(
     d,
     newRun(
       { staffId: h.to, kind: 'hand_off', note: null, handOff: h.handOff, threadId: h.threadId },
@@ -271,14 +288,50 @@ export function handOn(
   );
 }
 
-/** The usage window's hold lifts: each named open thread `askId` holds is parked on nothing. */
-export function freeFromWindow(d: Draft, askId: number, threadIds: readonly number[]): void {
+/**
+ * The usage window holds a hand-off on a thread, as `holdForWindow` in
+ * ../usage-window.ts does: the thread parks until the window resets, held by
+ * the window's ask, which may be new in this change. Its park replaces any
+ * other. Finished work opens again for a new round, with no hand-off counted.
+ * Then the thread settles.
+ */
+export function holdForWindow(
+  d: Draft,
+  h: { threadId: number; at: Date; ask: number | Inserted },
+  now: Date
+): void {
+  const t = d.rows.threads.get(h.threadId);
+  if (!t) throw fixedError('A hand-off was held on work the rows do not hold.');
+  const ask = typeof h.ask === 'number' ? h.ask : d.ids.get(h.ask.ref);
+  if (ask === undefined) throw fixedError('A hand-off was held by an ask no earlier put made.');
+  const handOffsUsed = t.status === 'open' ? t.handOffsUsed : 0;
+  putAll(d, [
+    {
+      table: 'threads',
+      row: { ...baseOf(t), handOffsUsed, status: 'open', park: { on: 'window', at: h.at, ask } },
+      // A new ask's id is known only to the apply, so the thread points at its ref.
+      ...(typeof h.ask === 'object' && { points: { heldBy: h.ask.ref } })
+    }
+  ]);
+  settle(d, h.threadId, now);
+}
+
+const heldBy = (t: Thread | undefined, askId: number): t is Thread & { status: 'open' } =>
+  t?.status === 'open' && t.park.on === 'window' && t.park.ask === askId;
+
+/**
+ * The usage window's hold lifts: each named open thread `askId` holds is
+ * parked on nothing. True when the ask still holds another thread, as
+ * `windowWoke` asks before it takes an unanswered ask off the desk.
+ */
+export function freeFromWindow(d: Draft, askId: number, threadIds: readonly number[]): boolean {
   const held = threadIds.flatMap((id) => {
     const t = d.rows.threads.get(id);
-    return t?.status === 'open' && t.park.on === 'window' && t.park.ask === askId ? [t] : [];
+    return heldBy(t, askId) ? [t] : [];
   });
   putAll(
     d,
     held.map((t) => ({ table: 'threads', row: { ...t, park: { on: 'none' } } }) as const)
   );
+  return [...d.rows.threads.values()].some((t) => heldBy(t, askId));
 }

@@ -37,12 +37,13 @@ import { carriedOutBy } from './twins.ts';
  * queued, a line each, so several answers landing together wake it once, or
  * it starts one. Only a queued row is joined: one an Odd's leaving ended
  * never starts, so a line joined to it would never be read. Nothing when the
- * lead left the office, since it runs nothing.
+ * lead left the office, since it runs nothing. With no line, as when the time
+ * a lead parked its work until comes, a waiting pick-up is enough as it is.
  */
 export function answerLead(
   d: Draft,
   threadId: number,
-  line: string,
+  line: string | null,
   o: { askId?: number; chat?: InChat },
   now: Date
 ): void {
@@ -61,6 +62,7 @@ export function answerLead(
     )
     .sort((a, b) => a.id - b.id)[0];
   if (waiting) {
+    if (line === null) return;
     const note = waiting.note ? `${waiting.note}\n${line}` : line;
     putAll(d, [{ table: 'followUps', row: { ...waiting, note, ...(chatCard && { chatCard }) } }]);
     return;

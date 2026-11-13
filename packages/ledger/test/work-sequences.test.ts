@@ -1,4 +1,4 @@
-// Random sequences of run, ask and task events through the work core's
+// Random sequences of run, ask, task, thread and leaving events through the work core's
 // deciders. After each event the rows the deciders leave are checked against
 // the test's own record, which it builds from the events alone with today's
 // rules written out in the models beside it (work-model.ts and each
@@ -57,22 +57,36 @@ import {
 } from './work-model.ts';
 import { ask, minutes, odd, recordingEffects, rowsOf, run, T0, task, thread } from './work-rows.ts';
 import { claim, finish, OWED, queue } from './work-runs-model.ts';
+import {
+  ABOUT,
+  bringBack,
+  clockWake,
+  handOff,
+  newRounds,
+  park,
+  removeOdd,
+  stopped,
+  tellLead,
+  threadEvents,
+  WINDOW
+} from './work-threads-model.ts';
 
 // How many seeds the test runs; set WORK_SEQUENCES_SEEDS for a longer run.
-const SEEDS = Number(process.env.WORK_SEQUENCES_SEEDS ?? 200);
+// Enough that each rule's rarer cases meet, such as a run owed to an Odd that left.
+const SEEDS = Number(process.env.WORK_SEQUENCES_SEEDS ?? 1000);
 const LENGTH = 30;
 
-const ABOUT = 'the work';
 // OUTCOME_TITLE has a title for every outcome, so its keys are every outcome.
 const OUTCOMES = Object.keys(OUTCOME_TITLE.resume) as Outcome[];
 
 // The office every sequence starts from. Ada leads at Act, Rico works at
-// Draft, Tess at Read. Theo left the office, so the work he led stopped. Jo
-// was brought back after her leaving failed her runs.
+// Draft, Tess at Read on Codex, so the usage window holds no hand-off to her.
+// Theo left the office, so the work he led stopped. Jo was brought back after
+// her leaving failed her runs.
 const ODDS = [
   odd('ada'),
   odd('rico', { level: 'draft' }),
-  odd('tess', { level: 'read' }),
+  odd('tess', { level: 'read', agent: 'codex' }),
   odd('theo', { leftAt: T0 }),
   odd('jo')
 ];
@@ -100,11 +114,11 @@ function office(): WorkRows {
       thread(3, 'theo', { status: 'stopped', endedAt: T0 }),
       // Ada's hand-offs to Rico and Tess; Rico raised ask 1 on it, still open.
       thread(4, 'ada', { holderId: 'rico' }),
-      // A job of Ada's that works on this thread is running.
-      thread(5, 'ada', { runs: ['ada job'] }),
+      // A job of Ada's that works on this thread is running; one hand-off is left in its round.
+      thread(5, 'ada', { runs: ['ada job'], handOffsUsed: 7 }),
       thread(6, 'tess', { park: { on: 'time', at: minutes(500) } }),
-      // The usage window holds Ada's work until the owner answers ask 4.
-      thread(7, 'ada', { park: { on: 'window', at: minutes(300), ask: 4 } }),
+      // The usage window holds Ada's work until the owner answers ask 4, or it resets.
+      thread(7, 'ada', { park: { on: 'window', at: minutes(WINDOW.resetsAt), ask: 4 } }),
       // Jo's leaving stopped the work she led.
       thread(8, 'jo', { status: 'stopped', endedAt: T0 }),
       // Ada parked this on her open task 4.
@@ -276,6 +290,14 @@ const RULE = {
     'every ask the owner decides and every task the owner ends is heard by exactly one run of the Odd that raised it, unless the answer is one that reaches no run of that Odd today',
   card: "a chat answer comes back under its card only in a run of the Odd whose chat it is, never in a twin's, a lesson's or another Odd's run",
   settled: "every thread's status and holder are what today's rule makes of its runs",
+  stoppedFinal:
+    'work that stopped, or whose lead left, takes no new hand-off and no words or files for its lead',
+  onePark: 'no work holds both a time and a task, and a usage-window hold always has its time',
+  leftClosed: 'an Odd the owner let go has no open ask or task and no run waiting to start',
+  broughtBack: 'an Odd brought back is in the office with its jobs on again, and takes a hand-off',
+  clockWake: "when parked work's time comes, its lead holds exactly one queued resume there",
+  filesGo:
+    "every file a hand-off or a lead's words pass on is copied into the work in that change, or none is",
   model: 'every run, park, ask, task, refusal, report and poke is what the record expects'
 } as const;
 
@@ -301,6 +323,19 @@ function broken(s: State, r: Model, events: WorkEvent[]): Broken[] {
   // The lines a row gained in this event: all of a new row's.
   const newLines = (g: FollowUp) => notesOf(g).slice(notesOf(s.prev.followUps.get(g.id)).length);
   const touched = (g: FollowUp) => !s.prev.followUps.has(g.id) || newLines(g).length > 0;
+
+  // First, so work left open for an Odd that left reads as that, not as the
+  // thread or model mismatch it also makes. Only Odds this sequence let go:
+  // the seed's Theo left before it, holding the queued results the lead-left
+  // rule needs.
+  for (const id of r.letGo) {
+    const open = [
+      ...[...s.rows.asks.values()].filter((a) => a.staffId === id && a.status === 'open'),
+      ...[...s.rows.tasks.values()].filter((k) => k.staffId === id && k.status === 'open'),
+      ...[...s.rows.followUps.values()].filter((f) => f.staffId === id && f.run.is === 'queued')
+    ];
+    if (open.length > 0) fail(RULE.leftClosed, `${id} left, and holds ${show(open)}`);
+  }
 
   if (e.kind === 'runFinished' && (x.refused === 'ended') !== !change)
     fail(RULE.secondFinish, `run ${e.id}: expected ${x.refused ?? 'a change'}, got ${show(d)}`);
@@ -381,6 +416,20 @@ function broken(s: State, r: Model, events: WorkEvent[]): Broken[] {
     if (!said) fail(RULE.wake, `run ${x.wake.runId} holds ${show(f?.note)}`);
   }
 
+  // Before the answers' check, which a wake with no line to the lead also breaks.
+  if (x.clockWake && !x.clockWake.leadLeft) {
+    const { threadId, lead } = x.clockWake;
+    const waiting = [...s.rows.followUps.values()].filter(
+      (g) =>
+        g.staffId === lead &&
+        g.threadId === threadId &&
+        g.kind === 'resume' &&
+        g.run.is === 'queued'
+    );
+    if (waiting.length !== 1)
+      fail(RULE.clockWake, `thread ${threadId}: ${lead} holds ${show(waiting)}`);
+  }
+
   // A run that ended stays ended, whatever a loader makes of its row.
   for (const f of r.runs.values())
     if (f.is === 'ended' && s.rows.followUps.get(f.id)?.run.is !== 'ended')
@@ -456,11 +505,72 @@ function broken(s: State, r: Model, events: WorkEvent[]): Broken[] {
       );
   }
 
+  if (x.onStoppedWork && change)
+    fail(RULE.stoppedFinal, `${show(e)} went through: ${show(change.result)}`);
+
+  // The columns' checks: a task park has no time, and a time or a window hold has one.
+  const PARK_KEYS = { none: 'on', task: 'on,task', time: 'at,on', window: 'ask,at,on' };
+  for (const t of s.rows.threads.values()) {
+    if (t.status !== 'open') continue;
+    const keys = Object.keys(t.park).sort().join();
+    const timed = !('at' in t.park) || t.park.at instanceof Date;
+    if (keys !== PARK_KEYS[t.park.on] || !timed)
+      fail(RULE.onePark, `thread ${t.id} is parked ${show(t.park)}`);
+  }
+
+  if (x.broughtBack) {
+    const back = s.rows.staff.get(x.broughtBack);
+    const jobsOn = (change?.outside ?? []).some(
+      (o) => o.kind === 'comeBack' && o.staffId === x.broughtBack
+    );
+    if (back?.leftAt !== null || !jobsOn)
+      fail(RULE.broughtBack, `${x.broughtBack}: ${show(back)}, ${show(change?.outside)}`);
+  }
+  if (e.kind === 'handedOff' && r.broughtBack.has(e.to) && x.handOff && !change)
+    fail(RULE.broughtBack, `the hand-off to ${e.to} was refused: ${show(d)}`);
+
+  if (e.kind === 'handedOff' || e.kind === 'toldLead') {
+    const files = e.kind === 'handedOff' ? e.carry : e.files.carry;
+    // A hand-off the window holds, or a goal's work opened for another lead,
+    // writes but carries nothing yet, as today: its files go when it is
+    // handed on again. So only a pass that goes carries them.
+    const p = x.passes;
+    const want = p && files.length > 0 ? [{ ...p, files }] : [];
+    const got = (change?.outside ?? []).flatMap((o) =>
+      o.kind === 'carryFiles'
+        ? [
+            {
+              threadId: typeof o.threadId === 'number' ? o.threadId : 'new',
+              from: o.from,
+              files: o.files
+            }
+          ]
+        : []
+    );
+    if (show(got) !== show(want)) fail(RULE.filesGo, `expected ${show(want)}, got ${show(got)}`);
+  }
+
   // The whole model, last, so each rule above names its own failure first.
   if ((x.refused !== undefined) !== !change)
     fail(RULE.model, `${show(e)}: expected ${x.refused ?? 'a change'}, got ${show(d)}`);
-  if (fakes.calls.length > 0)
-    fail(RULE.model, `deciding called its after-commit I/O: ${show(fakes.calls)}`);
+  if (fakes.calls.length > 0 || stopped.length > 0)
+    fail(RULE.model, `deciding called its after-commit I/O: ${show([fakes.calls, stopped])}`);
+  if (e.kind === 'handedOff' && change) {
+    const res = change.result as WorkResults['handedOff'];
+    const got = 'held' in res ? 'held' : 'asked' in res ? 'asked' : 'taken';
+    if (got !== x.handOff) fail(RULE.model, `expected the hand-off ${x.handOff}, got ${show(res)}`);
+  }
+  if (e.kind === 'oddRemoved' && 'change' in d) {
+    const [first] = d.after;
+    const went =
+      x.leaving === 'left'
+        ? !!first &&
+          'then' in first &&
+          first.then === 'stopRuns' &&
+          show(d.after.at(-1)) === show({ record: e.line })
+        : d.after.length === 0 && d.change.put.length === 0 && d.change.outside.length === 0;
+    if (!went) fail(RULE.model, `a leaving (${x.leaving}) gave ${show(d)}`);
+  }
   if ((e.kind === 'askRaised' || e.kind === 'taskGiven') && change) {
     const want = x.already === undefined ? null : { already: x.already };
     if (show(change.result) !== show(want))
@@ -471,6 +581,8 @@ function broken(s: State, r: Model, events: WorkEvent[]): Broken[] {
   if (pokes.length !== x.pokes.length) fail(RULE.model, `expected pokes ${show(x.pokes)}`);
   if (change && show(handedBack(change)) !== show(x.handedBack))
     fail(RULE.model, `expected hand-backs ${show(x.handedBack)}, got ${show(handedBack(change))}`);
+  if (s.rows.threads.size !== r.threads.size)
+    fail(RULE.model, `expected ${r.threads.size} threads, got ${s.rows.threads.size}`);
   if (s.rows.followUps.size !== r.runs.size)
     fail(RULE.model, `expected ${r.runs.size} runs, got ${s.rows.followUps.size}`);
   for (const f of r.runs.values()) {
@@ -499,6 +611,8 @@ function broken(s: State, r: Model, events: WorkEvent[]): Broken[] {
     const park = got.status !== 'open' ? { on: 'none' } : parkOf(got.park);
     if (show(park) !== show(t.park))
       fail(RULE.model, `thread ${t.id}: expected park ${show(t.park)}, got ${show(park)}`);
+    if (got.handOffsUsed !== t.used)
+      fail(RULE.model, `thread ${t.id}: expected ${t.used} hand-offs, got ${got.handOffsUsed}`);
   }
   return out;
 }
@@ -539,6 +653,22 @@ function preparedFor(rows: WorkRows, id: number): Prepared {
     };
   if (a.held) return { sharing: { from: a.held.from, title: a.held.title, brief: a.held.brief } };
   return {};
+}
+
+/** What the loader reads beside the rows for this event. */
+function loadedFor(rows: WorkRows, e: WorkEvent): WorkRows {
+  if (e.kind === 'askDecided') return { ...rows, prepared: preparedFor(rows, e.id) };
+  if (e.kind !== 'handedOff') return rows;
+  const ask = rows.asks.get(WINDOW.ask);
+  return {
+    ...rows,
+    window: {
+      share: WINDOW.share,
+      resetsAt: minutes(WINDOW.resetsAt),
+      ask: ask ? { id: ask.id, status: ask.status } : null
+    },
+    prepared: { sharing: { from: e.from, title: e.work.title, brief: e.work.brief } }
+  };
 }
 
 /** Every ask an Odd may raise now, each place raising each kind at most twice. */
@@ -639,7 +769,9 @@ const sequences: Explore<State, WorkEvent, Model> = {
       ...seed,
       followUps: new Map([...seed.followUps].map(([id, f]) => [id, loaded(f)] as const))
     };
-    return { state: { rows, prev: rows, at: 0 }, record: recordOf(seed) };
+    const record = recordOf(seed);
+    record.broughtBack.add('jo');
+    return { state: { rows, prev: rows, at: 0 }, record };
   },
   next: (r) => [
     ...[...r.runs.keys()].flatMap((id): WorkEvent[] => [
@@ -652,17 +784,19 @@ const sequences: Explore<State, WorkEvent, Model> = {
         ended: { outcome, result: `Ran: ${outcome}`, joined: r.runs.get(id)!.joined }
       }))
     ]),
+    // From an Odd that left too: its last run may still raise or be owed
+    // work as the owner lets it go, the race the rule on leaving closes.
     ...OWED.filter((_, i) => !r.owedSent.has(i)),
     ...raises(r),
-    ...r.asks.flatMap(answers),
     ...gives(r),
+    ...r.asks.flatMap(answers),
     ...[...r.tasks.values()].flatMap(ends),
-    ...DROPS
+    ...DROPS,
+    ...threadEvents(r)
   ],
   step: (s, e) => {
     const at = s.at + 1;
-    const rows =
-      e.kind === 'askDecided' ? { ...s.rows, prepared: preparedFor(s.rows, e.id) } : s.rows;
+    const rows = loadedFor(s.rows, e);
     const last = decide(rows, e, minutes(at));
     return {
       rows: 'change' in last ? applyChange(rows, last.change) : s.rows,
@@ -672,6 +806,7 @@ const sequences: Explore<State, WorkEvent, Model> = {
     };
   },
   note: (r, e) => {
+    const was = new Map([...r.threads].map(([id, t]) => [id, t.status]));
     r.at++;
     r.expected = fresh(Math.max(...r.runs.keys()) + 1);
     if (e.kind === 'runQueued') queue(r, e);
@@ -687,6 +822,13 @@ const sequences: Explore<State, WorkEvent, Model> = {
     if (e.kind === 'taskEnded') endTask(r, e);
     if (e.kind === 'connectTasksDropped') dropConnectTasks(r, e);
     if (e.kind === 'goalStatusChanged') r.owedSent.add(OWED.indexOf(e));
+    if (e.kind === 'parked') park(r, e);
+    if (e.kind === 'clockWoke') clockWake(r, e);
+    if (e.kind === 'handedOff') handOff(r, e);
+    if (e.kind === 'toldLead') tellLead(r, e);
+    if (e.kind === 'oddRemoved') removeOdd(r, e);
+    if (e.kind === 'oddBroughtBack') bringBack(r, e);
+    newRounds(r, e, was);
   },
   broken
 };
@@ -747,17 +889,58 @@ const CASES: Record<keyof typeof RULE, string[]> = {
     'a task answered in chat going back to work, with no card'
   ],
   settled: ['a thread ended', 'a thread kept open only because its last run ended waiting'],
+  stoppedFinal: [
+    'a hand-off on stopped work',
+    'words for stopped work',
+    'a hand-off from an Odd that left'
+  ],
+  onePark: [
+    'a task park replacing a time park',
+    'a time park replacing a task park',
+    'a time park replacing a window hold',
+    'a hand-off held for the usage window'
+  ],
+  leftClosed: [
+    "a leaving stopping the Odd's work",
+    'a leaving withdrawing an ask',
+    'a leaving withdrawing a task',
+    'a leaving failing a run yet to start',
+    'an ask raised by an Odd that left',
+    'a task given by an Odd that left',
+    'a run owed to an Odd that left'
+  ],
+  broughtBack: [
+    'an Odd brought back',
+    'a hand-off to an Odd brought back',
+    'a return withdrawing an ask to bring it back'
+  ],
+  clockWake: [
+    'a clock wake joining a queued resume',
+    'a clock wake starting a resume',
+    'a usage window reset waking held work',
+    'a clock wake with nothing due'
+  ],
+  filesGo: [
+    'a hand-off taken with files',
+    'words told to a lead with files',
+    'a hand-off past the round asking the owner'
+  ],
   model: [
     'a result handed back to its lead',
     'a held call raised again while it is open',
     'a connect task given while one is open',
     'an answer refused before the ask closes',
     'an answer to an ask answered already',
-    "a tool's connect tasks dropped"
+    "a tool's connect tasks dropped",
+    "a hand-off opening a goal's work its sender does not lead",
+    'a hand-off taken',
+    'words told to a lead',
+    'a leaving of an Odd gone already',
+    'an unanswered window ask leaving the desk at the reset'
   ]
 };
 
-test('random sequences of run, ask and task events keep every rule', async (t) => {
+test('random sequences of run, ask, task, thread and leaving events keep every rule', async (t) => {
   const failure = explore(sequences, { seeds: SEEDS, length: LENGTH });
   for (const key of Object.keys(RULE) as (keyof typeof RULE)[]) {
     await t.test(RULE[key], () => {
