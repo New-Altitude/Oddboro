@@ -79,7 +79,9 @@ jobs:
 
       # Each suite exits on its own, with no --test-force-exit, so a handle a
       # test leaks would hold the job to its 45 minutes. Each test step stops
-      # at 10 instead; the slowest took under 3 on a runner.
+      # at 10 instead; the slowest took under 3 on a runner. At 8,
+      # scripts/hang-report.ts records what each test process is doing, from
+      # Node's report on SIGUSR2, and stops the step.
       # NODE_OPTIONS keeps spec in the log and adds scripts/test-times.ts,
       # which writes a line as each file starts and ends, for the Test times
       # step. Flags passed after `--` would land after the npm script's file
@@ -88,10 +90,10 @@ jobs:
       - name: Ledger tests
         timeout-minutes: 10
         env:
-          NODE_OPTIONS: --test-reporter=spec --test-reporter-destination=stdout --test-reporter=../../scripts/test-times.ts --test-reporter-destination=${{ runner.temp }}/test-times/ledger.jsonl
+          NODE_OPTIONS: --test-reporter=spec --test-reporter-destination=stdout --test-reporter=../../scripts/test-times.ts --test-reporter-destination=${{ runner.temp }}/test-times/ledger.jsonl --report-on-signal --report-exclude-env --report-directory=${{ runner.temp }}/hang-reports
         run: |
           mkdir -p "$RUNNER_TEMP/test-times"
-          npx turbo run test --filter=@oddboro/ledger
+          node scripts/hang-report.ts 8 npx turbo run test --filter=@oddboro/ledger
 
       # The test office's stand-in AI tools are scripts that start through
       # their first line, which Windows is taken not to do.
@@ -99,8 +101,8 @@ jobs:
         if: runner.os != 'Windows'
         timeout-minutes: 10
         env:
-          NODE_OPTIONS: --test-reporter=spec --test-reporter-destination=stdout --test-reporter=../../scripts/test-times.ts --test-reporter-destination=${{ runner.temp }}/test-times/office.jsonl
-        run: npx turbo run test --filter=@oddboro/office
+          NODE_OPTIONS: --test-reporter=spec --test-reporter-destination=stdout --test-reporter=../../scripts/test-times.ts --test-reporter-destination=${{ runner.temp }}/test-times/office.jsonl --report-on-signal --report-exclude-env --report-directory=${{ runner.temp }}/hang-reports
+        run: node scripts/hang-report.ts 8 npx turbo run test --filter=@oddboro/office
 
       # The release scripts' Node tests, then the shell's own Rust tests.
       - name: Desktop tests
