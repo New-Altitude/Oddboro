@@ -194,7 +194,6 @@ const FIXTURES: Record<Show['is'], Fixture[]> = {
         work: [['Plan the trip', 'going']],
         count: 1,
         ring: false,
-        jobsLine: 'Running Plan the trip now.',
         running: [],
         locked: true
       },

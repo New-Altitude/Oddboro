@@ -22,8 +22,8 @@
     now: OddNow;
   };
   let { profile, version, now }: Props = $props();
-  /** Its runs going, in words, whatever else it shows. */
-  const running = $derived(runWords(now));
+  /** Its job runs going, in words. A hand-off, a follow-up or a draft is not a job. */
+  const running = $derived(runWords({ ...now, runs: now.runs.filter((w) => w.kind === 'job') }));
 
   let jobs = $state<Job[]>([]);
   /** The job being edited, 'new' for one being added, or nothing. */

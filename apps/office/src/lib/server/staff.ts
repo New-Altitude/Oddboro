@@ -128,7 +128,8 @@ import {
   type TaskRow,
   type ThreadStory,
   type Unparked,
-  type UsageKind
+  type UsageKind,
+  workTitle
 } from '@oddboro/ledger';
 import { flat } from '@oddboro/ledger/desk-answers';
 import { spawn } from 'node:child_process';
@@ -1359,9 +1360,11 @@ export async function followThrough(
           lead: leadId === who.id ? who.name : ((await staffer(leadId))?.name ?? leadId)
         }
       : undefined;
+  // The owner sees the work by its one name, as it shows while queued and in
+  // the Ledger; `label` stays the run's message to the model.
   const work = {
     kind: 'follow-up' as const,
-    label,
+    label: await workTitle(f),
     detail,
     askId: a?.id,
     about,
