@@ -744,6 +744,25 @@ test('every work event decides on the loaded rows as on the whole office, and wr
   assert.deepStrictEqual(calls, [], 'no decider ran an effect while deciding');
 });
 
+test('an Odd the owner let go is given no run, no ask and no task', async () => {
+  await seedOffice();
+  const before = await readRows();
+  const events: WorkEvent[] = [
+    { kind: 'runQueued', run: { staffId: 'gus', kind: 'edited', note: null } },
+    {
+      kind: 'askRaised',
+      ask: { staffId: 'gus', kind: 'approval', title: 'One more', why: 'w', ifApproved: 'i' }
+    },
+    { kind: 'taskGiven', task: { staffId: 'gus', title: 'Sign this', why: 'w', steps: [] } }
+  ];
+  // Gus left before any of these. The sequences above reach an ask or a task for an Odd that
+  // left only after a leaving, which the default seeds may not draw.
+  for (const e of events) {
+    await run(e, minutes(1));
+    assert.deepStrictEqual(await readRows(), before, `${e.kind} wrote nothing`);
+  }
+});
+
 test('new rows written together point at each other and at an effect id by ref, as in memory', async () => {
   await seedOffice();
   const world = await readWorld();
