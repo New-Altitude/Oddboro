@@ -161,14 +161,14 @@ async function reopen(q: Db, id: number, from: ThreadStatus[]): Promise<void> {
     .where(and(eq(threads.id, id), inArray(threads.status, from)));
 }
 
-/** What an Odd is told when it would open a thread it may not lead (`openThread`). */
+/** What an Odd is told when it would open a thread it may not lead (`mayLead`). */
 export const LEADS_NONE =
   "Nothing was opened. You serve a goal and have no job of your own, so you lead no work: the goal's lead hands each piece on. Pass the owner's words to the lead with tell_lead, then tell the owner you passed them on.";
 
 /**
- * The one place a thread is opened, with `hubId` as its lead, once it may
- * lead work (`mayLead`). A hand-off opens its new work through the work core
- * instead, after the same check.
+ * Opens a thread outside the work core, with `hubId` as its lead, once it
+ * may lead work (`mayLead`). A hand-off opens its new work through the work
+ * core instead, after the same check.
  */
 async function openThread(
   q: Db,
@@ -725,10 +725,12 @@ export function exchangeForLead(
  * note lists where each landed, or why it did not come. A file that does not
  * come never stops the words.
  *
- * One transaction holds the thread and its lead from the first look to the
- * note, so a stop or a removal landing meanwhile waits for it. The core
- * decides once with nothing copied, so a refusal copies no file and writes
- * nothing, then again with what the copy gave, which writes the note.
+ * One transaction locks the thread, its lead and the teller first, so a stop
+ * or a removal landing meanwhile waits for the note. What the event carries
+ * (the teller's name, the lead's tools, the work the teller is on) is read
+ * after, and the core decides on the rows it locked: once with nothing
+ * copied, so a refusal copies no file and writes nothing, then again with
+ * what the copy gave, which writes the note.
  */
 export async function tellLead(t: {
   staffId: string;
@@ -740,30 +742,30 @@ export async function tellLead(t: {
   files?: { carry: CarriedFile[]; unfit: { named: string; why: string }[] };
 }): Promise<{ lead: string; files?: Carried[] } | { problem: string }> {
   const told = await db.transaction(async (tx) => {
-    const [row] = await tx
-      .select({ hubId: threads.hubId })
-      .from(threads)
-      .where(eq(threads.id, t.threadId));
-    const [me] = await tx.select({ name: staff.name }).from(staff).where(eq(staff.id, t.staffId));
-    const name = me?.name ?? t.staffId;
-    const lacks =
-      t.exchange && row
-        ? lacking(await heldTools([row.hubId, t.staffId], tx), row.hubId, [t.staffId])
-        : [];
-    const e: EventOf<'toldLead'> = {
+    const toLoad: EventOf<'toldLead'> = {
       kind: 'toldLead',
       staffId: t.staffId,
       threadId: t.threadId,
       said: t.said,
       words: t.words,
       reading: t.reading,
-      exchange: exchangeForLead(t.exchange ?? '', name, lacks, REPLY_A_LEAD_LACKS),
-      worksOn: await workedOn(tx, t.staffId),
+      // Read below, under the locks: the loader reads only the thread and the teller.
+      exchange: '',
+      worksOn: new Set(),
       files: []
     };
-    // No refusal reads the files, so this one, under the locks the note is
-    // written under, is the one the note would get.
-    const first = decide(await loadWork(tx, e), e, new Date());
+    const rows = await loadWork(tx, toLoad);
+    const lead = rows.threads.get(t.threadId)?.hubId;
+    const name = rows.staff.get(t.staffId)?.name ?? t.staffId;
+    const lacks =
+      t.exchange && lead ? lacking(await heldTools([lead, t.staffId], tx), lead, [t.staffId]) : [];
+    const e: EventOf<'toldLead'> = {
+      ...toLoad,
+      exchange: exchangeForLead(t.exchange ?? '', name, lacks, REPLY_A_LEAD_LACKS),
+      worksOn: await workedOn(tx, t.staffId)
+    };
+    // No refusal reads the files, so this one is the one the note would get.
+    const first = decide(rows, e, new Date());
     if ('refused' in first) return first;
     const files: Carried[] = [
       ...carryEach(t.threadId, t.staffId, t.files?.carry ?? []),

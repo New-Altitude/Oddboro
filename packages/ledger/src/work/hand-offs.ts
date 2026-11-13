@@ -320,7 +320,7 @@ export function toldLead(
   return { change: changeOf(d, { lead: lead.name, ...(files.length && { files }) }), after: [] };
 }
 
-/** What the lead's note says of the files the owner attached, as `attachedLine` in ../threads.ts: where each landed, and which did not come and why. */
+/** What the lead's note says of the files the owner attached: where each landed, and which did not come and why. */
 function attachedLine(files: Carried[], owner: string): string {
   const landed = files.flatMap((f) => ('at' in f ? [`${flat(f.named)} at ${f.at}`] : []));
   const left = files.flatMap((f) => ('why' in f ? [`${flat(f.named)}, since ${f.why}`] : []));
