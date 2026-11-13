@@ -54,7 +54,7 @@ import { db } from './pglite.ts';
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
 const { LOCK_ORDER, transition } = await import('../src/transition.ts');
 const { loadWork, queuedRows } = await import('../src/work/load.ts');
-const { applyWork, realIds } = await import('../src/work/apply.ts');
+const { applyWork } = await import('../src/work/apply.ts');
 const { threadPart } = await import('../src/threads.ts');
 // The office's own handle, which is PGlite's here, so a transaction has the type the core takes.
 const { db: officeDb } = await import('../src/db.ts');
@@ -364,23 +364,35 @@ function applyAtSerials(rows: WorkRows, change: Change, next: Record<Table, numb
   return after;
 }
 
-/** One event through the shell, on the office's database, with the core's own loader and writer, and the rows it loaded. */
-async function run(e: WorkEvent, now: Date): Promise<{ got: Decided<Change>; loaded: WorkRows }> {
+/** The real ids `applyWork` gives for the rows a written change names. */
+type RealId = Awaited<ReturnType<typeof applyWork>>;
+
+/**
+ * One event through the shell, on the office's database, with the core's own
+ * loader and writer, the rows it loaded, and the real ids of a change it wrote.
+ */
+async function run(
+  e: WorkEvent,
+  now: Date
+): Promise<{ got: Decided<Change>; loaded: WorkRows; real: RealId | undefined }> {
   let loaded: WorkRows | undefined;
+  let real: RealId | undefined;
   const got = await officeDb.transaction((tx) =>
     transition(
       {
         name: e.kind,
         load: async (q: Tx) => (loaded = await loadWork(q, e)),
         decide: (rows: WorkRows, at: Date) => decide(rows, e, at),
-        apply: applyWork
+        apply: async (q: Tx, c: Change) => {
+          real = await applyWork(q, c);
+        }
       },
       // The shell hands the after-effects back unrun: the effects test below runs them.
       { tx, now }
     )
   );
   if (!loaded) throw new Error('The shell decided without loading.');
-  return { got, loaded };
+  return { got, loaded, real };
 }
 
 /** An after-effect that runs a closure, by its name: a closure made in each decide is a new function. */
@@ -1153,7 +1165,10 @@ test('an answer and a leaving run their effects after the commit, never while th
             calls.push('decided');
             return d;
           },
-          apply: applyWork
+          // A transition's `apply` gives nothing back, and this test reads no real ids.
+          apply: async (q: Tx, c: Change) => {
+            await applyWork(q, c);
+          }
         },
         { now: minutes(1) }
       );
@@ -1237,11 +1252,13 @@ test('a hand-off that opens new work copies its files into that work by its real
 test("a taken hand-off's result names the real run and work, never the decider's guesses", async () => {
   await seedOffice();
   await idsOffset(await readRows());
-  const { got } = await run(handOffOf({ open: { title: 'New work', hubId: 'lia' } }), minutes(1));
-  assert.ok('change' in got);
+  const { got, real } = await run(
+    handOffOf({ open: { title: 'New work', hubId: 'lia' } }),
+    minutes(1)
+  );
+  assert.ok('change' in got && real);
   const result = got.change.result as WorkResults['handedOff'];
   assert.ok('id' in result, 'the hand-off was taken');
-  const real = realIds(got.change);
   const [run1] = await db.select().from(followUps).orderBy(desc(followUps.id)).limit(1);
   assert.deepStrictEqual(
     { id: real(result.id), thread: real(result.thread), kind: run1.kind },

@@ -41,29 +41,15 @@ type Ids = Map<string, number | string>;
 type RealId = (row: number | Inserted) => number;
 
 /**
- * Each written change's real ids, so an entry reads them from the change
- * the transition hands back, whose `apply` returns nothing.
- */
-const written = new WeakMap<Change, RealId>();
-
-/**
- * The real ids of the rows a written change's result names, which the entry
- * gives its caller in place of the refs.
- */
-export function realIds(change: Change): RealId {
-  const real = written.get(change);
-  if (!real) throw fixedError('A change was read for its ids before it was written.');
-  return real;
-}
-
-/**
  * Write a change inside the transition's transaction. The `perKind` effects
  * run first, in order, since a put may point at the id one returns; then the
  * puts, in order; then the other writes outside the four tables, in order,
  * since attachments point at a new ask or task. Any throw rolls all of it
- * back, a hand-off's files that cannot be carried included.
+ * back, a hand-off's files that cannot be carried included. Gives the real
+ * ids of the rows the change names, which an entry gives its caller in place
+ * of the refs in the change's result.
  */
-export async function applyWork(tx: Tx, change: Change): Promise<void> {
+export async function applyWork(tx: Tx, change: Change): Promise<RealId> {
   const ids: Ids = new Map();
   for (const o of change.outside) {
     if (o.kind !== 'perKind') continue;
@@ -75,7 +61,7 @@ export async function applyWork(tx: Tx, change: Change): Promise<void> {
   for (const p of change.put) await put(tx, p, ids);
   const real: RealId = (row) => (typeof row === 'number' ? row : idOf(ids, row.ref));
   for (const o of change.outside) await outside(tx, o, real);
-  written.set(change, real);
+  return real;
 }
 
 function keep(ids: Ids, ref: string, id: number | string): void {
