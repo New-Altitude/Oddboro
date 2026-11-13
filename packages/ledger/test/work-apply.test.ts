@@ -1112,46 +1112,53 @@ test('a yes to a switch, a folder or a held hand-off is decided on what the load
     assert.deepStrictEqual(await prepared(no), {}, 'a no or a send-back prepares nothing');
 });
 
-test('an answer runs its effects after its commit, never while it is decided', async () => {
-  await seedOffice();
-  calls.length = 0;
-  const e = answer(3, 'approve', {
-    carryOut: async (a) => void calls.push(`carryOut ${a.id}`)
-  });
-  const commit = officeDb.transaction.bind(officeDb);
-  mock.method(officeDb, 'transaction', async (inTx: Parameters<typeof commit>[0]) => {
-    const done = await commit(inTx);
-    calls.push('committed');
-    return done;
-  });
-  try {
-    await transition(
-      {
-        name: e.kind,
-        load: (q: Tx) => loadWork(q, e),
-        decide: (rows: WorkRows, at: Date) => {
-          calls.push('deciding');
-          const d = decide(rows, e, at);
-          calls.push('decided');
-          return d;
+test('an answer and a leaving run their effects after the commit, never while they are decided', async () => {
+  /** The calls one event makes, in order, with when it was decided and committed. */
+  const callsOf = async (e: WorkEvent): Promise<string[]> => {
+    await seedOffice();
+    calls.length = 0;
+    const commit = officeDb.transaction.bind(officeDb);
+    mock.method(officeDb, 'transaction', async (inTx: Parameters<typeof commit>[0]) => {
+      const done = await commit(inTx);
+      calls.push('committed');
+      return done;
+    });
+    try {
+      await transition(
+        {
+          name: e.kind,
+          load: (q: Tx) => loadWork(q, e),
+          decide: (rows: WorkRows, at: Date) => {
+            calls.push('deciding');
+            const d = decide(rows, e, at);
+            calls.push('decided');
+            return d;
+          },
+          apply: applyWork
         },
-        apply: applyWork
-      },
-      { now: minutes(1) }
-    );
-  } finally {
-    mock.restoreAll();
-  }
+        { now: minutes(1) }
+      );
+    } finally {
+      mock.restoreAll();
+    }
+    const made = [...calls];
+    calls.length = 0;
+    return made;
+  };
   // The twin off any work is answered with it, and carried out with it.
-  assert.deepStrictEqual(calls, [
+  assert.deepStrictEqual(
+    await callsOf(
+      answer(3, 'approve', { carryOut: async (a) => void calls.push(`carryOut ${a.id}`) })
+    ),
+    ['deciding', 'decided', 'committed', 'carryOut 3', 'grantAccess cal', 'carryOutTogether 3 4']
+  );
+  // The office stops a run of the Odd only once its leaving is in the database.
+  assert.deepStrictEqual(await callsOf(leaving('cal')), [
     'deciding',
     'decided',
     'committed',
-    'carryOut 3',
-    'grantAccess cal',
-    'carryOutTogether 3 4'
+    'stopRuns cal'
   ]);
-  calls.length = 0;
 });
 
 test('the usage window ask goes under the earliest hired manager, whatever their names', async () => {
