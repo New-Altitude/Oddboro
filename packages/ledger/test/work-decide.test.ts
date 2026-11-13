@@ -4,43 +4,34 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { StaffRow } from '../src/office.ts';
-import type { Decision } from '../src/office-asks.ts';
 import type { AccessRequest, HandOff, Step } from '../src/schema.ts';
 import { decide } from '../src/work/decide.ts';
 import type { Claimed, EventOf, RunEnded } from '../src/work/events.ts';
 import { applyChange, type Change, type WorkRows } from '../src/work/snapshot.ts';
 import { askRow, threadRow, type FollowUp, type Park, type Thread } from '../src/work/state.ts';
-import { ask, minutes, odd, recordingEffects, rowsOf, run, T0, task, thread } from './work-rows.ts';
+import {
+  answer,
+  ask,
+  changed,
+  minutes,
+  odd,
+  pokesOf,
+  recordingEffects,
+  reportsOf,
+  rowsOf,
+  run,
+  T0,
+  task,
+  thread
+} from './work-rows.ts';
 
 const NOW = minutes(10);
 const TITLE = 'Sort the invoices';
-
-/** A change the decider made, failing the test on a refusal. */
-function changed<R>(d: { refused: string } | { change: Change<R> }): Change<R> {
-  if ('refused' in d) assert.fail(`refused: ${d.refused}`);
-  return d.change;
-}
 
 /** The runs a change starts: the follow-ups it adds to the rows. */
 function started(rows: WorkRows, c: Change): FollowUp[] {
   return [...applyChange(rows, c).followUps.values()].filter((f) => !rows.followUps.has(f.id));
 }
-
-/** The owner's answer to ask `id`, with nothing the entry adds and fakes that record each call. */
-const answer = (
-  id: number,
-  decision: Decision,
-  over: Partial<EventOf<'askDecided'>> = {}
-): EventOf<'askDecided'> => ({
-  kind: 'askDecided',
-  id,
-  decision,
-  reason: null,
-  inChat: false,
-  perKind: [],
-  effects: recordingEffects().effects,
-  ...over
-});
 
 /** The owner's end to task `id`, off the chat unless `over` says so. */
 const ended = (
@@ -61,9 +52,6 @@ const connectGmail: Step = {
   done: false,
   action: { kind: 'oauth', connector: 'gmail' }
 };
-
-const pokesOf = (c: Change) => c.outside.flatMap((o) => (o.kind === 'poke' ? [o] : []));
-const reportsOf = (c: Change) => c.outside.flatMap((o) => (o.kind === 'report' ? [o] : []));
 
 /**
  * Ada led thread 1 and left the office, which stopped it. Rico did the work

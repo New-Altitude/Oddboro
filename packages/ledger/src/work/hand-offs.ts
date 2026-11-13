@@ -277,12 +277,9 @@ function raise(d: Draft, ask: NewAsk, tag: string, after: After[], now: Date): I
  * the owner said, so only the owner's own words reach the lead as theirs.
  * Not to work the Odd leads, is not on, that stopped, or whose lead left.
  *
- * The owner's attachments are copied with the change (`carryFiles`), each
- * under the name the entry planned, and the note names where each landed or
- * why it did not come. A file that cannot land never stops the words: there
- * is no rollback for a failed copy, and the apply skips a file whose copy
- * fails, as `carryEach` does. The note is written before the copy, so a file
- * whose copy fails at the apply is named in it as landed though it is not there.
+ * The entry copies the owner's attachments first, as `carryEach` does, and
+ * the event carries what came of each: the note names where each landed and
+ * why each other did not come. A file that cannot land never stops the words.
  */
 export function toldLead(
   rows: WorkRows,
@@ -320,13 +317,8 @@ export function toldLead(
     };
 
   const name = rows.staff.get(e.staffId)?.name ?? e.staffId;
-  const files = e.files.noted;
-  const d = draft(
-    rows,
-    e.files.carry.length
-      ? [{ kind: 'carryFiles', threadId: id, from: e.staffId, files: e.files.carry }]
-      : []
-  );
+  const files = e.files;
+  const d = draft(rows);
   // A lead once read this as the colleague taking it on, and sent no work.
   const note = `${name} passed you what ${owner} told them in chat about this work. You decide what comes of it and hand on any work it needs; ${name} does nothing more with it. ${owner}'s words: ${words} ${name}'s own reading, which is not ${owner}'s words: ${reading}${e.exchange ? ` ${e.exchange}` : ''}${attachedLine(files, owner)}`;
   answerLead(d, id, note, {}, now);

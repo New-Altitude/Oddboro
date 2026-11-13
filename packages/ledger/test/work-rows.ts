@@ -1,8 +1,11 @@
-// Rows in memory for the work core's pure tests (work-decide.test.ts and
-// work-sequences.test.ts). Each builder fills every column, so a test names
+// Rows in memory for the work core's pure tests (work-decide.test.ts,
+// work-decide-threads.test.ts and work-sequences.test.ts), and what those
+// tests read off a change. Each builder fills every column, so a test names
 // only what it is about. Imports types and pure modules only: no database.
-import type { AskEffects, LiveKind } from '../src/work/events.ts';
-import type { Odd, WorkRows } from '../src/work/snapshot.ts';
+import assert from 'node:assert/strict';
+import type { Decision } from '../src/office-asks.ts';
+import type { AskEffects, EventOf, LiveKind } from '../src/work/events.ts';
+import type { Change, Odd, WorkRows } from '../src/work/snapshot.ts';
 import type { Ask, FollowUp, RunState, Task, Thread } from '../src/work/state.ts';
 
 /** The time the rows were made; each event in a test comes later. */
@@ -172,3 +175,28 @@ export function recordingEffects(granted = { task: true, connector: 'gmail' }): 
   };
   return { effects, calls };
 }
+
+/** A change the decider made, failing the test on a refusal. */
+export function changed<R>(d: { refused: string } | { change: Change<R> }): Change<R> {
+  if ('refused' in d) assert.fail(`refused: ${d.refused}`);
+  return d.change;
+}
+
+export const pokesOf = (c: Change) => c.outside.flatMap((o) => (o.kind === 'poke' ? [o] : []));
+export const reportsOf = (c: Change) => c.outside.flatMap((o) => (o.kind === 'report' ? [o] : []));
+
+/** The owner's answer to ask `id`, with nothing the entry adds and fakes that record each call. */
+export const answer = (
+  id: number,
+  decision: Decision,
+  over: Partial<EventOf<'askDecided'>> = {}
+): EventOf<'askDecided'> => ({
+  kind: 'askDecided',
+  id,
+  decision,
+  reason: null,
+  inChat: false,
+  perKind: [],
+  effects: recordingEffects().effects,
+  ...over
+});

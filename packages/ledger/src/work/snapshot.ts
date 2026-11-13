@@ -236,7 +236,7 @@ export function draft(rows: WorkRows, outside: Outside[] = []): Draft {
 export function putAll(d: Draft, puts: readonly Put[]): void {
   const rows = copy(d.rows);
   for (const p of puts) {
-    const inserted = 'row' in p ? insertOf(d, p) : undefined;
+    const inserted = 'row' in p ? insertOf(d, p.table, p.row.id) : undefined;
     if (inserted && 'row' in p) {
       // Its points stay, with any this put adds; the row's own id fields hold the same ids they give.
       const { id: _, ...insert } = p.row;
@@ -278,17 +278,24 @@ function idAt(row: Tables[keyof Tables], field: string): unknown {
   return Reflect.get(row, field);
 }
 
-/** The insert in this draft that gave `p`'s row its id, if one did. */
+/** The insert in this draft that gave row `id` of `table` its id, if one did. */
 function insertOf(
   d: Draft,
-  p: Extract<Put, { row: unknown }>
+  table: keyof Tables,
+  id: number
 ): { at: number; put: Extract<Put, { ref: string }> } | undefined {
-  if (d.loaded[p.table].has(p.row.id)) return undefined;
-  const at = d.put.findIndex(
-    (q) => 'ref' in q && q.table === p.table && d.ids.get(q.ref) === p.row.id
-  );
+  if (d.loaded[table].has(id)) return undefined;
+  const at = d.put.findIndex((q) => 'ref' in q && q.table === table && d.ids.get(q.ref) === id);
   return at < 0 ? undefined : { at, put: d.put[at] as Extract<Put, { ref: string }> };
 }
+
+/**
+ * The `ref` of the row this draft inserted into `table` as `id`, if it did.
+ * A row that takes that id points at the ref: `id` is only the draft's
+ * guess, and the database gives the row its own.
+ */
+export const insertedRef = (d: Draft, table: keyof Tables, id: number): string | undefined =>
+  insertOf(d, table, id)?.put.ref;
 
 /**
  * Puts the change another decider made of `d.rows` into `d`, so one event

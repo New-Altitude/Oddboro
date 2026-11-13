@@ -207,11 +207,11 @@ export type WorkEvent =
       /** The threads the Odd works on and does not lead, as the entry read them: the goals it serves are not loaded. */
       worksOn: ReadonlySet<number>;
       /**
-       * The owner's attachments: `carry` each file to copy, under the name it
-       * lands at, and `noted` where each lands or why it does not, for the
-       * lead's note. The entry plans where each lands; the copy goes with the change.
+       * What became of each of the owner's attachments: where it landed, or
+       * why it could not be copied. The entry copies them before deciding,
+       * as `carryEach` does, so the lead's note names only what is there.
        */
-      files: { carry: CarriedFile[]; noted: Carried[] };
+      files: Carried[];
     };
 
 export type { Inserted } from './snapshot.ts';

@@ -24,7 +24,13 @@ import type {
   WorkResults
 } from '../src/work/events.ts';
 import { OUTCOME_TITLE } from '../src/work/runs.ts';
-import { applyChange, type Change, type Prepared, type WorkRows } from '../src/work/snapshot.ts';
+import {
+  applyChange,
+  type Change,
+  type Prepared,
+  type Put,
+  type WorkRows
+} from '../src/work/snapshot.ts';
 import { followUpRow, parseFollowUp, type FollowUp } from '../src/work/state.ts';
 import {
   decideAsk,
@@ -297,11 +303,36 @@ const RULE = {
   broughtBack: 'an Odd brought back is in the office with its jobs on again, and takes a hand-off',
   clockWake: "when parked work's time comes, its lead holds exactly one queued resume there",
   filesGo:
-    "every file a hand-off or a lead's words pass on is copied into the work in that change, or none is",
+    "every file a hand-off passes on is copied into the work in that change, or none is, and a lead's words name each attached file where its copy landed or why it did not come",
+  pointed:
+    'a row a change writes takes the id of a row new in that change only by pointing at its ref, never by the id the draft made up',
   model: 'every run, park, ask, task, refusal, report and poke is what the record expects'
 } as const;
 
 const notesOf = (f: FollowUp | undefined) => (f?.note ? f.note.split('\n') : []);
+
+type Table = Put['table'];
+type LinkOf<T extends Table> = keyof NonNullable<Extract<Put, { table: T }>['points']>;
+/**
+ * The table each id field a put may point with takes its id from, so the
+ * type checker fails here when a put gains one. Null for a goal, which no
+ * change in the core inserts.
+ */
+const LINKS: { [T in Table]: Record<LinkOf<T>, Table | null> } = {
+  threads: { goalId: null, heldBy: 'asks' },
+  followUps: { threadId: 'threads', askId: 'asks', taskId: 'tasks', goalId: null },
+  asks: { threadId: 'threads', handOffId: 'followUps' },
+  tasks: { threadId: 'threads', askId: 'asks', handOffId: 'followUps' }
+};
+
+/** The id one field of a put's row holds, where a window park keeps its ask in the park. */
+function idIn(p: Put, field: string): unknown {
+  if (p.table === 'threads' && field === 'heldBy') {
+    const t = 'row' in p ? p.row : p.insert;
+    return t.status === 'open' && t.park.on === 'window' ? t.park.ask : undefined;
+  }
+  return Reflect.get('row' in p ? p.row : p.insert, field);
+}
 /** The kinds of run that hear an answer, by where it was raised; on its own work a lead's pick-up hears it too. */
 const HEARS: Record<Heard['place'], LiveKind[]> = {
   none: ['answered', 'carry_out', 'rework', 'denied', 'task_done'],
@@ -530,12 +561,13 @@ function broken(s: State, r: Model, events: WorkEvent[]): Broken[] {
     fail(RULE.broughtBack, `the hand-off to ${e.to} was refused: ${show(d)}`);
 
   if (e.kind === 'handedOff' || e.kind === 'toldLead') {
-    const files = e.kind === 'handedOff' ? e.carry : e.files.carry;
     // A hand-off the window holds, or a goal's work opened for another lead,
     // writes but carries nothing yet, as today: its files go when it is
-    // handed on again. So only a pass that goes carries them.
+    // handed on again. So only a pass that goes carries them. A lead's words
+    // carry none: the entry copied the owner's attachments before deciding.
     const p = x.passes;
-    const want = p && files.length > 0 ? [{ ...p, files }] : [];
+    const want =
+      p && e.kind === 'handedOff' && e.carry.length > 0 ? [{ ...p, files: e.carry }] : [];
     const got = (change?.outside ?? []).flatMap((o) =>
       o.kind === 'carryFiles'
         ? [
@@ -548,6 +580,31 @@ function broken(s: State, r: Model, events: WorkEvent[]): Broken[] {
         : []
     );
     if (show(got) !== show(want)) fail(RULE.filesGo, `expected ${show(want)}, got ${show(got)}`);
+  }
+  if (e.kind === 'toldLead' && x.passes) {
+    const note = [...s.rows.followUps.values()].flatMap(newLines).join('\n');
+    for (const f of e.files) {
+      const said = 'at' in f ? `${f.named} at ${f.at}` : `${f.named}, since ${f.why}`;
+      if (!note.includes(said)) fail(RULE.filesGo, `the lead's note does not say ${said}: ${note}`);
+      if ('why' in f && note.includes(`${f.named} at `))
+        fail(RULE.filesGo, `the lead's note names ${f.named} as landed: ${note}`);
+    }
+  }
+
+  // The in-memory apply gives a new row the id the draft made up, so only the
+  // puts themselves show an id the database would give another row.
+  for (const p of change?.put ?? []) {
+    const links: Partial<Record<string, Table | null>> = LINKS[p.table];
+    for (const [field, table] of Object.entries(links)) {
+      const id = idIn(p, field);
+      const made =
+        !!table && typeof id === 'number' && !s.prev[table].has(id) && s.rows[table].has(id);
+      if (made && !(p.points && field in p.points))
+        fail(
+          RULE.pointed,
+          show({ table: p.table, ref: 'ref' in p ? p.ref : p.row.id, [field]: id })
+        );
+    }
   }
 
   // The whole model, last, so each rule above names its own failure first.
@@ -925,6 +982,7 @@ const CASES: Record<keyof typeof RULE, string[]> = {
     'words told to a lead with files',
     'a hand-off past the round asking the owner'
   ],
+  pointed: ['a hand-off taken on new work'],
   model: [
     'a result handed back to its lead',
     'a held call raised again while it is open',
