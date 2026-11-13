@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { eq } from 'drizzle-orm';
-import { asks, followUps, staff, tasks } from '../src/schema.ts';
+import { asks, followUps, staff, tasks, threads } from '../src/schema.ts';
 import { db } from './pglite.ts';
 
 // The ledger rows a decision writes embed nothing: no Ollama answers here.
@@ -89,6 +89,31 @@ test('a no answers both, and only the first starts a run to read why', async () 
   assert.deepEqual(
     answered.filter((f) => f.askId === first.id || f.askId === twin.id),
     []
+  );
+});
+
+test('a no to a folder ask answers its twin on a thread, and that thread hears it', async () => {
+  const [work] = await db
+    .insert(threads)
+    .values({ title: 'Sort the notes', hubId: 'paige', holderId: 'paige' })
+    .returning();
+  const folder = { path: '/tmp/twin-asks-folder', level: 'read' as const };
+  const ask = {
+    kind: 'folder' as const,
+    title: 'Read the notes folder',
+    why: 'w',
+    ifApproved: 'i',
+    folder
+  };
+  const { ask: first } = await raiseAsk('paige', ask);
+  const { ask: twin } = await raiseAsk('paige', { ...ask, threadId: work.id });
+  await decideAsk(first.id, 'deny', null);
+  assert.equal((await row(twin.id)).status, 'denied');
+  assert.ok(!(await shown()).includes(twin.id), 'the twin does not come back on the desk');
+  const onThread = await db.select().from(followUps).where(eq(followUps.threadId, work.id));
+  assert.deepEqual(
+    onThread.map((f) => f.askId),
+    [twin.id]
   );
 });
 

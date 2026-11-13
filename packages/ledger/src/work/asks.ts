@@ -186,7 +186,9 @@ export function askDecided(
 
   const reason = e.reason || null;
   const { status: _, ...base } = loaded;
-  const ask = decidedAs({ ...base, ...done }, decision, reason, now);
+  // An entry names every `done` key, the ones it did nothing with as undefined:
+  // a plain spread would erase the ask's own folder, and with it its twins.
+  const ask = decidedAs(filled(base, done), decision, reason, now);
   // A yes or a no answers the twins too; sending one back leaves them for the new version.
   const twins =
     TWINNED.includes(ask.kind) && decision !== 'iterate'

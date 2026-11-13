@@ -68,14 +68,14 @@ type Links = {
 export type Fresh<T> = T extends unknown ? Omit<T, 'id'> : never;
 
 /**
- * A new row: every column `empty` holds, then each one `named` gives a
- * value. A column `named` leaves undefined keeps its empty value, as an
- * insert that leaves a column out gets its default.
+ * A row: every column `base` holds, then each one `named` gives a value. A
+ * column `named` leaves undefined keeps its value in `base`, as an insert
+ * that leaves a column out gets its default, or an update leaves it as it was.
  */
-export function filled<E extends object, N extends object>(empty: E, named: N): E & N {
+export function filled<E extends object, N extends object>(base: E, named: N): E & N {
   const given = Object.entries(named).filter(([, v]) => v !== undefined);
-  // `given` is `named` without its undefined columns, which `empty` fills.
-  return { ...empty, ...Object.fromEntries(given) } as E & N;
+  // `given` is `named` without its undefined columns, which `base` fills.
+  return { ...base, ...Object.fromEntries(given) } as E & N;
 }
 
 /**
