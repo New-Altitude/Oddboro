@@ -248,7 +248,7 @@ export function oweRun(
 
 /**
  * A colleague's result goes back to the lead that handed it the work, as a
- * `handed_back` run on the work, as `handBack` and `addFollowUp` do. Nothing
+ * `handed_back` run on the work, as `addFollowUp` does. Nothing
  * goes back to a lead that left the office, since it runs nothing: true when
  * the result went back. `answered` marks a result that is the owner's own
  * answer, which no run followed.

@@ -189,7 +189,7 @@ export function taskEnded(
     switch (effect) {
       // A dropped task's answer goes back to its hand-off or thread, with no
       // chat card, as today. On no work it is the `answered` run of the Odd
-      // that gave it (`offWorkAnswer`).
+      // that gave it (`offWorkAnswer`), unless taken off the desk.
       case 'answer_back': {
         const answer = [said, ...parked.map((p) => pickedUpLine(p.title))].join(' ');
         if (offWorkOdd)

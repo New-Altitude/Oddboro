@@ -1834,13 +1834,14 @@ test('a dropped connect task for an ask raised in a chat answers its Odd with a 
   );
 });
 
-test('a dropped task given on a hand-off answers the lead that handed the work, so the work its Odd parked on it hears of no run of its own', async () => {
+test("a dropped task given on a hand-off answers the lead that handed the work, and the work its Odd parked on it hears that the hand-off's work picks up", async () => {
   const { lead, colleague, h } = await ownWork('dropped-hand-off');
   const task = await O.giveTask(colleague, {
     title: 'Check the hall',
     why: 'w',
     steps: ['Do it'],
-    handOffId: h.id
+    handOffId: h.id,
+    threadId: h.threadId ?? undefined
   });
   const own = await H.handOff({
     from: colleague,
@@ -1860,7 +1861,7 @@ test('a dropped task given on a hand-off answers the lead that handed the work, 
   const [woken] = await onThread(parked, 'resume');
   assert.match(
     woken.note ?? '',
-    /dropped "Check the hall", the task you parked this work on, so it will not be finished\. Decide what comes of the work now: Not needed\.$/
+    /dropped "Check the hall", the task you parked this work on, so it will not be finished\. "Work on dropped-hand-off", the work that task was given on, picks up too, and its lead carries that work's own part: do only this work's here\. Decide what comes of the work now: Not needed\.$/
   );
 });
 

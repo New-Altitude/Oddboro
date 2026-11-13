@@ -484,8 +484,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   and when a run on the task's own work picks up too, names that work, whose lead carries its
   own part (never a lead that left the office, which runs nothing), or for a task on no work
   says another run of the hub's does, as one does when the owner finishes or drops it (`OWN_RUN`):
-  never when it is taken off the desk, or when it came on a hand-off, whose lead the drop's
-  answer goes to; a stopped thread loses its park, whether the owner
+  never when it is taken off the desk; a stopped thread loses its park, whether the owner
   stopped it or its hub left the office (`removeOdd`); and the
   hub's next run on the thread ends a park on a task or a time as it starts, whatever starts it,
   and is told the wait ended (`startFollowUp`), while a colleague's run, a pick-up still waiting

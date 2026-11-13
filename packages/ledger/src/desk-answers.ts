@@ -119,9 +119,9 @@ export type TaskEffect = Extract<Effect, 'carry_out' | 'task_done' | 'answer_bac
 /**
  * Whether each effect of a task's end starts a run of the task's own: always;
  * on its work, else its Odd, as an answer does: it goes back to the work the
- * task is on, and on no work to the Odd that gave it, as an `answered` run,
- * unless that Odd took the task off the desk or the task came on a hand-off,
- * whose lead the answer goes to instead; or never. Each such run and the work
+ * task is on, to the lead that handed it when the task came on a hand-off,
+ * and on no work to the Odd that gave it, as an `answered` run, unless that
+ * Odd took the task off the desk; or never. Each such run and the work
  * parked on the task are told of each other (`ownRunOf`), or both do the
  * parked work.
  */
