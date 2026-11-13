@@ -1028,7 +1028,6 @@ async function toldLead(colleague: string, work: number): Promise<Row> {
   const told = await T.tellLead({
     staffId: colleague,
     threadId: work,
-    owner: 'Sam',
     said,
     words: said,
     reading: 'Sam wants it done now.'

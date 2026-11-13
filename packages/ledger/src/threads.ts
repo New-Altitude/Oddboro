@@ -48,8 +48,11 @@ import { flat, type DeskItem } from './desk-answers.ts';
 import { heldTools, lacking, sharing, toolNames, type Tool } from './sharing.ts';
 import { carryEach, type Carried, type CarriedFile } from './hand-offs.ts';
 import { THREADS_DIR, workPath } from './work-paths.ts';
+import { runAfters } from './transition.ts';
 import { transitionWork } from './work/apply.ts';
-import { queuedRows } from './work/load.ts';
+import { decide } from './work/decide.ts';
+import type { EventOf } from './work/events.ts';
+import { loadWork, queuedRows } from './work/load.ts';
 
 export type ThreadRow = typeof threads.$inferSelect;
 
@@ -710,90 +713,67 @@ export function exchangeForLead(
 /**
  * The owner told a colleague in chat something about a thread it works on and
  * does not lead: their words go to the thread's lead, which picks the thread
- * back up with them (`answerThread`). `said` is the owner's whole message, set
- * by the office, and `words` the part about this thread, which must be in it,
- * so only the owner's own words reach the lead as theirs. `reading` is what the
- * colleague understood them to mean, which goes labelled as the colleague's,
- * since a lead cannot judge a clarifying "no" from the bare word. `exchange` is
- * the last two lines of that chat, as the office set them (`exchangeForLead`).
- * `files` are every file the owner attached to that message, as the tool
- * server checked them: each that can land is copied into the colleague's part
- * of the work (`carryEach`), and the note lists where each landed, or why it
- * did not come. A file that does not come never stops the words.
+ * back up with them, through the work core (`toldLead`). `said` is the
+ * owner's whole message, set by the office, and `words` the part about this
+ * thread, which must be in it, so only the owner's own words reach the lead as
+ * theirs. `reading` is what the colleague understood them to mean, which goes
+ * labelled as the colleague's, since a lead cannot judge a clarifying "no"
+ * from the bare word. `exchange` is the last two lines of that chat, as the
+ * office set them (`exchangeForLead`). `files` are every file the owner
+ * attached to that message, as the tool server checked them: each that can
+ * land is copied into the colleague's part of the work (`carryEach`), and the
+ * note lists where each landed, or why it did not come. A file that does not
+ * come never stops the words.
+ *
+ * One transaction holds the thread and its lead from the first look to the
+ * note, so a stop or a removal landing meanwhile waits for it. The core
+ * decides once with nothing copied, so a refusal copies no file and writes
+ * nothing, then again with what the copy gave, which writes the note.
  */
 export async function tellLead(t: {
   staffId: string;
   threadId: number;
-  owner: string;
   said: string;
   words: string;
   reading: string;
   exchange?: string;
   files?: { carry: CarriedFile[]; unfit: { named: string; why: string }[] };
 }): Promise<{ lead: string; files?: Carried[] } | { problem: string }> {
-  const words = flat(t.words);
-  if (!words || !flat(t.said).includes(words))
-    return {
-      problem: `Pass ${t.owner}'s own words in words, copied exactly from their message. Your own go in your reply to them.`
+  const told = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .select({ hubId: threads.hubId })
+      .from(threads)
+      .where(eq(threads.id, t.threadId));
+    const [me] = await tx.select({ name: staff.name }).from(staff).where(eq(staff.id, t.staffId));
+    const name = me?.name ?? t.staffId;
+    const lacks =
+      t.exchange && row
+        ? lacking(await heldTools([row.hubId, t.staffId], tx), row.hubId, [t.staffId])
+        : [];
+    const e: EventOf<'toldLead'> = {
+      kind: 'toldLead',
+      staffId: t.staffId,
+      threadId: t.threadId,
+      said: t.said,
+      words: t.words,
+      reading: t.reading,
+      exchange: exchangeForLead(t.exchange ?? '', name, lacks, REPLY_A_LEAD_LACKS),
+      worksOn: await workedOn(tx, t.staffId),
+      files: []
     };
-  // The whole note stays on one line: `answers` reads each line as its own word.
-  const reading = flat(t.reading);
-  if (!reading)
-    return {
-      problem: `Say in reading what you understood ${t.owner} to mean, in your own words. Nothing was passed on.`
-    };
-  const [row] = await db
-    .select({ hubId: threads.hubId, status: threads.status, lead: staff.name })
-    .from(threads)
-    .innerJoin(staff, eq(threads.hubId, staff.id))
-    .where(eq(threads.id, t.threadId));
-  if (!row) return { problem: `There is no work ${t.threadId}.` };
-  if (row.hubId === t.staffId)
-    return {
-      problem: `You lead work ${t.threadId}, so there is no lead to tell: it is yours.`
-    };
-  const [on] = await db
-    .select({ id: threads.id })
-    .from(threads)
-    .where(and(eq(threads.id, t.threadId), worksOn(t.staffId)));
-  if (!on)
-    return {
-      problem: `Work ${t.threadId} is not work you are on, so it is not yours to pass on. Tell ${t.owner} so.`
-    };
-  if (row.status === 'stopped')
-    return {
-      problem: `${t.owner} stopped work ${t.threadId}, so nothing more runs on it. Tell them so.`
-    };
-  const [me] = await db.select({ name: staff.name }).from(staff).where(eq(staff.id, t.staffId));
-  const name = me?.name ?? t.staffId;
-  const lacks = t.exchange
-    ? lacking(await heldTools([row.hubId, t.staffId]), row.hubId, [t.staffId])
-    : [];
-  const exchange = exchangeForLead(t.exchange ?? '', name, lacks, REPLY_A_LEAD_LACKS);
-  const files: Carried[] = [
-    ...carryEach(t.threadId, t.staffId, t.files?.carry ?? []),
-    ...(t.files?.unfit ?? [])
-  ];
-  // A lead once read this as the colleague taking it on, and sent no work.
-  await answerThread(
-    t.threadId,
-    `${name} passed you what ${t.owner} told them in chat about this work. You decide what comes of it and hand on any work it needs; ${name} does nothing more with it. ${t.owner}'s words: ${words} ${name}'s own reading, which is not ${t.owner}'s words: ${reading}${exchange ? ` ${exchange}` : ''}${attachedLine(files, t.owner)}`
-  );
-  return { lead: row.lead, ...(files.length ? { files } : {}) };
-}
-
-/** What the lead's note says of the files the owner attached: where each landed, and which did not come and why. */
-function attachedLine(files: Carried[], owner: string): string {
-  const landed = files.flatMap((f) => ('at' in f ? [`${flat(f.named)} at ${f.at}`] : []));
-  const left = files.flatMap((f) => ('why' in f ? [`${flat(f.named)}, since ${f.why}`] : []));
-  return [
-    landed.length
-      ? ` ${owner} attached ${landed.length === 1 ? 'a file' : `${landed.length} files`} to that message, now in this work: ${landed.join('; ')}.`
-      : '',
-    left.length
-      ? ` ${left.length === 1 ? 'One file' : `${left.length} files`} ${owner} attached did not come: ${left.join('; ')}.`
-      : ''
-  ].join('');
+    // No refusal reads the files, so this one, under the locks the note is
+    // written under, is the one the note would get.
+    const first = decide(await loadWork(tx, e), e, new Date());
+    if ('refused' in first) return first;
+    const files: Carried[] = [
+      ...carryEach(t.threadId, t.staffId, t.files?.carry ?? []),
+      ...(t.files?.unfit ?? [])
+    ];
+    return transitionWork({ ...e, files }, { tx });
+  });
+  if ('refused' in told) return { problem: told.refused };
+  await runAfters('toldLead', told.after);
+  return told.change.result;
 }
 
 /** Something a thread put on the owner's desk that is still open. */

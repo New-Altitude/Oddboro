@@ -216,7 +216,6 @@ test("what the owner tells a colleague in chat about the goal wakes the lead, an
   const r = await T.tellLead({
     staffId: hired.Priya,
     threadId: goalThread,
-    owner: OWNER,
     said,
     words: 'use the Game of Life glider for the spin.',
     reading: 'They want the spin to use the glider.'

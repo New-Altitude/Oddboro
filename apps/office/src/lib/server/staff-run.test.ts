@@ -1634,7 +1634,6 @@ test("a lead woken by a colleague's tell_lead is told the work is its to decide 
   const told = await L.tellLead({
     staffId: 'paige',
     threadId: h.thread,
-    owner: 'Sam',
     said,
     words: said,
     reading: 'They want red paint.'
@@ -1644,9 +1643,13 @@ test("a lead woken by a colleague's tell_lead is told the work is its to decide 
     select id from follow_ups where staff_id = 'lead' and kind = 'resume' and thread_id = ${h.thread}`;
   assert.ok(wake, 'tell_lead woke no pick-up');
   const { system } = await runOf(wake.id);
-  assert.match(
-    system,
-    /- Paige passed you what Sam told them in chat about this work\. You decide what comes of it and hand on any work it needs; Paige does nothing more with it\. Sam's words: Make the barn red\. Paige's own reading, which is not Sam's words: They want red paint\./
+  // The note names the owner as the office does, by the name they gave.
+  const owner = await L.ownerName();
+  assert.ok(
+    system.includes(
+      `- Paige passed you what ${owner} told them in chat about this work. You decide what comes of it and hand on any work it needs; Paige does nothing more with it. ${owner}'s words: Make the barn red. Paige's own reading, which is not ${owner}'s words: They want red paint.`
+    ),
+    system
   );
 });
 
