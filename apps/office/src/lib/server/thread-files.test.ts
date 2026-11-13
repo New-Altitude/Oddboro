@@ -35,7 +35,6 @@ Object.assign(process.env, {
   ODDBORO_DB_PORT: String(port),
   // A file that does not exist, so no .env reaches this office.
   ODDBORO_ENV: join(folder, 'none.env'),
-  DATABASE_URL: `postgres://postgres:postgres@127.0.0.1:${port}/postgres`,
   ODDBORO_LOCAL_DB: '1',
   OLLAMA_URL: 'http://127.0.0.1:9'
 });

@@ -1,6 +1,6 @@
 // Which requests the office answers: `guardOffice`, the first step of the
 // server's `handle`, in front of the real routes, over the office's own database (local-db.ts) in a
-// throwaway folder on a free port. Run with `npm test -w @oddboro/office`.
+// throwaway folder. Run with `npm test -w @oddboro/office`.
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
@@ -24,7 +24,6 @@ Object.assign(process.env, {
   ODDBORO_DB_PORT: String(port),
   // A file that does not exist, so no .env reaches this office.
   ODDBORO_ENV: join(folder, 'none.env'),
-  DATABASE_URL: `postgres://postgres:postgres@127.0.0.1:${port}/postgres`,
   ODDBORO_LOCAL_DB: '1',
   OLLAMA_URL: 'http://127.0.0.1:9',
   ODDBORO_UPDATE_TOKEN: TOKEN,

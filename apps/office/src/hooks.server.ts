@@ -1,5 +1,6 @@
 // Once, when the office server starts: the certificates this computer trusts
-// (`trustSystemCertificates`), the office's own database if .env names
+// (`trustSystemCertificates`), the office home closed to other accounts
+// (`makeHomePrivate`), the office's own database if .env names
 // no other (copied aside first on a new version's first start), the tables
 // brought up to date, the update row reset, then the job clock, the follow-up
 // watcher, one read of the New Altitude personas, and the office's address in
@@ -17,7 +18,7 @@
 import { release } from 'node:os';
 import { sequence, type ServerInit } from '@sveltejs/kit/hooks';
 import { handleErrorWithSentry, sentryHandle } from '@sentry/sveltekit';
-import { LOCAL, whenOddLeaves } from '@oddboro/ledger';
+import { LOCAL, makeHomePrivate, whenOddLeaves } from '@oddboro/ledger';
 import { trustSystemCertificates } from '@oddboro/ledger/certificates';
 import { startLocalDatabase } from '@oddboro/ledger/local-db';
 import { currentPlatform } from '@oddboro/ledger/platform';
@@ -50,6 +51,8 @@ export const init: ServerInit = async () => {
   console.log(
     `office: ${VERSION || 'development'} on ${currentPlatform()} ${release()} ${process.arch}, Node ${process.version}`
   );
+  // Before the office writes anything there, the database's socket included.
+  makeHomePrivate();
   // In the Mac app the shell keeps the secrets; this process alone asks it.
   await timed('secrets', useShellSecrets);
   if (LOCAL) await timed('database', startLocalDatabase);

@@ -29,7 +29,6 @@ import { setTimeout as wait } from 'node:timers/promises';
 import { mock, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import type { McpServer } from './launch.ts';
-import postgres from 'postgres';
 import {
   L,
   PATCH,
@@ -260,7 +259,7 @@ test('a run stuck before its tool starts ends at its time limit, saying where it
   // Opening the run's tools reads the Odd's lessons: a lock on them holds the
   // run while it gets ready, as a hung database or embedding once held a chat.
   // On a connection of its own, since the held run takes the ledger's.
-  const pg = postgres(process.env.DATABASE_URL!, { max: 2, onnotice: () => {} });
+  const pg = L.openPool(L.DATABASE_URL, { max: 2, onnotice: () => {} });
   const lock = await pg.reserve();
   const events: { type: string; message?: string }[] = [];
   try {
