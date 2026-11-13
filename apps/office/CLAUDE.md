@@ -158,7 +158,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    restart mid-run marks it failed rather than run it twice. When the owner
    gave the answer on a card in the Odd's own chat, the route gets `chat: true`,
    the follow-up keeps that card (`chatCard`, set by `followUp`, `setGoal` or
-   `answerThread` in the ledger), and as the run ends `endFollowUp` adds its
+   `answerLead` in the ledger), and as the run ends `endFollowUp` adds its
    reply to that chat as one `told` line whose `re` names the card
    (`answerInChat` in `staff.ts`); a failed run's line says so in one line and
    carries `runFailed`, never `failed`, which would mark the owner's line before
@@ -182,7 +182,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    once, each hire becomes a hire ask the page opens in its own hire window,
    and the owner's steps land as a task. Every plan goes on its goal's thread,
    whatever run raised it, and once those parts exist the answer brings the
-   manager back there (`answerThread`), told to lead the work by handing each
+   manager back there (`answerLead` in the ledger), told to lead the work by handing each
    piece on; a denied one, told not to start it. The plan's hire asks go on
    that thread too, so hiring one brings the manager back again, to hand the
    hire its first piece.
@@ -1107,7 +1107,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
     A thread its hub parked with `resume_at` wakes at that time: the clock
     starts the hub's `resume` follow-up. One parked on a task (`after_task`)
     wakes when that task is done or dropped, with no clock. So does a thread the usage window
-    held, at the window's reset (`usage-window.ts` in the ledger).
+    held, at the window's reset (`handedOff` in the ledger's `src/work/hand-offs.ts`).
     A manual run leaves the schedule where it was, and the Office Manager's report data
     (office times) tells the two apart. The Jobs tab edits a job in place, and opens the Odd's job description
     in the document editor (`src/lib/ui/JobDescription.svelte`); a save

@@ -113,7 +113,7 @@ const HAND_OFF_ID = Number(process.env.HAND_OFF_ID) || undefined;
  * it raises carry it. The hub's runs hand off into it and may park it.
  */
 const THREAD_ID = Number(process.env.THREAD_ID) || undefined;
-/** Set by the office for every run: a thread it puts work on keeps it (`keepRun`, `runsGoing`). */
+/** Set by the office for every run: a thread it puts work on keeps it (`keepRun` in work/hand-offs.ts, `runsGoing`). */
 const RUN_KEY = process.env.RUN_KEY || undefined;
 /**
  * Set by the office for a run that only reads the owner's reason or edit for a

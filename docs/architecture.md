@@ -36,31 +36,31 @@ an app; `ledger` imports `world` and `sprites`, and `world` imports `sprites`.
 
 Before writing a helper, use the one that already does the job.
 
-| Job                                                     | Use                                                   | In                                                     |
-| ------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------ |
-| Write a ledger row (a decision, a hire, a run)          | `record()`                                            | `packages/ledger/src/office-ledger.ts`                 |
-| Find the office's folders, code and ports               | `home()`, `CODE`, `OFFICE_PORT`, `DATABASE_PORT`      | `packages/ledger/src/home.ts`                          |
-| Tell the office's time                                  | `zone()`                                              | `packages/ledger/src/time.ts`                          |
-| Read or write `.env`                                    | `readEnv()`, `writeEnv()`                             | `packages/ledger/src/env.ts`                           |
-| Read which system this is                               | `currentPlatform()`                                   | `packages/ledger/src/platform.ts`                      |
-| Start Claude Code, or reach Windows                     | `claudeCommand()`, `powershell()`                     | `packages/ledger/src/platform.ts`                      |
-| Know an AI tool's name and systems                      | `AGENT_NAMES`, `AGENT_PLATFORMS`                      | `packages/ledger/src/agents.ts`                        |
-| Know whether a run gets a shell                         | `commandsHow()`, `runsCommands()`                     | `packages/ledger/src/agents.ts`                        |
-| Know what an Odd's run reaches                          | `capabilities()`, `ownTools()`                        | `packages/ledger/src/capabilities.ts`                  |
-| Say a level or where the owner sets access              | `LEVELS`, `settingsTab()`, `levelRoute()`             | `packages/ledger/src/access-words.ts`                  |
-| Know whether an Odd holds an office tool                | `hasTool()`                                           | `packages/ledger/src/tools.ts`                         |
-| Register an office tool                                 | `tool()`                                              | `packages/ledger/src/mcp-run.ts`                       |
-| Check a folder before an Odd gets it                    | `checkFolder()`                                       | `packages/ledger/src/office-folders.ts`                |
-| Put a follow-up on a thread                             | `addFollowUp()`, which runs `settleThread()`          | `packages/ledger/src/threads.ts`                       |
-| Tell the page something changed                         | a table's trigger, or `emit()`                        | `apps/office/src/lib/server/events.ts`                 |
-| Tell every run how the office works                     | `house()`                                             | `apps/office/src/lib/server/house.ts`                  |
-| Run as the office, not as an Odd                        | `runAsOffice()`                                       | `apps/office/src/lib/server/office-run.ts`             |
-| Give the page an Odd                                    | `toProfile()`                                         | `apps/office/src/lib/server/profile.ts`                |
-| Reach an outside tool's server, for the owner or a run  | `upstream()`, through the run's gateway               | `apps/office/src/lib/server/access.ts`                 |
-| Refuse a request from anywhere but the page             | `guardOffice`                                         | `apps/office/src/lib/server/owner-page.ts`             |
-| Call the office from the page                           | `call()`, `stream()`, `follow()`                      | `apps/office/src/lib/ui/api.ts`                        |
-| Fail a lint guard                                       | `report()`                                            | `scripts/lib/files.ts`                                 |
-| Test against a database, the tool server, or the office | `pglite.ts`, `tool-server.ts`, `office-under-test.ts` | `packages/ledger/test/`, `apps/office/src/lib/server/` |
+| Job                                                     | Use                                                                   | In                                                     |
+| ------------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------ |
+| Write a ledger row (a decision, a hire, a run)          | `record()`                                                            | `packages/ledger/src/office-ledger.ts`                 |
+| Find the office's folders, code and ports               | `home()`, `CODE`, `OFFICE_PORT`, `DATABASE_PORT`                      | `packages/ledger/src/home.ts`                          |
+| Tell the office's time                                  | `zone()`                                                              | `packages/ledger/src/time.ts`                          |
+| Read or write `.env`                                    | `readEnv()`, `writeEnv()`                                             | `packages/ledger/src/env.ts`                           |
+| Read which system this is                               | `currentPlatform()`                                                   | `packages/ledger/src/platform.ts`                      |
+| Start Claude Code, or reach Windows                     | `claudeCommand()`, `powershell()`                                     | `packages/ledger/src/platform.ts`                      |
+| Know an AI tool's name and systems                      | `AGENT_NAMES`, `AGENT_PLATFORMS`                                      | `packages/ledger/src/agents.ts`                        |
+| Know whether a run gets a shell                         | `commandsHow()`, `runsCommands()`                                     | `packages/ledger/src/agents.ts`                        |
+| Know what an Odd's run reaches                          | `capabilities()`, `ownTools()`                                        | `packages/ledger/src/capabilities.ts`                  |
+| Say a level or where the owner sets access              | `LEVELS`, `settingsTab()`, `levelRoute()`                             | `packages/ledger/src/access-words.ts`                  |
+| Know whether an Odd holds an office tool                | `hasTool()`                                                           | `packages/ledger/src/tools.ts`                         |
+| Register an office tool                                 | `tool()`                                                              | `packages/ledger/src/mcp-run.ts`                       |
+| Check a folder before an Odd gets it                    | `checkFolder()`                                                       | `packages/ledger/src/office-folders.ts`                |
+| Put a follow-up on a thread                             | `transitionWork()` with `runQueued`, whose `oweRun()` runs `settle()` | `packages/ledger/src/work/threads.ts`                  |
+| Tell the page something changed                         | a table's trigger, or `emit()`                                        | `apps/office/src/lib/server/events.ts`                 |
+| Tell every run how the office works                     | `house()`                                                             | `apps/office/src/lib/server/house.ts`                  |
+| Run as the office, not as an Odd                        | `runAsOffice()`                                                       | `apps/office/src/lib/server/office-run.ts`             |
+| Give the page an Odd                                    | `toProfile()`                                                         | `apps/office/src/lib/server/profile.ts`                |
+| Reach an outside tool's server, for the owner or a run  | `upstream()`, through the run's gateway                               | `apps/office/src/lib/server/access.ts`                 |
+| Refuse a request from anywhere but the page             | `guardOffice`                                                         | `apps/office/src/lib/server/owner-page.ts`             |
+| Call the office from the page                           | `call()`, `stream()`, `follow()`                                      | `apps/office/src/lib/ui/api.ts`                        |
+| Fail a lint guard                                       | `report()`                                                            | `scripts/lib/files.ts`                                 |
+| Test against a database, the tool server, or the office | `pglite.ts`, `tool-server.ts`, `office-under-test.ts`                 | `packages/ledger/test/`, `apps/office/src/lib/server/` |
 
 ## Adding a new kind
 

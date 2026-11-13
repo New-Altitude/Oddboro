@@ -12,7 +12,7 @@ process.env.OLLAMA_URL = 'http://127.0.0.1:9';
 const { CUT_OFF_WORK, OUTCOME_TITLE, closeStaleFollowUps, workTitle } =
   await import('../src/office.ts');
 const { HEALTH_WORDS, STATUS_WORDS } = await import('../src/goal-words.ts');
-const { answerThread } = await import('../src/threads.ts');
+const { answerLeadNow } = await import('./answer-lead.ts');
 const { asks, followUps, goals, ledger, staff, tasks, threads } = await import('../src/schema.ts');
 
 test('no ledger title of a finished run names a thread or a hand-off', () => {
@@ -50,7 +50,7 @@ test("a lead's pick-up a restart cut off is named in the Ledger by its goal, or 
       { title: 'Bake the bread', hubId: 'lead', holderId: 'lead' }
     ])
     .returning();
-  for (const t of made) await answerThread(t.id, 'The owner said: more salt.');
+  for (const t of made) await answerLeadNow(t.id, 'The owner said: more salt.');
   await db.update(followUps).set({ startedAt: new Date() }).where(eq(followUps.kind, 'resume'));
 
   await closeStaleFollowUps();

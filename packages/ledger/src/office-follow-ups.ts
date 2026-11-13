@@ -18,29 +18,19 @@ import {
 import { alias } from 'drizzle-orm/pg-core';
 import { db } from './db.ts';
 import type { Db } from './threads.ts';
-import {
-  pokes,
-  tasks,
-  threads,
-  followUps,
-  goals,
-  type FollowUpKind,
-  type InChat,
-  type Outcome
-} from './schema.ts';
+import { tasks, threads, followUps, goals, type InChat, type Outcome } from './schema.ts';
 import type { AskRow, TaskRow } from './office.ts';
 import { ofWorkingOdd } from './office-staff.ts';
-import { record } from './office-ledger.ts';
 import { ask } from './office-asks.ts';
 import { task } from './office-tasks.ts';
 import { transitionWork } from './work/apply.ts';
 import type { LiveKind } from './work/events.ts';
 import { queuedRows } from './work/load.ts';
-import { CUT_OFF_RESULT, OUTCOME_TITLE } from './work/runs.ts';
+import { CUT_OFF_RESULT, CUT_OFF_WORK, OUTCOME_TITLE } from './work/runs.ts';
 import { followUpRow } from './work/state.ts';
 
 /** The run words live with the run's deciders; kept here too for this file's importers. */
-export { CUT_OFF_RESULT, OUTCOME_TITLE };
+export { CUT_OFF_RESULT, CUT_OFF_WORK, OUTCOME_TITLE };
 
 // Follow-ups: work a staffer owes once the owner answers it or finishes a task it
 // gave them. The office starts each one as soon as it is written.
@@ -138,12 +128,12 @@ export async function followUpsToStart(): Promise<FollowUpRow[]> {
  * of the same Odd there has yet to end. So a hub never picks its thread up
  * twice at once, and a colleague's run on the owner's answer starts only once
  * the run that raised it ended. Answers that come meanwhile join the waiting
- * `resume` (`answerThread`), and results the waiting `handed_back`
+ * `resume` (`answerLead`), and results the waiting `handed_back`
  * (`resultsToJoin`); the run ending starts it. A hand-off is new work, not a
  * pick-up, so several may run side by side, even for one colleague. A run on
  * no thread, such as a chat, a job or a follow-up like a carry-out, counts on
  * each thread it put work on, a hand-off held or not or a goal's plan
- * (`threads.runs`, `keepRun`), while its key is in `runsGoing`.
+ * (`threads.runs`, `keepRun` in work/hand-offs.ts), while its key is in `runsGoing`.
  */
 function waitsOnOwnRun(): SQL {
   const busy = alias(followUps, 'busy');
@@ -185,7 +175,7 @@ export type Unparked = { task: string } | { at: Date };
 
 /**
  * Claim a follow-up (`runClaimed`), and return it as claimed: an answer that
- * joined it after it was listed is in its note (`answerThread`). Undefined
+ * joined it after it was listed is in its note (`answerLead`). Undefined
  * when it already started or ended, such as one its Odd's leaving failed, or
  * it waits on a run of its Odd's own (`waitsOnOwnRun`).
  *
@@ -205,42 +195,6 @@ export async function startFollowUp(
   if (!('change' in decided)) return undefined;
   const { run, unparked } = decided.change.result;
   return { ...followUpRow(run), kind: run.kind, ...(unparked && { unparked }) };
-}
-
-/**
- * A colleague's result that no lead takes, since the lead that handed it the
- * work left the office (`hasLeft`): nothing picks the work up. The owner
- * ruled that nothing goes on the desk for it. The colleague, the last Odd on
- * the work, pokes the owner now, and the Ledger keeps a line. What the
- * colleague did stays in the work's folder.
- */
-export type Unreturned = {
-  colleague: { id: string; name: string };
-  lead: string;
-  title: string;
-  outcome: Exclude<Outcome, 'waiting'>;
-};
-
-/** The poke that tells the owner, sent now, as `poke_owner` would send one. */
-export async function pokeUnreturned(q: Db, u: Unreturned): Promise<void> {
-  const did = u.outcome === 'done' ? 'finished' : 'could not finish';
-  const yet = u.outcome === 'done' ? 'but' : 'and';
-  await q.insert(pokes).values({
-    staffId: u.colleague.id,
-    at: new Date(),
-    message: `${u.colleague.name} ${did} "${u.title}", ${yet} could not hand it back to ${u.lead} because ${u.lead} is no longer here.`
-  });
-}
-
-/** The Ledger's line for it. Outside a transaction: `record` embeds its text first. */
-export async function recordUnreturned(u: Unreturned): Promise<void> {
-  const did = u.outcome === 'done' ? 'finished' : 'could not finish';
-  await record({
-    kind: 'work',
-    actor: u.colleague.id,
-    title: `${u.outcome === 'done' ? 'Finished' : 'Could not finish'}, but ${u.lead} has left: ${u.title}`,
-    body: `${u.colleague.name} ${did} "${u.title}", but ${u.lead} has left the office, so nothing picks the work up. What ${u.colleague.name} did stays in the work's folder.`
-  });
 }
 
 /**
@@ -285,25 +239,6 @@ export async function closeStaleFollowUps(): Promise<FollowUpRow[]> {
   }
   return closed;
 }
-
-/**
- * What the Ledger names work when no title is left for it, such as an ask
- * since removed, or a first day. The owner reads it after each kind's
- * `OUTCOME_TITLE`, so it names no thread and no number (test/owner-tables.test.ts).
- */
-export const CUT_OFF_WORK: Record<FollowUpKind, string> = {
-  carry_out: 'an ask',
-  rework: 'an ask',
-  denied: 'an ask',
-  task_done: 'a task',
-  first_day: 'getting started',
-  goal: 'a goal',
-  hand_off: 'the work',
-  handed_back: 'the work',
-  resume: 'the work',
-  answered: 'your answer',
-  edited: 'a file'
-};
 
 /**
  * What the Ledger names the work a follow-up was about, whether it finished or

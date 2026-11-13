@@ -32,7 +32,7 @@ export function taskSaid(t: { steps: Step[]; note: string | null }): string {
 /**
  * What each run a task's end starts on the task's own work is told of other
  * work parked on that task. That work picks up in its own run at the same
- * moment (`wakeOnTask`), so without this line both runs did the parked work.
+ * moment (`wakeParked`), so without this line both runs did the parked work.
  * "This", not "this task": a carry-out's brief speaks of the ask, not of the
  * connect task that ended.
  */
@@ -85,7 +85,7 @@ export const askReplaced = (a: { status: AskStatus; reason: string | null }): bo
  * - `denied_lesson`: a `denied` follow-up, when the no carries a reason.
  * - `task_done`: a `task_done` follow-up, to pick up what waited on the task.
  * - `wake_parked`: the work a lead parked on the task picks up, told how the
- *   task ended (`wakeOnTask`).
+ *   task ended (`wakeParked`).
  * - `odd_leaves`: the Odd the ask names leaves the office (`removeOdd` in
  *   leaving.ts), after the answer went back, so leaving closes any run it started.
  * - `odd_returns`: the Odd the ask names comes back as it was (`bringBack`).

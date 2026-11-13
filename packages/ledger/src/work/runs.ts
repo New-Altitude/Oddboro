@@ -6,7 +6,7 @@
 // Pure: every import that reaches the database is a type.
 import { flat } from '../desk-answers.ts';
 import { fixedError } from '../errors.ts';
-import type { Unparked, Unreturned } from '../office-follow-ups.ts';
+import type { Unparked } from '../office-follow-ups.ts';
 import type { FollowUpKind, Outcome } from '../schema.ts';
 import type { TaskEnded } from '../task-parking.ts';
 import type { After, Decided } from '../transition.ts';
@@ -82,6 +82,25 @@ export const OUTCOME_TITLE: Record<FollowUpKind, Record<Outcome, string>> = {
 /** The result of a run a restart cut off. */
 export const CUT_OFF_RESULT =
   'The office restarted while this was running, so it may be half done. Check it, then ask the Odd to finish it.';
+
+/**
+ * What the Ledger names work when no title is left for it, such as an ask
+ * since removed, or a first day. The owner reads it after each kind's
+ * `OUTCOME_TITLE`, so it names no thread and no number (test/owner-tables.test.ts).
+ */
+export const CUT_OFF_WORK: Record<FollowUpKind, string> = {
+  carry_out: 'an ask',
+  rework: 'an ask',
+  denied: 'an ask',
+  task_done: 'a task',
+  first_day: 'getting started',
+  goal: 'a goal',
+  hand_off: 'the work',
+  handed_back: 'the work',
+  resume: 'the work',
+  answered: 'your answer',
+  edited: 'a file'
+};
 
 /** A follow-up of a kind the office still starts, running or not; run-registry's `LiveRun` is a process that is running. */
 export type LiveFollowUp = Extract<FollowUp, { kind: LiveKind }>;
@@ -230,7 +249,21 @@ function endedAs(t: Task): TaskEnded {
       : 'dropped';
 }
 
-/** The poke and the Ledger line for a colleague's result no lead takes, as `pokeUnreturned` and `recordUnreturned` write them. */
+/**
+ * A colleague's result that no lead takes, since the lead that handed it the
+ * work left the office (`hasLeft`): nothing picks the work up. The owner
+ * ruled that nothing goes on the desk for it. The colleague, the last Odd on
+ * the work, pokes the owner now, and the Ledger keeps a line. What the
+ * colleague did stays in the work's folder.
+ */
+type Unreturned = {
+  colleague: { id: string; name: string };
+  lead: string;
+  title: string;
+  outcome: Exclude<Outcome, 'waiting'>;
+};
+
+/** The poke and the Ledger line for a colleague's result no lead takes. */
 function unreturned(u: Unreturned): { poke: string; line: After } {
   const did = u.outcome === 'done' ? 'finished' : 'could not finish';
   const yet = u.outcome === 'done' ? 'but' : 'and';

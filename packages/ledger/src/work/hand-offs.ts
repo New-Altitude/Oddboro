@@ -144,7 +144,7 @@ function goesOnRefused(rows: WorkRows, id: number, from: string): string | undef
   return undefined;
 }
 
-/** The lead's run handing work on keeps its key on the work, last, as `keepRun` in ../threads.ts does. */
+/** The lead's run handing work on keeps its key on the work, last. */
 function keepRun(d: Draft, threadId: number, run: string | undefined): void {
   const t = d.rows.threads.get(threadId);
   if (!run || !t) return;

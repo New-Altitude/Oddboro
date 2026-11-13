@@ -768,6 +768,56 @@ test('a plan yes whose hire ask cannot be written leaves the plan open, writes n
   );
 });
 
+// A transition in its own transaction runs again when Postgres ends it to
+// break a deadlock. The plan's write keeps the hire asks it raised in memory,
+// so a second run must not hand back the first run's, which rolled back.
+test('a plan yes that Postgres ends once to break a deadlock gives back only the hire asks it wrote', async () => {
+  const goalId = await aGoal('Sell spelt');
+  const hire = (name: string) => ({
+    kind: 'hire' as const,
+    hire: {
+      name,
+      role: 'Baker',
+      permission: 'draft' as const,
+      remit: 'Bakes.',
+      jobDescriptionFile: 'baker.md'
+    },
+    part: 'Bakes the loaves'
+  });
+  const { ask } = await raiseAsk('ada', {
+    title: 'Plan the spelt sale',
+    why: 'w',
+    ifApproved: 'i',
+    kind: 'plan',
+    plan: { goalId, items: [hire('Dot'), hire('Eli')] }
+  });
+  // A sequence is not rolled back, so only the first run is ended.
+  const run = async (statements: string[]) => {
+    for (const statement of statements) await db.execute(sql.raw(statement));
+  };
+  await run([
+    'create sequence deadlock_once',
+    `create function deadlock_once() returns trigger as $$ begin if old.kind = 'plan' and new.status <> 'open' and nextval('deadlock_once') = 1 then raise exception 'deadlock detected' using errcode = 'deadlock_detected'; end if; return new; end $$ language plpgsql`,
+    'create trigger deadlock_once before update on asks for each row execute function deadlock_once()'
+  ]);
+  let given: number[];
+  try {
+    given = (await approvePlan(ask.id, [0, 1], null)).hires.map((h) => h.id);
+  } finally {
+    await run([
+      'drop trigger deadlock_once on asks',
+      'drop function deadlock_once()',
+      'drop sequence deadlock_once'
+    ]);
+  }
+  assert.equal((await askRow(ask.id))?.status, 'approved');
+  const written = (await db.select().from(asks).where(eq(asks.kind, 'hire')))
+    .filter((h) => h.hire?.goal?.id === goalId)
+    .map((h) => h.id);
+  assert.equal(written.length, 2);
+  assert.deepEqual(given, written);
+});
+
 test("a done or dropped task, a done task with no Odd, and a goal's pause, met or drop have the rows pinned here and reach the Odd as pinned, and a none names its Linear row", async () => {
   assert.deepEqual(OWNER_ANSWERS.task, {
     done: {

@@ -1,7 +1,7 @@
 // Where a thread stands as its runs move, and a new run on it, as steps a
 // decider takes on its `Draft`. `settle` is the one place a thread's status
-// and holder are worked out, as `settleThread` in ../threads.ts is today, and
-// `stopThread` the one place a thread becomes stopped.
+// and holder are worked out, and `stopThread` the one place a thread becomes
+// stopped.
 //
 // Pure: every import that reaches the database is a type.
 import { fixedError } from '../errors.ts';
@@ -113,7 +113,7 @@ export function newRun(
 }
 
 /**
- * Adds a run, and settles the thread it works on, as `addFollowUp` does: so a
+ * Adds a run, and settles the thread it works on: so a
  * thread's holder and status never fall behind its runs. A run on work this
  * change opens points at the work's ref. Returns the run's ref.
  */
@@ -202,7 +202,7 @@ export function idOf(d: Draft, row: Inserted): number {
 }
 
 /**
- * Owe an Odd a run, as `followUp` and `addFollowUp` do. The answer to
+ * Owe an Odd a run, as `followUp` does. The answer to
  * something raised on a thread works on that thread, unless its kind serves
  * none. With `onlyWhileOpen`, nothing is put once that work ended. `chat` is
  * the card the owner answered on: the run replies under it only when it is
@@ -248,7 +248,7 @@ export function oweRun(
 
 /**
  * A colleague's result goes back to the lead that handed it the work, as a
- * `handed_back` run on the work, as `addFollowUp` does. Nothing
+ * `handed_back` run on the work. Nothing
  * goes back to a lead that left the office, since it runs nothing: true when
  * the result went back. `answered` marks a result that is the owner's own
  * answer, which no run followed.
@@ -302,7 +302,7 @@ function baseOf(t: Thread): ThreadBase {
  */
 const REOPENS: readonly Thread['status'][] = ['done', 'failed'];
 
-/** An ended thread opened again for a new round of work, as `reopen` does: no park, and no hand-off counted yet. */
+/** An ended thread opened again for a new round of work: no park, and no hand-off counted yet. */
 const reopened = (t: Thread): Thread => ({
   ...baseOf(t),
   handOffsUsed: 0,
@@ -312,7 +312,7 @@ const reopened = (t: Thread): Thread => ({
 
 /**
  * An ask raised or a task given on a thread keeps it waiting until the owner
- * answers, as `keepRun` and `raisedOn` in ../threads.ts do. The thread keeps
+ * answers. The thread keeps
  * the key of the run that raised it, only when that run is its lead's, so the
  * answer cannot start the lead there while that run still goes. Finished work
  * opens again for it; a stopped one stays stopped, but for a new plan, which
@@ -352,7 +352,7 @@ export function stopThread(d: Draft, threadId: number, now: Date): void {
  * One hand-off taken on a thread, `used` the count of its round so far with
  * this one: the `hand_off` run of `to`, carrying what `sharing()` gave for it.
  * An open thread keeps its park; done or failed work opens again with none.
- * A stopped thread stays stopped, as `startHeld` leaves it. Returns the run's ref.
+ * A stopped thread stays stopped. Returns the run's ref.
  */
 export function handOn(
   d: Draft,

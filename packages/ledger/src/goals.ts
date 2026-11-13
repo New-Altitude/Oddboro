@@ -402,7 +402,7 @@ export async function approveGoal(
   const draft = a.goal;
   let set: GoalRow | undefined;
   // The yes's decider plans the goal this sets, pointing at it by `GOAL_SET`.
-  await approveAsk(askId, reason, {
+  const approved = await approveAsk(askId, reason, {
     perKind: [
       {
         name: GOAL_SET,
@@ -414,7 +414,9 @@ export async function approveGoal(
     ],
     inChat
   });
-  if (!set) throw fixedError('That goal is no longer open');
+  // A `set` from a run Postgres ended to break a deadlock rolled back, and the
+  // next run may find the ask answered already.
+  if (!approved || !set) throw fixedError('That goal is no longer open');
   return set;
 }
 
@@ -491,6 +493,8 @@ export async function approvePlan(
       {
         name: 'plan',
         run: async (tx) => {
+          // A run Postgres ended to break a deadlock rolled its hire asks back.
+          hires.length = 0;
           for (const item of picked)
             if (item.kind === 'assign') await serveGoal(item.staff, g.id, item.part, tx, askId);
           for (const item of picked) {

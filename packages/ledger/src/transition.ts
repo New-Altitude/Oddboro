@@ -20,7 +20,9 @@ export type Decided<C> = { refused: string } | { change: C; after: After[] };
 
 /**
  * Run one transition: load with locks, decide, apply, in one transaction.
- * With the caller's own `tx` the caller owns the commit, so the after-effects
+ * In a transaction of its own, it runs again from the load when Postgres ends
+ * it to break a deadlock, and its after-effects run once, after the commit
+ * that holds. With the caller's own `tx` the caller owns the commit, so the after-effects
  * come back unrun, and the caller runs them with `runAfters` once it commits.
  */
 export async function transition<W, C>(
@@ -43,9 +45,47 @@ export async function transition<W, C>(
     return decided;
   };
   if (o.tx) return inTx(o.tx);
-  const decided = await db.transaction(inTx);
+  const decided = await ownTransaction(inTx);
   if ('change' in decided) await runAfters(step.name, decided.after);
   return decided;
+}
+
+/**
+ * How many times a transition runs in all when Postgres keeps ending it to
+ * break a deadlock. Two transitions whose locks depend on what they read
+ * first, such as two Odds leaving with open work on each other's threads,
+ * cannot always lock in one order, so one is ended and runs again.
+ */
+const DEADLOCK_TRIES = 3;
+
+/**
+ * Run `inTx` in a transaction of its own. When Postgres ends it to break a
+ * deadlock, its writes to the database rolled back, so it runs again from the
+ * load. Two things a rollback does not undo: what a `perKind` effect's closure
+ * kept in memory, which is why each starts afresh (`PerKindInTx`), and the
+ * files `carryFiles` copied. Into work already open, the next run finds
+ * each copy the same file and leaves it; into new work, the copy stays in the
+ * folder of work never written, as after any rollback.
+ */
+async function ownTransaction<T>(inTx: (tx: Tx) => Promise<T>): Promise<T> {
+  for (let tries = 1; ; tries++) {
+    try {
+      return await db.transaction(inTx);
+    } catch (err) {
+      if (tries === DEADLOCK_TRIES || !isDeadlock(err)) throw err;
+    }
+  }
+}
+
+/**
+ * Whether Postgres ended the transaction to break a deadlock
+ * (`deadlock_detected`). The driver's error comes wrapped, so its code is on
+ * a `cause`.
+ */
+function isDeadlock(err: unknown): boolean {
+  for (let e = err; e instanceof Object; e = 'cause' in e ? e.cause : undefined)
+    if ('code' in e && e.code === '40P01') return true;
+  return false;
 }
 
 /**

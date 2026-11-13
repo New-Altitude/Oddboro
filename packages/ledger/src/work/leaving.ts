@@ -8,8 +8,7 @@ import { fixedError } from '../errors.ts';
 import type { After, Decided } from '../transition.ts';
 import { askDecided } from './asks.ts';
 import type { AskEffects, EventOf, LiveKind } from './events.ts';
-import type { FollowUpKind } from './kinds.ts';
-import { runFinished } from './runs.ts';
+import { CUT_OFF_WORK, runFinished } from './runs.ts';
 import {
   applyChange,
   changeOf,
@@ -23,25 +22,6 @@ import {
 import type { FollowUp } from './state.ts';
 import { taskEnded } from './tasks.ts';
 import { leftBeforeStarting, stopThread } from './threads.ts';
-
-/**
- * What the Ledger names a run's work when the entry read no title for it.
- * A copy of `CUT_OFF_WORK` in office-follow-ups.ts: that file loads the
- * database, and this one stays pure.
- */
-const CUT_OFF_WORK: Record<FollowUpKind, string> = {
-  carry_out: 'an ask',
-  rework: 'an ask',
-  denied: 'an ask',
-  task_done: 'a task',
-  first_day: 'getting started',
-  goal: 'a goal',
-  hand_off: 'the work',
-  handed_back: 'the work',
-  resume: 'the work',
-  answered: 'your answer',
-  edited: 'a file'
-};
 
 /** A run yet to start. Only a live kind's run can be: a retired kind's row is always ended. */
 const queued = (f: FollowUp): f is Extract<FollowUp, { kind: LiveKind }> => f.run.is === 'queued';

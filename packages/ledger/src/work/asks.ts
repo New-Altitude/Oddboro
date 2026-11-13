@@ -425,8 +425,7 @@ function decisionLine(
 }
 
 /**
- * A yes to the usage window's ask, as `answerWindow` in usage-window.ts
- * does: every open thread it holds picks back up, its lead told hand-offs
+ * A yes to the usage window's ask: every open thread it holds picks back up, its lead told hand-offs
  * run until the reset. A no leaves them for the clock to wake at the reset.
  */
 function answerWindow(d: Draft, ask: Ask, now: Date): void {
@@ -442,8 +441,7 @@ function answerWindow(d: Draft, ask: Ask, now: Date): void {
 }
 
 /**
- * The owner answered a `hand_offs` ask, as `answerHandOffs` in ../threads.ts
- * does. A yes already started the hand-off it held (`start_held`); the lead
+ * The owner answered a `hand_offs` ask. A yes already started the hand-off it held (`start_held`); the lead
  * hears the yes itself only when the owner wrote something with it. One held
  * for a colleague that left since never goes, and the lead hears why. A no
  * stops the work, the held hand-off never goes, and the lead hears so it can
