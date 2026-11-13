@@ -1,18 +1,30 @@
 // The rules an Odd's live state keeps after any run of events: every screen
 // shows the same state, nothing claims work that is not there, the Jobs tab
-// follows the runs, a hand-off reads "is on it" only while its run goes, a
-// chat reply ranks above background runs, and the card's tabs reload only
+// follows the runs, a hand-off reads "is on it" only while a run serving it
+// goes, a chat reply ranks above background runs, and the card's tabs reload only
 // when a run starts or ends. Random event sequences drive the page's
 // snapshot; the test keeps its own record of what is true from the events
-// alone, and each rule asserts equality with it. Then one fixture per state
-// renders every screen that reads an Odd's state (svelte-load.ts compiles
-// them) and checks the words each shows against the fixture's own. Run with
-// `npm test -w @oddboro/office`; `ODD_NOW_SEEDS` sets how many sequences.
+// alone, and each rule asserts equality with it. odd-now-fixtures.test.ts
+// renders the screens themselves. Run with `npm test -w @oddboro/office`;
+// `ODD_NOW_SEEDS` sets how many sequences.
 import assert from 'node:assert/strict';
-import { register } from 'node:module';
 import { test } from 'node:test';
-import type { AskRow, Desk, HandOffLine } from '@oddboro/ledger';
+import type { AskRow } from '@oddboro/ledger';
 import { explore, type Explore } from '@oddboro/ledger/sequences';
+import {
+  CARRY_OUT_LABEL,
+  CATCH_UP,
+  deskOf,
+  GONE,
+  HAND_OFF_LABEL,
+  handOff,
+  HELLO,
+  IDS,
+  JOBS,
+  NAMES,
+  nameOf,
+  work
+} from '#lib/staff/odd-now-cases.ts';
 import {
   floorMode,
   handOffProgress,
@@ -22,8 +34,8 @@ import {
   oddNow,
   railCount,
   railRing,
+  nowIn,
   readerProps,
-  runFor,
   runsChanged,
   runWords,
   tagWords,
@@ -38,19 +50,7 @@ import type { Work } from '#lib/staff/work.ts';
 const SEEDS = Number(process.env.ODD_NOW_SEEDS ?? 300);
 const LENGTH = 40;
 
-const NAMES: Record<string, string> = { ada: 'Ada', bo: 'Bo', cy: 'Cy' };
-const IDS = Object.keys(NAMES);
-const nameOf = (id: string) => NAMES[id] ?? id;
-/** A colleague who has left: the page holds no state for it. */
-const GONE = 'dee';
-
-const JOBS = ['Morning brief', 'Inbox sweep'];
-/** A catch-up run, as job-brief.ts words one: its label is not the job's name. */
-const CATCH_UP = 'Catching up 2 periods of Morning brief';
-/** A new hire's hello: a run through the slot, not a chat reply. */
-const HELLO = 'Saying hello';
 const RUN_LABELS = [...JOBS, CATCH_UP, HELLO];
-const HAND_OFF_LABEL = 'Plan the trip';
 const TOOLS = ['Read', 'Edit'];
 /** Where the floor may put an Odd: at work, elsewhere, and at the owner's door. */
 const PLACES: Activity[] = ['work', 'read', 'play', 'wait'];
@@ -67,6 +67,7 @@ type Event =
   | { kind: 'queuedRunDropped'; key: number }
   | { kind: 'followUpAdded'; odd: string; id: number }
   | { kind: 'followUpClaimed'; odd: string; id: number; key: number }
+  | { kind: 'carryOutClaimed'; odd: string; handOff: number; key: number }
   | { kind: 'chatStarted'; odd: string }
   | { kind: 'chatEnded'; odd: string }
   | { kind: 'askRaised'; odd: string; id: number }
@@ -85,7 +86,8 @@ type Run = {
   odd: string;
   label: string;
   going: boolean;
-  followUp?: number;
+  /** The hand-off it serves: its own, or the one whose ask a carry-out answers. */
+  handOff?: number;
   steps: number;
 };
 type Record_ = {
@@ -95,7 +97,7 @@ type Record_ = {
   /** Follow-ups yet to start. */
   waiting: { id: number; odd: string }[];
   /** Every hand-off follow-up ever added. */
-  handOffs: number[];
+  handOffs: { id: number; odd: string }[];
   chats: Set<string>;
   asks: { id: number; odd: string }[];
   tasks: { id: number; odd: string | null }[];
@@ -106,26 +108,6 @@ type Record_ = {
 };
 
 type State = { snap: Snapshot; before: Record<string, OddNow>; now: Record<string, OddNow> };
-
-const work = (id: number, label: string, more: Partial<Work> = {}): Work => ({
-  id,
-  kind: 'job',
-  label,
-  detail: 'A run',
-  since: '2026-11-12T09:00:00.000Z',
-  queued: true,
-  steps: 0,
-  ...more
-});
-
-/**
- * A Desk with only the asks and tasks. oddNow reads only each one's Odd; the
- * rest of a Desk is the server's, so it is left out here.
- */
-const deskOf = (
-  asks: { id: number; staffId: string }[],
-  tasks: { id: number; staffId: string | null }[]
-) => ({ asks, tasks }) as unknown as Desk;
 
 const start = (): { state: State; record: Record_ } => {
   const activity = Object.fromEntries(IDS.map((id) => [id, 'work' as Activity]));
@@ -194,6 +176,13 @@ function next(r: Record_): Event[] {
   for (const w of r.waiting)
     if (r.runs.filter((x) => x.odd === w.odd).length < RUNS_EACH)
       out.push({ kind: 'followUpClaimed', odd: w.odd, id: w.id, key });
+  // Once a hand-off's own run is claimed, the owner's yes to what it asked can start a carry-out.
+  for (const h of r.handOffs)
+    if (
+      !r.waiting.some((w) => w.id === h.id) &&
+      r.runs.filter((x) => x.odd === h.odd).length < RUNS_EACH
+    )
+      out.push({ kind: 'carryOutClaimed', odd: h.odd, handOff: h.id, key });
   for (const a of r.asks) out.push({ kind: 'askAnswered', id: a.id });
   for (const t of r.tasks) out.push({ kind: 'taskEnded', id: t.id });
   for (const t of r.threads) out.push({ kind: 'threadReleased', title: t.title });
@@ -220,7 +209,7 @@ function note(r: Record_, e: Event): void {
       return;
     case 'followUpAdded':
       r.waiting.push({ id: e.id, odd: e.odd });
-      r.handOffs.push(e.id);
+      r.handOffs.push({ id: e.id, odd: e.odd });
       r.serial++;
       return;
     case 'followUpClaimed':
@@ -230,7 +219,18 @@ function note(r: Record_, e: Event): void {
         odd: e.odd,
         label: HAND_OFF_LABEL,
         going: false,
-        followUp: e.id,
+        handOff: e.id,
+        steps: 0
+      });
+      r.serial++;
+      return;
+    case 'carryOutClaimed':
+      r.runs.push({
+        key: e.key,
+        odd: e.odd,
+        label: CARRY_OUT_LABEL,
+        going: false,
+        handOff: e.handOff,
         steps: 0
       });
       r.serial++;
@@ -310,7 +310,15 @@ function apply(s: Snapshot, e: Event): Snapshot {
         toStart: { ...s.toStart, [e.odd]: (s.toStart[e.odd] ?? []).filter((w) => w.id !== -e.id) },
         inProgress: withRun(
           e.odd,
-          work(e.key, HAND_OFF_LABEL, { kind: 'follow-up', followUp: e.id })
+          work(e.key, HAND_OFF_LABEL, { kind: 'follow-up', handOffId: e.id })
+        )
+      };
+    case 'carryOutClaimed':
+      return {
+        ...s,
+        inProgress: withRun(
+          e.odd,
+          work(e.key, CARRY_OUT_LABEL, { kind: 'follow-up', handOffId: e.handOff })
         )
       };
     case 'chatStarted':
@@ -449,6 +457,7 @@ const RELOADS: Record<Event['kind'], boolean> = {
   queuedRunDropped: false,
   followUpAdded: false,
   followUpClaimed: false,
+  carryOutClaimed: false,
   chatStarted: false,
   chatEnded: false,
   askRaised: false,
@@ -487,8 +496,9 @@ function sequences(rule: string, check: Check): { failed: unknown; seen: Set<str
         if (runs[0]?.label === HELLO) seen.add('a hello going first');
         if (runs.some((x) => x.label === CATCH_UP) && !runs.some((x) => x.label === JOBS[0]))
           seen.add('a catch-up going without its job');
-        if (expectedShow(r, id) === 'holding' && runs.some((x) => x.followUp !== undefined))
+        if (expectedShow(r, id) === 'holding' && runs.some((x) => x.handOff !== undefined))
           seen.add('holding while its hand-off run goes');
+        if (runs.some((x) => x.label === CARRY_OUT_LABEL)) seen.add('a carry-out going');
         if (expectedShow(r, id) === 'free' && r.activity[id] === 'work') seen.add('free at work');
       }
       return check(state.now, r, state.before).map((detail) => ({ rule, detail }));
@@ -572,20 +582,29 @@ test('a job shows Running exactly while a run with its name goes, and Run now is
   ]);
 });
 
-test('a colleague is on a hand-off exactly while its run for that hand-off goes, whatever it shows', () => {
-  const { failed, seen } = sequences('a hand-off is on it only while its run goes', (now, r) =>
-    r.handOffs.flatMap((followUp) =>
-      [...IDS, GONE].flatMap((id) => {
-        const found = runFor(now[id], followUp)?.id;
-        const want = going(r, id).find((x) => x.followUp === followUp)?.key;
-        return found === want
-          ? []
-          : [`${id}'s run for hand-off ${followUp} is ${found}, the record says ${want}`];
-      })
-    )
+test('a colleague is on a hand-off exactly while a run serving it goes, its own or a carry-out, whatever it shows', () => {
+  const { failed, seen } = sequences(
+    'a hand-off is on it only while a run serving it goes',
+    (now, r) =>
+      r.handOffs.flatMap((h) =>
+        [...IDS, GONE].flatMap((id) => {
+          const line = handOff({ id: h.id, toId: id, to: nameOf(id) });
+          const onIt = handOffProgress(line, nowIn(now)).text === `${nameOf(id)} is on it`;
+          const want = going(r, id).some((x) => x.handOff === h.id);
+          return onIt === want
+            ? []
+            : [`${id} reads as on hand-off ${h.id}: ${onIt}, the record says ${want}`];
+        })
+      )
   );
   assert.equal(failed, undefined);
-  reached(seen, ['holding while its hand-off run goes', 'followUpClaimed', 'runStarted']);
+  reached(seen, [
+    'holding while its hand-off run goes',
+    'a carry-out going',
+    'followUpClaimed',
+    'carryOutClaimed',
+    'runStarted'
+  ]);
 });
 
 test('an Odd shows Replying to you exactly while its chat reply goes and nothing above it holds, and a hello reads as a run', () => {
@@ -641,28 +660,10 @@ test("the floor sends an Odd to the door while it waits on the owner, and to its
   reached(seen, ['leading', 'holding with a run going', 'chatting with a run going', 'queued']);
 });
 
-/** A hand-off Ada gave Bo, as the chat lists it; only the fields the words read matter. */
-const handOff = (more: Partial<HandOffLine>): HandOffLine => ({
-  id: 7,
-  threadId: 1,
-  at: new Date('2026-11-12T09:00:00.000Z'),
-  title: HAND_OFF_LABEL,
-  brief: 'Plan it',
-  from: 'Ada',
-  to: 'Bo',
-  fromId: 'ada',
-  toId: 'bo',
-  gave: true,
-  status: 'working',
-  answered: false,
-  backs: [],
-  ...more
-});
-
 /** The office with Bo running the hand-off above, and Dee, who has left, not on the roster. */
 const handOffOffice = (): Snapshot => ({
   ids: IDS,
-  inProgress: { bo: [work(1, HAND_OFF_LABEL, { kind: 'follow-up', queued: false, followUp: 7 })] },
+  inProgress: { bo: [work(1, HAND_OFF_LABEL, { kind: 'follow-up', queued: false, handOffId: 7 })] },
   toStart: {},
   chatting: [],
   desk: deskOf([], []),
@@ -687,7 +688,7 @@ test("the page's reader props give an Odd's screens its own state, any colleague
   assert.equal(props.onplan, onplan);
 });
 
-test('a hand-off line says the colleague is on it only while its run for that hand-off goes', () => {
+test('a hand-off line says the colleague is on it only while a run serving that hand-off goes', () => {
   const snap = handOffOffice();
   const { nowOf } = readerProps(snap, oddNow(snap), 'ada', () => {});
   assert.deepEqual(handOffProgress(handOff({}), nowOf), { text: 'Bo is on it', yours: false });
@@ -706,7 +707,7 @@ test('a hand-off line says the colleague is on it only while its run for that ha
   );
 });
 
-test("a hand-off line keeps its words for a finished step and for a colleague who has left, and says back on it after the owner's answer", () => {
+test('a hand-off line keeps its words for a finished step and for a colleague who has left', () => {
   const snap = handOffOffice();
   const { nowOf } = readerProps(snap, oddNow(snap), 'ada', () => {});
   const left = handOff({ toId: GONE, to: 'Dee', status: 'failed' });
@@ -716,14 +717,6 @@ test("a hand-off line keeps its words for a finished step and for a colleague wh
     yours: false
   });
   assert.equal(handOffWords(handOff({ status: 'queued' }), false).text, 'Bo has not started yet');
-  const back = {
-    at: new Date('2026-11-12T10:00:00.000Z'),
-    outcome: 'waiting' as const,
-    text: 'Asked the owner',
-    answered: true,
-    pickUp: { status: 'done' as const }
-  };
-  assert.equal(handOffWords(handOff({ backs: [back] }), true).text, 'Bo is back on it');
   assert.deepEqual(handOffWords(handOff({ status: 'waiting' }), false), {
     text: 'Bo is waiting on you · Ada is taking it from here',
     yours: true
@@ -734,456 +727,38 @@ test("a hand-off line keeps its words for a finished step and for a colleague wh
   );
 });
 
-/** An Odd's profile, with only the fields its screens read. Every Odd here is a Writer. */
-const profileOf = (id: string) =>
-  ({
-    id,
-    name: NAMES[id],
-    role: 'Writer',
-    agent: 'claude',
-    permission: 'read',
-    hired: '2026-11-01',
-    remit: 'Writes the briefs.',
-    portrait: id,
-    sprite: id,
-    variant: 'a',
-    guesses: 0,
-    tools: []
-    // The rest of a profile is the server's, and no screen here reads it.
-  }) as unknown as StaffProfile;
-
-/** Where the floor put each Odd: Ada at `activity`, the rest at work. */
-const adaAt = (activity: Activity): Record<string, Activity> => ({
-  ada: activity,
-  bo: 'work',
-  cy: 'work'
-});
-
-/** The office as the page holds it: Ada, Bo and Cy at work with nothing going, then `more`. */
-const office = (more: Partial<Snapshot> = {}): Snapshot => ({
-  ids: IDS,
-  inProgress: {},
-  toStart: {},
-  chatting: [],
-  desk: deskOf([], []),
-  staff: IDS.map(profileOf),
-  messages: {},
-  threads: [],
-  activity: Object.fromEntries(IDS.map((id) => [id, 'work' as Activity])),
-  nameOf,
-  ...more
-});
-
-const goingRun = (id: number, label: string, more: Partial<Work> = {}) =>
-  work(id, label, { queued: false, ...more });
-/** Bo's thread, which Ada holds for it. */
-const BOS_THREAD = { title: HAND_OFF_LABEL, hubId: 'bo', holderId: 'ada' };
-/** The hand-off Bo gave Ada, as Bo's chat lists it. */
-const toAda = handOff({ from: 'Bo', to: 'Ada', fromId: 'bo', toId: 'ada' });
-
-/** A piece of work in the list, by its label, and how it stands. */
-type Item = [label: string, stands: 'going' | 'slot' | 'start'];
-/** What the info page and the chat's foot say of a piece of work, past its label. */
-const ITEM_WORDS = {
-  going: { info: 'Thinking · 0 steps', chat: 'Thinking' },
-  slot: {
-    info: 'Waiting for a free slot: Ada runs up to three things at once.',
-    chat: 'waiting for a free slot'
-  },
-  start: { info: "Starts once Ada's current run on this work ends.", chat: 'waiting to start' }
+/** Bo's step came back waiting on the owner, who said yes. */
+const back = {
+  at: new Date('2026-11-12T10:00:00.000Z'),
+  outcome: 'waiting' as const,
+  text: 'Asked the owner',
+  answered: true,
+  pickUp: { status: 'done' as const }
 };
 
-/** What Ada's screens show. */
-type Expected = {
-  /** The floor tag, the card line and the rail's title. */
-  words: string;
-  /** The info page's line. */
-  info: string;
-  work: Item[];
-  /** The rail's count and the card's in-progress count. */
-  count: number;
-  /** Whether the rail rings Ada. */
-  ring: boolean;
-  /** The Jobs tab's line while a run goes. */
-  jobsLine?: string;
-  /** The jobs the Jobs tab shows Running. */
-  running: string[];
-  /** Whether Run now is locked. */
-  locked: boolean;
-};
-
-/** A hand-off line in the lead's chat, read in `office` (the fixture's own by default). */
-type HandOffCheck = {
-  lead: string;
-  line: HandOffLine;
-  office?: Snapshot;
-  onIt: boolean;
-  text: string;
-};
-
-type Fixture = { name: string; snap: Snapshot; expect: Expected; handOffs?: HandOffCheck[] };
-
-/** Ada with nothing going and nothing queued. */
-const idle = { work: [], count: 0, ring: false, running: [], locked: false };
-/** Ada with the Morning brief going, whatever she shows. */
-const briefGoing: Pick<Expected, 'work' | 'count' | 'jobsLine' | 'running' | 'locked'> = {
-  work: [['Morning brief', 'going']],
-  count: 1,
-  jobsLine: 'Running Morning brief now.',
-  running: ['Morning brief'],
-  locked: true
-};
-const brief = { ada: [goingRun(1, 'Morning brief')] };
-
-/** Every state Ada can show, each with the offices that put her there. */
-const FIXTURES: Record<Show['is'], Fixture[]> = {
-  message: [
-    {
-      name: 'a message',
-      snap: office({ messages: { ada: 1 }, activity: adaAt('wait') }),
-      expect: { ...idle, words: 'Has a message for you', info: 'Has a message for you', ring: true }
-    },
-    {
-      name: 'a message while running',
-      snap: office({ messages: { ada: 1 }, inProgress: brief, activity: adaAt('wait') }),
-      expect: {
-        ...briefGoing,
-        words: 'Has a message for you',
-        info: 'Has a message for you',
-        ring: true
-      }
-    }
-  ],
-  waitingOnYou: [
-    {
-      name: 'waiting on you',
-      snap: office({ desk: deskOf([{ id: 1, staffId: 'ada' }], []), activity: adaAt('wait') }),
-      expect: { ...idle, words: 'Waiting on you', info: 'Waiting on you', ring: true }
-    },
-    {
-      name: 'waiting on you while running',
-      snap: office({
-        desk: deskOf([{ id: 1, staffId: 'ada' }], []),
-        inProgress: brief,
-        activity: adaAt('wait')
-      }),
-      expect: { ...briefGoing, words: 'Waiting on you', info: 'Waiting on you', ring: true }
-    }
-  ],
-  holding: [
-    {
-      name: 'holding a thread',
-      snap: office({ threads: [BOS_THREAD] }),
-      expect: { ...idle, words: 'Plan the trip · with Bo', info: 'Plan the trip · with Bo' }
-    },
-    {
-      name: 'holding while its hand-off run goes',
-      snap: office({
-        threads: [BOS_THREAD],
-        inProgress: {
-          ada: [goingRun(1, HAND_OFF_LABEL, { kind: 'follow-up', followUp: toAda.id })]
-        }
-      }),
-      expect: {
-        words: 'Plan the trip · with Bo',
-        info: 'Plan the trip · with Bo',
-        work: [['Plan the trip', 'going']],
-        count: 1,
-        ring: false,
-        jobsLine: 'Running Plan the trip now.',
-        running: [],
-        locked: true
-      },
-      handOffs: [
-        { lead: 'bo', line: toAda, onIt: true, text: 'Ada is on it' },
-        {
-          lead: 'bo',
-          line: toAda,
-          office: office({
-            threads: [BOS_THREAD],
-            toStart: {
-              ada: [
-                work(1, HAND_OFF_LABEL, { kind: 'follow-up', toStart: true, followUp: toAda.id })
-              ]
-            }
-          }),
-          onIt: false,
-          text: 'Ada has not started yet'
-        }
-      ]
-    }
-  ],
-  leading: [
-    {
-      name: 'leading a thread a colleague holds',
-      snap: office({ threads: [{ title: HAND_OFF_LABEL, hubId: 'ada', holderId: 'bo' }] }),
-      expect: { ...idle, words: 'Waiting on Bo', info: 'Waiting on Bo' }
-    },
-    {
-      name: 'leading a thread a colleague holds while running',
-      snap: office({
-        threads: [{ title: HAND_OFF_LABEL, hubId: 'ada', holderId: 'bo' }],
-        inProgress: brief
-      }),
-      expect: {
-        ...briefGoing,
-        words: 'Plan the trip · with Bo',
-        info: 'Plan the trip · with Bo',
-        ring: false
-      }
-    }
-  ],
-  chatting: [
-    {
-      name: 'chatting',
-      snap: office({ chatting: ['ada'] }),
-      expect: { ...idle, words: 'Replying to you', info: 'Replying to you' }
-    },
-    {
-      name: 'chatting while a run goes',
-      snap: office({ chatting: ['ada'], inProgress: brief }),
-      expect: { ...briefGoing, words: 'Replying to you', info: 'Replying to you', ring: false }
-    }
-  ],
-  running: [
-    {
-      name: 'running two runs',
-      snap: office({
-        inProgress: { ada: [goingRun(1, 'Morning brief'), goingRun(2, 'Inbox sweep')] }
-      }),
-      expect: {
-        words: 'Morning brief +1 more',
-        info: 'Running Morning brief +1 more',
-        work: [
-          ['Morning brief', 'going'],
-          ['Inbox sweep', 'going']
-        ],
-        count: 2,
-        ring: false,
-        jobsLine: 'Running Morning brief +1 more now.',
-        running: ['Morning brief', 'Inbox sweep'],
-        locked: true
-      }
-    },
-    {
-      name: 'saying hello',
-      snap: office({ inProgress: { ada: [goingRun(1, HELLO)] } }),
-      expect: {
-        words: 'Saying hello',
-        info: 'Running Saying hello',
-        work: [['Saying hello', 'going']],
-        count: 1,
-        ring: false,
-        jobsLine: 'Running Saying hello now.',
-        running: [],
-        locked: true
-      }
-    },
-    {
-      name: 'a catch-up run going',
-      snap: office({ inProgress: { ada: [goingRun(1, CATCH_UP)] } }),
-      expect: {
-        words: 'Catching up 2 periods of Morning brief',
-        info: 'Running Catching up 2 periods of Morning brief',
-        work: [['Catching up 2 periods of Morning brief', 'going']],
-        count: 1,
-        ring: false,
-        jobsLine: 'Running Catching up 2 periods of Morning brief now.',
-        running: [],
-        locked: true
-      }
-    }
-  ],
-  queued: [
-    {
-      name: 'queued only',
-      snap: office({ inProgress: { ada: [work(1, 'Morning brief')] } }),
-      expect: {
-        ...idle,
-        words: 'Working',
-        info: 'Working',
-        work: [['Morning brief', 'slot']],
-        count: 1
-      }
-    },
-    {
-      name: 'a follow-up yet to start',
-      snap: office({
-        toStart: {
-          ada: [work(1, HAND_OFF_LABEL, { kind: 'follow-up', toStart: true, followUp: 7 })]
-        },
-        activity: adaAt('read')
-      }),
-      expect: {
-        ...idle,
-        words: 'Reading in the library',
-        info: 'Reading in the library',
-        work: [['Plan the trip', 'start']],
-        count: 1
-      }
-    }
-  ],
-  free: [
-    {
-      name: 'free at work after a run ended',
-      snap: office(),
-      expect: { ...idle, words: 'At their desk', info: 'At their desk' }
-    },
-    {
-      name: 'free elsewhere',
-      snap: office({ activity: adaAt('play') }),
-      expect: { ...idle, words: 'In the break room', info: 'In the break room' }
-    },
-    {
-      name: "free elsewhere with an office task on the Desk, which is no Odd's",
-      snap: office({
-        desk: deskOf([], [{ id: 1, staffId: null }]),
-        activity: adaAt('play')
-      }),
-      expect: { ...idle, words: 'In the break room', info: 'In the break room' }
-    },
-    {
-      name: "a hand-off to a colleague who has left keeps today's line",
-      snap: office(),
-      expect: { ...idle, words: 'At their desk', info: 'At their desk' },
-      handOffs: [
-        {
-          lead: 'ada',
-          line: handOff({ toId: GONE, to: 'Dee', status: 'failed' }),
-          onIt: false,
-          text: 'Dee could not finish · Ada is taking it from here'
-        }
-      ]
-    }
-  ]
-};
-
-/** A render's markup without Svelte's hydration markers, which split what the owner reads. */
-const markup = (rendered: { body: string }) => rendered.body.replace(/<!--.*?-->/gs, '');
-/** The text of `html` as the owner reads it: tags dropped, entities decoded, spaces collapsed. */
-const plain = (html: string) =>
-  html
-    .replace(/<[^>]*>/g, '')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&amp;/g, '&')
-    .replace(/\s+/g, ' ')
-    .trim();
-/** Each match of `re` in `html`, its groups as plain text. */
-const each = (html: string, re: RegExp) =>
-  [...html.matchAll(re)].map((m) => m.slice(1).map((g) => (g === undefined ? g : plain(g))));
-/** The first group of the first match, as plain text; undefined with no match. */
-const first = (html: string, re: RegExp) => {
-  const group = re.exec(html)?.[1];
-  return group === undefined ? group : plain(group);
-};
-
-test("every reader of an Odd's status shows the same state for the same fixture", async (t) => {
-  // Static imports are hoisted, so the hook is in place only if the components load after it.
-  register('./svelte-load.ts', import.meta.url);
-  const { render } = await import('svelte/server');
-  const { default: StaffCard } = await import('#lib/ui/StaffCard.svelte');
-  const { default: OddInfo } = await import('#lib/ui/OddInfo.svelte');
-  const { default: OddsRail } = await import('#lib/ui/OddsRail.svelte');
-  const onplan = (_hires: AskRow[]) => {};
-  const none = () => {};
-
-  for (const [is, fixtures] of Object.entries(FIXTURES)) {
-    for (const f of fixtures) {
-      await t.test(f.name, () => {
-        const props = readerProps(f.snap, oddNow(f.snap), 'ada', onplan);
-        const profile = f.snap.staff[0];
-        const activity = f.snap.activity.ada;
-        const card = markup(
-          render(StaffCard, {
-            props: {
-              ...props,
-              profile,
-              activity,
-              version: 0,
-              onitem: none,
-              places: [],
-              manual: false,
-              sentTo: undefined,
-              held: {},
-              onsend: none,
-              onschedule: none,
-              onchatstart: none,
-              onchatend: none,
-              oncollapse: none,
-              onclose: none
-            }
-          })
-        );
-        const info = markup(
-          render(OddInfo, {
-            props: { profile, activity, version: 0, now: props.now, focus: 0, onsend: none }
-          })
-        );
-        const rail = markup(
-          render(OddsRail, {
-            props: {
-              staff: f.snap.staff,
-              nowOf: props.nowOf,
-              headings: Object.fromEntries(IDS.map((id) => [id, undefined])),
-              onselect: none,
-              onchat: none
-            }
-          })
-        );
-        // Ada's place on the rail, as markup: its title, its ring and its count.
-        const onRail = /<li><button[^>]*aria-label="Ada, Writer"(.*?)<\/li>/s.exec(rail)?.[1] ?? '';
-        const shown = {
-          tag: tagWords(props.now),
-          rail: {
-            words: first(onRail, /title="Ada, Writer: ([^"]*)"/),
-            count: Number(first(onRail, /aria-hidden="true">(\d+)<\/span>/) ?? 0),
-            ring: onRail.includes('ring-2 ring-ember')
-          },
-          card: {
-            words: first(card, /Writer · ([^<]*)<\/span>/),
-            count: Number(first(card, /aria-label="(\d+) in progress"/) ?? 0)
-          },
-          info: {
-            words: first(info, /<span class="truncate">([^<]*)<\/span>/),
-            work: each(
-              info,
-              /<section class="rounded-xl bg-raise p-3[^"]*" aria-label="[^"]*">.*?<h3[^>]*>(.*?)<\/h3>\s*<p[^>]*>(.*?)<\/p>/gs
-            )
-          },
-          chat: each(
-            card,
-            /title="Open In progress">([^<]*)<\/button> <span[^>]*>· ([^<]*)<\/span>(?: <span class="min-w-0 truncate[^"]*">· ([^<]*)<\/span>)?/g
-          ).map(([label, stands, doing]) => [label, doing ?? stands]),
-          jobs: {
-            line: first(info, /(Running [^<]* now\.)/),
-            // The Jobs tab lists its jobs once it has fetched them, which a server
-            // render never does, so its badge and lock are read as it reads them.
-            running: JOBS.filter((job) => jobRunning(props.now, job)),
-            locked: props.now.runs.length > 0
-          }
-        };
-        const e = f.expect;
-        assert.deepEqual(shown, {
-          tag: e.words,
-          rail: { words: e.words, count: e.count, ring: e.ring },
-          card: { words: e.words, count: e.count },
-          info: {
-            words: e.info,
-            work: e.work.map(([label, stands]) => [label, ITEM_WORDS[stands].info])
-          },
-          chat: e.work.map(([label, stands]) => [label, ITEM_WORDS[stands].chat]),
-          jobs: { line: e.jobsLine, running: e.running, locked: e.locked }
-        });
-        for (const h of f.handOffs ?? []) {
-          const snap = h.office ?? f.snap;
-          const { nowOf } = readerProps(snap, oddNow(snap), h.lead, onplan);
-          assert.equal(!!runFor(nowOf(h.line.toId), h.line.id), h.onIt);
-          assert.equal(handOffProgress(h.line, nowOf).text, h.text);
-        }
-        assert.equal(props.now.show.is, is);
-      });
-    }
+test('a running hand-off line reads on it, back on it, getting back to it or not started, by whether a run goes and whether a step came back', () => {
+  for (const status of ['queued', 'working'] as const) {
+    const fresh = handOff({ status });
+    const returned = handOff({ status, backs: [back] });
+    assert.equal(handOffWords(fresh, true).text, 'Bo is on it');
+    assert.equal(handOffWords(returned, true).text, 'Bo is back on it');
+    assert.equal(handOffWords(returned, false).text, 'Bo is getting back to it');
+    assert.equal(handOffWords(fresh, false).text, 'Bo has not started yet');
   }
+});
+
+test("a hand-off line says the colleague is back on it while its carry-out of the owner's yes goes", () => {
+  // Bo now carries the owner's yes out.
+  const line = handOff({ backs: [back] });
+  const carrying = (handOffId: number): Snapshot => ({
+    ...handOffOffice(),
+    inProgress: {
+      bo: [work(2, CARRY_OUT_LABEL, { kind: 'follow-up', queued: false, handOffId })]
+    }
+  });
+  const read = (snap: Snapshot) =>
+    handOffProgress(line, readerProps(snap, oddNow(snap), 'ada', () => {}).nowOf);
+  assert.deepEqual(read(carrying(7)), { text: 'Bo is back on it', yours: false });
+  // A carry-out for another hand-off is not this one's.
+  assert.deepEqual(read(carrying(8)), { text: 'Bo is getting back to it', yours: false });
 });

@@ -59,7 +59,7 @@ export function workAbout(leadId: string, key: string): WorkAbout | undefined {
 /** A chat uses its own session. Only background work waits for these slots. */
 export async function slot<T>(
   id: string,
-  about: Pick<Work, 'kind' | 'label' | 'detail' | 'askId' | 'about' | 'followUp'>,
+  about: Pick<Work, 'kind' | 'label' | 'detail' | 'askId' | 'about' | 'handOffId'>,
   fn: (onEvent: (e: ChatEvent) => void, runId: string) => Promise<T>,
   options: { greeting?: true } = {}
 ): Promise<T> {
