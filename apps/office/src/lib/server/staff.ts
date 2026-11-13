@@ -24,7 +24,6 @@ import {
   accountsHome,
   AGENT_NAMES,
   anyStaffer,
-  atDraft,
   capabilities,
   capped,
   CHAT_STORIES_MAX,
@@ -58,7 +57,6 @@ import {
   ledStories,
   lessonLine,
   lessonsOf,
-  levelAtMost,
   levelLine,
   liveLessons,
   MANAGER_ROLE,
@@ -79,6 +77,8 @@ import {
   resultsToJoin,
   roster,
   rulePath,
+  runCeiling,
+  runsAtDraft,
   runsGoing,
   runsOnLine,
   SECRET_STORES,
@@ -167,7 +167,7 @@ import { tooOldLine } from './versions.ts';
 export { activeReply, addToReply, chat, replyToOwnerTurn, stopReply } from './chat-run.ts';
 export { history, keepOwnerTurn } from './chat-turns.ts';
 export { runJob } from './job-run.ts';
-export { inProgress, isBusy, runsActive, stopRuns, working } from './run-state.ts';
+export { chatting, inProgress, isBusy, runsActive, stopRuns, working } from './run-state.ts';
 
 /** The owner's data folder, which every staffer may read, whatever tool it runs on. */
 const DATA = home('data');
@@ -704,7 +704,7 @@ export type RunOpts = {
   ownerNote?: string;
   /** The file the owner edited, and their version of it, which a lesson read from it quotes. The run may not write that file. */
   ownerEdit?: { path: string; text: string };
-  /** Draft at most: a follow-up `atDraft` names. */
+  /** Draft at most: a follow-up `runsAtDraft` names, or a file job's run. */
   draftOnly?: boolean;
   /** A run that only reads the owner's reason or edit for a lesson (`servesNoThread`): it hands nothing on. */
   lessonRun?: boolean;
@@ -825,7 +825,7 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
   const saved = read && (read.home ?? '') === toolDir ? read : undefined;
   /** Claude Code's folder for this run: the account's, or ~/.claude for the owner's own login. */
   const claudeDir = toolDir || join(homedir(), '.claude');
-  const ceiling = opts.draftOnly && levelAtMost('draft', who.permission) ? 'draft' : who.permission;
+  const ceiling = runCeiling(who.permission, opts.draftOnly);
   // Every run gets a key: a thread it hands off on keeps it, and holds the
   // Odd's pick-ups there until it ends (`runsGoing`), even when it is a
   // follow-up on no thread. A call the gateway holds for the owner carries it too.
@@ -1265,6 +1265,8 @@ export async function followThrough(
   // The hand-off this run's work serves, if any: its own, or the one whose ask or
   // task the owner just answered. Its result goes back to the giver.
   const serves = await servesHandOff(f);
+  // Whether this run carries out the owner's yes to an approval ask, which the Draft rule weighs.
+  const carriesApproval = f.kind === 'carry_out' && a?.kind === 'approval';
   const giver = serves?.handOff
     ? {
         id: serves.handOff.from,
@@ -1357,7 +1359,7 @@ export async function followThrough(
           lead: leadId === who.id ? who.name : ((await staffer(leadId))?.name ?? leadId)
         }
       : undefined;
-  const work = { kind: 'follow-up' as const, label, detail, askId: a?.id, about };
+  const work = { kind: 'follow-up' as const, label, detail, askId: a?.id, about, followUp: f.id };
   const res = await slot(who.id, work, (onEvent, runId) =>
     run(who, label, {
       kind: 'follow-up',
@@ -1374,7 +1376,7 @@ export async function followThrough(
       approvedAsk: f.kind === 'carry_out' ? a?.id : undefined,
       ownerNote: ownerNoteOf(f),
       ownerEdit: edit && { path: edit.path, text: edit.shown.now },
-      draftOnly: atDraft(f.kind),
+      draftOnly: runsAtDraft({ kind: f.kind, serves: !!serves, carriesApproval }),
       lessonRun: servesNoThread(f.kind),
       handOffId: serves?.id,
       threadId: thread?.id,

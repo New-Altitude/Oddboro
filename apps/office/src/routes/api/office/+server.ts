@@ -18,7 +18,7 @@ import {
 } from '@oddboro/ledger';
 import { currentOffice } from '#lib/server/space.ts';
 import { followUpsWaiting } from '#lib/server/follow-ups.ts';
-import { inProgress, working } from '#lib/server/staff.ts';
+import { chatting, inProgress, working } from '#lib/server/staff.ts';
 import { toProfile } from '#lib/server/profile.ts';
 import { heldThreads } from '#lib/staff/thread-tags.ts';
 import type { RequestHandler } from './$types';
@@ -31,6 +31,7 @@ export const GET: RequestHandler = async () => {
     staff: staff.map((s) => toProfile(s, guesses[s.id])),
     desk: await desk(),
     working: working(),
+    chatting: chatting(),
     inProgress: inProgress(),
     toStart: await followUpsWaiting(),
     roomNames: await roomNamesFor(office),
