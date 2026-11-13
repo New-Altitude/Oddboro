@@ -221,17 +221,18 @@ const SEEDS: {
       ends: given
     };
   },
-  oddBroughtBack: async (tx, { staffId }) => {
-    const twins = await tx
-      .select({ id: asks.id, staffId: asks.staffId })
-      .from(asks)
-      .where(and(eq(asks.status, 'open'), eq(asks.odd, staffId), eq(asks.kind, 'bring_back')));
-    return {
-      staff: [staffId, ...twins.map((a) => a.staffId)],
-      asks: twins.map((a) => a.id),
-      update: ['staff', 'asks']
-    };
-  }
+  oddBroughtBack: async (tx, { staffId }) => ({
+    // Each other open ask to bring it back is withdrawn. A withdrawal's line
+    // goes only to the ask's thread lead or hand-off, whose rows come with the
+    // ask, so the Odd that raised it is not read.
+    staff: [staffId],
+    asks: await idsOf(
+      tx,
+      asks,
+      and(eq(asks.status, 'open'), eq(asks.odd, staffId), eq(asks.kind, 'bring_back'))
+    ),
+    update: ['staff', 'asks']
+  })
 };
 
 /**
