@@ -289,6 +289,17 @@ Every update is required. `src-tauri/src/update.rs` runs them with
   Windows's own `tar`). `scripts/smoke.ts --stage` then checks the stage.
 - `scripts/smoke.ts` and `scripts/driver.ts`. The smoke test, and what
   drives the installed app for it. See "Smoke tests".
+- `installer/`. The window the Mac `.dmg` opens to: the app and
+  Applications on Oddboro's grass lot, an arrow between them.
+  `lot.json` is the lot (a room stamp of grass and park props), `arrow.px`
+  the arrow. `scripts/installer.ts` draws them into `background.tiff` (1x
+  and 2x) and has Finder lay out a scratch disk named Oddboro, keeping its
+  layout as `DS_Store`. `release.ts` copies both into every `.dmg`. Only
+  Finder writes a layout Finder trusts, and it finds the picture by its path
+  on a disk named Oddboro, so the volume name must stay. After changing
+  `lot.json` or `arrow.px`, run `npm run installer -w @oddboro/desktop` on a
+  Mac and commit both files. `-- --look` writes only the picture, with the
+  icons marked, to `out/installer-look.png`.
 - `stage/` must hold no folder symlinks. The bundler walks it without
   following them, so a linked folder never reaches the app.
 - `stage/`, `src-tauri/binaries/`, `src-tauri/target/` and `src-tauri/gen/`
