@@ -1,8 +1,10 @@
-// What the office tells a test or a bug report about itself: each startup
-// step and how long it took (also written as an `office:` line, which the
-// app's shell keeps in office.log), how many pages hold the live line, and
-// how many errors pages have reported. GET /api/health serves it, and
-// POST /api/client-log brings the page's own reports here.
+// What the office tells a test or a bug report about itself: the port and
+// home it runs with, which the smoke test holds to the shell's launch line,
+// each startup step and how long it took (also written as an `office:` line,
+// which the app's shell keeps in office.log), how many pages hold the live
+// line, and how many errors pages have reported. GET /api/health serves it,
+// and POST /api/client-log brings the page's own reports here.
+import { home, OFFICE_PORT } from '@oddboro/ledger/home';
 
 /** At most this many page lines a minute, so a page stuck in a loop cannot fill the log. */
 export const PAGE_LINES_PER_MINUTE = 30;
@@ -72,6 +74,8 @@ export function health() {
   return {
     version: process.env.ODDBORO_VERSION || 'development',
     pid: process.pid,
+    port: OFFICE_PORT,
+    home: home(),
     uptimeMs: Math.round(process.uptime() * 1000),
     readyMs: readyMs ?? null,
     steps: { ...steps },

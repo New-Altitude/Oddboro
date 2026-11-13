@@ -392,7 +392,9 @@ it starts with no dialog; the real window shows the welcome and Next moves it
 to the name step; a write with no `Origin` gets 403 and the page's own shape
 404 (#25); the setup checks pass, with a stand-in Claude Code found where an
 install puts it (PR #18, CI only); it onboards; the log has the window
-loading the page and the page booting, with no page errors; it quits with
+loading the page and the page booting, with no page errors; the shell's
+launch line and the office's `/api/health` name the port and home the run
+set (NEW-1694: each side works them out, and the shell hands them over); it quits with
 Node and both ports gone; it starts twice more with its data; on Windows it
 uninstalls.
 
