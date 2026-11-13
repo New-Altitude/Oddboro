@@ -1,14 +1,17 @@
 # Every pull request to main, and every push to it, runs the checks the repo
 # already has on a Mac, Linux and Windows: the setup check, lint, types, the
 # tests, and that the migrations match the schema. Setup has to work on all
-# three systems (hard rule 14), so each check runs on each one.
+# three systems (hard rule 14), so each check runs on each one. A change to
+# nothing but the site or the docs skips this, and site.yml checks it instead.
 name: Checks
 
 on:
   pull_request:
     branches: [main]
+    paths-ignore: ['apps/site/**', 'docs/**']
   push:
     branches: [main]
+    paths-ignore: ['apps/site/**', 'docs/**']
 
 permissions:
   contents: read
