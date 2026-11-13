@@ -75,6 +75,7 @@
         href={SITE.github}
         class="text-muted hover:text-ink hover:bg-raise flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium"
         rel="noopener"
+        aria-label="GitHub"
       >
         <GitHubMark class="size-4" />
         <span class="hidden sm:inline">GitHub</span>
