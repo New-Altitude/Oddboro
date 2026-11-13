@@ -102,7 +102,12 @@ export type Inserted = { ref: string };
 /** A line for the Ledger, as `record` takes it. */
 export type LedgerLine = Parameters<typeof record>[0];
 
-/** An in-transaction write outside the four tables that an entry function supplies, as setting a goal on its yes is. */
+/**
+ * An in-transaction write outside the four tables that an entry function
+ * supplies, as setting a goal on its yes is. It may run more than once: a
+ * transition Postgres ends to break a deadlock runs again from the load, so
+ * `run` keeps nothing from an earlier run, such as rows it collected.
+ */
 export type PerKindInTx = {
   /** Names it in an error, and is the `ref` a put may point at. */
   name: string;

@@ -60,9 +60,12 @@ const DEADLOCK_TRIES = 3;
 
 /**
  * Run `inTx` in a transaction of its own. When Postgres ends it to break a
- * deadlock, everything it did rolled back, so it runs again from the load.
- * With a caller's `tx` there is no retry: a deadlock ends the caller's
- * transaction, which only the caller can run again.
+ * deadlock, its writes to the database rolled back, so it runs again from the
+ * load. Two things a rollback does not undo: what a `perKind` effect's closure
+ * kept in memory, which is why each starts afresh (`PerKindInTx`), and the
+ * files `carryFiles` copied. Into work already open, the next run finds
+ * each copy the same file and leaves it; into new work, the copy stays in the
+ * folder of work never written, as after any rollback.
  */
 async function ownTransaction<T>(inTx: (tx: Tx) => Promise<T>): Promise<T> {
   for (let tries = 1; ; tries++) {
