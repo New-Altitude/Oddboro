@@ -75,12 +75,13 @@ export const OUTCOME_TITLE: Record<FollowUpKind, Record<Outcome, string>> = {
 export const CUT_OFF_RESULT =
   'The office restarted while this was running, so it may be half done. Check it, then ask the Odd to finish it.';
 
-export type LiveRun = Extract<FollowUp, { kind: LiveKind }>;
+/** A follow-up of a kind the office still starts, running or not; run-registry's `LiveRun` is a process that is running. */
+export type LiveFollowUp = Extract<FollowUp, { kind: LiveKind }>;
 /** The park a lead's claim lifted, which a failed run gives back. */
 type Lifted = Extract<RunState, { is: 'running' }>['unparked'];
 
 /** A run not yet ended. A retired kind's row is always ended, so such a run is of a live kind. */
-const notEnded = (f: FollowUp | undefined): f is LiveRun => !!f && f.run.is !== 'ended';
+const notEnded = (f: FollowUp | undefined): f is LiveFollowUp => !!f && f.run.is !== 'ended';
 
 /**
  * Owe an Odd a run: a source's run, as `followUp` puts it. An Odd that has
@@ -102,7 +103,7 @@ export function runQueued(
  * or the one the ask or task it answers was raised in. A lead's pick-up
  * serves none: its asks are its own.
  */
-function servesHandOff(rows: WorkRows, f: LiveRun): HandOffRow | undefined {
+function servesHandOff(rows: WorkRows, f: LiveFollowUp): HandOffRow | undefined {
   if (isHandOff(f)) return f;
   if (SERVES_NO_THREAD[f.kind]) return undefined;
   const link =
@@ -162,7 +163,7 @@ export function runClaimed(
   const park = t?.status === 'open' && t.hubId === f.staffId ? t.park : undefined;
   const lifted: Lifted =
     park?.on === 'task' ? { task: park.task } : park?.on === 'time' ? { at: park.at } : null;
-  const run: LiveRun = { ...f, run: { is: 'running', startedAt: now, unparked: lifted } };
+  const run: LiveFollowUp = { ...f, run: { is: 'running', startedAt: now, unparked: lifted } };
   const d = draft(rows);
   putAll(d, [{ table: 'followUps', row: run }]);
   if (t?.status === 'open' && lifted)
@@ -269,7 +270,7 @@ export function staleRunsClosed(
 
 function finish(
   rows: WorkRows,
-  f: LiveRun,
+  f: LiveFollowUp,
   about: string,
   ended: RunEnded,
   now: Date
