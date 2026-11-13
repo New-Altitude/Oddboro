@@ -356,3 +356,32 @@ test('when the door refuses access the owner still gets the report, the Odd goes
   );
   assert.deepEqual(quiet.events, [{ type: 'error', message: QUIET_LINE.access('Pat') }]);
 });
+
+test('work conversations keep the persona session separate from its main chat and other work', async () => {
+  const { run } = await import('./staff.ts');
+  await L.setQuiet(pat.id, undefined);
+  const one = L.home('staff', pat.id, 'work-one-persona.json');
+  const two = L.home('staff', pat.id, 'work-two-persona.json');
+  const main = readFileSync(L.home('staff', pat.id, 'persona-session.json'), 'utf8');
+  fake.door = { ...ANSWERED };
+  const speak = async (session: string, words: string) => {
+    const who = await L.staffer(pat.id);
+    assert.ok(who);
+    const answer = await run(who, words, {
+      kind: 'chat',
+      ownerSaid: words,
+      personaSessionFile: session,
+      timeoutMs: 30_000
+    });
+    assert.ok(answer.ok, answer.text);
+    return lastTurn();
+  };
+  assert.deepEqual((await speak(one, 'Work one question.')).priorTurns, []);
+  assert.deepEqual((await speak(two, 'Work two question.')).priorTurns, []);
+  const resumed = await speak(one, 'Work one follow-up.');
+  assert.deepEqual(
+    resumed.priorTurns?.map((t) => t.message),
+    ['Work one question.']
+  );
+  assert.equal(readFileSync(L.home('staff', pat.id, 'persona-session.json'), 'utf8'), main);
+});

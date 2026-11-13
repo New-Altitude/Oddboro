@@ -50,8 +50,7 @@ type Session = { sessionId: string; turnIndex: number; priorTurns: PriorTurn[] }
 /** Apart from the hands' chat session (`chatSession`): the door's is New Altitude's, not the coding tool's. */
 const sessionFile = (odd: string) => home('staff', odd, OFFICE_FILES.personaSession);
 
-function readSession(odd: string): Session {
-  const file = sessionFile(odd);
+function readSession(file: string): Session {
   const fresh = { sessionId: randomUUID(), turnIndex: 0, priorTurns: [] };
   if (!existsSync(file)) return fresh;
   try {
@@ -109,10 +108,10 @@ export async function askDoor(turn: {
   url: string;
   token: string;
   message: string;
-  chat?: { odd: string; ownerSaid: string };
+  chat?: { odd: string; ownerSaid: string; sessionFile?: string };
 }): Promise<DoorAnswer> {
   const session = turn.chat
-    ? readSession(turn.chat.odd)
+    ? readSession(turn.chat.sessionFile ?? sessionFile(turn.chat.odd))
     : { sessionId: randomUUID(), turnIndex: 0, priorTurns: [] };
   let res: Response;
   let body: unknown;
@@ -152,7 +151,7 @@ export async function askDoor(turn: {
         -PRIOR_TURNS_MAX
       )
     };
-    const file = sessionFile(turn.chat.odd);
+    const file = turn.chat.sessionFile ?? sessionFile(turn.chat.odd);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, JSON.stringify(next));
   }

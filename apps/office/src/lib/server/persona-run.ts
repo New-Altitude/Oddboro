@@ -109,7 +109,7 @@ export async function personaRun(
   const answer = await askPersona(
     who,
     voiceMessage({ kind: opts.kind, owner: await ownerName(), asked, report }),
-    opts.kind === 'chat' ? { ownerSaid: asked } : undefined
+    opts.kind === 'chat' ? { ownerSaid: asked, sessionFile: opts.personaSessionFile } : undefined
   );
   let reply: string;
   if (answer.outcome === 'answered')

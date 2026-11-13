@@ -816,6 +816,32 @@ export const threads = pgTable('threads', {
   endedAt: at('ended_at')
 });
 
+/** One owner message and its reply, kept apart from an Odd's main chat. */
+export const workMessages = pgTable(
+  'work_messages',
+  {
+    id: id(),
+    requestId: text().notNull().unique(),
+    threadId: integer()
+      .notNull()
+      .references(() => threads.id),
+    staffId: text()
+      .notNull()
+      .references(() => staff.id),
+    message: text().notNull(),
+    reply: text(),
+    status: text()
+      .$type<'replying' | 'done' | 'failed' | 'stopped'>()
+      .notNull()
+      .default('replying'),
+    /** Keep the access at writing time even when its author later loses a tool. */
+    tools: jsonb().$type<{ id: string; name: string }[]>().notNull().default([]),
+    createdAt: created(),
+    endedAt: at('ended_at')
+  },
+  (t) => [index('work_messages_thread_id_idx').on(t.threadId)]
+);
+
 /**
  * Work a staffer owes after the owner answers it: carry out an approved ask, rework
  * one the owner sent back, take in the reason for a no, act on their feedback on a report, pick up the work

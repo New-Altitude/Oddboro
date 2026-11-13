@@ -24,6 +24,7 @@
   import LedgerPanel from '#lib/ui/LedgerPanel.svelte';
   import ServicesPanel from '#lib/ui/ServicesPanel.svelte';
   import { serviceNames } from '#lib/ui/service-names.svelte.ts';
+  import WorkConversation from '#lib/ui/WorkConversation.svelte';
   import GoalsPanel from '#lib/ui/GoalsPanel.svelte';
   import LessonsLibrary from '#lib/ui/LessonsLibrary.svelte';
   import Welcome from '#lib/ui/Welcome.svelte';
@@ -175,7 +176,7 @@
     )
   );
   /** A request for the card to open on a tab, from the Odds rail's list. */
-  let cardShow = $state<{ id: string; tab: 'work'; n: number } | undefined>();
+  let cardShow = $state<{ id: string; tab: 'work' | 'chat'; n: number } | undefined>();
   /** Bumps when jobs, runs, access, goals, threads or lessons change, so the card's tabs and the Goals and Lessons windows reload. */
   let version = $state(0);
   /** Bumped on a change to the ledger's rows, so the Ledger window searches again. */
@@ -718,6 +719,7 @@
     if (w.kind === 'ledger') return 'Ledger';
     if (w.kind === 'projects') return 'Projects';
     if (w.kind === 'services') return 'Services';
+    if (w.kind === 'conversation') return wins.titles[w.id] ?? w.work.title;
     if (w.kind === 'goals') return 'Goals';
     if (w.kind === 'lessons') return 'Lessons';
     if (w.kind === 'office') return wins.titles[w.id] ?? 'Office';
@@ -1363,18 +1365,29 @@
           {/if}
         </nav>
         {#if !oddInFront && staff.length}
-          <!-- The Office level opens on every Odd, a click from each. -->
-          <OddsList
-            {staff}
-            {desk}
-            {messages}
-            find={findAgent}
-            fill={!wins.list.length}
-            onselect={select}
-          />
+          {#snippet oddsList()}
+            <OddsList
+              {staff}
+              {desk}
+              {messages}
+              find={findAgent}
+              fill={!wins.list.length}
+              onselect={select}
+            />
+          {/snippet}
+          {#if front?.kind === 'conversation'}
+            <details class="shrink-0">
+              <summary class="cursor-pointer px-4 py-2 text-xs text-muted hover:text-ink"
+                >Your Odds</summary
+              >
+              {@render oddsList()}
+            </details>
+          {:else}
+            {@render oddsList()}
+          {/if}
         {/if}
-        {#if oddInFront && profile}
-          <div class="min-h-0 flex-1 border-t border-hairline">
+        {#if profile}
+          <div class="min-h-0 flex-1 border-t border-hairline" class:hidden={!oddInFront}>
             {#if paneItem}
               {#key `${paneItem.kind}-${paneItem.id}`}
                 {#if paneItem.kind === 'report' && !desk.reports.some((r) => r.id === paneItem?.id)}
@@ -1399,6 +1412,7 @@
               {#key profile.id}
                 <div class="h-full" in:fly={fromEdge()}>
                   <StaffCard
+                    visible={oddInFront}
                     {desk}
                     {staff}
                     onplan={planHires}
@@ -1475,6 +1489,18 @@
                   onhire={hireProposal}
                   onplan={planHires}
                   onstaff={select}
+                />
+              {:else if w.kind === 'conversation'}
+                <WorkConversation
+                  id={w.id}
+                  work={w.work}
+                  {version}
+                  visible={wins.active === w.id && !oddInFront}
+                  onstaff={(id) => {
+                    paneItem = undefined;
+                    select(id);
+                    cardShow = { id, tab: 'chat', n: (cardShow?.n ?? 0) + 1 };
+                  }}
                 />
               {:else if w.kind === 'goals'}
                 <GoalsPanel {staff} {version} onthread={openThread} />

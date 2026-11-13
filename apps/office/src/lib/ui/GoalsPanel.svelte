@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { openConversation } from './windows.svelte.ts';
   import type {
     GoalHorizon,
     GoalStatus,
@@ -310,6 +311,10 @@
             <span class="mt-0.5 block text-ember">Waits on your {w.kind}: {w.title}</span>
           {/each}
         </button>
+        <button
+          class="mt-1 px-2.5 text-xs text-sea hover:text-ink"
+          onclick={() => openConversation(t)}>Talk about this work</button
+        >
       </li>
     {/snippet}
 

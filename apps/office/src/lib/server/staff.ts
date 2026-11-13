@@ -526,7 +526,7 @@ async function prompt(
     // A chat is told the story of each live goal it leads (`workLedBrief`), so
     // its list leaves those out. Work with no goal stays on it, told or not: the
     // list is where the run hears how to continue it.
-    (hands.leads
+    (hands.leads && !opts.thread
       ? recentThreadsBrief([
           ...goalsLeftOut,
           ...(await recentThreads(who.id, {
@@ -534,7 +534,11 @@ async function prompt(
           }))
         ])
       : '') +
-    (chat ? threadsOnBrief(await threadsOn(who.id)) : '') +
+    (chat
+      ? threadsOnBrief(
+          (await threadsOn(who.id)).filter((t) => !opts.thread || t.id === opts.thread)
+        )
+      : '') +
     (opts.thread
       ? opts.led.flatMap((story) => threadBrief({ story, shown: opts.shown })).join('\n')
       : workLedBrief(led.kept)) +
@@ -730,6 +734,7 @@ export type RunOpts = {
     sources?: string[];
   };
   sessionFile?: string;
+  personaSessionFile?: string;
   extra?: string;
   /** The owner's own message, when this is a chat. */
   ownerSaid?: string;
@@ -924,10 +929,12 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
     : inChat
       ? await ledStories(who.id, 'chat')
       : [];
-  const on = inChat
-    ? await onStories(who.id)
-    : opts.threadId && !led.length
+  const on = opts.threadId
+    ? !led.length
       ? await storyOf(opts.threadId)
+      : []
+    : inChat
+      ? await onStories(who.id)
       : [];
   // A chat reads the folder of all that work, even a story too long to be told
   // there. A folder not made yet stays out: each tool would be started with a
