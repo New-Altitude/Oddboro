@@ -40,7 +40,6 @@ import {
   tasks,
   threads,
   chatCardOf,
-  type HeldHandOff,
   type InChat,
   type Outcome,
   type ThreadStatus
@@ -48,7 +47,7 @@ import {
 import { flat, type DeskItem } from './desk-answers.ts';
 import { heldTools, lacking, sharing, toolNames, type Tool } from './sharing.ts';
 import { carryEach, type Carried, type CarriedFile } from './hand-offs.ts';
-import { holdForWindow, WINDOW_RESET, windowWoke } from './usage-window.ts';
+import { WINDOW_RESET, windowWoke } from './usage-window.ts';
 import { THREADS_DIR, workPath } from './work-paths.ts';
 import { queuedRows } from './work/load.ts';
 
@@ -71,7 +70,7 @@ export type Db = typeof db | Tx;
 
 /**
  * The thread keeps the key of a run that put work on it from outside it: a
- * hand-off, taken or held (`takeHandOff`), or a plan (`raiseAsk`). While that
+ * hand-off, taken or held (`handOff` in hand-offs.ts), or a plan (`raiseAsk`). While that
  * run goes, the hub's pick-ups there wait (`waitsOnOwnRun` in office-follow-ups.ts). Only
  * the office's memory says which keys still go (`runsGoing`), so a key from
  * before a restart holds nothing, and none needs clearing.
@@ -148,8 +147,8 @@ export async function settleThread(q: Db, id: number): Promise<void> {
 const REOPENS: ThreadStatus[] = ['done', 'failed'];
 
 /**
- * An ended thread opens again for a new round of work, as continuing one
- * does (`takeHandOff`). Only from the statuses in `from`; an open one is left
+ * An ended thread opens again for a new round of work, as a hand-off
+ * continuing one does. Only from the statuses in `from`; an open one is left
  * as it is.
  */
 async function reopen(q: Db, id: number, from: ThreadStatus[]): Promise<void> {
@@ -164,34 +163,38 @@ export const LEADS_NONE =
   "Nothing was opened. You serve a goal and have no job of your own, so you lead no work: the goal's lead hands each piece on. Pass the owner's words to the lead with tell_lead, then tell the owner you passed them on.";
 
 /**
- * The one place a thread is opened, with `hubId` as its lead. An Odd that
- * serves a goal and has no job does only that goal's work, which the goal's
- * lead hands on, so it never leads a thread: this throws instead, whatever
- * tool or run got here, and the tool server returns the throw as an error the
- * Odd reads. The manager leads every goal's thread, so it is never refused.
+ * The one place a thread is opened, with `hubId` as its lead, once it may
+ * lead work (`mayLead`). A hand-off opens its new work through the work core
+ * instead, after the same check.
  */
 async function openThread(
   q: Db,
   t: { title: string; hubId: string; goalId?: number }
 ): Promise<ThreadRow> {
-  const [serves] = await q
-    .select({ id: staffGoals.goalId })
-    .from(staffGoals)
-    .where(eq(staffGoals.staffId, t.hubId))
-    .limit(1);
-  if (serves) {
-    const [job] = await q
-      .select({ id: jobs.id })
-      .from(jobs)
-      .where(eq(jobs.staffId, t.hubId))
-      .limit(1);
-    if (!job && (await manager(q))?.id !== t.hubId) throw new Error(LEADS_NONE);
-  }
+  await mayLead(q, t.hubId);
   const [opened] = await q
     .insert(threads)
     .values({ ...t, holderId: t.hubId })
     .returning();
   return opened;
+}
+
+/**
+ * An Odd that serves a goal and has no job does only that goal's work, which
+ * the goal's lead hands on, so it never leads a thread: this throws instead,
+ * whatever tool or run got here, and the tool server returns the throw as an
+ * error the Odd reads. The manager leads every goal's thread, so it is never
+ * refused.
+ */
+export async function mayLead(q: Db, hubId: string): Promise<void> {
+  const [serves] = await q
+    .select({ id: staffGoals.goalId })
+    .from(staffGoals)
+    .where(eq(staffGoals.staffId, hubId))
+    .limit(1);
+  if (!serves) return;
+  const [job] = await q.select({ id: jobs.id }).from(jobs).where(eq(jobs.staffId, hubId)).limit(1);
+  if (!job && (await manager(q))?.id !== hubId) throw new Error(LEADS_NONE);
 }
 
 /**
@@ -201,12 +204,22 @@ async function openThread(
  * hand-off for the goal, so a hire serving it joins it as a colleague and
  * never leads one of its own. An ended one is found as it is, so the goal
  * never gets a second: what lands on it opens it again, an ask or task
- * (`raisedOn`) or the lead's next hand-off (`takeHandOff`), so a lookup alone,
- * such as a hand-off the office refuses, changes nothing. A stopped one opens
- * again only for a new plan (`raisedOn`); a hand-off there is refused until
- * then. Opening one counts no hand-off against its limit.
+ * (`raisedOn`) or the lead's next hand-off, so a lookup alone, such as a
+ * hand-off the office refuses, changes nothing. A stopped one opens again
+ * only for a new plan (`raisedOn`); a hand-off there is refused until then.
+ * Opening one counts no hand-off against its limit.
  */
 export async function goalThread(q: Db, goalId: number, opener: string): Promise<number> {
+  const work = await goalWork(q, goalId, opener);
+  return 'id' in work ? work.id : (await openThread(q, work.open)).id;
+}
+
+/** A goal's one thread, as `goalThread` finds it, or the one to open for it when it has none yet. */
+export async function goalWork(
+  q: Db,
+  goalId: number,
+  opener: string
+): Promise<{ id: number } | { open: { title: string; hubId: string; goalId: number } }> {
   const lead = (await manager(q))?.id;
   const [found] = await q
     .select({ id: threads.id })
@@ -214,10 +227,10 @@ export async function goalThread(q: Db, goalId: number, opener: string): Promise
     .where(and(eq(threads.goalId, goalId), lead ? eq(threads.hubId, lead) : undefined))
     .orderBy(desc(threads.id))
     .limit(1);
-  if (found) return found.id;
+  if (found) return { id: found.id };
   const [g] = await q.select({ title: goals.title }).from(goals).where(eq(goals.id, goalId));
   if (!g) throw new Error(`No goal #${goalId}`);
-  return (await openThread(q, { title: g.title, goalId, hubId: lead ?? opener })).id;
+  return { open: { title: g.title, hubId: lead ?? opener, goalId } };
 }
 
 /**
@@ -260,114 +273,11 @@ export async function notLed(t: {
  */
 export type ThreadFor = { id: number } | { title: string; goalId?: number };
 
-/**
- * The hand-offs a round of work takes before the office asks the owner whether
- * it keeps going (`askToKeepGoing`). The one finished round in the trial
- * offices took 6: plan, build, review, a fix and a check, and one more.
- */
-export const HAND_OFF_LIMIT = 8;
-
-/** What a hand-off came to: counted on a thread, refused, or held for the owner's answer. */
-export type Taken = ThreadRow | { problem: string } | { asked: number; thread: number };
+// Its one home is the work core's hand-off decider, which holds the round to it.
+export { HAND_OFF_LIMIT } from './work/hand-offs.ts';
 
 /** "1 hand-off", "3 hand-offs". */
 export const handOffsWord = (n: number): string => `${n} ${n === 1 ? 'hand-off' : 'hand-offs'}`;
-
-/**
- * Count one hand-off against a thread: on a new thread, on a finished one it
- * continues (which reopens it with the same folder, history, goal and request,
- * for a new round), or on a goal's thread. A round takes up to
- * `HAND_OFF_LIMIT`; the next is held on the owner's answer (`askToKeepGoing`),
- * and past the usage window's guard, on the window (`holdForWindow`). Taken
- * or held, the thread keeps the key of the run handing off (`threads.runs`),
- * so the hub's pick-ups there wait while that run goes, even when no hand-off
- * was written.
- */
-export async function takeHandOff(
-  tx: Tx,
-  h: {
-    from: string;
-    to: string;
-    thread: ThreadFor;
-    run?: string;
-    work: { title: string; brief: string; files?: string[] };
-  }
-): Promise<Taken> {
-  const held: HeldHandOff = { from: h.from, to: h.to, ...h.work };
-  const on = h.thread;
-  let id: number;
-  if ('id' in on) id = on.id;
-  // Work for a goal goes on the goal's one thread, which only its lead hands on in.
-  else if (on.goalId !== undefined) id = await goalThread(tx, on.goalId, h.from);
-  else {
-    const opened = await openThread(tx, { title: on.title, hubId: h.from });
-    await keepRun(tx, opened.id, { key: h.run, by: h.from });
-    return (await holdForWindow(tx, opened, h.to)) ?? count(tx, opened, held);
-  }
-  // Locked, so two hand-offs at once cannot both take the last one left, or ask twice.
-  const [t] = await tx.select().from(threads).where(eq(threads.id, id)).for('update');
-  if (t?.hubId !== h.from)
-    return {
-      problem: `Work ${id} is not work you lead. Hand off on work you lead, or start new work.`
-    };
-  if (t.endedAt && !REOPENS.includes(t.status))
-    return {
-      problem: `Work ${id} has ended (${t.status}). Nothing more runs on it. Tell the owner so.`
-    };
-  const [asked] = await tx
-    .select({ id: asks.id })
-    .from(asks)
-    .where(and(eq(asks.threadId, id), eq(asks.kind, 'hand_offs'), eq(asks.status, 'open')));
-  if (asked)
-    return {
-      problem: `Work ${id} waits on the owner's answer to ask #${asked.id} about going on, and holds the hand-off that raised it, which goes ahead on their yes. This one did not go: once the held one comes back, hand it on again if it is still needed. Finish this run; their answer brings you back.`
-    };
-  await keepRun(tx, id, { key: h.run, by: h.from });
-  return (await holdForWindow(tx, t, h.to)) ?? count(tx, t, held);
-}
-
-/**
- * One more hand-off in this round, or the owner's ask, holding `held`, once
- * the round has taken `HAND_OFF_LIMIT`. Continuing an ended thread starts a
- * new round; clearing `endedAt` reopens it, and its status follows from the
- * hand-off written next (`settleThread`).
- */
-async function count(tx: Tx, t: ThreadRow, held: HeldHandOff): Promise<Taken> {
-  const used = t.endedAt ? 0 : t.handOffsUsed;
-  if (used >= HAND_OFF_LIMIT) return askToKeepGoing(tx, t, held);
-  const [taken] = await tx
-    .update(threads)
-    .set({ endedAt: null, handOffsUsed: used + 1 })
-    .where(eq(threads.id, t.id))
-    .returning();
-  return taken;
-}
-
-/**
- * A round of work took its limit and the hub hands off again: one ask goes on
- * the owner's desk holding that hand-off (`asks.held`), and the thread waits
- * on it. A yes starts the held hand-off as the first of a new round
- * (`startHeld`); a no stops the thread, and the held one never goes.
- */
-async function askToKeepGoing(tx: Tx, t: ThreadRow, held: HeldHandOff): Promise<Taken> {
-  const [hub] = await tx.select({ name: staff.name }).from(staff).where(eq(staff.id, t.hubId));
-  const [to] = await tx.select({ name: staff.name }).from(staff).where(eq(staff.id, held.to));
-  // The owner reads the work by its title: no thread, no number, no hand-off count.
-  const [ask] = await tx
-    .insert(asks)
-    .values({
-      staffId: t.hubId,
-      kind: 'hand_offs',
-      threadId: t.id,
-      held,
-      title: `${hub.name} needs a few more steps to finish ${t.title}. Go ahead?`,
-      why: `${hub.name} has handed on as many pieces of ${t.title} as the office lets work go without asking you.`,
-      ifApproved: `${to.name} starts on "${held.title}" now, as ${hub.name} asked. If you say no, ${t.title} stops.`
-    })
-    .returning({ id: asks.id });
-  await settleThread(tx, t.id);
-  return { asked: ask.id, thread: t.id };
-}
 
 /**
  * A yes to a `hand_offs` ask starts the hand-off it held, as the hub wrote it,

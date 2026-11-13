@@ -29,18 +29,21 @@ import {
   type HandOff,
   type Outcome
 } from './schema.ts';
-import { sharing, toolNames } from './sharing.ts';
+import { toolNames } from './sharing.ts';
 import {
   addFollowUp,
-  HAND_OFF_LIMIT,
+  goalWork,
+  mayLead,
   nextIsLeads,
-  takeHandOff,
   threadFolder,
   threadPart,
   type Db,
   type ThreadFor
 } from './threads.ts';
 import { workName } from './work-paths.ts';
+import { transitionWork } from './work/apply.ts';
+import type { EventOf } from './work/events.ts';
+import { handOffProblem } from './work/hand-offs.ts';
 import { SERVES_NO_THREAD } from './work/kinds.ts';
 
 type FollowUpRow = typeof followUps.$inferSelect;
@@ -166,8 +169,9 @@ export function carryEach(thread: number, from: string, carry: CarriedFile[]): C
 
 /**
  * Hand `to` a piece of work from `from`, opening a thread or going on in one
- * `from` leads. Returns the hand-off's id, its thread and the hand-offs left
- * this round, why it cannot go, or the ask that holds it until the owner's yes.
+ * `from` leads, through the work core (`handedOff`). Returns the hand-off's
+ * id, its thread and the hand-offs left this round, why it cannot go, or the
+ * ask that holds it until the owner's yes.
  */
 export async function handOff(h: {
   from: string;
@@ -183,41 +187,52 @@ export async function handOff(h: {
   | { problem: string }
   | { asked: number; thread: number }
 > {
-  if (h.to === h.from)
-    return {
-      problem: 'You cannot hand work to yourself. Do it in this run, or hand it to a colleague.'
-    };
-  const [colleague] = await db
-    .select({ id: staff.id })
-    .from(staff)
-    .where(and(eq(staff.id, h.to), isNull(staff.leftAt)));
-  if (!colleague)
-    return { problem: `Nobody called "${h.to}" works here. Use a colleague's id from the list.` };
   const carry = h.carry ?? [];
-  // On the work before takeHandOff, which writes a held hand-off from it.
+  // On the work it hands on, which an ask holding it keeps as written.
   const files = [...(h.work.files ?? []), ...carry.map((c) => `${h.from}/${c.name}`)];
-  const work = files.length ? { ...h.work, files } : h.work;
   try {
-    return await db.transaction(async (tx) => {
-      // Past the round's limit, the ask holds this hand-off and the owner's yes starts it.
-      const t = await takeHandOff(tx, { ...h, work });
-      if ('problem' in t) return t;
-      // In the transaction, so a copy refused or failing takes the hand-off back with it.
-      if (carry.length) carryFiles('asked' in t ? t.thread : t.id, h.from, carry);
-      if ('asked' in t) return t;
-      const id = await addFollowUp(tx, {
-        staffId: h.to,
-        kind: 'hand_off',
-        note: null,
-        handOff: await sharing(tx, { from: h.from, to: h.to, ...work, threadId: t.id }),
-        threadId: t.id
-      });
-      return { id, thread: t.id, left: HAND_OFF_LIMIT - t.handOffsUsed };
+    const went = await transitionWork({
+      kind: 'handedOff',
+      from: h.from,
+      to: h.to,
+      work: files.length ? { ...h.work, files } : h.work,
+      thread: await workFor(h.thread, h.from),
+      run: h.run,
+      carry
     });
+    if ('refused' in went) return { problem: went.refused };
+    const { result } = went.change;
+    const { real } = went;
+    if ('held' in result) {
+      const held = result.held;
+      return {
+        problem: handOffProblem(
+          'notLed' in held ? { notLed: real(held.notLed) } : { ...held, window: real(held.window) }
+        )
+      };
+    }
+    if ('asked' in result) return { asked: real(result.asked), thread: real(result.thread) };
+    return { id: real(result.id), thread: real(result.thread), left: result.left };
   } catch (e) {
+    // A file the change carries that cannot land takes the hand-off back with it.
     if (e instanceof NotCarried) return { problem: e.message };
     throw e;
   }
+}
+
+/**
+ * The work a hand-off goes on: one named, its goal's, or new work its lead
+ * opens, once the lead may lead work (`mayLead`). The core loads neither the
+ * goal nor what the lead serves, so they are read here.
+ */
+async function workFor(on: ThreadFor, from: string): Promise<EventOf<'handedOff'>['thread']> {
+  if ('id' in on) return { id: on.id };
+  const work =
+    on.goalId === undefined
+      ? { open: { title: on.title, hubId: from } }
+      : await goalWork(db, on.goalId, from);
+  if ('open' in work) await mayLead(db, work.open.hubId);
+  return work;
 }
 
 /**

@@ -300,11 +300,10 @@ export function handOn(
 }
 
 /**
- * The usage window holds a hand-off on a thread, as `holdForWindow` in
- * ../usage-window.ts does: the thread parks until the window resets, held by
- * the window's ask, which may be new in this change. Its park replaces any
- * other. Finished work opens again for a new round, with no hand-off counted.
- * Then the thread settles.
+ * The usage window holds a hand-off on a thread: the thread parks until the
+ * window resets, held by the window's ask, which may be new in this change. Its
+ * park replaces any other. Finished work opens again for a new round, with no
+ * hand-off counted. Then the thread settles.
  */
 export function holdForWindow(
   d: Draft,

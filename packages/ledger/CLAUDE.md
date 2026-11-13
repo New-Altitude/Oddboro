@@ -440,11 +440,11 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   it and every hand-off for it (`hand_off` with `goal`), and counts no
   hand-off as it opens. Only its lead hands on there, so a hire serving the
   goal joins it as a colleague. An Odd that serves a goal and has no job leads
-  no thread: `openThread`, the one place a thread is opened, refuses it
+  no thread: `mayLead`, checked wherever a thread is opened, refuses it
   (`LEADS_NONE`), whatever tool or run got there; the manager is never refused.
   A finished goal thread is found as it is, so a goal never gets a second: an
   ask or task raised on it opens it again (`raisedOn`), and so does the lead's
-  next hand-off (`takeHandOff`), so a lookup alone, such as a hand-off the
+  next hand-off, so a lookup alone, such as a hand-off the
   office refuses, changes nothing. A stopped one stays stopped: a hand-off
   there is refused, and only a new plan for the goal opens it again
   (`raisedOn` with `plan`), since the plan asks the owner afresh. With no
@@ -462,8 +462,8 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   one stays stopped. A round of work takes up to `HAND_OFF_LIMIT` (8)
   hand-offs; continuing an ended thread starts a new one. `handOffsUsed` is
   this round's; every round's are the thread's `hand_off` follow-ups.
-  `takeHandOff` holds the limit, and `count` is its one check. The hand-off
-  past it waits: `askToKeepGoing` raises one `hand_offs` ask on the thread,
+  The hand-off decider (`handedOff` in `src/work/hand-offs.ts`) holds the
+  limit. The hand-off past it waits: it raises one `hand_offs` ask on the thread,
   holding what the lead chose in `asks.held` (the colleague, title and
   brief), and while that ask is open no other hand-off goes. The office raised it, so it
   takes a yes or a no only (`yesOrNo` in `src/tools.ts`). A yes
@@ -500,7 +500,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   returns the row as joined (`startFollowUp`), so the run reads every line.
   Every follow-up on a thread is written through `addFollowUp`, which settles
   the thread's holder and status (`settleThread`, the one place status is
-  worked out; `askToKeepGoing` settles it too): the status is open until the
+  worked out): the status is open until the
   work ends, and an ask or task raised on it that is still open keeps it
   open, however the hub's last run ended. Whether it waits on the owner is
   never stored: `stageOf` reads it from the desk. Each hub run on its thread gets
@@ -531,7 +531,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
 - New hand-offs to Odds on Claude Code wait while the plan's 5-hour usage window is nearly used up
   (`src/usage-window.ts`). Runs report the share used and the reset time
   (`plan_limits`); the window's size in tokens is not known. Past
-  `WINDOW_GUARD` (85%), `holdForWindow` in `takeHandOff` refuses each new
+  `WINDOW_GUARD` (85%), the hand-off decider refuses each new
   hand-off to an Odd on Claude Code without counting it (one to an Odd on
   another tool goes), parks its thread until the reset
   (`resume_at`, with `threads.held_by` naming the ask; a finished one opens

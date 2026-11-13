@@ -28,22 +28,21 @@ import {
 import type { Thread } from './state.ts';
 import { handOn, hasLeft, holdForWindow } from './threads.ts';
 
-// Copies of words and limits in ../threads.ts, ../usage-window.ts and
-// ../sharing.ts, which load the database, until the hand-off and tell_lead
-// entries decide through these deciders and that code goes.
-
-/** `HAND_OFF_LIMIT` in ../threads.ts: the hand-offs a round of work takes before the owner is asked. */
-const HAND_OFF_LIMIT = 8;
-/** `WINDOW_GUARD` in ../usage-window.ts: the share of the 5-hour window past which new hand-offs wait. */
+/**
+ * The hand-offs a round of work takes before the office asks the owner whether
+ * it keeps going (`keepGoingAsk`). The one finished round in the trial
+ * offices took 6: plan, build, review, a fix and a check, and one more.
+ */
+export const HAND_OFF_LIMIT = 8;
+/** The share of the Claude plan's 5-hour window past which new hand-offs to Odds on it wait. */
 const WINDOW_GUARD = 0.85;
 const percent = (share: number) => `${Math.round(share * 100)}%`;
-/** The list `toolNames` in ../sharing.ts formats with. */
+/** A copy of the list `toolNames` in ../sharing.ts formats with, since that file loads the database. */
 const list = new Intl.ListFormat('en', { style: 'long', type: 'conjunction' });
 
 /**
  * What the Odd handing off is told when its hand-off did not go, once the
- * work's number is known: today's words in `takeHandOff` (../threads.ts) and
- * `holdForWindow` (../usage-window.ts).
+ * work's number is known.
  */
 export function handOffProblem(p: HandOffHeld<number>): string {
   if ('notLed' in p)
@@ -54,16 +53,15 @@ export function handOffProblem(p: HandOffHeld<number>): string {
 type HandedOff = WorkResults['handedOff'];
 
 /**
- * A lead hands a colleague a piece of work, as `handOff` in ../hand-offs.ts
- * and `takeHandOff` in ../threads.ts do: on work it leads, or on new work it
- * opens. Nobody who left the office hands work on or takes it, and work that
- * stopped, or waits on the owner's answer to going on, takes none. Taken or
- * held, the work keeps the key of the run handing it on. Past the usage
- * window's guard the work waits for the reset, and the change still commits;
- * once a round has taken `HAND_OFF_LIMIT`, one ask holds the hand-off until
- * the owner's yes. The files it carries are copied into the sender's part of
- * the work in the same change, taken or asked, so a copy that fails takes the
- * hand-off back with it.
+ * A lead hands a colleague a piece of work, through `handOff` in
+ * ../hand-offs.ts: on work it leads, or on new work it opens. Nobody who left
+ * the office hands work on or takes it, and work that stopped, or waits on the
+ * owner's answer to going on, takes none. Taken or held, the work keeps the key
+ * of the run handing it on. Past the usage window's guard the work waits for
+ * the reset, and the change still commits; once a round has taken
+ * `HAND_OFF_LIMIT`, one ask holds the hand-off until the owner's yes. The files
+ * it carries are copied into the sender's part of the work in the same change,
+ * taken or asked, so a copy that fails takes the hand-off back with it.
  */
 export function handedOff(
   rows: WorkRows,
@@ -132,7 +130,7 @@ export function handedOff(
   return { change: changeOf(d, { id, thread, left: HAND_OFF_LIMIT - (used + 1) }), after };
 }
 
-/** Why a hand-off cannot go on work already open or ended, which writes nothing: as `takeHandOff` refuses it. */
+/** Why a hand-off cannot go on work already open or ended, which writes nothing. */
 function goesOnRefused(rows: WorkRows, id: number, from: string): string | undefined {
   const t = rows.threads.get(id);
   if (t?.hubId !== from) return handOffProblem({ notLed: id });
@@ -189,10 +187,9 @@ function keepRun(d: Draft, threadId: number, run: string | undefined): void {
 }
 
 /**
- * Whether a hand-off to `to` waits for the usage window, as `holdForWindow`
- * in ../usage-window.ts decides: only for an Odd on Claude Code, past the
- * guard, with a reset still ahead, and when the owner has not let hand-offs
- * run in this window. `ask` is this window's ask, when one was raised.
+ * Whether a hand-off to `to` waits for the usage window: only for an Odd on
+ * Claude Code, past the guard, with a reset still ahead, and when the owner
+ * has not let hand-offs run in this window. `ask` is this window's ask, when one was raised.
  */
 function windowHold(
   rows: WorkRows,
@@ -207,9 +204,8 @@ function windowHold(
 }
 
 /**
- * The office's one ask for this window, as `raiseWindowAsk` in
- * ../usage-window.ts words it. It is office-wide, so it is filed under the
- * manager, who runs the floor, else under the lead that hit the guard. Its
+ * The office's one ask for this window. It is office-wide, so it is filed under
+ * the manager, who runs the floor, else under the lead that hit the guard. Its
  * why names the Odds on Claude Code when the office has Odds on other tools.
  */
 function windowAsk(rows: WorkRows, leadId: string, share: number, at: string): NewAsk {
@@ -233,9 +229,8 @@ function windowAsk(rows: WorkRows, leadId: string, share: number, at: string): N
 }
 
 /**
- * The ask that holds a hand-off past the round's limit, as `askToKeepGoing`
- * in ../threads.ts words it. The owner reads the work by its title: no
- * thread, no number, no hand-off count.
+ * The ask that holds a hand-off past the round's limit. The owner reads the
+ * work by its title: no thread, no number, no hand-off count.
  */
 function keepGoingAsk(rows: WorkRows, t: Thread, held: HeldHandOff): NewAsk {
   const hub = nameOf(rows, t.hubId);

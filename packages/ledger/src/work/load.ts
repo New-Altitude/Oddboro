@@ -220,8 +220,7 @@ const SEEDS: {
 
 /**
  * The usage window as the last run reported it, and this window's ask, the
- * last one raised since the window began, as `holdForWindow` in
- * ../usage-window.ts reads them. Read under the plan's lock.
+ * last one raised since the window began. Read under the plan's lock.
  */
 async function windowNow(tx: Tx): Promise<Seeds['window']> {
   const [w] = await tx.select().from(planLimits).where(eq(planLimits.id, PLAN));
