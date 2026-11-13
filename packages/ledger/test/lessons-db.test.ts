@@ -194,6 +194,12 @@ test('two Odds keeping lessons for the office at the same moment never take it p
     statements.filter((s) => !s.locked).map((s) => s.text),
     []
   );
+  // The lock ends with each keep's transaction. One held past it, as a session
+  // lock is, would shut every later keep on another session out of the scope.
+  const {
+    rows: [after]
+  } = await db.$client.query<{ held: boolean }>(LOCK_HELD, ['lessons:everyone']);
+  assert.equal(after.held, false);
   const [{ open }] = await sql<{ open: number }>`
     select count(*)::int as open from lessons
     where staff_id is null and status in ('live', 'waiting')`;
