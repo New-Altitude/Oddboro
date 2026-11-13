@@ -12,7 +12,7 @@ download address, an install time or an executable.
 
 - A page, file, message or release note could tell an Odd to install code.
   The chat tool has no installation action. It can request only a check and
-  show controls. Only the authenticated owner page can use Install now.
+  show controls. Install now uses the existing check that the request came from the office's own page.
 - A forged or stale request file could show controls or request a check.
   The office accepts only a valid request for the current successful chat
   run and consumes it once. A stopped or failed reply discards it. The file
