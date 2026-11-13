@@ -118,15 +118,17 @@ export async function provenKey(r: Run, base: string): Promise<string | undefine
 /**
  * Every request to the office this run started, with its owner's key once
  * the office proved it holds it (`provenKey`), and with none for an app older
- * than the key. The error names the home, never the key.
+ * than the key. The error names the home, never the key. `withKey` false
+ * sends none, for the checks that the office refuses a request without it.
  */
 export async function officeFetch(
   r: Run,
   path: string,
   init: { method?: string; headers?: Record<string, string>; body?: string } = {},
-  secs = 20
+  secs = 20,
+  withKey = true
 ): Promise<Response> {
-  const key = await provenKey(r, BASE);
+  const key = withKey ? await provenKey(r, BASE) : undefined;
   return fetch(BASE + path, {
     ...init,
     headers: key ? { ...init.headers, cookie: `${OWNER_COOKIE}=${key}` } : init.headers,

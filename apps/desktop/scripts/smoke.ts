@@ -58,6 +58,7 @@ import {
   pageHeaders,
   plist,
   PORT,
+  provenKey,
   ps,
   quit,
   ready,
@@ -172,6 +173,31 @@ async function officeChecks(
   );
   await step('takes it with Origin only, as older WebKit sends it', true, async () =>
     expectStatus(await send(r, 'DELETE', '/api/pokes/999999', pageHeaders(false)), 404)
+  );
+  // NEW-1673: the page's own headers are not enough without the owner's key.
+  const keyed = !!(await provenKey(r, BASE).catch(() => undefined));
+  const bare = async (headers: Record<string, string>) => {
+    const res = await officeFetch(r, '/api/pokes/999999', { method: 'DELETE', headers }, 20, false);
+    return { status: res.status, text: (await res.text()).slice(0, 200) };
+  };
+  await step('refuses a page-shaped write without the owner key', keyed, async () =>
+    expectStatus(await bare(pageHeaders(true)), 403)
+  );
+  await step('refuses a page-shaped write with a wrong key', keyed, async () =>
+    expectStatus(
+      await bare({ ...pageHeaders(true), cookie: `oddboro-owner-${PORT}=not-the-key` }),
+      403
+    )
+  );
+  await step("refuses another site's write, even with the key", keyed, async () =>
+    expectStatus(
+      await send(r, 'DELETE', '/api/pokes/999999', {
+        origin: 'http://evil.example',
+        'sec-fetch-site': 'cross-site',
+        'content-type': 'application/json'
+      }),
+      403
+    )
   );
   // The checks start programs (claude --version and others): 35 s on the arm64 Windows runner.
   await step(
