@@ -293,6 +293,23 @@ test('a proposal sent back in chat gets the reworked reply in chat', async () =>
   assert.equal(line?.text, r.text);
 });
 
+test('a no with no reason in chat, to an ask on no work, wakes its Odd once with the answer, replying under the card', async () => {
+  const { ask } = await L.raiseAsk('paige', {
+    title: 'Book the hall for Friday',
+    why: 'For the meeting.',
+    ifApproved: 'Book it.'
+  });
+  await post(asks.POST, ask.id, { decision: 'deny', chat: true });
+  const before = (await answersIn('paige')).length;
+  const { f, r } = await runFollowUp({ ask: ask.id });
+  assert.equal(f.kind, 'answered');
+  assert.deepEqual(f.chatCard, { kind: 'ask', id: ask.id, title: ask.title });
+  const lines = await answersIn('paige');
+  assert.equal(lines.length, before + 1);
+  assert.deepEqual(lines.at(-1)?.re, { kind: 'ask', id: ask.id, title: ask.title });
+  assert.equal(lines.at(-1)?.text, r.text);
+});
+
 test('a failed run on a chat answer says so in one line under the card', async () => {
   const q = await L.giveTask('paige', { title: 'Which room is quiet?', why: 'w', steps: [] });
   await post(tasks.POST, q.id, { op: 'finish', done: true, note: 'The back room.', chat: true });
