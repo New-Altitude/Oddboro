@@ -633,7 +633,7 @@ test('a hand-off on new work names the work, its run and its carried files by In
   assert.deepEqual(held.outside, []);
 });
 
-test("handOffProblem words a hand-off that did not go in today's sentences", () => {
+test('handOffProblem words a hand-off that did not go as takeHandOff and holdForWindow word it', () => {
   assert.equal(
     handOffProblem({ notLed: 12 }),
     'Work 12 is not work you lead. Hand off on work you lead, or start new work.'
