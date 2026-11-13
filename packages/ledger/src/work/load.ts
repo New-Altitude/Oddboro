@@ -8,7 +8,7 @@ import { manager } from '../goals.ts';
 import type { StaffRow } from '../office.ts';
 import { gaveFolder, switchesOff } from '../office-folders.ts';
 import { networkNote } from '../office-staff.ts';
-import { ownerName } from '../office-usage.ts';
+import { ownerName, PLAN_ROW, WINDOW_MS } from '../office-usage.ts';
 import { runsGoing } from '../run-registry.ts';
 import { asks, followUps, planLimits, staff, tasks, threads, type HandOff } from '../schema.ts';
 import { sharing } from '../sharing.ts';
@@ -62,11 +62,6 @@ type Seeds = {
 };
 
 const one = <T>(id: T | null | undefined): T[] => (id == null ? [] : [id]);
-
-/** The plan's one row, the Claude plan's windows, as `notePlan` keeps it. */
-const PLAN = 'claude';
-/** `WINDOW_MS` in ../usage-window.ts: a window that resets at a time began this long before it. */
-const WINDOW_MS = 5 * 3_600_000;
 
 /**
  * A kind of event added to `WorkEvent` fails the type check here until it
@@ -156,7 +151,7 @@ const SEEDS: {
   },
   goalStatusChanged: () => ({}),
   handedOff: async (tx, e) => {
-    await lockRows(tx, 'plan_limits', [PLAN], 'update');
+    await lockRows(tx, 'plan_limits', [PLAN_ROW], 'update');
     const window = await windowNow(tx);
     return {
       threads: 'id' in e.thread ? [e.thread.id] : [],
@@ -171,7 +166,7 @@ const SEEDS: {
   toldLead: (_, e) => ({ threads: [e.threadId], staff: [e.staffId] }),
   parked: (_, e) => ({ threads: [e.threadId], tasks: 'task' in e.on ? [e.on.task] : [] }),
   clockWoke: async (tx, { threadId }) => {
-    await lockRows(tx, 'plan_limits', [PLAN], 'share');
+    await lockRows(tx, 'plan_limits', [PLAN_ROW], 'share');
     const [t] = await tx
       .select({ heldBy: threads.heldBy })
       .from(threads)
@@ -223,7 +218,7 @@ const SEEDS: {
  * last one raised since the window began. Read under the plan's lock.
  */
 async function windowNow(tx: Tx): Promise<Seeds['window']> {
-  const [w] = await tx.select().from(planLimits).where(eq(planLimits.id, PLAN));
+  const [w] = await tx.select().from(planLimits).where(eq(planLimits.id, PLAN_ROW));
   if (!w) return undefined;
   const resets = w.fiveHourResetsAt;
   const [asked] = resets

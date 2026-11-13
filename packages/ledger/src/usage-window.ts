@@ -14,9 +14,6 @@ import { db } from './db.ts';
 import { asks, threads } from './schema.ts';
 import { answerThread, type Tx } from './threads.ts';
 
-/** A window that resets at a time began this long before it. */
-const WINDOW_MS = 5 * 3_600_000;
-
 /** What a held thread's hub is told when the clock wakes it at the reset. */
 export const WINDOW_RESET =
   'The usage window has reset, so hand-offs run again. Hand on the work the office held.';
