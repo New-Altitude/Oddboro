@@ -120,17 +120,20 @@ export const DECISIONS = Object.keys(STATUS_OF) as Decision[];
 /**
  * An answer reaches a thread's lead, as today: it joins the lead's oldest
  * queued resume there, a line, or starts one; nothing for a lead that left.
- * The chat card goes only to a lead whose chat it is, and a join takes it.
+ * With no line (a time park's wake) a join adds nothing and a new resume has
+ * no note. The chat card goes only to a lead whose chat it is, and a join takes it.
  */
-function answerLead(
+export function answerLead(
   r: Model,
   threadId: number,
-  marker: string,
+  marker: string | null,
   o: { askId?: number; chat?: Chat } = {}
 ): number | undefined {
   const lead = r.threads.get(threadId)!.hub;
   const leadLeft = left(r, lead);
-  r.expected.delivered.push({ lead, threadId, kind: 'resume', marker, leadLeft });
+  // A wake with no line leaves no marker to find, so R13 checks its row instead.
+  if (marker !== null)
+    r.expected.delivered.push({ lead, threadId, kind: 'resume', marker, leadLeft });
   if (leadLeft) {
     meet('an answer for a lead that left');
     return undefined;
@@ -142,7 +145,7 @@ function answerLead(
     .sort((a, b) => a.id - b.id);
   const waiting = mine.find((f) => f.is === 'queued');
   if (waiting) {
-    waiting.lines++;
+    if (marker !== null) waiting.lines++;
     meet("an answer joining a lead's queued pick-up");
     if (card) {
       waiting.card = card;
@@ -157,7 +160,14 @@ function answerLead(
   );
   return insert(
     r,
-    newRun({ staffId: lead, kind: 'resume', threadId, askId: o.askId ?? null, card, lines: 1 })
+    newRun({
+      staffId: lead,
+      kind: 'resume',
+      threadId,
+      askId: o.askId ?? null,
+      card,
+      lines: marker === null ? 0 : 1
+    })
   );
 }
 
