@@ -251,7 +251,7 @@ if (has('give_owner_a_task'))
         why: z
           .string()
           .describe(
-            'Why only the owner can do this, after checking your notes, relevant Ledger entries and shared work. Name the relevant colleague you considered and why they cannot do it. If there is no suitable colleague, say so. Work a colleague can do goes through hand_off when you have it.'
+            `Why only the owner can do this, after checking your notes, relevant Ledger entries and shared work. Name the relevant colleague you considered and why they cannot do it. If there is no suitable colleague, say so. ${offered('hand_off') ? 'Work a colleague can do goes through hand_off.' : 'If you cannot hand work to a suitable colleague, explain the access limit rather than treating it as owner-only work.'}`
           ),
         steps: z
           .array(z.string())
