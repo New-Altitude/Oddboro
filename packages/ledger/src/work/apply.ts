@@ -1,9 +1,10 @@
-// Writing a decided change: the one place the work core writes the office's
-// rows. A thread, run, ask or task is written whole through its serializer
-// in state.ts, so no write leaves a stale column behind, and a row's id
-// fields that name a new row, or an effect's id, are filled in by ref. The
-// decider's own guess at a new row's id never reaches the database: another
-// transaction may have taken that id first.
+// An event through the shell, and writing its decided change: the one place
+// the work core writes the office's rows. A thread, run, ask or task is
+// written whole through its serializer in state.ts, so no write leaves a
+// stale column behind, and a row's id fields that name a new row, or an
+// effect's id, are filled in by ref. The decider's own guess at a new row's
+// id never reaches the database: another transaction may have taken that id
+// first.
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { fixedError } from '../errors.ts';
 import { carryFiles } from '../hand-offs.ts';
@@ -22,7 +23,10 @@ import {
 } from '../schema.ts';
 import type { Tx } from '../threads.ts';
 import { nextRun } from '../time.ts';
-import type { LiveKind } from './events.ts';
+import { transition, type Decided } from '../transition.ts';
+import { decide } from './decide.ts';
+import type { EventOf, LiveKind, WorkEvent, WorkResults } from './events.ts';
+import { loadWork } from './load.ts';
 import type { Change, Inserted, Outside, Put } from './snapshot.ts';
 import {
   askRow,
@@ -33,6 +37,30 @@ import {
   type FollowUp,
   type RetiredKind
 } from './state.ts';
+
+/**
+ * One work event through the shell: its rows loaded and locked, its decider,
+ * and the change written, in one transaction. With the caller's own `tx` the
+ * caller owns the commit, and runs the after-effects once it commits, as
+ * `transition` says. Every entry function that hands an event to the core
+ * goes through here.
+ */
+export function transitionWork<K extends WorkEvent['kind']>(
+  e: EventOf<K>,
+  o: { tx?: Tx; now?: Date } = {}
+): Promise<Decided<Change<WorkResults[K]>>> {
+  return transition(
+    {
+      name: e.kind,
+      load: (tx) => loadWork(tx, e),
+      decide: (rows, now) => decide(rows, e, now),
+      apply: async (tx, change) => {
+        await applyWork(tx, change);
+      }
+    },
+    o
+  );
+}
 
 /** The id each `ref` in a change stands for: a new row's, or the one a `perKind` effect returned. */
 type Ids = Map<string, number | string>;
@@ -159,7 +187,8 @@ function liveColumns(f: FollowUp): Omit<ReturnType<typeof followUpRow>, 'id' | '
   return { ...rest, kind };
 }
 
-const isRetired = (kind: FollowUp['kind']): kind is RetiredKind =>
+/** A run's kind the office no longer starts: a row of one has always ended. */
+export const isRetired = (kind: FollowUp['kind']): kind is RetiredKind =>
   RETIRED_KINDS.some((r) => r === kind);
 
 /** A row's id fields set from the refs `points` names. Each field is a column. */

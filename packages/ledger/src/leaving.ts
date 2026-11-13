@@ -10,17 +10,13 @@ import { asks, followUps, jobs, pokes, staff, tasks, threads, type AskKind } fro
 import {
   anyStaffer,
   finishFollowUp,
-  pokeUnreturned,
   record,
-  recordUnreturned,
   roster,
   staffer,
   withdrawAsk,
   withdrawTask,
-  workTitle,
-  type Unreturned
+  workTitle
 } from './office.ts';
-import { flat } from './desk-answers.ts';
 import { MANAGER_ROLE } from './managers.ts';
 import { nextRun } from './time.ts';
 
@@ -130,47 +126,21 @@ export async function removeOdd(
     .from(tasks)
     .where(and(eq(tasks.staffId, id), eq(tasks.status, 'open')));
   for (const t of given) await withdrawTask(t.id, line);
-  // Last, so nothing written for it as it left is missed. A run on work it led
-  // ends with no report, since the owner let it go and the work stopped with
-  // it. A colleague's result waiting there goes to no one: that colleague
-  // tells the owner (`Unreturned`).
+  // Last, so nothing written for it as it left is missed. Each run it had
+  // yet to start fails (`runFinished`): one on work it led reports nothing,
+  // since the owner let it go and the work stopped with it, and a colleague's
+  // result waiting there goes to no one, so that colleague tells the owner.
   const waiting = await db
     .select()
     .from(followUps)
     .where(and(eq(followUps.staffId, id), isNull(followUps.startedAt)));
-  const led = new Set(
-    (await db.select({ id: threads.id }).from(threads).where(eq(threads.hubId, id))).map(
-      (t) => t.id
-    )
-  );
-  for (const f of waiting) {
-    const stopped = f.threadId !== null && led.has(f.threadId);
+  for (const f of waiting)
     await finishFollowUp(
       f,
       await workTitle(f),
       'failed',
-      `${who.name} left the office before starting this.`,
-      { stopped }
+      `${who.name} left the office before starting this.`
     );
-    const h = f.handOff;
-    // Not the owner's own answer going back: the colleague did nothing after it.
-    if (
-      !stopped ||
-      f.kind !== 'handed_back' ||
-      !h?.outcome ||
-      h.outcome === 'waiting' ||
-      h.answered
-    )
-      continue;
-    const u: Unreturned = {
-      colleague: { id: h.from, name: (await anyStaffer(h.from))?.name ?? h.from },
-      lead: who.name,
-      title: flat(h.title),
-      outcome: h.outcome
-    };
-    await pokeUnreturned(db, u);
-    await recordUnreturned(u);
-  }
   await record({
     kind: 'hire',
     actor: 'owner',

@@ -283,34 +283,6 @@ export async function servesHandOff(f: FollowUpRow): Promise<FollowUpRow | undef
 }
 
 /**
- * Whether the owner already answered everything a hand-off put on the desk:
- * it raised an ask or a task, and none of it is still open. A tool's connect
- * task belongs to the access ask it came from.
- */
-export async function answeredAll(q: Db, handOffId: number): Promise<boolean> {
-  const raised = await q
-    .select({ id: asks.id, status: asks.status })
-    .from(asks)
-    .where(eq(asks.handOffId, handOffId));
-  const given = await q
-    .select({ status: tasks.status })
-    .from(tasks)
-    .where(
-      or(
-        eq(tasks.handOffId, handOffId),
-        raised.length
-          ? inArray(
-              tasks.askId,
-              raised.map((a) => a.id)
-            )
-          : sql`false`
-      )
-    );
-  const all = [...raised, ...given];
-  return all.length > 0 && all.every((r) => r.status !== 'open');
-}
-
-/**
  * The other results waiting for a hub on the thread a `handed_back` picks up,
  * oldest first. They landed while a run of the hub's there had yet to end
  * (`waitsOnOwnRun` in office-follow-ups.ts), so this one run picks them all up, and they

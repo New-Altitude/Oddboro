@@ -363,4 +363,4 @@ export async function tasksFrom(staffId: string): Promise<TaskRow[]> {
     .limit(30);
 }
 
-export { taskEnd, ownRunOf, taskEnded };
+export { taskEnded };
