@@ -727,15 +727,28 @@ test('a hand-off line keeps its words for a finished step and for a colleague wh
   );
 });
 
+/** Bo's step came back waiting on the owner, who said yes. */
+const back = {
+  at: new Date('2026-11-12T10:00:00.000Z'),
+  outcome: 'waiting' as const,
+  text: 'Asked the owner',
+  answered: true,
+  pickUp: { status: 'done' as const }
+};
+
+test('a running hand-off line reads on it, back on it, getting back to it or not started, by whether a run goes and whether a step came back', () => {
+  for (const status of ['queued', 'working'] as const) {
+    const fresh = handOff({ status });
+    const returned = handOff({ status, backs: [back] });
+    assert.equal(handOffWords(fresh, true).text, 'Bo is on it');
+    assert.equal(handOffWords(returned, true).text, 'Bo is back on it');
+    assert.equal(handOffWords(returned, false).text, 'Bo is getting back to it');
+    assert.equal(handOffWords(fresh, false).text, 'Bo has not started yet');
+  }
+});
+
 test("a hand-off line says the colleague is back on it while its carry-out of the owner's yes goes", () => {
-  // Bo's step came back waiting on the owner, who said yes; Bo now carries that yes out.
-  const back = {
-    at: new Date('2026-11-12T10:00:00.000Z'),
-    outcome: 'waiting' as const,
-    text: 'Asked the owner',
-    answered: true,
-    pickUp: { status: 'done' as const }
-  };
+  // Bo now carries the owner's yes out.
   const line = handOff({ backs: [back] });
   const carrying = (handOffId: number): Snapshot => ({
     ...handOffOffice(),
@@ -747,5 +760,5 @@ test("a hand-off line says the colleague is back on it while its carry-out of th
     handOffProgress(line, readerProps(snap, oddNow(snap), 'ada', () => {}).nowOf);
   assert.deepEqual(read(carrying(7)), { text: 'Bo is back on it', yours: false });
   // A carry-out for another hand-off is not this one's.
-  assert.deepEqual(read(carrying(8)), { text: 'Bo has not started yet', yours: false });
+  assert.deepEqual(read(carrying(8)), { text: 'Bo is getting back to it', yours: false });
 });

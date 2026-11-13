@@ -147,7 +147,7 @@ test('a twin pair of access asks starts one carry-out, on the hand-off twin, tol
     [twin.ask.id]
   );
   const task = await L.giveTask('cleo', { title: 'Pick a label', why: 'w', steps: ['Pick one.'] });
-  // The floor shows the carry-out as serving the hand-off, so the giver's chat reads Cleo on it, not "has not started yet".
+  // The floor shows the carry-out as serving the hand-off, so the giver's chat reads Cleo back on it while it goes.
   const serving = new Set<number | undefined>();
   const seen = (e: { type: string; inProgress?: Record<string, { handOffId?: number }[]> }) => {
     if (e.type === 'working') for (const w of e.inProgress?.cleo ?? []) serving.add(w.handOffId);

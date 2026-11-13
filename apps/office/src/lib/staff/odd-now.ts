@@ -203,6 +203,8 @@ export const HAND_OFF_WORDS = {
   // Back on it: the owner answered what an earlier step put on the desk.
   backOnIt: (to: string) => `${to} is back on it`,
   onIt: (to: string) => `${to} is on it`,
+  // An earlier step came back, so the colleague has started; its next run has not begun.
+  gettingBackToIt: (to: string) => `${to} is getting back to it`,
   notStarted: (to: string) => `${to} has not started yet`,
   answered: 'You answered',
   ended: {
@@ -224,8 +226,9 @@ export const HAND_OFF_WORDS = {
 export function handOffWords(h: HandOffLine, onIt: boolean): { text: string; yours: boolean } {
   const W = HAND_OFF_WORDS;
   if (h.status === 'queued' || h.status === 'working') {
-    if (!onIt) return { text: W.notStarted(h.to), yours: false };
-    return { text: h.backs.length ? W.backOnIt(h.to) : W.onIt(h.to), yours: false };
+    const back = h.backs.length > 0;
+    if (onIt) return { text: back ? W.backOnIt(h.to) : W.onIt(h.to), yours: false };
+    return { text: back ? W.gettingBackToIt(h.to) : W.notStarted(h.to), yours: false };
   }
   // A denial or a dropped task is the owner's answer, not the colleague failing.
   const ended = h.answered ? W.answered : W.ended[h.status](h.to);
