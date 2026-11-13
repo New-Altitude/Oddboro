@@ -102,7 +102,7 @@ export type Inserted = { ref: string };
 /** A line for the Ledger, as `record` takes it. */
 export type LedgerLine = Parameters<typeof record>[0];
 
-/** An in-transaction write outside the four tables that an entry function supplies, as an ask's `link` is. */
+/** An in-transaction write outside the four tables that an entry function supplies, as setting a goal on its yes is. */
 export type PerKindInTx = {
   /** Names it in an error, and is the `ref` a put may point at. */
   name: string;

@@ -476,12 +476,13 @@ test('an answer and a leaving run their effects after the commit, never while th
     return made;
   };
   // The twin off any work is answered with it, and carried out with it.
-  assert.deepStrictEqual(
-    await callsOf(
-      answer(3, 'approve', { carryOut: async (a) => void calls.push(`carryOut ${a.id}`) })
-    ),
-    ['deciding', 'decided', 'committed', 'carryOut 3', 'grantAccess cal', 'carryOutTogether 3 4']
-  );
+  assert.deepStrictEqual(await callsOf(answer(3, 'approve')), [
+    'deciding',
+    'decided',
+    'committed',
+    'grantAccess cal',
+    'carryOutTogether 3 4'
+  ]);
   // The office stops a run of the Odd only once its leaving is in the database.
   assert.deepStrictEqual(await callsOf(leaving('cal')), [
     'deciding',

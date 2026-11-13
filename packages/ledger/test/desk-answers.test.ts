@@ -167,7 +167,7 @@ const PINNED: Record<AskKind, Record<Decision, Pin>> = {
     approve: {
       cell: { by: 'Approve a hire by hiring', then: ['answer_back'] },
       onThread: ['resume:ada'],
-      onNone: []
+      onNone: ['answered:ada']
     },
     deny: NO,
     iterate: REWORK
@@ -600,6 +600,7 @@ test("every ask kind's yes, no and send-back has the row pinned here, and reache
 const NO_RUN_OF_ITS_OWN: readonly (readonly [AskKind, Decision])[] = [
   ['reply', 'approve'],
   ['filter', 'approve'],
+  ['hire', 'approve'],
   ['approval', 'deny'],
   ['access', 'deny'],
   ['hire', 'deny'],
@@ -634,6 +635,82 @@ test('an answer with no run of its own, a no with no reason among them, to an as
     ).map((d) => `${kind} ${d}`)
   );
   assert.deepEqual(naming, []);
+});
+
+test("a yes to a hire raised on no work wakes the Odd that proposed it, once, with the owner's note", async () => {
+  const { id } = await raise.hire(false);
+  // As the hire route does when the owner hired a persona in place of the proposed Odd.
+  const bo = await hire({
+    name: 'Bo',
+    role: 'Baker',
+    variant: 'a',
+    portrait: 'a',
+    room: 'workspace',
+    permission: 'draft',
+    remit: 'Bakes.',
+    desk: 'You are Bo.'
+  });
+  const mark = await markNow();
+  await approveHire(id, bo.id, 'Bo came from the personas instead.');
+  assert.deepEqual(
+    (await reached(mark)).filter((r) => r.endsWith(':ada')),
+    ['answered:ada']
+  );
+  const [woke] = await db.select().from(followUps).where(eq(followUps.askId, id));
+  assert.ok(
+    woke?.note?.includes('approved "Hire a baker": Bo came from the personas instead.'),
+    `${woke?.note}`
+  );
+});
+
+test("a plan yes's hire asks, job changes and owner task commit with its answer, so one that fails leaves the plan open and wakes nobody", async () => {
+  const goalId = await aGoal('Sell flour');
+  // Two jobs of one name, as an Odd can have until the owner renames one, so changing it fails.
+  const weigh = {
+    staffId: 'ivy',
+    name: 'Weigh flour',
+    instructions: 'Weigh it.',
+    schedule: { every: 'day', at: '09:00' } as const
+  };
+  await db.insert(jobs).values([weigh, weigh]);
+  const { ask } = await raiseAsk('ada', {
+    title: 'Plan the flour sale',
+    why: 'w',
+    ifApproved: 'i',
+    kind: 'plan',
+    plan: {
+      goalId,
+      items: [
+        {
+          kind: 'hire',
+          hire: {
+            name: 'Bo',
+            role: 'Baker',
+            permission: 'draft',
+            remit: 'Bakes.',
+            jobDescriptionFile: 'baker.md'
+          },
+          part: 'Bakes the samples'
+        },
+        {
+          kind: 'assign',
+          staff: 'ivy',
+          part: 'Weighs it',
+          editJob: { name: weigh.name, instructions: 'Weigh it twice.' }
+        }
+      ],
+      ownerSteps: ['Buy the sacks']
+    }
+  });
+  const mark = await markNow();
+  await assert.rejects(approvePlan(ask.id, [0, 1], null), /Two jobs have that name/);
+  assert.equal((await askRow(ask.id))?.status, 'open');
+  assert.deepEqual(await reached(mark), []);
+  const hires = await db.select().from(asks).where(eq(asks.kind, 'hire'));
+  assert.deepEqual(
+    hires.filter((h) => h.hire?.goal?.id === goalId),
+    []
+  );
 });
 
 test("a done or dropped task, a done task with no Odd, and a goal's pause, met or drop have the rows pinned here and reach the Odd as pinned, and a none names its Linear row", async () => {

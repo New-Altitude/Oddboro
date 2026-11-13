@@ -2,7 +2,7 @@
 import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import { db } from './db.ts';
 import { fixedError } from './errors.ts';
-import type { Db } from './threads.ts';
+import type { Db, Tx } from './threads.ts';
 import { attachments, tasks, type Step } from './schema.ts';
 import type { TaskRow } from './office.ts';
 import { lockDesk, refuseRepeat } from './office-asks.ts';
@@ -32,11 +32,12 @@ export async function giveTask(
     ownerSaid?: string;
     /** The office gives it in the Odd's name (a plan's steps), so it may repeat a title. */
     byOffice?: true;
-  }
+  },
+  q: Db = db
 ): Promise<TaskRow> {
   const steps = t.steps.map((s) => (typeof s === 'string' ? { text: s, done: false } : s));
   const { title, why, response, handOffId, threadId, via, ownerSaid, attach, run } = t;
-  const given = await db.transaction(async (tx) => {
+  const give = async (tx: Tx) => {
     // An Odd's own task may not repeat an item it already has on the desk.
     if (staffId && !t.byOffice) {
       await lockDesk(tx, staffId);
@@ -55,9 +56,12 @@ export async function giveTask(
     const row = await task(went.real({ ref: 'task' }), tx);
     if (!row) throw fixedError('A task was given that is not there.');
     return { row, after: went.after };
-  });
+  };
+  // A caller's transaction owns the commit, and giving a task leaves nothing for after it (`taskGiven`).
+  const inCallers = 'rollback' in q;
+  const given = inCallers ? await give(q) : await db.transaction(give);
   if ('refused' in given) throw new Error(given.refused);
-  await runAfters('taskGiven', given.after);
+  if (!inCallers) await runAfters('taskGiven', given.after);
   return given.row;
 }
 

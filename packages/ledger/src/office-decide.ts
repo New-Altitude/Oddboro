@@ -1,15 +1,11 @@
 // The owner's answer to an ask and to a report, what each answer starts, held
 // calls, and taking an ask or a task off the desk.
-import { and, eq, inArray } from 'drizzle-orm';
+import { inArray } from 'drizzle-orm';
 import { db } from './db.ts';
 import { fixedError } from './errors.ts';
-import { handBackLater } from './hand-offs.ts';
-import { answerThread, type Db, type Tx } from './threads.ts';
 import {
   asks,
   type FolderRequest,
-  type InChat,
-  type Outcome,
   type HeldCall,
   type ReplyDraft,
   type AskKind
@@ -27,7 +23,6 @@ import { record } from './office-ledger.ts';
 import { raiseAsk, ask, type Decision, carryOutTogether } from './office-asks.ts';
 import { grantAccess } from './office-access.ts';
 import { readReport, report } from './office-desk.ts';
-import { ownerName } from './office-usage.ts';
 import { transitionWork } from './work/apply.ts';
 import type { AskEffects } from './work/events.ts';
 import type { PerKindInTx } from './work/snapshot.ts';
@@ -52,32 +47,30 @@ export async function decideAsk(
   return decide(id, decision, reason, { reportWhenDone, inChat });
 }
 
-/** What approving an ask means, done before the answer goes back. */
+/** What approving an ask means, done in the transaction that approves it. */
 export type Approval = {
   /**
-   * Done in the transaction that approves the ask: if it fails, the ask stays
-   * open, and nothing is recorded or answered.
+   * Writes only the entry knows, such as setting a goal: if one fails, the
+   * ask stays open, and nothing is recorded or answered.
    */
-  link?: (ask: AskRow, tx: Tx) => Promise<void>;
-  /** Done once the ask is approved, so the run the answer starts finds it. */
-  carryOut?: (ask: AskRow) => Promise<void>;
+  perKind?: PerKindInTx[];
   /** The owner answered on the ask's card in its Odd's chat: the run the answer starts replies there. */
   inChat?: boolean;
 };
 
 /**
- * Approve a goal, plan or hire ask, and do what approving it means before the
- * answer goes back, so the run the answer starts finds all of it: the goal
- * set, the plan's jobs, hire asks and owner task, or the hire serving its goal.
- * Nothing is done when the ask was no longer open, and that returns false.
+ * Approve a goal, plan or hire ask, and do what approving it means in the
+ * transaction that approves it, so the run the answer starts finds all of
+ * it: the goal set, the plan's jobs, hire asks and owner task, or the hire
+ * serving its goal. Nothing is done when the ask was no longer open, and that
+ * returns false.
  */
 export async function approveAsk(
   id: number,
   reason: string | null,
   approval: Approval
 ): Promise<boolean> {
-  const { link, ...rest } = approval;
-  return link ? decideWithLink(id, reason, { ...rest, link }) : decide(id, 'approve', reason, rest);
+  return decide(id, 'approve', reason, approval);
 }
 
 /**
@@ -206,7 +199,7 @@ async function decide(
   id: number,
   decision: Decision,
   reason: string | null,
-  o: Omit<Approval, 'link'> & {
+  o: Approval & {
     reportWhenDone?: boolean;
     reply?: ReplyDraft;
     filter?: GmailFilter;
@@ -235,8 +228,8 @@ async function decide(
     reportWhenDone: o.reportWhenDone,
     done: { reply: o.reply, filter: o.filter, call: o.call, folder: o.folder },
     withdrawn: o.withdrawn,
-    perKind: raised && decision === 'approve' ? yesInTx(raised, o.folder) : [],
-    carryOut: o.carryOut,
+    perKind:
+      raised && decision === 'approve' ? [...(o.perKind ?? []), ...yesInTx(raised, o.folder)] : [],
     effects: ASK_EFFECTS
   });
   if (!('refused' in decided)) return true;
@@ -303,53 +296,6 @@ const ASK_EFFECTS: AskEffects = {
 };
 
 /**
- * A goal, plan or hire yes, whose `link` (`approveGoal`, `approvePlan`,
- * `approveHire`) writes in the transaction that approves the ask: if it
- * fails, the ask stays open, and nothing is recorded or answered. Of what a
- * yes starts, only the answer going back acts for these kinds. False when the
- * ask was no longer open.
- */
-async function decideWithLink(
-  id: number,
-  reason: string | null,
-  o: Omit<Approval, 'link'> & Required<Pick<Approval, 'link'>>
-): Promise<boolean> {
-  const ask = await db.transaction(async (tx) => {
-    const [claimed] = await tx
-      .update(asks)
-      .set({ status: 'approved', reason: reason || null, decidedAt: new Date() })
-      .where(and(eq(asks.id, id), eq(asks.status, 'open')))
-      .returning();
-    if (claimed) await o.link(claimed, tx);
-    return claimed;
-  });
-  if (!ask) return false;
-  await record({
-    kind: 'decision',
-    actor: 'owner',
-    title: `Approved: ${ask.title}`,
-    body: `Asked by ${ask.staffId}. ${ask.why}`,
-    reason: ask.reason,
-    askId: ask.id
-  });
-  await o.carryOut?.(ask);
-  const chat: InChat | undefined = o.inChat
-    ? { staffId: ask.staffId, card: { kind: 'ask', id: ask.id, title: ask.title } }
-    : undefined;
-  const said = `${await ownerName()} approved "${ask.title}"`;
-  const answer = ask.reason ? `${said}: ${ask.reason}` : `${said}.`;
-  if (effectsOf(ask.kind, 'approve').includes('answer_back'))
-    await answerLater(
-      { handOffId: ask.handOffId, threadId: ask.threadId, askId: ask.id },
-      'done',
-      answer,
-      db,
-      chat
-    );
-  return true;
-}
-
-/**
  * What `leavingRefused` checks before a yes that moves an Odd, by the move.
  * Any kind whose yes makes that move gets the same check.
  */
@@ -394,23 +340,6 @@ export async function withdrawTask(id: number, line: string): Promise<boolean> {
   if (!('refused' in ended)) return true;
   if (ended.refused === ANSWERED_ALREADY) return false;
   throw new Error(ended.refused);
-}
-
-/**
- * The owner answered something raised on a hand-off or a thread, and no run
- * follows it: the answer itself goes back. A colleague's goes to the Odd that
- * handed it the work, and a hub's starts the hub's next run on its thread,
- * which knows the ask it answers, if it was one.
- */
-async function answerLater(
-  on: { handOffId: number | null; threadId: number | null; askId?: number },
-  outcome: Outcome,
-  answer: string,
-  q: Db = db,
-  chat?: InChat
-): Promise<void> {
-  if (on.handOffId) await handBackLater(on.handOffId, outcome, answer, q);
-  else if (on.threadId) await answerThread(on.threadId, answer, on.askId, q, chat);
 }
 
 /**

@@ -12,7 +12,6 @@ import type { GmailFilter } from '../filter-words.ts';
 import type { Carried, CarriedFile } from '../hand-offs.ts';
 import type { carryOutTogether, Decision } from '../office-asks.ts';
 import type { Unparked } from '../office-follow-ups.ts';
-import type { AskRow } from '../office.ts';
 import type {
   AccessRequest,
   FileEdit,
@@ -126,8 +125,6 @@ export type WorkEvent =
       withdrawn?: string;
       /** Writes in the same transaction that only the entry knows, such as setting a goal. */
       perKind: PerKindInTx[];
-      /** The caller's own step once the ask is approved, after the commit. */
-      carryOut?: (ask: AskRow) => Promise<void>;
       effects: AskEffects;
     }
   | {

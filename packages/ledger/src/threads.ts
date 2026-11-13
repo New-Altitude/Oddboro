@@ -564,8 +564,8 @@ export async function worksOnIds(q: Db, staffId: string): Promise<Set<number>> {
 const onThread = (staffId: string) => or(eq(threads.hubId, staffId), worksOn(staffId));
 
 /** Whether `staffId` leads thread `id` or works on it. */
-export async function isOnThread(staffId: string, id: number): Promise<boolean> {
-  const [row] = await db
+export async function isOnThread(staffId: string, id: number, q: Db = db): Promise<boolean> {
+  const [row] = await q
     .select({ id: threads.id })
     .from(threads)
     .where(and(eq(threads.id, id), onThread(staffId)));

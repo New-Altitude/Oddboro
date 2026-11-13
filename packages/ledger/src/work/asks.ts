@@ -223,8 +223,6 @@ export function askDecided(
   const did = doneWith(rows, ask, decision);
   const row = askRow(ask);
   const after: After[] = [{ record: decisionLine(rows, { ask, twins, did, e }) }];
-  const carryOut = e.carryOut;
-  if (carryOut) after.push({ then: 'carryOut', run: () => carryOut(row) });
 
   // Only the run this ask's own answer starts, never a twin's, replies under its card.
   const chat: InChat | undefined = e.inChat

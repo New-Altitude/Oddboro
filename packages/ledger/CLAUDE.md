@@ -610,7 +610,8 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   office sets `HAND_OFF_ID` for those runs). `servesHandOff` finds it for the
   follow-up an answer starts, and `finishFollowUp` hands that result back once
   it ends done or failed. With no run to follow (a denial, a dropped task, an
-  approved hire), `handBackLater` sends the owner's answer itself.
+  approved hire), the answer itself goes back (`answerBack` in
+  `src/work/answers.ts`).
 - A `reply` ask carries one email in `asks.reply` (`ReplyDraft`), raised by
   `propose_reply`, which every Odd has (`always` in `tools.ts`, so no hire's
   tool list can leave it out) and `mcp-mail.ts` offers only while it holds a Gmail
@@ -789,19 +790,22 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   ask, with a note. The
   office approves a hire with `approveHire` (`src/goals.ts`), which links the
   goal in the transaction that approves the ask, so a link that fails leaves
-  the proposal open and wakes nobody.
+  the proposal open and wakes nobody. Raised on no work, the yes wakes the
+  Odd that proposed it with an `answered` run, which carries the owner's note.
 - Goals are the owner's. An Odd never sets one: `propose_goal` raises a
-  `goal` ask, and `approveGoal` sets it. Setting one (`addGoal`) starts a
-  `goal` follow-up for the Office Manager to plan it, and the first goal makes
-  the manager's weekly review job. A `plan` ask (`propose_goal_plan`) holds
+  `goal` ask, and `approveGoal` sets it. Setting one, on its yes or by
+  `addGoal`, opens the goal's work under the Office Manager with a `goal`
+  follow-up there to plan it (`planGoal` in `src/work/threads.ts`), and the
+  first goal makes the manager's weekly review job. A `plan` ask (`propose_goal_plan`) holds
   every part of one goal's plan in `asks.plan`, and `raiseAsk` puts it on the
   goal's one thread (`goalThread`), whatever run raised it, and the thread
   keeps that run's key when its raiser leads it (`keepRun`).
   `approvePlan` takes the parts the owner ticked: Odds already here serve the
   goal in the transaction that approves the ask and get their job at once,
   and the answer names each Odd by name, never its id. Each hire becomes its own hire ask on the
-  plan's thread, and the owner's steps a task. `approveAsk` does all that
-  before the answer goes back, so the hub's run finds it. Hiring one of those
+  plan's thread, and the owner's steps a task. `approveAsk` does all that in
+  the transaction that approves the ask, so the hub's run finds it, and a
+  part that fails leaves the whole plan open. Hiring one of those
   hires answers its ask on the thread, which brings the hub back again.
 - An Odd sees only the goals it serves (`staff_goals`): `my_goals` and its
   prompt read `goalsFor`, never `allGoals`. `log_progress` takes a goal it

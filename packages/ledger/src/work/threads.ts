@@ -162,9 +162,9 @@ export function openThread(
 }
 
 /**
- * A goal set, and its lead plans it, as `setGoal` and `goalThread` in
- * ../goals.ts did: the goal's work opens under the lead, and the lead's
- * `goal` run goes on it. `goal` is the goal's id, or the ref of the write
+ * A goal set, and its lead plans it: the goal's work opens under the lead,
+ * which is the office's manager and so may always lead work, and the lead's
+ * `goal` run goes on it (a goal's yes, and `addGoal`). `goal` is the goal's id, or the ref of the write
  * that sets it in this change. `chat` is the card the owner answered on: the
  * run replies under it only when it is that chat's Odd's.
  */

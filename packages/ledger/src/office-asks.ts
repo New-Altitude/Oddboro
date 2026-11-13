@@ -311,11 +311,12 @@ export async function raiseAsk(
      * thread passes none, since its own follow-up already holds the hub.
      */
     run?: string;
-  }
+  },
+  q: Db = db
 ): Promise<{ ask: AskRow; precedent: LedgerRow[]; already: boolean }> {
   const { attach, run, ...fields } = a;
   const kind = a.kind ?? (a.access ? 'access' : a.hire ? 'hire' : 'approval');
-  const raised = await db.transaction(async (tx) => {
+  const raise = async (tx: Tx) => {
     // An Odd's own ask may not repeat one on the desk, a reply may not
     // answer an email twice, and a filter may not file the same mail twice.
     // A folder or switch ask may not repeat one from the same place.
@@ -353,14 +354,20 @@ export async function raiseAsk(
     const row = await ask(already ?? went.real({ ref: 'ask' }), tx);
     if (!row) throw fixedError('An ask was raised that is not there.');
     return { row, already: already !== undefined, after: went.after };
-  });
+  };
+  // A caller's transaction owns the commit: the ask goes in with the rest of
+  // its writes, and raising one leaves nothing for after it (`askRaised`).
+  const inCallers = 'rollback' in q;
+  const raised = inCallers ? await raise(q) : await db.transaction(raise);
   if ('refused' in raised) throw new Error(raised.refused);
-  await runAfters('askRaised', raised.after);
+  if (!inCallers) await runAfters('askRaised', raised.after);
   const { row, already } = raised;
-  // A repeat of a held call is the one there, whose precedent the Odd already had.
+  // A repeat of a held call is the one there, whose precedent the Odd already
+  // had. One the office raises in its own transaction, as a plan's hires, no
+  // Odd reads, and its precedent is read outside that transaction.
   return {
     ask: row,
-    precedent: already ? [] : await precedent(`${a.title}\n${a.why}`),
+    precedent: already || inCallers ? [] : await precedent(`${a.title}\n${a.why}`),
     already
   };
 }

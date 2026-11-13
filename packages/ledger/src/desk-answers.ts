@@ -59,8 +59,10 @@ export const askReplaced = (a: { status: AskStatus; reason: string | null }): bo
  * What reaches the Odd when the owner answers. A `none` names the Linear row
  * that would add it.
  *
- * - `approval_work`: what approving means, done by the function that approves
- *   that kind (`approveGoal`, `approvePlan`) before the answer goes back.
+ * - `approval_work`: what approving means, written in the transaction that
+ *   approves the ask by the function that approves that kind (`approveGoal`,
+ *   `approvePlan`). A goal's yes then puts the manager's planning run on the
+ *   goal's new work (`planGoal`).
  * - `carry_out`: a `carry_out` follow-up, to do what the ask or task waited on.
  * - `grant_access`: the access the ask names is granted (`grantAccess`). A tool
  *   already connected starts the work that waited on it (`carry_out`) at once;
@@ -76,9 +78,9 @@ export const askReplaced = (a: { status: AskStatus; reason: string | null }): bo
  * - `answer_hand_offs`: the yes or no to more hand-offs goes to the thread's hub
  *   (`answerHandOffs`).
  * - `answer_back`: the answer itself goes to the hand-off or thread it was
- *   raised on (`answerLater`). Raised on neither, it wakes the Odd that raised
- *   it, once, as an `answered` run (`offWorkAnswer`); a goal's or a hire's yes
- *   does not.
+ *   raised on (`answerBack`). Raised on neither, it wakes the Odd that raised
+ *   it, once, as an `answered` run (`offWorkAnswer`); a goal's yes does not,
+ *   since its planning run follows it.
  * - `rework`: a `rework` follow-up, with what to change.
  * - `denied_lesson`: a `denied` follow-up, when the no carries a reason.
  * - `task_done`: a `task_done` follow-up, to pick up what waited on the task.

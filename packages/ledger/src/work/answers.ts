@@ -213,7 +213,7 @@ export const ANSWERED_ALREADY = 'That was answered already.';
 
 /**
  * No run carries the answer out: it goes back to the hand-off or thread it
- * was raised on, as `answerLater` does. A colleague's goes to the lead that
+ * was raised on. A colleague's goes to the lead that
  * handed it the work, as the owner's own answer; a lead's starts or joins its
  * pick-up there. False when it was raised on neither.
  */
