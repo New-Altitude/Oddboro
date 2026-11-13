@@ -8,7 +8,7 @@ import { manager } from '../goals.ts';
 import type { StaffRow } from '../office.ts';
 import { gaveFolder, switchesOff } from '../office-folders.ts';
 import { networkNote } from '../office-staff.ts';
-import { ownerName, PLAN_ROW, WINDOW_MS } from '../office-usage.ts';
+import { ownerName, PLAN_ROW, windowBegan } from '../office-usage.ts';
 import { runsGoing } from '../run-registry.ts';
 import { asks, followUps, planLimits, staff, tasks, threads, type HandOff } from '../schema.ts';
 import { sharing } from '../sharing.ts';
@@ -67,9 +67,11 @@ const one = <T>(id: T | null | undefined): T[] => (id == null ? [] : [id]);
 /**
  * A kind of event added to `WorkEvent` fails the type check here until it
  * names its rows. Each reads what it needs to name them before any lock but
- * the plan's, which comes first in `LOCK_ORDER`: only a hand-off, new or a
+ * the plan's, which comes first in `LOCK_ORDER`. Only a hand-off, new or a
  * held one's yes, holds work for the usage window, and it does so under that
- * lock, so a read made under it sees every hold. A leaving locks its Odd's
+ * lock. So a seed that reads the window or what it holds takes the lock
+ * first, and its read sees every hold: a hand-off, a held one's yes, and the
+ * window ask's yes, which frees the work it holds. A leaving locks its Odd's
  * row before its reads, for the same reason (`oddRemoved`).
  */
 const SEEDS: {
@@ -108,7 +110,9 @@ const SEEDS: {
     const yes = e.decision === 'approve';
     // A yes that starts a held hand-off asks the usage window first, as a new hand-off does.
     const startsHeld = effectsOf(a.kind, e.decision).includes('start_held');
-    if (startsHeld) await lockRows(tx, 'plan_limits', [PLAN_ROW], 'update');
+    // The window ask's yes frees the work it holds, read below.
+    const freesHeld = yes && a.kind === 'window';
+    if (startsHeld || freesHeld) await lockRows(tx, 'plan_limits', [PLAN_ROW], 'update');
     const window = startsHeld ? await windowNow(tx) : undefined;
     // The Odd's open asks of a twinned kind, which a yes or a no answers too.
     const twins =
@@ -119,11 +123,9 @@ const SEEDS: {
             and(eq(asks.staffId, a.staffId), eq(asks.kind, a.kind), eq(asks.status, 'open'))
           )
         : [];
-    // The work the usage window's ask holds, which its yes frees.
-    const held =
-      yes && a.kind === 'window'
-        ? await tx.select({ id: threads.id }).from(threads).where(eq(threads.heldBy, a.id))
-        : [];
+    const held = freesHeld
+      ? await tx.select({ id: threads.id }).from(threads).where(eq(threads.heldBy, a.id))
+      : [];
     return {
       asks: [a.id, ...twins],
       threads: held.map((t) => t.id),
@@ -243,9 +245,7 @@ async function windowNow(tx: Tx): Promise<Seeds['window']> {
     ? await tx
         .select({ id: asks.id })
         .from(asks)
-        .where(
-          and(eq(asks.kind, 'window'), gt(asks.createdAt, new Date(resets.getTime() - WINDOW_MS)))
-        )
+        .where(and(eq(asks.kind, 'window'), gt(asks.createdAt, windowBegan(resets))))
         .orderBy(desc(asks.id))
         .limit(1)
     : [];

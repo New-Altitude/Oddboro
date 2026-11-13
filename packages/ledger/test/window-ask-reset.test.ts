@@ -162,3 +162,35 @@ test("a window ask is due at its own window's reset, one from an older window is
     { id: ask.id, at: new Date(raised.getTime() + WINDOW_MS) }
   ]);
 });
+
+test("a window ask raised in the window before this one is due now, and a hand-off past the guard raises this window's own", async () => {
+  // A new window: the last one's ask was raised a day ago.
+  await db
+    .update(asks)
+    .set({ createdAt: new Date(Date.now() - 86_400_000) })
+    .where(eq(asks.kind, 'window'));
+  const resets = new Date(Date.now() + 3_600_000);
+  await window(0.9, resets);
+  const hold = (title: string) =>
+    handOff({
+      from: 'cole',
+      to: 'ivy',
+      work: { title: 'Tune gravity', brief: 'Tune it.' },
+      thread: { title }
+    });
+  assert.ok('problem' in (await hold('Build a star')));
+  const { ask: last } = await windowAsk('Build a star');
+  // Halfway through the window before this one.
+  const raised = new Date(resets.getTime() - 1.5 * WINDOW_MS);
+  await db.update(asks).set({ createdAt: raised }).where(eq(asks.id, last.id));
+  const due = await windowAsksDue();
+  assert.deepEqual(
+    due.find((a) => a.id === last.id),
+    { id: last.id, at: raised },
+    "the last window's ask waits for this window's reset"
+  );
+
+  assert.ok('problem' in (await hold('Build a planet')));
+  const { ask: now } = await windowAsk('Build a planet');
+  assert.notEqual(now.id, last.id, "the last window's ask holds this window's work");
+});

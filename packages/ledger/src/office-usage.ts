@@ -40,6 +40,13 @@ export const PLAN_ROW = 'claude';
 /** The plan's 5-hour window: one that resets at a time began this long before it. */
 export const WINDOW_MS = 5 * 3_600_000;
 
+/**
+ * When the window that resets at `resets` began. A window ask raised after
+ * it is this window's ask. The loader (`windowNow` in work/load.ts) tests that
+ * in SQL and the office clock (`windowAsksDue`) in code, both against this.
+ */
+export const windowBegan = (resets: Date): Date => new Date(resets.getTime() - WINDOW_MS);
+
 export type PlanWindows = {
   fiveHour: number;
   fiveHourResetsAt: Date | null;
@@ -62,9 +69,8 @@ export const WINDOW_ASK_LAPSED = 'The window reset before an answer.';
  * Each open window ask, and when its window resets, for the office clock to
  * take it off the desk then: the ask is about that window, so it leaves when
  * the window does, whatever work it still holds. This window's ask (raised
- * since the window began, as `windowNow` in work/load.ts reads it) is due at
- * the reset; one from an older window is due already; with no reset reported,
- * a window lasts `WINDOW_MS` at most.
+ * after `windowBegan`) is due at the reset; one from an older window is due
+ * already; with no reset reported, a window lasts `WINDOW_MS` at most.
  */
 export async function windowAsksDue(): Promise<{ id: number; at: Date }[]> {
   const [row] = await db.select().from(planLimits).where(eq(planLimits.id, PLAN_ROW));
@@ -75,8 +81,7 @@ export async function windowAsksDue(): Promise<{ id: number; at: Date }[]> {
     .where(and(eq(asks.kind, 'window'), eq(asks.status, 'open')));
   return open.map(({ id, createdAt }) => {
     if (!resets) return { id, at: new Date(createdAt.getTime() + WINDOW_MS) };
-    const thisWindow = createdAt > new Date(resets.getTime() - WINDOW_MS);
-    return { id, at: thisWindow ? resets : createdAt };
+    return { id, at: createdAt > windowBegan(resets) ? resets : createdAt };
   });
 }
 
