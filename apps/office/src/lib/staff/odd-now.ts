@@ -180,11 +180,6 @@ export function jobRunning(n: OddNow, job: string): boolean {
   return n.runs.some((w) => w.label === job);
 }
 
-/** The run going for a follow-up. Undefined for an Odd the page does not hold, such as one who has left. */
-export function runFor(n: OddNow | undefined, followUp: number): Work | undefined {
-  return n?.runs.find((w) => w.followUp === followUp);
-}
-
 /** The work list: runs going, then queued runs, then follow-ups yet to start. */
 export function workItems(n: OddNow): Work[] {
   return [...n.runs, ...n.queued];
@@ -202,8 +197,8 @@ export function railRing(n: OddNow): boolean {
 
 /**
  * Where a hand-off stands, in words, and whether the owner has to act. The
- * colleague is on it only while its run for the hand-off goes, which the live
- * state says; the row's status is as of the chat's last load.
+ * colleague is on it only while a run serving the hand-off goes, which the
+ * live state says; the row's status is as of the chat's last load.
  */
 export function handOffWords(h: HandOffLine, onIt: boolean): { text: string; yours: boolean } {
   if (h.status === 'queued' || h.status === 'working')
@@ -228,12 +223,17 @@ export function handOffWords(h: HandOffLine, onIt: boolean): { text: string; you
   return { text: h.status === 'done' ? 'Done' : ended, yours: false };
 }
 
-/** A hand-off line in the chat, read from its colleague's state: on it while its run for it goes. */
+/**
+ * A hand-off line in the chat, read from its colleague's state: on it while a
+ * run serving the hand-off goes, its own or the carry-out of the owner's yes
+ * to what it asked. A colleague who has left has no state, so it is on nothing.
+ */
 export function handOffProgress(
   h: HandOffLine,
   nowOf: ReaderProps['nowOf']
 ): { text: string; yours: boolean } {
-  return handOffWords(h, !!runFor(nowOf(h.toId), h.id));
+  const onIt = nowOf(h.toId)?.runs.some((w) => w.handOffId === h.id) ?? false;
+  return handOffWords(h, onIt);
 }
 
 /** What the page passes each screen that shows an Odd's state. */

@@ -1359,7 +1359,14 @@ export async function followThrough(
           lead: leadId === who.id ? who.name : ((await staffer(leadId))?.name ?? leadId)
         }
       : undefined;
-  const work = { kind: 'follow-up' as const, label, detail, askId: a?.id, about, followUp: f.id };
+  const work = {
+    kind: 'follow-up' as const,
+    label,
+    detail,
+    askId: a?.id,
+    about,
+    handOffId: serves?.id
+  };
   const res = await slot(who.id, work, (onEvent, runId) =>
     run(who, label, {
       kind: 'follow-up',

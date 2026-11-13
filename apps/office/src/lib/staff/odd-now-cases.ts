@@ -16,6 +16,8 @@ export const CATCH_UP = 'Catching up 2 periods of Morning brief';
 /** A new hire's hello: a run through the slot, not a chat reply. */
 export const HELLO = 'Saying hello';
 export const HAND_OFF_LABEL = 'Plan the trip';
+/** A carry-out of the owner's yes to an ask the colleague raised on a hand-off. */
+export const CARRY_OUT_LABEL = 'Book the flights';
 
 export const work = (id: number, label: string, more: Partial<Work> = {}): Work => ({
   id,

@@ -1,7 +1,7 @@
 // The rules an Odd's live state keeps after any run of events: every screen
 // shows the same state, nothing claims work that is not there, the Jobs tab
-// follows the runs, a hand-off reads "is on it" only while its run goes, a
-// chat reply ranks above background runs, and the card's tabs reload only
+// follows the runs, a hand-off reads "is on it" only while a run serving it
+// goes, a chat reply ranks above background runs, and the card's tabs reload only
 // when a run starts or ends. Random event sequences drive the page's
 // snapshot; the test keeps its own record of what is true from the events
 // alone, and each rule asserts equality with it. odd-now-fixtures.test.ts
@@ -12,6 +12,7 @@ import { test } from 'node:test';
 import type { AskRow } from '@oddboro/ledger';
 import { explore, type Explore } from '@oddboro/ledger/sequences';
 import {
+  CARRY_OUT_LABEL,
   CATCH_UP,
   deskOf,
   GONE,
@@ -33,8 +34,8 @@ import {
   oddNow,
   railCount,
   railRing,
+  nowIn,
   readerProps,
-  runFor,
   runsChanged,
   runWords,
   tagWords,
@@ -66,6 +67,7 @@ type Event =
   | { kind: 'queuedRunDropped'; key: number }
   | { kind: 'followUpAdded'; odd: string; id: number }
   | { kind: 'followUpClaimed'; odd: string; id: number; key: number }
+  | { kind: 'carryOutClaimed'; odd: string; handOff: number; key: number }
   | { kind: 'chatStarted'; odd: string }
   | { kind: 'chatEnded'; odd: string }
   | { kind: 'askRaised'; odd: string; id: number }
@@ -84,7 +86,8 @@ type Run = {
   odd: string;
   label: string;
   going: boolean;
-  followUp?: number;
+  /** The hand-off it serves: its own, or the one whose ask a carry-out answers. */
+  handOff?: number;
   steps: number;
 };
 type Record_ = {
@@ -94,7 +97,7 @@ type Record_ = {
   /** Follow-ups yet to start. */
   waiting: { id: number; odd: string }[];
   /** Every hand-off follow-up ever added. */
-  handOffs: number[];
+  handOffs: { id: number; odd: string }[];
   chats: Set<string>;
   asks: { id: number; odd: string }[];
   tasks: { id: number; odd: string | null }[];
@@ -173,6 +176,13 @@ function next(r: Record_): Event[] {
   for (const w of r.waiting)
     if (r.runs.filter((x) => x.odd === w.odd).length < RUNS_EACH)
       out.push({ kind: 'followUpClaimed', odd: w.odd, id: w.id, key });
+  // Once a hand-off's own run is claimed, the owner's yes to what it asked can start a carry-out.
+  for (const h of r.handOffs)
+    if (
+      !r.waiting.some((w) => w.id === h.id) &&
+      r.runs.filter((x) => x.odd === h.odd).length < RUNS_EACH
+    )
+      out.push({ kind: 'carryOutClaimed', odd: h.odd, handOff: h.id, key });
   for (const a of r.asks) out.push({ kind: 'askAnswered', id: a.id });
   for (const t of r.tasks) out.push({ kind: 'taskEnded', id: t.id });
   for (const t of r.threads) out.push({ kind: 'threadReleased', title: t.title });
@@ -199,7 +209,7 @@ function note(r: Record_, e: Event): void {
       return;
     case 'followUpAdded':
       r.waiting.push({ id: e.id, odd: e.odd });
-      r.handOffs.push(e.id);
+      r.handOffs.push({ id: e.id, odd: e.odd });
       r.serial++;
       return;
     case 'followUpClaimed':
@@ -209,7 +219,18 @@ function note(r: Record_, e: Event): void {
         odd: e.odd,
         label: HAND_OFF_LABEL,
         going: false,
-        followUp: e.id,
+        handOff: e.id,
+        steps: 0
+      });
+      r.serial++;
+      return;
+    case 'carryOutClaimed':
+      r.runs.push({
+        key: e.key,
+        odd: e.odd,
+        label: CARRY_OUT_LABEL,
+        going: false,
+        handOff: e.handOff,
         steps: 0
       });
       r.serial++;
@@ -289,7 +310,15 @@ function apply(s: Snapshot, e: Event): Snapshot {
         toStart: { ...s.toStart, [e.odd]: (s.toStart[e.odd] ?? []).filter((w) => w.id !== -e.id) },
         inProgress: withRun(
           e.odd,
-          work(e.key, HAND_OFF_LABEL, { kind: 'follow-up', followUp: e.id })
+          work(e.key, HAND_OFF_LABEL, { kind: 'follow-up', handOffId: e.id })
+        )
+      };
+    case 'carryOutClaimed':
+      return {
+        ...s,
+        inProgress: withRun(
+          e.odd,
+          work(e.key, CARRY_OUT_LABEL, { kind: 'follow-up', handOffId: e.handOff })
         )
       };
     case 'chatStarted':
@@ -428,6 +457,7 @@ const RELOADS: Record<Event['kind'], boolean> = {
   queuedRunDropped: false,
   followUpAdded: false,
   followUpClaimed: false,
+  carryOutClaimed: false,
   chatStarted: false,
   chatEnded: false,
   askRaised: false,
@@ -466,8 +496,9 @@ function sequences(rule: string, check: Check): { failed: unknown; seen: Set<str
         if (runs[0]?.label === HELLO) seen.add('a hello going first');
         if (runs.some((x) => x.label === CATCH_UP) && !runs.some((x) => x.label === JOBS[0]))
           seen.add('a catch-up going without its job');
-        if (expectedShow(r, id) === 'holding' && runs.some((x) => x.followUp !== undefined))
+        if (expectedShow(r, id) === 'holding' && runs.some((x) => x.handOff !== undefined))
           seen.add('holding while its hand-off run goes');
+        if (runs.some((x) => x.label === CARRY_OUT_LABEL)) seen.add('a carry-out going');
         if (expectedShow(r, id) === 'free' && r.activity[id] === 'work') seen.add('free at work');
       }
       return check(state.now, r, state.before).map((detail) => ({ rule, detail }));
@@ -551,20 +582,29 @@ test('a job shows Running exactly while a run with its name goes, and Run now is
   ]);
 });
 
-test('a colleague is on a hand-off exactly while its run for that hand-off goes, whatever it shows', () => {
-  const { failed, seen } = sequences('a hand-off is on it only while its run goes', (now, r) =>
-    r.handOffs.flatMap((followUp) =>
-      [...IDS, GONE].flatMap((id) => {
-        const found = runFor(now[id], followUp)?.id;
-        const want = going(r, id).find((x) => x.followUp === followUp)?.key;
-        return found === want
-          ? []
-          : [`${id}'s run for hand-off ${followUp} is ${found}, the record says ${want}`];
-      })
-    )
+test('a colleague is on a hand-off exactly while a run serving it goes, its own or a carry-out, whatever it shows', () => {
+  const { failed, seen } = sequences(
+    'a hand-off is on it only while a run serving it goes',
+    (now, r) =>
+      r.handOffs.flatMap((h) =>
+        [...IDS, GONE].flatMap((id) => {
+          const line = handOff({ id: h.id, toId: id, to: nameOf(id) });
+          const onIt = handOffProgress(line, nowIn(now)).text === `${nameOf(id)} is on it`;
+          const want = going(r, id).some((x) => x.handOff === h.id);
+          return onIt === want
+            ? []
+            : [`${id} reads as on hand-off ${h.id}: ${onIt}, the record says ${want}`];
+        })
+      )
   );
   assert.equal(failed, undefined);
-  reached(seen, ['holding while its hand-off run goes', 'followUpClaimed', 'runStarted']);
+  reached(seen, [
+    'holding while its hand-off run goes',
+    'a carry-out going',
+    'followUpClaimed',
+    'carryOutClaimed',
+    'runStarted'
+  ]);
 });
 
 test('an Odd shows Replying to you exactly while its chat reply goes and nothing above it holds, and a hello reads as a run', () => {
@@ -623,7 +663,7 @@ test("the floor sends an Odd to the door while it waits on the owner, and to its
 /** The office with Bo running the hand-off above, and Dee, who has left, not on the roster. */
 const handOffOffice = (): Snapshot => ({
   ids: IDS,
-  inProgress: { bo: [work(1, HAND_OFF_LABEL, { kind: 'follow-up', queued: false, followUp: 7 })] },
+  inProgress: { bo: [work(1, HAND_OFF_LABEL, { kind: 'follow-up', queued: false, handOffId: 7 })] },
   toStart: {},
   chatting: [],
   desk: deskOf([], []),
@@ -648,7 +688,7 @@ test("the page's reader props give an Odd's screens its own state, any colleague
   assert.equal(props.onplan, onplan);
 });
 
-test('a hand-off line says the colleague is on it only while its run for that hand-off goes', () => {
+test('a hand-off line says the colleague is on it only while a run serving that hand-off goes', () => {
   const snap = handOffOffice();
   const { nowOf } = readerProps(snap, oddNow(snap), 'ada', () => {});
   assert.deepEqual(handOffProgress(handOff({}), nowOf), { text: 'Bo is on it', yours: false });
@@ -667,7 +707,7 @@ test('a hand-off line says the colleague is on it only while its run for that ha
   );
 });
 
-test("a hand-off line keeps its words for a finished step and for a colleague who has left, and says back on it after the owner's answer", () => {
+test('a hand-off line keeps its words for a finished step and for a colleague who has left', () => {
   const snap = handOffOffice();
   const { nowOf } = readerProps(snap, oddNow(snap), 'ada', () => {});
   const left = handOff({ toId: GONE, to: 'Dee', status: 'failed' });
@@ -677,14 +717,6 @@ test("a hand-off line keeps its words for a finished step and for a colleague wh
     yours: false
   });
   assert.equal(handOffWords(handOff({ status: 'queued' }), false).text, 'Bo has not started yet');
-  const back = {
-    at: new Date('2026-11-12T10:00:00.000Z'),
-    outcome: 'waiting' as const,
-    text: 'Asked the owner',
-    answered: true,
-    pickUp: { status: 'done' as const }
-  };
-  assert.equal(handOffWords(handOff({ backs: [back] }), true).text, 'Bo is back on it');
   assert.deepEqual(handOffWords(handOff({ status: 'waiting' }), false), {
     text: 'Bo is waiting on you · Ada is taking it from here',
     yours: true
@@ -693,4 +725,27 @@ test("a hand-off line keeps its words for a finished step and for a colleague wh
     handOffWords(handOff({ status: 'done' }), false).text,
     'Bo finished · Ada is taking it from here'
   );
+});
+
+test("a hand-off line says the colleague is back on it while its carry-out of the owner's yes goes", () => {
+  // Bo's step came back waiting on the owner, who said yes; Bo now carries that yes out.
+  const back = {
+    at: new Date('2026-11-12T10:00:00.000Z'),
+    outcome: 'waiting' as const,
+    text: 'Asked the owner',
+    answered: true,
+    pickUp: { status: 'done' as const }
+  };
+  const line = handOff({ backs: [back] });
+  const carrying = (handOffId: number): Snapshot => ({
+    ...handOffOffice(),
+    inProgress: {
+      bo: [work(2, CARRY_OUT_LABEL, { kind: 'follow-up', queued: false, handOffId })]
+    }
+  });
+  const read = (snap: Snapshot) =>
+    handOffProgress(line, readerProps(snap, oddNow(snap), 'ada', () => {}).nowOf);
+  assert.deepEqual(read(carrying(7)), { text: 'Bo is back on it', yours: false });
+  // A carry-out for another hand-off is not this one's.
+  assert.deepEqual(read(carrying(8)), { text: 'Bo has not started yet', yours: false });
 });

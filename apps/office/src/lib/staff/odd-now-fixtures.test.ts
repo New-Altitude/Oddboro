@@ -6,6 +6,7 @@ import { register } from 'node:module';
 import { test } from 'node:test';
 import type { AskRow, HandOffLine } from '@oddboro/ledger';
 import {
+  CARRY_OUT_LABEL,
   CATCH_UP,
   deskOf,
   GONE,
@@ -23,7 +24,6 @@ import {
   jobRunning,
   oddNow,
   readerProps,
-  runFor,
   tagWords,
   type Show,
   type Snapshot
@@ -77,6 +77,14 @@ const goingRun = (id: number, label: string, more: Partial<Work> = {}) =>
 const BOS_THREAD = { title: HAND_OFF_LABEL, hubId: 'bo', holderId: 'ada' };
 /** The hand-off Bo gave Ada, as Bo's chat lists it. */
 const toAda = handOff({ from: 'Bo', to: 'Ada', fromId: 'bo', toId: 'ada' });
+/** A step that came back waiting on the owner, who has since answered. */
+const answeredBack = {
+  at: new Date('2026-11-12T10:00:00.000Z'),
+  outcome: 'waiting' as const,
+  text: 'Asked the owner',
+  answered: true,
+  pickUp: { status: 'done' as const }
+};
 
 /** A piece of work in the list, by its label, and how it stands. */
 type Item = [label: string, stands: 'going' | 'slot' | 'start'];
@@ -114,7 +122,6 @@ type HandOffCheck = {
   lead: string;
   line: HandOffLine;
   office?: Snapshot;
-  onIt: boolean;
   text: string;
 };
 
@@ -178,7 +185,7 @@ const FIXTURES: Record<Show['is'], Fixture[]> = {
       snap: office({
         threads: [BOS_THREAD],
         inProgress: {
-          ada: [goingRun(1, HAND_OFF_LABEL, { kind: 'follow-up', followUp: toAda.id })]
+          ada: [goingRun(1, HAND_OFF_LABEL, { kind: 'follow-up', handOffId: toAda.id })]
         }
       }),
       expect: {
@@ -192,7 +199,7 @@ const FIXTURES: Record<Show['is'], Fixture[]> = {
         locked: true
       },
       handOffs: [
-        { lead: 'bo', line: toAda, onIt: true, text: 'Ada is on it' },
+        { lead: 'bo', line: toAda, text: 'Ada is on it' },
         {
           lead: 'bo',
           line: toAda,
@@ -200,12 +207,23 @@ const FIXTURES: Record<Show['is'], Fixture[]> = {
             threads: [BOS_THREAD],
             toStart: {
               ada: [
-                work(1, HAND_OFF_LABEL, { kind: 'follow-up', toStart: true, followUp: toAda.id })
+                work(1, HAND_OFF_LABEL, { kind: 'follow-up', toStart: true, handOffId: toAda.id })
               ]
             }
           }),
-          onIt: false,
           text: 'Ada has not started yet'
+        },
+        {
+          // Ada's step came back waiting on the owner, and she carries out their yes.
+          lead: 'bo',
+          line: { ...toAda, backs: [answeredBack] },
+          office: office({
+            threads: [BOS_THREAD],
+            inProgress: {
+              ada: [goingRun(2, CARRY_OUT_LABEL, { kind: 'follow-up', handOffId: toAda.id })]
+            }
+          }),
+          text: 'Ada is back on it'
         }
       ]
     }
@@ -307,7 +325,7 @@ const FIXTURES: Record<Show['is'], Fixture[]> = {
       name: 'a follow-up yet to start',
       snap: office({
         toStart: {
-          ada: [work(1, HAND_OFF_LABEL, { kind: 'follow-up', toStart: true, followUp: 7 })]
+          ada: [work(1, HAND_OFF_LABEL, { kind: 'follow-up', toStart: true, handOffId: 7 })]
         },
         activity: adaAt('read')
       }),
@@ -347,7 +365,6 @@ const FIXTURES: Record<Show['is'], Fixture[]> = {
         {
           lead: 'ada',
           line: handOff({ toId: GONE, to: 'Dee', status: 'failed' }),
-          onIt: false,
           text: 'Dee could not finish · Ada is taking it from here'
         }
       ]
@@ -476,7 +493,6 @@ test("every reader of an Odd's status shows the same state for the same fixture"
         for (const h of f.handOffs ?? []) {
           const snap = h.office ?? f.snap;
           const { nowOf } = readerProps(snap, oddNow(snap), h.lead, onplan);
-          assert.equal(!!runFor(nowOf(h.line.toId), h.line.id), h.onIt);
           assert.equal(handOffProgress(h.line, nowOf).text, h.text);
         }
         assert.equal(props.now.show.is, is);
