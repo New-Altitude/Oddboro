@@ -161,20 +161,20 @@ async function reopen(q: Db, id: number, from: ThreadStatus[]): Promise<void> {
     .where(and(eq(threads.id, id), inArray(threads.status, from)));
 }
 
-/** What an Odd is told when it would open a thread it may not lead (`mayLead`). */
+/** What an Odd is told when it would open a thread it may not lead (`assertMayLead`). */
 export const LEADS_NONE =
   "Nothing was opened. You serve a goal and have no job of your own, so you lead no work: the goal's lead hands each piece on. Pass the owner's words to the lead with tell_lead, then tell the owner you passed them on.";
 
 /**
  * Opens a thread outside the work core, with `hubId` as its lead, once it
- * may lead work (`mayLead`). A hand-off opens its new work through the work
+ * may lead work (`assertMayLead`). A hand-off opens its new work through the work
  * core instead, after the same check.
  */
 async function openThread(
   q: Db,
   t: { title: string; hubId: string; goalId?: number }
 ): Promise<ThreadRow> {
-  await mayLead(q, t.hubId);
+  await assertMayLead(q, t.hubId);
   const [opened] = await q
     .insert(threads)
     .values({ ...t, holderId: t.hubId })
@@ -189,7 +189,7 @@ async function openThread(
  * error the Odd reads. The manager leads every goal's thread, so it is never
  * refused.
  */
-export async function mayLead(q: Db, hubId: string): Promise<void> {
+export async function assertMayLead(q: Db, hubId: string): Promise<void> {
   const [serves] = await q
     .select({ id: staffGoals.goalId })
     .from(staffGoals)
@@ -213,12 +213,12 @@ export async function mayLead(q: Db, hubId: string): Promise<void> {
  * Opening one counts no hand-off against its limit.
  */
 export async function goalThread(q: Db, goalId: number, opener: string): Promise<number> {
-  const work = await goalWork(q, goalId, opener);
+  const work = await goalThreadOrNew(q, goalId, opener);
   return 'id' in work ? work.id : (await openThread(q, work.open)).id;
 }
 
 /** A goal's one thread, as `goalThread` finds it, or the one to open for it when it has none yet. */
-export async function goalWork(
+export async function goalThreadOrNew(
   q: Db,
   goalId: number,
   opener: string
@@ -559,7 +559,7 @@ export const worksOn = (staffId: string) =>
   );
 
 /** The threads `staffId` works on (`worksOn`), as a park or tell_lead reads them before the work core decides. */
-export async function workedOn(q: Db, staffId: string): Promise<Set<number>> {
+export async function worksOnIds(q: Db, staffId: string): Promise<Set<number>> {
   const rows = await q.select({ id: threads.id }).from(threads).where(worksOn(staffId));
   return new Set(rows.map((r) => r.id));
 }
@@ -762,7 +762,7 @@ export async function tellLead(t: {
     const e: EventOf<'toldLead'> = {
       ...toLoad,
       exchange: exchangeForLead(t.exchange ?? '', name, lacks, REPLY_A_LEAD_LACKS),
-      worksOn: await workedOn(tx, t.staffId)
+      worksOn: await worksOnIds(tx, t.staffId)
     };
     // No refusal reads the files, so this one is the one the note would get.
     const first = decide(rows, e, new Date());

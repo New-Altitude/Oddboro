@@ -32,8 +32,8 @@ import {
 import { toolNames } from './sharing.ts';
 import {
   addFollowUp,
-  goalWork,
-  mayLead,
+  goalThreadOrNew,
+  assertMayLead,
   nextIsLeads,
   threadFolder,
   threadPart,
@@ -222,7 +222,7 @@ export async function handOff(h: {
 
 /**
  * The work a hand-off goes on: one named, its goal's, or new work its lead
- * opens, once the lead may lead work (`mayLead`). The core loads neither the
+ * opens, once the lead may lead work (`assertMayLead`). The core loads neither the
  * goal nor what the lead serves, so they are read here.
  */
 async function workFor(on: ThreadFor, from: string): Promise<EventOf<'handedOff'>['thread']> {
@@ -230,8 +230,8 @@ async function workFor(on: ThreadFor, from: string): Promise<EventOf<'handedOff'
   const work =
     on.goalId === undefined
       ? { open: { title: on.title, hubId: from } }
-      : await goalWork(db, on.goalId, from);
-  if ('open' in work) await mayLead(db, work.open.hubId);
+      : await goalThreadOrNew(db, on.goalId, from);
+  if ('open' in work) await assertMayLead(db, work.open.hubId);
   return work;
 }
 

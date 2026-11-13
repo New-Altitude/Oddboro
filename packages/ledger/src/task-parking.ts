@@ -5,7 +5,7 @@ import { db } from './db.ts';
 import { flat } from './desk-answers.ts';
 import { fixedError } from './errors.ts';
 import { threads } from './schema.ts';
-import { answerThread, workedOn, type Db } from './threads.ts';
+import { answerThread, worksOnIds, type Db } from './threads.ts';
 import { transitionWork } from './work/apply.ts';
 
 /**
@@ -23,7 +23,7 @@ export async function parkOnTask(
     staffId: hubId,
     threadId: id,
     on: { task: taskId },
-    worksOn: await workedOn(db, hubId)
+    worksOn: await worksOnIds(db, hubId)
   });
   if ('refused' in parked) return { problem: parked.refused };
   const r = parked.change.result;

@@ -440,7 +440,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   it and every hand-off for it (`hand_off` with `goal`), and counts no
   hand-off as it opens. Only its lead hands on there, so a hire serving the
   goal joins it as a colleague. An Odd that serves a goal and has no job leads
-  no thread: `mayLead`, checked wherever a thread is opened, refuses it
+  no thread: `assertMayLead`, checked wherever a thread is opened, refuses it
   (`LEADS_NONE`), whatever tool or run got there; the manager is never refused.
   A finished goal thread is found as it is, so a goal never gets a second: an
   ask or task raised on it opens it again (`raisedOn`), and so does the lead's
