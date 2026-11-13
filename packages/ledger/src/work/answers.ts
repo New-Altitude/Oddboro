@@ -3,8 +3,24 @@
 // or starts one, and parked work wakes as its task ends.
 //
 // Pure: every import that reaches the database is a type.
-import { flat, OWN_RUN, OWNER_ANSWERS, type TaskEffect } from '../desk-answers.ts';
-import { chatCardOf, type InChat } from '../schema.ts';
+import { switchesSaid, type OwnSwitch } from '../access-words.ts';
+import {
+  flat,
+  OWN_RUN,
+  OWNER_ANSWERS,
+  type AskAnswer,
+  type AskEffect,
+  type TaskEffect
+} from '../desk-answers.ts';
+import { filterWords, type GmailFilter } from '../filter-words.ts';
+import type { Decision } from '../office-asks.ts';
+import {
+  chatCardOf,
+  type AskKind,
+  type HeldCall,
+  type InChat,
+  type ReplyDraft
+} from '../schema.ts';
 import type { TaskEnded } from '../task-parking.ts';
 import { putAll, type Draft, type WorkRows } from './snapshot.ts';
 import type { Task, Thread } from './state.ts';
@@ -143,3 +159,25 @@ export function ownRunOf(rows: WorkRows, t: Task): OwnRun | undefined {
     return undefined;
   return { work: own?.title ?? null };
 }
+
+/** What a made call returned, cut to fit a ledger line or a brief. */
+export const callResultText = (r: NonNullable<HeldCall['result']>, max = 4000): string =>
+  `${r.ok ? '' : 'The tool said it failed: '}${r.text.length > max ? `${r.text.slice(0, max)}…` : r.text}`;
+
+/** A created filter in one line, for its ledger line and the answer: what it does, and what was tidied. */
+export const filterDone = (f: GmailFilter) =>
+  `${filterWords(f)}${f.created?.tidied ? `, and tidied ${f.created.tidied} ${f.created.tidied === 1 ? 'email' : 'emails'}` : ''}`;
+
+/** What a reply ask's ledger line and answer say the owner did with it. */
+export const replyDone = (r: ReplyDraft) =>
+  r.sent?.action === 'draft' ? 'Saved to Gmail drafts' : 'Sent';
+
+/** What the owner's decision on an ask of this kind does, from its row in `OWNER_ANSWERS`. */
+export function effectsOf(kind: AskKind, decision: Decision): readonly AskEffect[] {
+  const cell = (OWNER_ANSWERS.ask[kind] as AskAnswer)[decision];
+  return cell === 'refused' ? [] : 'by' in cell ? cell.then : cell;
+}
+
+/** The ledger's words for turning switches on: "Let Theo run commands and browse the web". */
+export const turnedOn = (name: string, on: readonly OwnSwitch[]) =>
+  `Let ${name} ${switchesSaid(on).toLowerCase()}`;

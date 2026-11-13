@@ -23,12 +23,12 @@ import { bringBack, leavingRefused, removeOdd } from './leaving.ts';
 import { giveStanding } from './standing.ts';
 import { oweCatchUp } from './missed-runs.ts';
 import { type FolderAccess, type OwnSwitch } from './access-words.ts';
-import { filterWords, type GmailFilter } from './filter-words.ts';
+import type { GmailFilter } from './filter-words.ts';
 import { yesOrNo } from './tools.ts';
-import { OWNER_ANSWERS, type AskAnswer, type AskEffect } from './desk-answers.ts';
+import { OWNER_ANSWERS, type AskEffect } from './desk-answers.ts';
 import type { StaffRow, AskRow, ReportRow } from './office.ts';
 import { anyStaffer, networkNote } from './office-staff.ts';
-import { changeFolder, gaveFolder, switchesOff, turnedOn, checkFolder } from './office-folders.ts';
+import { changeFolder, gaveFolder, switchesOff, checkFolder } from './office-folders.ts';
 import { record } from './office-ledger.ts';
 import {
   raiseAsk,
@@ -43,6 +43,9 @@ import { grantAccess } from './office-access.ts';
 import { taskEnded } from './office-tasks.ts';
 import { readReport, report } from './office-desk.ts';
 import { ownerName } from './office-usage.ts';
+import { callResultText, effectsOf, filterDone, replyDone, turnedOn } from './work/answers.ts';
+
+export { callResultText };
 
 /**
  * The owner's decision. Approving an access ask grants it and gives the owner the steps
@@ -167,10 +170,6 @@ export async function raiseCall(
   return { ask, already: false };
 }
 
-/** What a made call returned, cut to fit a ledger line or a brief. */
-export const callResultText = (r: NonNullable<HeldCall['result']>, max = 4000): string =>
-  `${r.ok ? '' : 'The tool said it failed: '}${r.text.length > max ? `${r.text.slice(0, max)}…` : r.text}`;
-
 /** Why the owner's Give access on a folder ask gave nothing, with the status the route answers. */
 export type FolderNotGiven = { refused: string; status: 400 | 404 | 409 };
 
@@ -241,14 +240,6 @@ export async function giveFolder(
   }
   return { given };
 }
-
-/** A created filter in one line, for its ledger line and the answer: what it does, and what was tidied. */
-const filterDone = (f: GmailFilter) =>
-  `${filterWords(f)}${f.created?.tidied ? `, and tidied ${f.created.tidied} ${f.created.tidied === 1 ? 'email' : 'emails'}` : ''}`;
-
-/** What a reply ask's ledger line and answer say the owner did with it. */
-const replyDone = (r: ReplyDraft) =>
-  r.sent?.action === 'draft' ? 'Saved to Gmail drafts' : 'Sent';
 
 async function decide(
   id: number,
@@ -486,12 +477,6 @@ async function decide(
     }
   }
   return true;
-}
-
-/** What the owner's decision on an ask of this kind does, from its row in `OWNER_ANSWERS`. */
-function effectsOf(kind: AskKind, decision: Decision): readonly AskEffect[] {
-  const cell = (OWNER_ANSWERS.ask[kind] as AskAnswer)[decision];
-  return cell === 'refused' ? [] : 'by' in cell ? cell.then : cell;
 }
 
 /**
