@@ -26,7 +26,7 @@ import {
   type WorkRows
 } from './snapshot.ts';
 import type { Thread } from './state.ts';
-import { handOn, hasLeft, holdForWindow } from './threads.ts';
+import { handOn, hasLeft, holdForWindow, idOf, openThread } from './threads.ts';
 
 /**
  * The hand-offs a round of work takes before the office asks the owner whether
@@ -142,41 +142,6 @@ function goesOnRefused(rows: WorkRows, id: number, from: string): string | undef
   if (asked)
     return `Work ${id} waits on the owner's answer to ask #${asked.id} about going on, and holds the hand-off that raised it, which goes ahead on their yes. This one did not go: once the held one comes back, hand it on again if it is still needed. Finish this run; their answer brings you back.`;
   return undefined;
-}
-
-/** New work, opened in this change once the entry checked its lead may lead work, as `openThread` in ../threads.ts does. */
-function openThread(
-  d: Draft,
-  open: { title: string; hubId: string; goalId?: number },
-  runs: string[],
-  now: Date
-): Inserted {
-  const ref = 'thread';
-  putAll(d, [
-    {
-      table: 'threads',
-      ref,
-      insert: {
-        title: open.title,
-        goalId: open.goalId ?? null,
-        hubId: open.hubId,
-        holderId: open.hubId,
-        handOffsUsed: 0,
-        runs,
-        createdAt: now,
-        status: 'open',
-        park: { on: 'none' }
-      }
-    }
-  ]);
-  return { ref };
-}
-
-/** The id this draft gave a row it inserted, which its later steps read it by. */
-function idOf(d: Draft, row: Inserted): number {
-  const id = d.ids.get(row.ref);
-  if (id === undefined) throw fixedError('A change named a row it did not insert.');
-  return id;
 }
 
 /** The lead's run handing work on keeps its key on the work, last, as `keepRun` in ../threads.ts does. */
@@ -304,7 +269,7 @@ export function toldLead(
       refused: `Work ${id} is not work you are on, so it is not yours to pass on. Tell ${owner} so.`
     };
   if (t.status === 'stopped')
-    return { refused: `${owner} stopped work ${id}, so nothing more runs on it. Tell them so.` };
+    return { refused: `Work ${id} has stopped, so nothing more runs on it. Tell ${owner} so.` };
   // Its lead's leaving stops the work; this is a call that landed as the lead left.
   if (lead.leftAt)
     return {

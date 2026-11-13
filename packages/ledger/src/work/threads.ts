@@ -22,7 +22,7 @@ import type { FollowUp, FollowUpBase, Thread, ThreadBase } from './state.ts';
 export type HandOffRow = FollowUp & { kind: 'hand_off' };
 export const isHandOff = (f: FollowUp | undefined): f is HandOffRow => f?.kind === 'hand_off';
 
-/** Whether an Odd left the office. One the rows do not hold reads as here, as `leadLeft` reads a missing row. */
+/** Whether an Odd left the office. One the rows do not hold reads as here. */
 export const hasLeft = (rows: WorkRows, id: string): boolean => !!rows.staff.get(id)?.leftAt;
 
 /**
@@ -128,6 +128,80 @@ export function addRun(d: Draft, run: Fresh<FollowUp>, now: Date): Inserted {
 }
 
 /**
+ * New work, opened in this change once the entry checked its lead may lead
+ * work, as `openThread` in ../threads.ts does. A goal set in the same change
+ * (a `perKind` effect's ref) is pointed at, so the work takes the goal's real id.
+ */
+export function openThread(
+  d: Draft,
+  open: { title: string; hubId: string; goalId?: number | Inserted },
+  runs: string[],
+  now: Date
+): Inserted {
+  const ref = 'thread';
+  const goal = open.goalId;
+  putAll(d, [
+    {
+      table: 'threads',
+      ref,
+      insert: {
+        title: open.title,
+        goalId: goal === undefined ? null : typeof goal === 'number' ? goal : idOf(d, goal),
+        hubId: open.hubId,
+        holderId: open.hubId,
+        handOffsUsed: 0,
+        runs,
+        createdAt: now,
+        status: 'open',
+        park: { on: 'none' }
+      },
+      ...(typeof goal === 'object' && { points: { goalId: goal.ref } })
+    }
+  ]);
+  return { ref };
+}
+
+/**
+ * A goal set, and its lead plans it: the goal's work opens under the lead,
+ * which is the office's manager and so may always lead work, and the lead's
+ * `goal` run goes on it (a goal's yes, and `addGoal`). `goal` is the goal's id, or the ref of the write
+ * that sets it in this change. `chat` is the card the owner answered on: the
+ * run replies under it only when it is that chat's Odd's.
+ */
+export function planGoal(
+  d: Draft,
+  o: { goal: number | Inserted; title: string; lead: string; chat?: InChat },
+  now: Date
+): void {
+  const thread = openThread(d, { title: o.title, hubId: o.lead, goalId: o.goal }, [], now);
+  const threadId = idOf(d, thread);
+  const run = newRun(
+    {
+      staffId: o.lead,
+      kind: 'goal',
+      goalId: typeof o.goal === 'number' ? o.goal : idOf(d, o.goal),
+      threadId,
+      chatCard: chatCardOf(o.lead, o.chat) ?? null
+    },
+    now
+  );
+  // Put here rather than by `addRun`, which points only a run's thread: this one points at its goal too.
+  const points = {
+    threadId: thread.ref,
+    ...(typeof o.goal === 'object' && { goalId: o.goal.ref })
+  };
+  putAll(d, [{ table: 'followUps', ref: `run ${d.ids.size}`, insert: run, points }]);
+  settle(d, threadId, now);
+}
+
+/** The id this draft gave a row it inserted, or made up for a `perKind` effect, which its later steps read it by. */
+export function idOf(d: Draft, row: Inserted): number {
+  const id = d.ids.get(row.ref);
+  if (id === undefined) throw fixedError('A change named a row it did not insert.');
+  return id;
+}
+
+/**
  * Owe an Odd a run, as `followUp` and `addFollowUp` do. The answer to
  * something raised on a thread works on that thread, unless its kind serves
  * none. With `onlyWhileOpen`, nothing is put once that work ended. `chat` is
@@ -174,7 +248,7 @@ export function oweRun(
 
 /**
  * A colleague's result goes back to the lead that handed it the work, as a
- * `handed_back` run on the work, as `handBack` and `addFollowUp` do. Nothing
+ * `handed_back` run on the work, as `addFollowUp` does. Nothing
  * goes back to a lead that left the office, since it runs nothing: true when
  * the result went back. `answered` marks a result that is the owner's own
  * answer, which no run followed.

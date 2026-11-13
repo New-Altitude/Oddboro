@@ -150,7 +150,7 @@ async function placed(a: {
 }): Promise<{ problem: string } | { handOffId?: number; threadId?: number; run?: string }> {
   // A thread it leads is its own work, never a colleague's goal work.
   if (a.work !== undefined && a.work !== null) {
-    const problem = await notLed({ hubId: ME, threadId: a.work, owner: OWNER });
+    const problem = await notLed({ hubId: ME, threadId: a.work });
     // Only a lead's run naming its thread keeps its key there: a colleague's run
     // on a thread must never hold the lead's pick-ups (`waitsOnOwnRun`).
     return problem ? { problem } : { threadId: a.work, run: RUN_KEY };

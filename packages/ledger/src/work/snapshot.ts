@@ -9,7 +9,7 @@ import type { Agent } from '../agents.ts';
 import { fixedError } from '../errors.ts';
 import type { CarriedFile } from '../hand-offs.ts';
 import type { record } from '../office-ledger.ts';
-import type { AskRow, StaffRow } from '../office.ts';
+import type { StaffRow } from '../office.ts';
 import type { AskStatus, HandOff } from '../schema.ts';
 import type { Tx } from '../threads.ts';
 import type { Ask, FollowUp, Task, Thread } from './state.ts';
@@ -68,14 +68,14 @@ type Links = {
 export type Fresh<T> = T extends unknown ? Omit<T, 'id'> : never;
 
 /**
- * A new row: every column `empty` holds, then each one `named` gives a
- * value. A column `named` leaves undefined keeps its empty value, as an
- * insert that leaves a column out gets its default.
+ * A row: every column `base` holds, then each one `named` gives a value. A
+ * column `named` leaves undefined keeps its value in `base`, as an insert
+ * that leaves a column out gets its default, or an update leaves it as it was.
  */
-export function filled<E extends object, N extends object>(empty: E, named: N): E & N {
+export function filled<E extends object, N extends object>(base: E, named: N): E & N {
   const given = Object.entries(named).filter(([, v]) => v !== undefined);
-  // `given` is `named` without its undefined columns, which `empty` fills.
-  return { ...empty, ...Object.fromEntries(given) } as E & N;
+  // `given` is `named` without its undefined columns, which `base` fills.
+  return { ...base, ...Object.fromEntries(given) } as E & N;
 }
 
 /**
@@ -102,12 +102,11 @@ export type Inserted = { ref: string };
 /** A line for the Ledger, as `record` takes it. */
 export type LedgerLine = Parameters<typeof record>[0];
 
-/** An in-transaction write outside the four tables that an entry function supplies, as an ask's `link` is. */
+/** An in-transaction write outside the four tables that an entry function supplies, as setting a goal on its yes is. */
 export type PerKindInTx = {
   /** Names it in an error, and is the `ref` a put may point at. */
   name: string;
-  /** `ask`: the ask this change claims, on an ask's answer. */
-  run: (tx: Tx, ask?: AskRow) => Promise<{ id: string | number } | void>;
+  run: (tx: Tx) => Promise<{ id: string | number } | void>;
 };
 
 /** A write inside the transaction outside the four tables, as named data. */

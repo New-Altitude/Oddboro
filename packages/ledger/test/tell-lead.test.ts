@@ -24,7 +24,7 @@ import { db } from './pglite.ts';
 // Loaded once db.ts is this database, so every query they make lands here.
 const { handOff } = await import('../src/hand-offs.ts');
 const { raiseAsk } = await import('../src/office.ts');
-const { exchangeForLead, tellLead, threadFolder, threadPart, threadsOn, threadsOnBrief } =
+const { exchangeForLead, notLed, tellLead, threadFolder, threadPart, threadsOn, threadsOnBrief } =
   await import('../src/threads.ts');
 const { setOwnerName } = await import('../src/office-usage.ts');
 // The lead's note names the owner as the office does, by the name they gave.
@@ -405,7 +405,7 @@ test("a removal landing while tell_lead passes the owner's words waits for it, s
   t.mock.module(new URL('../src/sharing.ts', import.meta.url).href, {
     namedExports: {
       ...sharing,
-      // tell_lead reads the tools after its checks and before the note. The
+      // tell_lead reads the tools under its locks, before its checks and the note. The
       // removal starts here and gets a quarter second to land: where the
       // checks and the note are separate steps it lands in that time, and the
       // lead it removed never gets the note; here it waits for the note's
@@ -437,4 +437,31 @@ test("a removal landing while tell_lead passes the owner's words waits for it, s
     notes.some((n) => n.includes("Sam's words: make the colours warmer.")),
     `tellLead returned ${JSON.stringify(r)}, and the lead's pick-ups hold ${JSON.stringify(notes)}`
   );
+});
+
+test("tell_lead on work its lead's leaving stopped says the work stopped, never that the owner stopped it", async () => {
+  await db.insert(staff).values([odd('uma', 'Uma'), odd('vic', 'Vic')]);
+  const work = await onThread('uma', 'vic', 'Work whose lead leaves');
+  const { removeOdd } = await import('../src/leaving.ts');
+  await removeOdd('uma');
+  assert.equal((await db.select().from(threads).where(eq(threads.id, work)))[0]?.status, 'stopped');
+  const r = await tell('vic', work);
+  assert.deepEqual(r, {
+    problem: `Work ${work} has stopped, so nothing more runs on it. Tell Sam so.`
+  });
+  assert.doesNotMatch(r.problem, /stopped it|stopped work/);
+});
+
+test('a hub naming its own stopped work for an ask hears the work stopped, never that the owner stopped it', async () => {
+  const work = await onThread('cole', 'bram', 'Stopped work a hub names');
+  await db
+    .update(threads)
+    .set({ status: 'stopped', endedAt: new Date() })
+    .where(eq(threads.id, work));
+  const problem = await notLed({ hubId: 'cole', threadId: work });
+  assert.equal(
+    problem,
+    `Work ${work} has stopped, so nothing more goes on it. Name another, or null.`
+  );
+  assert.doesNotMatch(problem ?? '', /stopped it|stopped work/);
 });

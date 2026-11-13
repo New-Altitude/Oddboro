@@ -36,7 +36,6 @@ const B = await import('../src/lead-brief.ts');
 const W = await import('../src/goal-work.ts');
 const { MANAGER_ROLE } = await import('../src/managers.ts');
 
-const OWNER = 'Sam';
 const odd = (name: string, role: string) => ({
   name,
   role,
@@ -424,11 +423,11 @@ test("after the owner stops the goal's thread, only a new plan opens it again: n
   assert.equal((await threadRow(goalThread)).status, 'stopped');
   assert.match(
     B.workLedBrief(await B.ledStories('marshall', 'chat')),
-    /^Where it stands: \{owner\} stopped it, so it cannot be continued\.$/m,
-    "the lead's chat says the owner stopped the goal's work"
+    /^Where it stands: it has stopped, so it cannot be continued\.$/m,
+    "the lead's chat says the goal's work has stopped"
   );
   assert.match(
-    (await T.notLed({ hubId: 'marshall', threadId: goalThread, owner: OWNER })) ?? '',
+    (await T.notLed({ hubId: 'marshall', threadId: goalThread })) ?? '',
     /stopped/,
     'the lead may not name a stopped thread from a chat'
   );

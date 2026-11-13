@@ -116,16 +116,17 @@ export async function updateJob(
   patch: Partial<
     Pick<JobRow, 'name' | 'instructions' | 'schedule' | 'enabled' | 'report' | 'missed' | 'files'>
   >,
-  expectedFiles?: JobFiles
+  expectedFiles?: JobFiles,
+  q: Db = db
 ): Promise<void> {
   if (patch.files)
     refuseFileCycle(
-      (await fileJobs()).map((j) =>
+      (await fileJobs(q)).map((j) =>
         j.id === id ? { ...j, name: patch.name ?? j.name, files: patch.files! } : j
       )
     );
-  const schedule = patch.schedule ?? (patch.enabled ? (await job(id))?.schedule : undefined);
-  const rows = await db
+  const schedule = patch.schedule ?? (patch.enabled ? (await job(id, q))?.schedule : undefined);
+  const rows = await q
     .update(jobs)
     .set({
       ...patch,
@@ -145,14 +146,17 @@ export async function updateJob(
 export type GoAhead = { said: string } | { askId: number };
 
 /** In a chat, the owner's words go in the ledger as their decision, beside the change. */
-async function recordGoAhead(who: StaffRow, go: GoAhead, what: string): Promise<void> {
+async function recordGoAhead(who: StaffRow, go: GoAhead, what: string, q: Db = db): Promise<void> {
   if ('said' in go)
-    await record({
-      kind: 'decision',
-      actor: 'owner',
-      title: `Asked ${who.name} in chat: ${what}`,
-      body: go.said
-    });
+    await record(
+      {
+        kind: 'decision',
+        actor: 'owner',
+        title: `Asked ${who.name} in chat: ${what}`,
+        body: go.said
+      },
+      q
+    );
 }
 
 export async function editOwnJob(
@@ -161,38 +165,42 @@ export async function editOwnJob(
   patch: Partial<
     Pick<JobRow, 'name' | 'instructions' | 'schedule' | 'report' | 'missed' | 'files'>
   >,
-  go: GoAhead
+  go: GoAhead,
+  q: Db = db
 ): Promise<JobRow | undefined> {
-  const who = await staffer(staffId);
-  const [j, other] = await db
+  const who = await staffer(staffId, q);
+  const [j, other] = await q
     .select()
     .from(jobs)
     .where(and(eq(jobs.staffId, staffId), eq(jobs.name, name)))
     .limit(2);
   if (other) throw new Error('Two jobs have that name. Rename one on the Odd’s card first.');
   if (!who || !j) return undefined;
-  if (patch.files && !(await isOnThread(staffId, patch.files.thread)))
+  if (patch.files && !(await isOnThread(staffId, patch.files.thread, q)))
     throw new Error('This Odd has no assignment on that work.');
-  await updateJob(j.id, patch);
-  await recordGoAhead(who, go, `change its job "${name}"`);
-  await record({
-    kind: 'work',
-    actor: staffId,
-    title: `Changed its job: ${patch.name ?? name}`,
-    body: [
-      patch.name && `Former name: ${name}`,
-      patch.files && `Scheduled files: ${JSON.stringify(patch.files)}`,
-      patch.instructions && `Steps:\n${patch.instructions}`,
-      patch.schedule && `Schedule: ${JSON.stringify(patch.schedule)}`,
-      patch.report !== undefined &&
-        `Reports to ${await ownerName()}: ${patch.report ? 'yes' : 'no'}`,
-      patch.missed && `Missed runs: ${MISSED_WORDS[patch.missed]}`
-    ]
-      .filter(Boolean)
-      .join('\n\n'),
-    askId: 'askId' in go ? go.askId : undefined
-  });
-  return job(j.id);
+  await updateJob(j.id, patch, undefined, q);
+  await recordGoAhead(who, go, `change its job "${name}"`, q);
+  await record(
+    {
+      kind: 'work',
+      actor: staffId,
+      title: `Changed its job: ${patch.name ?? name}`,
+      body: [
+        patch.name && `Former name: ${name}`,
+        patch.files && `Scheduled files: ${JSON.stringify(patch.files)}`,
+        patch.instructions && `Steps:\n${patch.instructions}`,
+        patch.schedule && `Schedule: ${JSON.stringify(patch.schedule)}`,
+        patch.report !== undefined &&
+          `Reports to ${await ownerName(q)}: ${patch.report ? 'yes' : 'no'}`,
+        patch.missed && `Missed runs: ${MISSED_WORDS[patch.missed]}`
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+      askId: 'askId' in go ? go.askId : undefined
+    },
+    q
+  );
+  return job(j.id, q);
 }
 
 /**
@@ -239,8 +247,8 @@ export async function enabledJobs(): Promise<JobRow[]> {
     .where(and(eq(jobs.enabled, true), ofWorkingOdd(jobs.staffId)));
 }
 
-export async function job(id: number): Promise<JobRow | undefined> {
-  const [row] = await db.select().from(jobs).where(eq(jobs.id, id));
+export async function job(id: number, q: Db = db): Promise<JobRow | undefined> {
+  const [row] = await q.select().from(jobs).where(eq(jobs.id, id));
   return row;
 }
 

@@ -765,7 +765,7 @@ test('a failed wake leaves the task open, its checked steps intact, and its work
   assert.equal((await O.task(task.id))?.note, 'Use the north path.');
 });
 
-test('finishing a task wakes the thread parked on it once, and a dropped task wakes it too and says so', async () => {
+test('finishing a task wakes the thread parked on it once, and a dropped task wakes it too and says so, each telling the work of the run its end starts for the Odd', async () => {
   const finished = await ownWork('finished');
   const proof = await aTask(finished.lead, 'Proof the banner');
   await parksOn(finished.lead, finished.work, proof.id);
@@ -783,20 +783,30 @@ test('finishing a task wakes the thread parked on it once, and a dropped task wa
   const print = await aTask(dropped.lead, 'Print\nthe banner');
   await parksOn(dropped.lead, dropped.work, print.id);
   await O.finishTask(print.id, false, 'Not needed\nany more.');
+  // A drop on no work answers the Odd that gave the task with a run of its own.
+  const answered = await db.select().from(followUps).where(eq(followUps.taskId, print.id));
+  assert.deepEqual(
+    answered.map((f) => [f.kind, f.staffId]),
+    [['answered', dropped.lead]]
+  );
   const told = await onThread(dropped.work, 'resume');
   assert.equal(told.length, 1);
   assert.match(
     told[0].note ?? '',
-    /dropped "Print the banner", the task you parked this work on, so it will not be finished\. Decide what comes of the work now: Not needed any more\.$/
+    /dropped "Print the banner", the task you parked this work on, so it will not be finished\. Another run of yours picks up from that task too and carries its own part: do only this work's here\. Decide what comes of the work now: Not needed any more\.$/
   );
   assert.equal((told[0].note ?? '').split('\n').length, 1, 'answers() splits a note on newlines');
   assert.equal((await threadOf(dropped.work)).resumeOnTask, null);
 
-  // Work that ended another way while parked stays ended.
+  // Work that ended another way while parked stays ended. An ended thread
+  // keeps the park it had, as the owner's answer past the hand-off limit leaves it.
   const ended = await ownWork('ended');
   const frame = await aTask(ended.lead, 'Frame the banner');
   await parksOn(ended.lead, ended.work, frame.id);
-  await db.update(threads).set({ endedAt: new Date() }).where(eq(threads.id, ended.work));
+  await db
+    .update(threads)
+    .set({ status: 'done', endedAt: new Date() })
+    .where(eq(threads.id, ended.work));
   await O.finishTask(frame.id, true, null);
   assert.deepEqual(await onThread(ended.work, 'resume'), []);
 });
@@ -1194,15 +1204,19 @@ test('a lead run that ended a park on a task fails after the task was finished: 
   assert.equal((await onThread(work, 'resume')).length, 1);
 });
 
-test('a lead run that ended a park on a task fails after the task was dropped: the work wakes once, told it was dropped', async () => {
+test('a lead run that ended a park on a task fails after the task was dropped: the work wakes once, told it was dropped and that its other run was set going back then', async () => {
   const { work, task, back } = await liftedPark('fails-dropped', 'Print the flyer');
   await O.finishTask(task.id, false, null);
+  assert.deepEqual(
+    (await db.select().from(followUps).where(eq(followUps.taskId, task.id))).map((f) => f.kind),
+    ['answered']
+  );
   await fails(back);
   const woken = await onThread(work, 'resume');
   assert.equal(woken.length, 1);
   assert.match(
     woken[0].note ?? '',
-    /dropped "Print the flyer", the task you parked this work on, so it will not be finished\. Decide what comes of the work now\.$/
+    /dropped "Print the flyer", the task you parked this work on, so it will not be finished\. Another run of yours was set going when the task ended and carries its own part: do only this work's part here\. Decide what comes of the work now\.$/
   );
   assert.equal((await threadOf(work)).resumeOnTask, null);
 });
@@ -1806,13 +1820,48 @@ test('a connect task with nothing parked on it starts its carry-out with nothing
   assert.equal(carry.pickedUp, null);
 });
 
-test('a dropped connect task starts no run of its own, so the work parked on it hears only of the drop', async () => {
+test('a dropped connect task for an ask raised in a chat answers its Odd with a run of its own, and the work parked on it hears of that run', async () => {
   const { otherWork, connect } = await connectWithParked('carry-dropped', { onWork: false });
   await O.finishTask(connect, false, null);
+  assert.deepEqual(
+    (await db.select().from(followUps).where(eq(followUps.taskId, connect))).map((f) => f.kind),
+    ['answered']
+  );
   const [woken] = await onThread(otherWork ?? 0, 'resume');
   assert.match(
     woken.note ?? '',
-    /dropped "Connect Gmail .+", the task you parked this work on, so it will not be finished\. Decide what comes of the work now\.$/
+    /dropped "Connect Gmail .+", the task you parked this work on, so it will not be finished\. Another run of yours picks up from that task too and carries its own part: do only this work's here\. Decide what comes of the work now\.$/
+  );
+});
+
+test("a dropped task given on a hand-off answers the lead that handed the work, and the work its Odd parked on it hears that the hand-off's work picks up", async () => {
+  const { lead, colleague, h } = await ownWork('dropped-hand-off');
+  const task = await O.giveTask(colleague, {
+    title: 'Check the hall',
+    why: 'w',
+    steps: ['Do it'],
+    handOffId: h.id,
+    threadId: h.threadId ?? undefined
+  });
+  const own = await H.handOff({
+    from: colleague,
+    to: lead,
+    work: { title: 'Hall of dropped-hand-off', brief: 'Book it.' },
+    thread: { title: 'Venue of dropped-hand-off' }
+  });
+  assert.ok('id' in own, JSON.stringify(own));
+  const parked = (await byId(own.id)).threadId ?? 0;
+  await parksOn(colleague, parked, task.id);
+  await O.finishTask(task.id, false, 'Not needed.');
+  assert.deepEqual(
+    (await onThread(h.threadId ?? 0, 'handed_back')).map((f) => f.staffId),
+    [lead]
+  );
+  assert.deepEqual(await db.select().from(followUps).where(eq(followUps.taskId, task.id)), []);
+  const [woken] = await onThread(parked, 'resume');
+  assert.match(
+    woken.note ?? '',
+    /dropped "Check the hall", the task you parked this work on, so it will not be finished\. "Work on dropped-hand-off", the work that task was given on, picks up too, and its lead carries that work's own part: do only this work's here\. Decide what comes of the work now: Not needed\.$/
   );
 });
 

@@ -5,10 +5,18 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { StaffRow } from '../src/office.ts';
 import type { AccessRequest, HandOff, Step } from '../src/schema.ts';
+import { GOAL_SET } from '../src/work/asks.ts';
 import { decide } from '../src/work/decide.ts';
 import type { Claimed, EventOf, RunEnded } from '../src/work/events.ts';
 import { applyChange, type Change, type WorkRows } from '../src/work/snapshot.ts';
-import { askRow, threadRow, type FollowUp, type Park, type Thread } from '../src/work/state.ts';
+import {
+  askRow,
+  threadRow,
+  type Ask,
+  type FollowUp,
+  type Park,
+  type Thread
+} from '../src/work/state.ts';
 import {
   answer,
   ask,
@@ -635,6 +643,74 @@ test('no answer row when the Odd took the item off the desk, left the office, or
   none(changed(decide(rows, answer(2, 'deny'), NOW)));
   none(changed(decide(rows, answer(3, 'approve'), NOW)));
   none(changed(decide(rows, ended(4, 'withdrawn', { note: 'Ada took it off the desk.' }), NOW)));
+});
+
+// A goal yes plans the goal: the manager's run on the goal's new work.
+
+/** A goal ask, and the yes's own write that sets the goal, under the name the decider points at. */
+const goalAsk = (id: number, staffId: string, over: Partial<Ask> = {}) =>
+  ask(id, staffId, {
+    kind: 'goal',
+    goal: { title: 'Run the fair', horizon: 'ongoing', area: 'work' },
+    ...over
+  });
+const setsGoal = { perKind: [{ name: GOAL_SET, run: async () => ({ id: 7 }) }] };
+
+test("a goal yes puts the manager's planning run on the goal's new work, both pointing at the goal the yes sets", () => {
+  const rows = rowsOf({
+    staff: [odd('ada'), odd('max', { manager: true })],
+    asks: [goalAsk(1, 'ada')]
+  });
+  const c = changed(decide(rows, answer(1, 'approve', setsGoal), NOW));
+  const opened = [...applyChange(rows, c).threads.values()].filter((t) => !rows.threads.has(t.id));
+  assert.deepEqual(
+    opened.map((t) => [t.title, t.hubId, t.status]),
+    [['Run the fair', 'max', 'open']]
+  );
+  assert.deepEqual(
+    started(rows, c).map((f) => [f.staffId, f.kind, f.threadId, f.chatCard]),
+    [['max', 'goal', opened[0].id, null]]
+  );
+  assert.deepEqual(
+    c.put.flatMap((p) => (p.points && 'goalId' in p.points ? [[p.table, p.points.goalId]] : [])),
+    [
+      ['threads', 'goal'],
+      ['followUps', 'goal']
+    ]
+  );
+});
+
+test('a goal yes in chat on work its manager leads replies under the card from the planning run only', () => {
+  const rows = rowsOf({
+    staff: [odd('max', { manager: true })],
+    threads: [thread(5, 'max')],
+    asks: [goalAsk(1, 'max', { threadId: 5 })]
+  });
+  const c = changed(decide(rows, answer(1, 'approve', { ...setsGoal, inChat: true }), NOW));
+  assert.deepEqual(
+    started(rows, c).map((f) => [f.kind, f.chatCard]),
+    [
+      ['goal', { kind: 'ask', id: 1, title: 'Ask 1' }],
+      ['resume', null]
+    ]
+  );
+});
+
+test("a goal the owner adds opens its work under the manager, and the manager's planning run goes on it", () => {
+  const rows = rowsOf({ staff: [odd('max', { manager: true })] });
+  const planning = { staffId: 'max', kind: 'goal', goalId: 7, note: null } as const;
+  const c = changed(
+    decide(rows, { kind: 'runQueued', run: planning, opens: { title: 'Run the fair' } }, NOW)
+  );
+  const opened = [...applyChange(rows, c).threads.values()];
+  assert.deepEqual(
+    opened.map((t) => [t.title, t.hubId, t.goalId]),
+    [['Run the fair', 'max', 7]]
+  );
+  assert.deepEqual(
+    started(rows, c).map((f) => [f.staffId, f.kind, f.goalId, f.threadId]),
+    [['max', 'goal', 7, opened[0].id]]
+  );
 });
 
 // Sequences a past bug named, as each decider now meets them.

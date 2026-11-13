@@ -33,7 +33,7 @@ import { hasLeft, LEFT_RAISES_NOTHING, oweRun, raisedOn } from './threads.ts';
 import { sameWanted, TWINNED } from './twins.ts';
 
 /** Whether a step of the task connects this tool; with `aws`, only an AWS step counts. */
-const connects = (t: Task, connector: string, aws = false): boolean =>
+export const connects = (t: Pick<Task, 'steps'>, connector: string, aws = false): boolean =>
   t.steps.some(
     (s) =>
       !!s.action &&
@@ -131,8 +131,8 @@ const parkedOn = (rows: WorkRows, taskId: number): Thread[] =>
 
 /**
  * The owner finished or dropped a task, or the office or its Odd took it off
- * the desk (`withdrawn`), as `finishTask` and `taskEnded` in office-tasks.ts
- * and `withdrawTask` in office-decide.ts do. What its end starts follows its
+ * the desk (`withdrawn`), as `finishTask` in office-tasks.ts and
+ * `withdrawTask` in office-decide.ts end it. What its end starts follows its
  * row in `OWNER_ANSWERS` (`taskEffects`). Work parked on it wakes, and each
  * run that picks up is told of the other, so neither does the other's part.
  */
@@ -180,30 +180,25 @@ export function taskEnded(
       ? { staffId: t.staffId, card: { kind: 'task', id: t.id, title: t.title } }
       : undefined;
 
-  const { from, effects } = taskEffects(rows, ended);
+  const { from, effects, on, offWorkOdd } = taskEffects(rows, ended);
   // Read before the effects: waking the parked work clears what parks it.
   const parked = parkedOn(rows, t.id);
   const ownRun = parked.length ? ownRunOf(d.rows, ended) : undefined;
   const pickedUp = parked.length ? parked.map((p) => p.title) : undefined;
   for (const effect of effects) {
-    if (typeof effect === 'object') continue;
     switch (effect) {
-      // No run follows a dropped task: the answer itself goes back. To a
-      // thread or a hand-off it carries no chat card, as today.
+      // A dropped task's answer goes back to its hand-off or thread, with no
+      // chat card, as today. On no work it is the `answered` run of the Odd
+      // that gave it (`offWorkAnswer`), unless taken off the desk.
       case 'answer_back': {
         const answer = [said, ...parked.map((p) => pickedUpLine(p.title))].join(' ');
-        const on = {
-          handOffId: t.handOffId ?? from?.handOffId ?? null,
-          threadId: t.threadId ?? from?.threadId ?? null
-        };
-        const went = answerBack(d, on, { outcome: done ? 'done' : 'failed', answer }, now);
-        // On no work it reaches the Odd that gave it, unless that Odd took it off the desk.
-        if (!went && t.staffId && byOwner)
+        if (offWorkOdd)
           offWorkAnswer(
             d,
-            { staffId: t.staffId, item: 'task', ids: [t.id], asked: t.id, line: answer, chat },
+            { staffId: offWorkOdd, item: 'task', ids: [t.id], asked: t.id, line: answer, chat },
             now
           );
+        else answerBack(d, on, { outcome: done ? 'done' : 'failed', answer }, now);
         break;
       }
       // The owner finished connecting a tool an Odd asked for: the work that

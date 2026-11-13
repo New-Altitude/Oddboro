@@ -14,6 +14,7 @@ import { desc, eq, sql, type SQL } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import { asks, attachments, followUps, goals, jobs, pokes, staff, threads } from '../src/schema.ts';
 import type { Tx } from '../src/threads.ts';
+import { GOAL_SET } from '../src/work/asks.ts';
 import { decide } from '../src/work/decide.ts';
 import type { WorkEvent, WorkResults } from '../src/work/events.ts';
 import { applyChange, type Change, type Put, type WorkRows } from '../src/work/snapshot.ts';
@@ -475,12 +476,13 @@ test('an answer and a leaving run their effects after the commit, never while th
     return made;
   };
   // The twin off any work is answered with it, and carried out with it.
-  assert.deepStrictEqual(
-    await callsOf(
-      answer(3, 'approve', { carryOut: async (a) => void calls.push(`carryOut ${a.id}`) })
-    ),
-    ['deciding', 'decided', 'committed', 'carryOut 3', 'grantAccess cal', 'carryOutTogether 3 4']
-  );
+  assert.deepStrictEqual(await callsOf(answer(3, 'approve')), [
+    'deciding',
+    'decided',
+    'committed',
+    'grantAccess cal',
+    'carryOutTogether 3 4'
+  ]);
   // The office stops a run of the Odd only once its leaving is in the database.
   assert.deepStrictEqual(await callsOf(leaving('cal')), [
     'deciding',
@@ -615,4 +617,58 @@ test('the clock waking one of two threads the window ask holds keeps the ask on 
   assert.deepStrictEqual(unput(got), unput(decide(world, e, minutes(1))));
   const [a] = await db.select().from(asks).where(eq(asks.id, 8));
   assert.equal(a.status, 'open', 'ask 8 still holds thread 2');
+});
+
+test("a goal yes loads the office's manager, whom no row names, so the manager plans the goal its own write set", async () => {
+  await seedOffice();
+  await db.insert(staff).values({
+    id: 'max',
+    name: 'Max',
+    role: MANAGER_ROLE,
+    variant: 'v',
+    portrait: 'p',
+    remit: 'r',
+    desk: 'd'
+  });
+  const draft = { title: 'Sell more bread', horizon: 'quarter' as const, area: 'work' };
+  const [raised] = await db
+    .insert(asks)
+    .values({
+      staffId: 'cal',
+      kind: 'goal',
+      title: draft.title,
+      why: 'w',
+      ifApproved: 'i',
+      goal: draft
+    })
+    .returning();
+  let set = 0;
+  const { got } = await run(
+    answer(raised.id, 'approve', {
+      perKind: [
+        {
+          name: GOAL_SET,
+          run: async (tx) => {
+            [{ id: set }] = await tx.insert(goals).values({ title: draft.title }).returning();
+            return { id: set };
+          }
+        }
+      ]
+    }),
+    minutes(1)
+  );
+  assert.ok('change' in got, 'the yes commits');
+  const planning = await db.select().from(followUps).where(eq(followUps.kind, 'goal'));
+  assert.deepStrictEqual(
+    planning.map((f) => ({ staffId: f.staffId, goalId: f.goalId })),
+    [{ staffId: 'max', goalId: set }]
+  );
+  const [work] = await db
+    .select()
+    .from(threads)
+    .where(eq(threads.id, planning[0].threadId ?? 0));
+  assert.deepStrictEqual(
+    { hubId: work?.hubId, goalId: work?.goalId },
+    { hubId: 'max', goalId: set }
+  );
 });
