@@ -162,8 +162,9 @@ function parseRun(row: FollowUpRow): RunState {
   if (outcome !== null) {
     if (!doneAt) throw new RowNotParsed('follow_ups', row.id, ['outcome', 'done_at']);
     // A row with no start time can still have ended: an Odd's leaving fails
-    // each follow-up it had yet to start. It is ended, never queued again. A
-    // joined pick-up is not one of these: it gets its start time as it ends.
+    // each follow-up it had yet to start. Such a row parses as ended, never as
+    // queued. A joined pick-up is not one of these: it gets its start time as
+    // it ends.
     return { is: 'ended', outcome, result, doneAt, startedAt };
   }
   if (doneAt) throw new RowNotParsed('follow_ups', row.id, ['outcome', 'done_at']);
