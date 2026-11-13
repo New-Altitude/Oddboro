@@ -122,8 +122,13 @@ const SEEDS: {
     return {
       asks: [a.id, ...twins],
       threads: held.map((t) => t.id),
-      // The Odd hears the answer unless it left, and a held hand-off names its colleague.
-      staff: [a.staffId, ...one(a.held?.to)],
+      // The Odd hears the answer unless it left, and a held hand-off names its
+      // colleague. A goal's yes is planned by the manager, whom no row names.
+      staff: [
+        a.staffId,
+        ...one(a.held?.to),
+        ...(yes && a.kind === 'goal' ? one((await manager(tx))?.id) : [])
+      ],
       // A switch or folder yes changes the Odd's own row with the claim.
       update: yes && (a.kind === 'switch' || a.kind === 'folder') ? ['staff', 'asks'] : ['asks']
     };
