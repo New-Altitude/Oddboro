@@ -11,7 +11,7 @@ import type { Outcome } from '../src/schema.ts';
 import { explore, type Explore } from '../src/sequences.ts';
 import type { Decided } from '../src/transition.ts';
 import { decide } from '../src/work/decide.ts';
-import type { Claimed, LiveKind, WorkEvent } from '../src/work/events.ts';
+import type { Claimed, LiveKind, WorkEvent, WorkResults } from '../src/work/events.ts';
 import { SERVES_NO_THREAD } from '../src/work/kinds.ts';
 import { CUT_OFF_RESULT, OUTCOME_TITLE } from '../src/work/runs.ts';
 import { applyChange, type Change, type WorkRows } from '../src/work/snapshot.ts';
@@ -548,7 +548,11 @@ function wake(r: Model, taskId: number): void {
   }
 }
 
-type State = { rows: WorkRows; at: number; last?: Decided<Change<Claimed | null>> };
+type State = {
+  rows: WorkRows;
+  at: number;
+  last?: Decided<Change<WorkResults[WorkEvent['kind']]>>;
+};
 type Broken = { rule: string; detail: string };
 
 const RULE = {
@@ -634,7 +638,7 @@ function broken(s: State, r: Model, events: WorkEvent[]): Broken[] {
     if (!ok) fail(RULE.leadLeft, `expected pokes ${show(want)}, got ${show(pokes)}`);
   }
 
-  if (x.failureReport && e.kind !== 'runQueued' && e.kind !== 'runClaimed') {
+  if (x.failureReport && (e.kind === 'runFinished' || e.kind === 'staleRunsClosed')) {
     const f = r.runs.get(e.id)!;
     const title = titleOf(r, f.kind, 'failed', ABOUT);
     const mine = reports.filter((p) => p.staffId === f.staffId && p.title === title);

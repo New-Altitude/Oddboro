@@ -1,6 +1,8 @@
 // How an answer reaches a lead's work, as steps a decider takes on its
 // `Draft`: the owner's answer or a task's end joins the lead's waiting pick-up
-// or starts one, and parked work wakes as its task ends.
+// or starts one, goes back to a hand-off, or reaches the Odd that raised it on
+// no work, and parked work wakes as its task ends. The deciders that use them
+// are in asks.ts and tasks.ts.
 //
 // Pure: every import that reaches the database is a type.
 import { switchesSaid, type OwnSwitch } from '../access-words.ts';
@@ -19,12 +21,15 @@ import {
   type AskKind,
   type HeldCall,
   type InChat,
+  type Outcome,
   type ReplyDraft
 } from '../schema.ts';
 import type { TaskEnded } from '../task-parking.ts';
-import { putAll, type Draft, type WorkRows } from './snapshot.ts';
-import type { Task, Thread } from './state.ts';
-import { addRun, newRun } from './threads.ts';
+import type { Decided } from '../transition.ts';
+import { changeOf, draft, putAll, type Change, type Draft, type WorkRows } from './snapshot.ts';
+import { askRow, type Ask, type Task, type Thread } from './state.ts';
+import { addRun, handBack, hasLeft, isHandOff, newRun, oweRun } from './threads.ts';
+import { carriedOutBy } from './twins.ts';
 
 /**
  * The owner's answer, or a task's end, reaches the lead of a thread, as
@@ -130,12 +135,16 @@ export function wakeParked(
 }
 
 /**
- * The run on an ended task's own work that `wakeParked` tells parked work
- * of, if one picks up, as `taskEnd` and `ownRunOf` in office-tasks.ts work it
- * out: whether the task's end starts a run there (`OWN_RUN`), and never on
- * stopped work or work whose lead left the office, which runs nothing.
+ * What an ended task starts (`OWNER_ANSWERS`), as `taskEnd` in
+ * office-tasks.ts works it out: the access ask a tool's connect task came
+ * from, the effects of how it ended, and the work it is on, its own or its
+ * ask's. `taskEnded` and `ownRunOf` both read it, so parked work hears of the
+ * same run that starts.
  */
-export function ownRunOf(rows: WorkRows, t: Task): OwnRun | undefined {
+export function taskEffects(
+  rows: WorkRows,
+  t: Task
+): { from: Ask | undefined; effects: readonly TaskEffect[]; ownThread: number | null } {
   // A tool's connect task belongs to the access ask it came from.
   const from = t.askId === null ? undefined : rows.asks.get(t.askId);
   const effects: readonly TaskEffect[] =
@@ -146,7 +155,17 @@ export function ownRunOf(rows: WorkRows, t: Task): OwnRun | undefined {
         : from?.kind === 'access'
           ? OWNER_ANSWERS.task.done.fromAccess
           : OWNER_ANSWERS.task.done.other;
-  const ownThread = t.threadId ?? from?.threadId ?? null;
+  return { from, effects, ownThread: t.threadId ?? from?.threadId ?? null };
+}
+
+/**
+ * The run on an ended task's own work that `wakeParked` tells parked work
+ * of, if one picks up, as `ownRunOf` in office-tasks.ts works it out: whether
+ * the task's end starts a run there (`OWN_RUN`), and never on stopped work or
+ * work whose lead left the office, which runs nothing.
+ */
+export function ownRunOf(rows: WorkRows, t: Task): OwnRun | undefined {
+  const { effects, ownThread } = taskEffects(rows, t);
   const ownRuns = effects.some(
     (e) =>
       typeof e === 'string' &&
@@ -159,6 +178,12 @@ export function ownRunOf(rows: WorkRows, t: Task): OwnRun | undefined {
     return undefined;
   return { work: own?.title ?? null };
 }
+
+/** The owner's words on an ended task: the response they saved when they finished it, then their note. */
+export const taskAnswer = (t: Task): string | null =>
+  [t.status === 'done' && t.responseVersion ? t.response : null, t.note]
+    .filter(Boolean)
+    .join('\n\n') || null;
 
 /** What a made call returned, cut to fit a ledger line or a brief. */
 export const callResultText = (r: NonNullable<HeldCall['result']>, max = 4000): string =>
@@ -181,3 +206,105 @@ export function effectsOf(kind: AskKind, decision: Decision): readonly AskEffect
 /** The ledger's words for turning switches on: "Let Theo run commands and browse the web". */
 export const turnedOn = (name: string, on: readonly OwnSwitch[]) =>
   `Let ${name} ${switchesSaid(on).toLowerCase()}`;
+
+/** The refusal when the ask or task was answered already. The entry returns false for it, as a claim that found nothing open does today. */
+export const ANSWERED_ALREADY = 'That was answered already.';
+
+/**
+ * No run carries the answer out: it goes back to the hand-off or thread it
+ * was raised on, as `answerLater` does. A colleague's goes to the lead that
+ * handed it the work, as the owner's own answer; a lead's starts or joins its
+ * pick-up there. False when it was raised on neither.
+ */
+export function answerBack(
+  d: Draft,
+  on: { handOffId: number | null; threadId: number | null; askId?: number },
+  back: { outcome: Outcome; answer: string; chat?: InChat },
+  now: Date
+): boolean {
+  if (on.handOffId) {
+    const origin = d.rows.followUps.get(on.handOffId);
+    if (isHandOff(origin))
+      handBack(d, origin, { outcome: back.outcome, result: back.answer, answered: true }, now);
+    return true;
+  }
+  if (!on.threadId) return false;
+  answerLead(d, on.threadId, back.answer, { askId: on.askId, chat: back.chat }, now);
+  return true;
+}
+
+/**
+ * The answer to something raised on no work reaches the Odd that raised it,
+ * once, as an `answered` run whose note is the answer line (NEW-1715,
+ * NEW-1703). `ids` are the items the answer settled on no work, the asked one
+ * and its twins: one row carries them all, with the asked item's id when it
+ * is among them, else the lowest, and the chat card only when it carries the
+ * asked item. None when that Odd left, or when this change already starts a
+ * run of that Odd for one of them, such as the `denied` run that tells it the
+ * no and why.
+ */
+export function offWorkAnswer(
+  d: Draft,
+  a: {
+    staffId: string;
+    item: 'ask' | 'task';
+    ids: number[];
+    asked: number;
+    line: string;
+    chat?: InChat;
+  },
+  now: Date
+): void {
+  if (!a.ids.length || hasLeft(d.rows, a.staffId)) return;
+  const started = [...d.rows.followUps.values()].some((f) => {
+    const item = a.item === 'ask' ? f.askId : f.taskId;
+    return (
+      !d.loaded.followUps.has(f.id) &&
+      f.staffId === a.staffId &&
+      item !== null &&
+      a.ids.includes(item)
+    );
+  });
+  if (started) return;
+  const id = a.ids.includes(a.asked) ? a.asked : Math.min(...a.ids);
+  oweRun(
+    d,
+    {
+      staffId: a.staffId,
+      kind: 'answered',
+      note: a.line,
+      ...(a.item === 'ask' ? { askId: id } : { taskId: id })
+    },
+    { chat: id === a.asked ? a.chat : undefined },
+    now
+  );
+}
+
+/**
+ * The carry-outs for asks one answer settled, one for each place a result
+ * goes back to (`carriedOutBy`), as `carryOutTogether` starts them. The chat
+ * card goes only to the run of the ask the owner answered in chat.
+ */
+export function startCarryOuts(
+  d: Draft,
+  together: readonly Ask[],
+  o: { pickedUp?: string[]; chat?: InChat },
+  now: Date
+): void {
+  for (const a of carriedOutBy(together.map(askRow)))
+    oweRun(
+      d,
+      { staffId: a.staffId, kind: 'carry_out', askId: a.id, note: null, pickedUp: o.pickedUp },
+      { chat: o.chat?.card.id === a.id ? o.chat : undefined },
+      now
+    );
+}
+
+/**
+ * A goal's change of status, as `updateGoal` in goals.ts makes it: it
+ * decides nothing, since every status tells its Odds nothing yet
+ * (`GOAL_ANSWERS`, all `none`). The goal row and its line stay in `updateGoal`.
+ */
+export function goalStatusChanged(rows: WorkRows): Decided<Change<null>> {
+  return { change: changeOf(draft(rows), null), after: [] };
+}
