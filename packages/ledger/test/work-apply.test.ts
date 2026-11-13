@@ -361,8 +361,12 @@ test('every loader locks in the one table order each row its decider reads, and 
     const at = `${e.kind} ${JSON.stringify(e)} locked ${locks.map((l) => `${l.table} ${l.mode} ${l.ids.join(',')}`).join('; ')}`;
     const order = locks.map((l) => LOCK_ORDER.indexOf(l.table as (typeof LOCK_ORDER)[number]));
     for (const l of locks) every.add(l.table);
-    // Only a hand-off holds work for the window, under the plan's lock.
-    if (e.kind === 'handedOff') assert.equal(locks[0]?.table, 'plan_limits', at);
+    // Only a hand-off, new or a held one's yes, holds work for the window, under the
+    // plan's lock. So each, and the window ask's yes that frees that work, takes it first.
+    const windowYes =
+      e.kind === 'askDecided' && e.decision === 'approve' && rows.asks.get(e.id)?.kind === 'window';
+    if (e.kind === 'handedOff' || rows.window || windowYes)
+      assert.equal(locks[0]?.table, 'plan_limits', at);
     assert.ok(!order.includes(-1), at);
     assert.deepStrictEqual(
       order,
