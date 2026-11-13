@@ -6,6 +6,7 @@
   import type { Desk } from '@oddboro/ledger';
   import type { StaffProfile } from '../staff/roster.ts';
   import Pixel from './Pixel.svelte';
+  import { waitingOf } from './office-status.ts';
 
   type Props = {
     staff: StaffProfile[];
@@ -47,21 +48,13 @@
     }
   });
 
-  /** What each Odd has waiting on the owner, oldest first: asks, tasks, then unread reports. */
-  const waitingOf = (id: string) =>
-    [
-      ...desk.asks.filter((a) => a.staffId === id),
-      ...desk.tasks.filter((t) => t.staffId === id),
-      ...desk.reports.filter((r) => r.staffId === id)
-    ].sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
-
   const rows = $derived(
     staff
       .filter((p) => {
         const q = query.trim().toLowerCase();
         return !q || [p.name, p.role].some((w) => w.toLowerCase().includes(q));
       })
-      .map((p) => ({ p, waits: waitingOf(p.id), pokes: messages[p.id] ?? 0 }))
+      .map((p) => ({ p, waits: waitingOf(desk, p.id), pokes: messages[p.id] ?? 0 }))
   );
 
   function keydown(e: KeyboardEvent) {
