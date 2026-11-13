@@ -337,3 +337,39 @@ test('an Odd brought back does not start work its leaving already failed', async
   assert.equal(await O.startFollowUp(r.id), undefined);
   assert.equal((await followUp(r.id)).startedAt, null);
 });
+
+test("after a lead is brought back, the owner's next answer starts a pick-up instead of joining one its leaving failed", async () => {
+  const h = await handsBea();
+  const work = h.threadId;
+  assert.ok(work);
+  const task = await O.giveTask(null, {
+    title: 'Sign the map',
+    why: 'It needs a name on it.',
+    steps: ['Sign it'],
+    threadId: work
+  });
+  const { ask } = await O.raiseAsk('rico', {
+    title: 'Buy ink',
+    why: 'The map needs ink.',
+    ifApproved: 'Rico buys ink.',
+    threadId: work
+  });
+  // Rico's own runs on the work, oldest first.
+  const ricosOnWork = async () =>
+    (await db.select().from(followUps).where(eq(followUps.staffId, 'rico')))
+      .filter((f) => f.threadId === work)
+      .sort((a, b) => a.id - b.id);
+  await O.decideAsk(ask.id, 'deny', null);
+  const [denied] = (await ricosOnWork()).filter((f) => f.kind === 'resume');
+  assert.ok(
+    denied && denied.startedAt === null && denied.outcome === null,
+    'the no queued a pick-up'
+  );
+  assert.equal(await L.removeOdd('rico'), undefined);
+  assert.equal((await followUp(denied.id)).outcome, 'failed');
+  assert.equal(await L.bringBack('rico'), undefined);
+  await O.finishTask(task.id, false, 'no');
+  const waiting = (await ricosOnWork()).filter((f) => f.outcome === null && f.startedAt === null);
+  assert.equal(waiting.length, 1, JSON.stringify(waiting));
+  assert.match(waiting[0].note ?? '', /dropped/);
+});

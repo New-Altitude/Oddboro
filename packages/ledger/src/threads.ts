@@ -50,6 +50,7 @@ import { heldTools, lacking, sharing, toolNames, type Tool } from './sharing.ts'
 import { carryEach, type Carried, type CarriedFile } from './hand-offs.ts';
 import { holdForWindow, WINDOW_RESET, windowWoke } from './usage-window.ts';
 import { THREADS_DIR, workPath } from './work-paths.ts';
+import { queuedRows } from './work/load.ts';
 
 export type ThreadRow = typeof threads.$inferSelect;
 
@@ -524,7 +525,8 @@ export async function answerThread(
           eq(followUps.staffId, t.hubId),
           eq(followUps.threadId, id),
           eq(followUps.kind, 'resume'),
-          isNull(followUps.startedAt)
+          // Not one the lead's leaving failed before it started: an answer joined there is never read.
+          queuedRows
         )
       )
       .orderBy(asc(followUps.id))
