@@ -180,7 +180,7 @@ export function taskEnded(
       ? { staffId: t.staffId, card: { kind: 'task', id: t.id, title: t.title } }
       : undefined;
 
-  const { from, effects } = taskEffects(rows, ended);
+  const { from, effects, on, offWorkOdd } = taskEffects(rows, ended);
   // Read before the effects: waking the parked work clears what parks it.
   const parked = parkedOn(rows, t.id);
   const ownRun = parked.length ? ownRunOf(d.rows, ended) : undefined;
@@ -192,18 +192,13 @@ export function taskEnded(
       // that gave it (`offWorkAnswer`).
       case 'answer_back': {
         const answer = [said, ...parked.map((p) => pickedUpLine(p.title))].join(' ');
-        const on = {
-          handOffId: t.handOffId ?? from?.handOffId ?? null,
-          threadId: t.threadId ?? from?.threadId ?? null
-        };
-        const went = answerBack(d, on, { outcome: done ? 'done' : 'failed', answer }, now);
-        // On no work it reaches the Odd that gave it, unless that Odd took it off the desk.
-        if (!went && t.staffId && byOwner)
+        if (offWorkOdd)
           offWorkAnswer(
             d,
-            { staffId: t.staffId, item: 'task', ids: [t.id], asked: t.id, line: answer, chat },
+            { staffId: offWorkOdd, item: 'task', ids: [t.id], asked: t.id, line: answer, chat },
             now
           );
+        else answerBack(d, on, { outcome: done ? 'done' : 'failed', answer }, now);
         break;
       }
       // The owner finished connecting a tool an Odd asked for: the work that

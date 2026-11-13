@@ -138,14 +138,21 @@ export function wakeParked(
 
 /**
  * What an ended task starts (`OWNER_ANSWERS`): the access ask a tool's
- * connect task came from, the effects of how it ended, and the work it is
- * on, its own or its ask's. `taskEnded` and `ownRunOf` both read it, so parked work hears of the
- * same run that starts.
+ * connect task came from, the effects of how it ended, and where the owner's
+ * answer goes back (`answer_back`): `on` the hand-off or work it is on, its own
+ * or its ask's, else to `offWorkOdd`, the Odd that gave it, unless that Odd
+ * took it off the desk. `taskEnded` and `ownRunOf` both read it, so parked
+ * work hears of the same run that starts.
  */
 export function taskEffects(
   rows: WorkRows,
   t: Task
-): { from: Ask | undefined; effects: readonly TaskEffect[]; ownThread: number | null } {
+): {
+  from: Ask | undefined;
+  effects: readonly TaskEffect[];
+  on: { handOffId: number | null; threadId: number | null };
+  offWorkOdd: string | null;
+} {
   // A tool's connect task belongs to the access ask it came from.
   const from = t.askId === null ? undefined : rows.asks.get(t.askId);
   const effects: readonly TaskEffect[] =
@@ -156,7 +163,15 @@ export function taskEffects(
         : from?.kind === 'access'
           ? OWNER_ANSWERS.task.done.fromAccess
           : OWNER_ANSWERS.task.done.other;
-  return { from, effects, ownThread: t.threadId ?? from?.threadId ?? null };
+  const on = {
+    handOffId: t.handOffId ?? from?.handOffId ?? null,
+    threadId: t.threadId ?? from?.threadId ?? null
+  };
+  const offWorkOdd =
+    on.handOffId === null && on.threadId === null && !(t.status === 'dropped' && t.withdrawn)
+      ? t.staffId
+      : null;
+  return { from, effects, on, offWorkOdd };
 }
 
 /**
@@ -166,20 +181,14 @@ export function taskEffects(
  * the office, which runs nothing.
  */
 export function ownRunOf(rows: WorkRows, t: Task): OwnRun | undefined {
-  const { from, effects, ownThread } = taskEffects(rows, t);
-  // On no work, the answer goes where `answer_back` in `taskEnded` sends it.
-  // Only the Odd that gave such a task can park on it, so an Odd gave it.
-  const toItsOdd =
-    ownThread === null &&
-    !(t.handOffId ?? from?.handOffId) &&
-    !(t.status === 'dropped' && t.withdrawn);
+  const { effects, on, offWorkOdd } = taskEffects(rows, t);
   const ownRuns = effects.some(
     (e) =>
       OWN_RUN[e] === 'always' ||
-      (OWN_RUN[e] === 'on its work, else its Odd' && (ownThread !== null || toItsOdd))
+      (OWN_RUN[e] === 'on its work, else its Odd' && (on.threadId !== null || offWorkOdd !== null))
   );
   if (!ownRuns) return undefined;
-  const own = ownThread === null ? undefined : rows.threads.get(ownThread);
+  const own = on.threadId === null ? undefined : rows.threads.get(on.threadId);
   // Its lead leaving stopped the work, so a lead brought back since still reads as gone.
   if (own && (own.status === 'stopped' || rows.staff.get(own.hubId)?.leftAt !== null))
     return undefined;
