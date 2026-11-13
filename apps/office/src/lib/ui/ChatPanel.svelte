@@ -614,12 +614,15 @@
 
   /**
    * Retry under the owner's message while no reply answered its turn, a stopped
-   * one included, even after later messages. Not under words added to a turn:
-   * Retry on the turn's first message sends them too.
+   * one included, even after later messages. Not while that turn's reply still
+   * runs: a reopened card has no line of it yet, and learns it runs only from
+   * its load (`active`). Not under words added to a turn: Retry on the turn's
+   * first message sends them too.
    */
   function retryable(line: Line, i: number): boolean {
     if (sending || line.from !== 'owner' || !line.turnId || line.source?.kind === 'added')
       return false;
+    if (active?.turnId === line.turnId) return false;
     const answered = (l: Line) =>
       l.from === 'staff' && !l.failed && !l.pending && l.turnId === line.turnId;
     return !lines.slice(i + 1).some(answered);
