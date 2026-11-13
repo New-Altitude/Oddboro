@@ -1,5 +1,6 @@
 // Asks on the desk: raising one, refusing a repeat, and finding the twins one
 // answer covers.
+import { type ItemRef } from './schema.ts';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { db } from './db.ts';
 import { goalThread, keepRun, raisedOn, type Db, type Tx } from './threads.ts';
@@ -304,6 +305,8 @@ export async function raiseAsk(
     threadId?: number;
     /** Files that go with it: paths in the staffer's folder, or names in a thread's folder (`workPath`). */
     attach?: string[];
+    /** Items open on the desk this one waits on, checked by `openNeeds`. */
+    needs?: ItemRef[];
     /**
      * The key of the run raising it (`runsGoing`), which its thread keeps: a
      * plan's, or a lead's that named a thread from a run on none. A run on the

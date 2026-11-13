@@ -29,6 +29,9 @@ import type { MailAttachment } from './mail-attachments.ts';
 import type { PersonaLink } from './personas.ts';
 
 const at = (name: string) => timestamp(name, { withTimezone: true });
+
+/** One thing on the owner's desk, by its kind and id. */
+export type ItemRef = { kind: 'ask' | 'task' | 'report'; id: number };
 const created = (name = 'created_at') => at(name).notNull().defaultNow();
 const id = () => integer().primaryKey().generatedAlwaysAsIdentity();
 
@@ -393,8 +396,12 @@ export const asks = pgTable('asks', {
   via: text(),
   status: text().$type<AskStatus>().notNull().default('open'),
   reason: text(),
+  /** Other items on the desk this one waits on (`after` on the tool that raised it). */
+  needs: jsonb().$type<ItemRef[]>().notNull().default([]),
   createdAt: created(),
-  decidedAt: at('decided_at')
+  decidedAt: at('decided_at'),
+  /** When the owner deleted it: gone from every view but its Odd's Deleted list. */
+  hiddenAt: at('hidden_at')
 });
 
 /**
@@ -449,8 +456,12 @@ export const tasks = pgTable('tasks', {
    * even once an Odd that left is brought back.
    */
   withdrawn: boolean().notNull().default(false),
+  /** Other items on the desk this one waits on (`after` on the tool that raised it). */
+  needs: jsonb().$type<ItemRef[]>().notNull().default([]),
   createdAt: created(),
-  doneAt: at('done_at')
+  doneAt: at('done_at'),
+  /** When the owner deleted it: gone from every view but its Odd's Deleted list. */
+  hiddenAt: at('hidden_at')
 });
 
 export const reports = pgTable('reports', {
@@ -461,7 +472,9 @@ export const reports = pgTable('reports', {
   title: text().notNull(),
   body: text().notNull(),
   createdAt: created(),
-  readAt: at('read_at')
+  readAt: at('read_at'),
+  /** When the owner deleted it: gone from every view but its Odd's Deleted list. */
+  hiddenAt: at('hidden_at')
 });
 
 /**
