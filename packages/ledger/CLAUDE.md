@@ -761,14 +761,15 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   a new hire's id, and `formerStaff()` lists them. The job clock, the
   follow-up queue, pokes and the desk also skip its rows (`ofWorkingOdd`), as
   a second wall. The owner's Remove (DELETE on the staff route) and a yes to a
-  `remove` ask both call `removeOdd`: in one transaction the Odd leaves, its
+  `remove` ask both call `removeOdd`, one change through the work core
+  (`oddRemoved`) that is saved whole or not at all: the Odd leaves, its
   jobs on turn off and are kept in `staff.jobs_off`, its waiting pokes are
   cancelled and threads it leads stop, with any task, time or usage-window
-  hold they waited on cleared; then each open ask of it or about it is
-  withdrawn (`withdrawAsk`: a no by the office, its line going back, no
-  `denied` run), each open task dropped (`withdrawTask`), each follow-up it has
-  yet to start fails, so a lead that handed it work hears at once, and the
-  office stops any run of it (`whenOddLeaves`). Nothing wakes it after
+  hold they waited on cleared; each open ask of it or about it is withdrawn
+  (a no by the office, its line going back, no `denied` run), each open task
+  dropped, and each follow-up it has yet to start fails, so a lead that
+  handed it work hears at once. Once that is saved, the office stops any run
+  of it (`whenOddLeaves`). Nothing wakes it after
   (`answerThread` skips a lead that left). A follow-up on work it led ends
   with no report, and a colleague's result waiting there is told to the
   owner by that colleague (`Unreturned`). A yes to `bring_back` calls

@@ -373,3 +373,60 @@ test("after a lead is brought back, the owner's next answer starts a pick-up ins
   assert.equal(waiting.length, 1, JSON.stringify(waiting));
   assert.match(waiting[0].note ?? '', /dropped/);
 });
+
+test('a callback given to whenOddLeaves runs once when the Odd leaves, after its leaving is saved', async () => {
+  // A connection of its own, open already, so the callback's read goes the
+  // moment it runs. One from the pool may still be connecting, and a read
+  // that waits for it would find the leaving saved whenever the callback ran.
+  const own = await sql.reserve();
+  const seen: { id: string; leftAt: PromiseLike<{ left_at: Date | null }[]> }[] = [];
+  const stop = L.whenOddLeaves(
+    (id) =>
+      void seen.push({
+        id,
+        leftAt: own<
+          { left_at: Date | null }[]
+        >`select left_at from staff where id = ${id}`.execute()
+      })
+  );
+  try {
+    assert.equal(await L.removeOdd('rico'), undefined);
+    // Gone already: a second leaving has nothing to stop.
+    await L.removeOdd('rico');
+    assert.deepEqual(
+      seen.map((s) => s.id),
+      ['rico']
+    );
+    const [read] = await seen[0].leftAt;
+    assert.ok(read?.left_at, 'the callback ran before the leaving was saved');
+  } finally {
+    stop();
+    own.release();
+  }
+});
+
+test('a leaving that cannot close all its open work leaves the Odd in the office with that work as it was', async () => {
+  const stopped: string[] = [];
+  const stop = L.whenOddLeaves((id) => void stopped.push(id));
+  const { ask } = await O.raiseAsk('rico', { title: 'Buy ink', why: 'w', ifApproved: 'i' });
+  const task = await O.giveTask('rico', { title: 'Sign in', why: 'w', steps: ['Sign in'] });
+  // The task's drop fails, as any write might.
+  await sql.unsafe(`create function refuse_drop() returns trigger language plpgsql as $$
+    begin raise exception 'The desk is busy.'; end $$`);
+  await sql.unsafe(`create trigger refuse_drop before update on tasks for each row
+    when (new.status = 'dropped') execute function refuse_drop()`);
+  try {
+    // The database's words come as the cause of the failed query.
+    await assert.rejects(L.removeOdd('rico'), (e: Error) =>
+      /The desk is busy/.test(String(e.cause))
+    );
+  } finally {
+    await sql.unsafe('drop trigger refuse_drop on tasks');
+    await sql.unsafe('drop function refuse_drop');
+    stop();
+  }
+  assert.ok(await O.staffer('rico'), 'the Odd left with its work still open');
+  assert.equal((await askOf(ask.id)).status, 'open');
+  assert.equal((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0].status, 'open');
+  assert.deepEqual(stopped, []);
+});

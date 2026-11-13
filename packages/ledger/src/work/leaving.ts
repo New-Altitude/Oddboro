@@ -1,7 +1,7 @@
-// An Odd leaving the office, and being brought back. Each decider mirrors the
-// database code it replaces, `removeOdd` and `bringBack` in ../leaving.ts, and
-// makes every decision on the work it closes through that work's own decider,
-// folded into its one change (`foldIn`).
+// An Odd leaving the office, and being brought back: the deciders behind
+// `removeOdd` and `bringBack` in ../leaving.ts. Each makes every decision on
+// the work it closes through that work's own decider, folded into its one
+// change (`foldIn`).
 //
 // Pure: every import that reaches the database is a type.
 import { fixedError } from '../errors.ts';
@@ -26,8 +26,8 @@ import { leftBeforeStarting, stopThread } from './threads.ts';
 
 /**
  * What the Ledger names a run's work when the entry read no title for it.
- * A copy of `CUT_OFF_WORK` in office-follow-ups.ts, which loads the
- * database, until the leaving's entry decides through this decider.
+ * A copy of `CUT_OFF_WORK` in office-follow-ups.ts: that file loads the
+ * database, and this one stays pure.
  */
 const CUT_OFF_WORK: Record<FollowUpKind, string> = {
   carry_out: 'an ask',
@@ -94,7 +94,7 @@ function step(d: Draft, decided: Decided<Change>, tag: string): After[] {
 }
 
 /**
- * The owner lets an Odd go, as `removeOdd` does. It leaves the floor with its
+ * The owner lets an Odd go, for `removeOdd`. It leaves the floor with its
  * jobs off and its waiting pokes cancelled, and every thread it leads stops,
  * waiting on nothing. Then, in that order, each open ask it raised or that
  * is about it is withdrawn, each open task it gave is dropped as withdrawn,
@@ -179,12 +179,12 @@ export function oddRemoved(
 }
 
 /**
- * The owner brings an Odd back as it was, as `bringBack` does: on the floor,
+ * The owner brings an Odd back as it was, for `bringBack`: on the floor,
  * with the jobs that were on when it left turned on again from now. Every
  * other open ask to bring it back is withdrawn, since nothing is left for it
- * to do. What it had open when it left stays closed. Like today's
- * transaction, this does not check that the Odd had left, so a second
- * bring-back racing the first writes again.
+ * to do. What it had open when it left stays closed. This does not check
+ * that the Odd had left, so a second bring-back racing the first writes
+ * again.
  */
 export function oddBroughtBack(
   rows: WorkRows,
