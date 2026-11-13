@@ -1,11 +1,22 @@
 // Where a thread stands as its runs move, and a new run on it, as steps a
 // decider takes on its `Draft`. `settle` is the one place a thread's status
-// and holder are worked out, as `settleThread` in ../threads.ts is today.
+// and holder are worked out, as `settleThread` in ../threads.ts is today, and
+// `stopThread` the one place a thread becomes stopped.
 //
 // Pure: every import that reaches the database is a type.
-import type { LiveKind } from './events.ts';
+import { fixedError } from '../errors.ts';
+import { chatCardOf, type HandOff, type InChat, type Outcome } from '../schema.ts';
+import type { LiveKind, OwedRun } from './events.ts';
+import { SERVES_NO_THREAD } from './kinds.ts';
 import { putAll, type Draft, type Fresh, type WorkRows } from './snapshot.ts';
-import type { FollowUp, FollowUpBase } from './state.ts';
+import type { FollowUp, FollowUpBase, Thread, ThreadBase } from './state.ts';
+
+/** A colleague's run on work a lead handed it. */
+export type HandOffRow = FollowUp & { kind: 'hand_off' };
+export const isHandOff = (f: FollowUp | undefined): f is HandOffRow => f?.kind === 'hand_off';
+
+/** Whether an Odd left the office. One the rows do not hold reads as here, as `leadLeft` reads a missing row. */
+export const hasLeft = (rows: WorkRows, id: string): boolean => !!rows.staff.get(id)?.leftAt;
 
 /**
  * Whether something raised on a thread is still open on the owner's desk: an
@@ -86,4 +97,188 @@ export function newRun(
 export function addRun(d: Draft, run: Fresh<FollowUp>, now: Date): void {
   putAll(d, [{ table: 'followUps', ref: `run ${d.ids.size}`, insert: run }]);
   if (run.threadId !== null) settle(d, run.threadId, now);
+}
+
+/**
+ * Owe an Odd a run, as `followUp` and `addFollowUp` do. The answer to
+ * something raised on a thread works on that thread, unless its kind serves
+ * none. With `onlyWhileOpen`, nothing is put once that work ended. `chat` is
+ * the card the owner answered on: the run replies under it only when it is
+ * that chat's Odd's.
+ */
+export function oweRun(
+  d: Draft,
+  run: OwedRun,
+  o: { chat?: InChat; onlyWhileOpen?: true },
+  now: Date
+): void {
+  const raisedOn = SERVES_NO_THREAD[run.kind]
+    ? null
+    : run.askId !== undefined
+      ? d.rows.asks.get(run.askId)?.threadId
+      : run.taskId !== undefined
+        ? d.rows.tasks.get(run.taskId)?.threadId
+        : null;
+  const threadId = run.threadId ?? raisedOn ?? null;
+  const open = threadId !== null && d.rows.threads.get(threadId)?.status === 'open';
+  if (o.onlyWhileOpen && !open) return;
+  addRun(
+    d,
+    newRun(
+      {
+        staffId: run.staffId,
+        kind: run.kind,
+        note: run.note,
+        askId: run.askId ?? null,
+        taskId: run.taskId ?? null,
+        goalId: run.goalId ?? null,
+        edit: run.edit ?? null,
+        pickedUp: run.pickedUp ?? null,
+        reportWhenDone: run.reportWhenDone ?? false,
+        chatCard: chatCardOf(run.staffId, o.chat) ?? null,
+        threadId
+      },
+      now
+    ),
+    now
+  );
+}
+
+/**
+ * A colleague's result goes back to the lead that handed it the work, as a
+ * `handed_back` run on the work, as `handBack` and `addFollowUp` do. Nothing
+ * goes back to a lead that left the office, since it runs nothing: true when
+ * the result went back. `answered` marks a result that is the owner's own
+ * answer, which no run followed.
+ */
+export function handBack(
+  d: Draft,
+  handOff: HandOffRow,
+  back: { outcome: Outcome; result: string; answered: boolean },
+  now: Date
+): boolean {
+  const h = handOff.handOff;
+  if (!h || hasLeft(d.rows, h.from)) return false;
+  const carried: HandOff = {
+    ...h,
+    from: handOff.staffId,
+    outcome: back.outcome,
+    id: handOff.id,
+    ...(back.answered && { answered: true })
+  };
+  addRun(
+    d,
+    newRun(
+      {
+        staffId: h.from,
+        kind: 'handed_back',
+        note: back.result,
+        handOff: carried,
+        threadId: handOff.threadId
+      },
+      now
+    ),
+    now
+  );
+  return true;
+}
+
+/** The columns every state of a thread shares. */
+function baseOf(t: Thread): ThreadBase {
+  if (t.status === 'open') {
+    const { status: _, park: __, ...base } = t;
+    return base;
+  }
+  const { status: _, endedAt: __, ...base } = t;
+  return base;
+}
+
+/**
+ * Done or failed work a lead may continue, which opens again for it. Not
+ * stopped work: the owner said no to more of it, and only a new plan opens a
+ * goal's stopped thread (`raisedOn`).
+ */
+const REOPENS: readonly Thread['status'][] = ['done', 'failed'];
+
+/** An ended thread opened again for a new round of work, as `reopen` does: no park, and no hand-off counted yet. */
+const reopened = (t: Thread): Thread => ({
+  ...baseOf(t),
+  handOffsUsed: 0,
+  status: 'open',
+  park: { on: 'none' }
+});
+
+/**
+ * An ask raised or a task given on a thread keeps it waiting until the owner
+ * answers, as `keepRun` and `raisedOn` in ../threads.ts do. The thread keeps
+ * the key of the run that raised it, only when that run is its lead's, so the
+ * answer cannot start the lead there while that run still goes. Finished work
+ * opens again for it; a stopped one stays stopped, but for a new plan, which
+ * asks the owner afresh. Then the thread settles.
+ */
+export function raisedOn(
+  d: Draft,
+  threadId: number,
+  o: { run?: string; by: string | null; plan: boolean },
+  now: Date
+): void {
+  const t = d.rows.threads.get(threadId);
+  if (!t) return;
+  const runs =
+    o.run && o.by !== null && t.hubId === o.by
+      ? [...t.runs.filter((k) => k !== o.run), o.run]
+      : t.runs;
+  const opens = o.plan ? [...REOPENS, 'stopped'] : REOPENS;
+  const next = opens.includes(t.status) ? reopened(t) : t;
+  if (next !== t || runs !== t.runs) putAll(d, [{ table: 'threads', row: { ...next, runs } }]);
+  settle(d, threadId, now);
+}
+
+/**
+ * The owner stopped the work: it ends `stopped`, and nothing more runs on it.
+ * The one place a thread becomes stopped. An ended thread holds no park, so
+ * no time, window hold or task outlives the stop, and a new plan that opens
+ * a stopped goal's thread again finds it waiting on nothing.
+ */
+export function stopThread(d: Draft, threadId: number, now: Date): void {
+  const t = d.rows.threads.get(threadId);
+  if (!t) return;
+  putAll(d, [{ table: 'threads', row: { ...baseOf(t), status: 'stopped', endedAt: now } }]);
+}
+
+/**
+ * One hand-off taken on a thread, `used` the count of its round so far with
+ * this one: the `hand_off` run of `to`, carrying what `sharing()` gave for it.
+ * An open thread keeps its park; done or failed work opens again with none.
+ * A stopped thread stays stopped, as `startHeld` leaves it.
+ */
+export function handOn(
+  d: Draft,
+  h: { threadId: number; to: string; handOff: HandOff; used: number },
+  now: Date
+): void {
+  const t = d.rows.threads.get(h.threadId);
+  if (!t) throw fixedError('A hand-off was taken on work the rows do not hold.');
+  const next = REOPENS.includes(t.status) ? reopened(t) : t;
+  putAll(d, [{ table: 'threads', row: { ...next, handOffsUsed: h.used } }]);
+  addRun(
+    d,
+    newRun(
+      { staffId: h.to, kind: 'hand_off', note: null, handOff: h.handOff, threadId: h.threadId },
+      now
+    ),
+    now
+  );
+}
+
+/** The usage window's hold lifts: each named open thread `askId` holds is parked on nothing. */
+export function freeFromWindow(d: Draft, askId: number, threadIds: readonly number[]): void {
+  const held = threadIds.flatMap((id) => {
+    const t = d.rows.threads.get(id);
+    return t?.status === 'open' && t.park.on === 'window' && t.park.ask === askId ? [t] : [];
+  });
+  putAll(
+    d,
+    held.map((t) => ({ table: 'threads', row: { ...t, park: { on: 'none' } } }) as const)
+  );
 }

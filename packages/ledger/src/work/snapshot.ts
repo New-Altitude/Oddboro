@@ -68,6 +68,17 @@ type Links = {
 export type Fresh<T> = T extends unknown ? Omit<T, 'id'> : never;
 
 /**
+ * A new row: every column `empty` holds, then each one `named` gives a
+ * value. A column `named` leaves undefined keeps its empty value, as an
+ * insert that leaves a column out gets its default.
+ */
+export function filled<E extends object, N extends object>(empty: E, named: N): E & N {
+  const given = Object.entries(named).filter(([, v]) => v !== undefined);
+  // `given` is `named` without its undefined columns, which `empty` fills.
+  return { ...empty, ...Object.fromEntries(given) } as E & N;
+}
+
+/**
  * One row written whole: an existing row's new state, or a new row. A new
  * row has a `ref`, its name in this change. `points` names, per id field, the
  * `ref` of a new row or a `perKind` effect whose id that field takes, so rows

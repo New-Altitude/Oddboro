@@ -7,15 +7,15 @@
 import { flat } from '../desk-answers.ts';
 import { fixedError } from '../errors.ts';
 import type { Unparked, Unreturned } from '../office-follow-ups.ts';
-import { chatCardOf, type FollowUpKind, type HandOff, type Outcome } from '../schema.ts';
+import type { FollowUpKind, Outcome } from '../schema.ts';
 import type { TaskEnded } from '../task-parking.ts';
 import type { After, Decided } from '../transition.ts';
 import { ownRunOf, wakeParked } from './answers.ts';
-import type { Claimed, LiveKind, RunEnded, WorkEvent } from './events.ts';
+import type { Claimed, EventOf, LiveKind, RunEnded } from './events.ts';
 import { runCeiling, runsAtDraft, SERVES_NO_THREAD } from './kinds.ts';
-import { changeOf, draft, putAll, type Change, type Draft, type WorkRows } from './snapshot.ts';
+import { changeOf, draft, putAll, type Change, type WorkRows } from './snapshot.ts';
 import type { FollowUp, RunState, Task } from './state.ts';
-import { addRun, newRun, settle } from './threads.ts';
+import { handBack, hasLeft, isHandOff, oweRun, settle, type HandOffRow } from './threads.ts';
 
 /**
  * The ledger title of each follow-up as it ends, before what it was about. The
@@ -75,8 +75,6 @@ export const OUTCOME_TITLE: Record<FollowUpKind, Record<Outcome, string>> = {
 export const CUT_OFF_RESULT =
   'The office restarted while this was running, so it may be half done. Check it, then ask the Odd to finish it.';
 
-type Event<K extends WorkEvent['kind']> = Extract<WorkEvent, { kind: K }>;
-type HandOffRow = FollowUp & { kind: 'hand_off' };
 type LiveRun = Extract<FollowUp, { kind: LiveKind }>;
 /** The park a lead's claim lifted, which a failed run gives back. */
 type Lifted = Extract<RunState, { is: 'running' }>['unparked'];
@@ -84,48 +82,14 @@ type Lifted = Extract<RunState, { is: 'running' }>['unparked'];
 /** A run not yet ended. A retired kind's row is always ended, so such a run is of a live kind. */
 const notEnded = (f: FollowUp | undefined): f is LiveRun => !!f && f.run.is !== 'ended';
 
-/** Whether an Odd left the office. One the rows do not hold reads as here, as `leadLeft` reads a missing row. */
-const hasLeft = (rows: WorkRows, id: string): boolean => !!rows.staff.get(id)?.leftAt;
-
-/**
- * Owe an Odd a run, as `followUp` and `addFollowUp` do. The answer to
- * something raised on a thread works on that thread, unless its kind serves
- * none. A run that may start only while its work is open puts nothing once
- * that work ended.
- */
-export function runQueued(rows: WorkRows, e: Event<'runQueued'>, now: Date): Decided<Change<null>> {
-  const { run } = e;
-  const raisedOn = SERVES_NO_THREAD[run.kind]
-    ? null
-    : run.askId !== undefined
-      ? rows.asks.get(run.askId)?.threadId
-      : run.taskId !== undefined
-        ? rows.tasks.get(run.taskId)?.threadId
-        : null;
-  const threadId = run.threadId ?? raisedOn ?? null;
+/** Owe an Odd a run: a source's run, as `followUp` puts it. */
+export function runQueued(
+  rows: WorkRows,
+  e: EventOf<'runQueued'>,
+  now: Date
+): Decided<Change<null>> {
   const d = draft(rows);
-  const open = threadId !== null && rows.threads.get(threadId)?.status === 'open';
-  if (!e.onlyWhileOpen || open)
-    addRun(
-      d,
-      newRun(
-        {
-          staffId: run.staffId,
-          kind: run.kind,
-          note: run.note,
-          askId: run.askId ?? null,
-          taskId: run.taskId ?? null,
-          goalId: run.goalId ?? null,
-          edit: run.edit ?? null,
-          pickedUp: run.pickedUp ?? null,
-          reportWhenDone: run.reportWhenDone ?? false,
-          chatCard: chatCardOf(run.staffId, e.chat) ?? null,
-          threadId
-        },
-        now
-      ),
-      now
-    );
+  oweRun(d, e.run, e, now);
   return { change: changeOf(d, null), after: [] };
 }
 
@@ -135,7 +99,6 @@ export function runQueued(rows: WorkRows, e: Event<'runQueued'>, now: Date): Dec
  * serves none: its asks are its own.
  */
 function servesHandOff(rows: WorkRows, f: LiveRun): HandOffRow | undefined {
-  const isHandOff = (r: FollowUp | undefined): r is HandOffRow => r?.kind === 'hand_off';
   if (isHandOff(f)) return f;
   if (SERVES_NO_THREAD[f.kind]) return undefined;
   const link =
@@ -176,7 +139,7 @@ function answeredAll(rows: WorkRows, handOffId: number): boolean {
  */
 export function runClaimed(
   rows: WorkRows,
-  e: Event<'runClaimed'>,
+  e: EventOf<'runClaimed'>,
   now: Date
 ): Decided<Change<Claimed>> {
   const f = rows.followUps.get(e.id);
@@ -235,45 +198,6 @@ export function runClaimed(
 }
 
 /**
- * A colleague's result goes back to the lead that handed it the work, as a
- * `handed_back` run on the work, as `handBack` and `addFollowUp` do. Nothing
- * goes back to a lead that left the office, since it runs nothing: true when
- * the result went back. `answered` marks a result that is the owner's own
- * answer, which no run followed.
- */
-export function handBack(
-  d: Draft,
-  handOff: HandOffRow,
-  back: { outcome: Outcome; result: string; answered: boolean },
-  now: Date
-): boolean {
-  const h = handOff.handOff;
-  if (!h || hasLeft(d.rows, h.from)) return false;
-  const carried: HandOff = {
-    ...h,
-    from: handOff.staffId,
-    outcome: back.outcome,
-    id: handOff.id,
-    ...(back.answered && { answered: true })
-  };
-  addRun(
-    d,
-    newRun(
-      {
-        staffId: h.from,
-        kind: 'handed_back',
-        note: back.result,
-        handOff: carried,
-        threadId: handOff.threadId
-      },
-      now
-    ),
-    now
-  );
-  return true;
-}
-
-/**
  * How a task that ended during a run reads to the work that run gives the
  * park back to: taken off the desk by the office or its Odd, dropped by the
  * owner, or done. Read from the row, not from whether its Odd is gone: one
@@ -320,7 +244,7 @@ function unreturned(u: Unreturned): { poke: string; line: After } {
  */
 export function runFinished(
   rows: WorkRows,
-  e: Event<'runFinished'>,
+  e: EventOf<'runFinished'>,
   now: Date
 ): Decided<Change<null>> {
   const f = rows.followUps.get(e.id);
@@ -331,7 +255,7 @@ export function runFinished(
 /** A run a restart cut off fails rather than run twice, as `closeStaleFollowUps` closes it. */
 export function staleRunsClosed(
   rows: WorkRows,
-  e: Event<'staleRunsClosed'>,
+  e: EventOf<'staleRunsClosed'>,
   now: Date
 ): Decided<Change<null>> {
   const f = rows.followUps.get(e.id);

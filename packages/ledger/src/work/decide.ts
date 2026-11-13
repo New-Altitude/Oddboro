@@ -3,14 +3,17 @@
 //
 // Pure: every import that reaches the database is a type.
 import type { Decided } from '../transition.ts';
-import type { WorkEvent, WorkResults } from './events.ts';
+import { goalStatusChanged } from './answers.ts';
+import { askDecided, askRaised } from './asks.ts';
+import type { EventOf, WorkEvent, WorkResults } from './events.ts';
 import { runClaimed, runFinished, runQueued, staleRunsClosed } from './runs.ts';
 import type { Change, WorkRows } from './snapshot.ts';
+import { connectTasksDropped, taskEnded, taskGiven } from './tasks.ts';
 
 type Kind = WorkEvent['kind'];
 type Decider<K extends Kind> = (
   rows: WorkRows,
-  event: Extract<WorkEvent, { kind: K }>,
+  event: EventOf<K>,
   now: Date
 ) => Decided<Change<WorkResults[K]>>;
 
@@ -19,13 +22,19 @@ const DECIDERS: { [K in Kind]: Decider<K> } = {
   runQueued,
   runClaimed,
   runFinished,
-  staleRunsClosed
+  staleRunsClosed,
+  askRaised,
+  askDecided,
+  taskGiven,
+  taskEnded,
+  connectTasksDropped,
+  goalStatusChanged
 };
 
 /** What the rows and the time make of one event: a refusal, or the change and what follows its commit. */
 export function decide<K extends Kind>(
   rows: WorkRows,
-  event: Extract<WorkEvent, { kind: K }>,
+  event: EventOf<K>,
   now: Date
 ): Decided<Change<WorkResults[K]>> {
   // TypeScript cannot tie the decider it looks up to this event's own kind,
