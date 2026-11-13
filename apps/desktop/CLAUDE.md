@@ -419,6 +419,13 @@ Windows keep to one at a time. Results go to `--out`: `results.json`,
 `summary.md`, `office.log`, `shell.log` and a screenshot. The run's home
 goes when it ends, pass or fail; `--keep` keeps it for a look.
 
+Where it runs: `--stage` in Checks (`ci.yml`) on every pull request, on all
+three systems. `--from` on an unsigned 9.9.9 build in `app-smoke.yml`, on
+every pull request that changes the app (Windows, macOS 15, Ubuntu 22.04)
+and nightly on `main` on all six release machines, then in `release.yml` on
+the signed builds before each draft. A failed row's words are in the job's
+summary table; the results, logs and screenshot are its `smoke-*` artifact.
+
 ### Secrets
 
 Set each as a secret of the `release` environment (the repo's Settings,

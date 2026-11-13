@@ -30,7 +30,9 @@ an app; `ledger` imports `world` and `sprites`, and `world` imports `sprites`.
 - `apps/site`. The public site, static. It reads `sprites` and `world` only.
 - `scripts`. The lint guards: plain Node, no dependencies.
 - `.github/workflows`. `ci.yml` runs the checks on every pull request, on a
-  Mac, Linux and Windows; `release.yml` builds the app; `codeql.yml` scans.
+  Mac, Linux and Windows; `app-smoke.yml` installs and smoke-tests the app
+  on pull requests that change it, and nightly; `release.yml` builds the app;
+  `codeql.yml` scans.
 
 ## One function per job
 
