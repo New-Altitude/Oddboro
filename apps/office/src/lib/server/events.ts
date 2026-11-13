@@ -29,7 +29,6 @@ export type OfficeEvent =
   | { type: 'change'; table: string }
   | {
       type: 'working';
-      working: Record<string, string>;
       chatting: string[];
       inProgress: Record<string, Work[]>;
     }

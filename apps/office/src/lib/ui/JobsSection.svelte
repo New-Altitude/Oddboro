@@ -9,6 +9,7 @@
   import { call } from './api.ts';
   import { ago, nextWhen } from './format.ts';
   import type { StaffProfile } from '../staff/roster.ts';
+  import { jobRunning, runWords, type OddNow } from '../staff/odd-now.ts';
 
   // An Odd's jobs, on its info page: each with its schedule, its last run and
   // its next ("Next run today at 3:00 PM", or Paused). Clicking a job opens it
@@ -18,9 +19,11 @@
     profile: StaffProfile;
     /** Bumps when jobs or runs change, so the list reloads. */
     version: number;
-    working: string | undefined;
+    now: OddNow;
   };
-  let { profile, version, working }: Props = $props();
+  let { profile, version, now }: Props = $props();
+  /** Its runs going, in words, whatever else it shows. */
+  const running = $derived(runWords(now));
 
   let jobs = $state<Job[]>([]);
   /** The job being edited, 'new' for one being added, or nothing. */
@@ -113,8 +116,8 @@
     {/if}
   </div>
   <p class="mt-0.5 text-[11px] text-muted">
-    {working
-      ? `Running ${working} now.`
+    {running
+      ? `Running ${running} now.`
       : `What it does on its own, and how often, in ${zoneName()}.`}
   </p>
   <div class="mt-2">
@@ -246,7 +249,7 @@
                     : ''}
                 </span>
               </span>
-              {#if working === j.name}
+              {#if jobRunning(now, j.name)}
                 <span class="rounded-full bg-moss/20 px-2 py-0.5 text-[11px] text-moss"
                   >Running</span
                 >
@@ -275,7 +278,7 @@
             <div class="mt-2 flex gap-1.5">
               <button
                 class="rounded-lg bg-night/60 px-2.5 py-1 text-xs hover:bg-sea/25 disabled:opacity-40"
-                disabled={!!working}
+                disabled={now.runs.length > 0}
                 onclick={() => act(() => call(`/api/jobs/${j.id}`, { op: 'run' }))}>Run now</button
               >
               <button

@@ -20,15 +20,6 @@ export function inProgress(): Record<string, Work[]> {
   return work;
 }
 
-export function working(): Record<string, string> {
-  const labels: Record<string, string> = {};
-  for (const [id, work] of Object.entries(inProgress())) {
-    const now = work.filter((w) => !w.queued).map((w) => w.label);
-    if (now.length) labels[id] = now.length > 1 ? `${now[0]} +${now.length - 1} more` : now[0];
-  }
-  return labels;
-}
-
 /**
  * The Odds replying to the owner in chat: an entry with a turn, which only a
  * chat reply to the owner's message has. Not `chatRun`, which also counts a
@@ -43,7 +34,7 @@ export function chatting(): string[] {
 
 /** Tells every page what runs now, after a run is reserved, steps or ends. */
 export function show(): void {
-  emit({ type: 'working', working: working(), chatting: chatting(), inProgress: inProgress() });
+  emit({ type: 'working', chatting: chatting(), inProgress: inProgress() });
 }
 
 export function chatRun(id: string): LiveRun | undefined {
