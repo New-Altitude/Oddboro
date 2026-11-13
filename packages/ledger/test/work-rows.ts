@@ -1,7 +1,7 @@
 // Rows in memory for the work core's pure tests (work-decide.test.ts and
 // work-sequences.test.ts). Each builder fills every column, so a test names
 // only what it is about. Imports types and pure modules only: no database.
-import type { LiveKind } from '../src/work/events.ts';
+import type { AskEffects, LiveKind } from '../src/work/events.ts';
 import type { Odd, WorkRows } from '../src/work/snapshot.ts';
 import type { Ask, FollowUp, RunState, Task, Thread } from '../src/work/state.ts';
 
@@ -132,4 +132,43 @@ export function rowsOf(o: {
     owner: 'Sam',
     prepared: {}
   };
+}
+
+/** One call an answer's after-commit I/O made: which effect, and what it was given. */
+export type EffectCall = { name: keyof AskEffects; args: unknown[] };
+
+/**
+ * Fakes for an answer's after-commit I/O that record each call, in order.
+ * `granted` is what the grant's fake returns: whether it made a connect task,
+ * and the connector it named.
+ */
+export function recordingEffects(granted = { task: true, connector: 'gmail' }): {
+  effects: AskEffects;
+  calls: EffectCall[];
+} {
+  const calls: EffectCall[] = [];
+  const effects: AskEffects = {
+    grantAccess: async (...args) => {
+      calls.push({ name: 'grantAccess', args });
+      return granted;
+    },
+    pointAsksAtConnector: async (...args) => {
+      calls.push({ name: 'pointAsksAtConnector', args });
+    },
+    carryOutTogether: async (...args) => {
+      calls.push({ name: 'carryOutTogether', args });
+    },
+    oweCatchUp: async (...args) => {
+      calls.push({ name: 'oweCatchUp', args });
+    },
+    removeOdd: async (...args) => {
+      calls.push({ name: 'removeOdd', args });
+      return undefined;
+    },
+    bringBack: async (...args) => {
+      calls.push({ name: 'bringBack', args });
+      return undefined;
+    }
+  };
+  return { effects, calls };
 }
