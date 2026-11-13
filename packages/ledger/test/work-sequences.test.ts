@@ -61,7 +61,18 @@ import {
   type Model,
   type TaskRec
 } from './work-model.ts';
-import { ask, minutes, odd, recordingEffects, rowsOf, run, T0, task, thread } from './work-rows.ts';
+import {
+  ask,
+  minutes,
+  odd,
+  pokesOf,
+  recordingEffects,
+  rowsOf,
+  run,
+  T0,
+  task,
+  thread
+} from './work-rows.ts';
 import { claim, finish, OWED, queue } from './work-runs-model.ts';
 import {
   ABOUT,
@@ -350,7 +361,7 @@ function broken(s: State, r: Model, events: WorkEvent[]): Broken[] {
   const reports = (change?.outside ?? []).flatMap((o) =>
     o.kind === 'report' ? [{ staffId: o.staffId, title: o.title }] : []
   );
-  const pokes = (change?.outside ?? []).flatMap((o) => (o.kind === 'poke' ? [o] : []));
+  const pokes = change ? pokesOf(change) : [];
   // The lines a row gained in this event: all of a new row's.
   const newLines = (g: FollowUp) => notesOf(g).slice(notesOf(s.prev.followUps.get(g.id)).length);
   const touched = (g: FollowUp) => !s.prev.followUps.has(g.id) || newLines(g).length > 0;
