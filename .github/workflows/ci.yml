@@ -102,6 +102,13 @@ jobs:
           NODE_OPTIONS: --test-reporter=spec --test-reporter-destination=stdout --test-reporter=../../scripts/test-times.ts --test-reporter-destination=${{ runner.temp }}/test-times/office.jsonl
         run: npx turbo run test --filter=@oddboro/office
 
+      # 15 minutes, not the Node suites' 10: cargo check above leaves no
+      # linked binaries, so a run with a cold cache compiles the whole
+      # desktop shell before its first test.
+      - name: Desktop Rust tests
+        timeout-minutes: 15
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+
       # Where the test time went, on the run's summary page: each suite's
       # total, the slowest tests and files, and any file that started but
       # never ended. It runs after a failed or timed-out test step too, and

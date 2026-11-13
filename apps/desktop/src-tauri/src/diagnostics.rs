@@ -666,6 +666,29 @@ mod tests {
             .collect()
     }
 
+    /// Whether `word` stands on its own in `body`, not inside a longer name.
+    /// The backtrace holds `std::panicking` and the toolchain's
+    /// `panicking.rs`, so a user named `nic` is inside every report as a
+    /// substring, though their name never reaches it.
+    fn holds_word(body: &str, word: &str) -> bool {
+        let part_of_name = |c: char| c.is_alphanumeric() || c == '_';
+        body.match_indices(word).any(|(at, _)| {
+            let before = body[..at].chars().next_back();
+            let after = body[at + word.len()..].chars().next();
+            !before.is_some_and(part_of_name) && !after.is_some_and(part_of_name)
+        })
+    }
+
+    #[test]
+    fn a_user_name_counts_only_as_a_whole_word() {
+        let frame = "core::panicking::panic_fmt at /rustc/abc/library/core/src/panicking.rs";
+        assert!(!holds_word(frame, "nic"));
+        assert!(!holds_word(frame, "pan"));
+        assert!(holds_word("/Users/nic/code", "nic"));
+        assert!(holds_word("C:\\\\Users\\\\nic\\\\code", "nic"));
+        assert!(holds_word("nic", "nic"));
+    }
+
     #[test]
     fn a_panic_reaches_the_door_only_after_yes_without_its_message() {
         let (dsn, door) = door();
@@ -715,14 +738,15 @@ mod tests {
             home.replace('\\', "/"),
         ];
         never.extend(PLANTS.map(String::from));
-        never.extend(
-            ["USER", "USERNAME"]
-                .iter()
-                .filter_map(|name| std::env::var(name).ok())
-                .filter(|v| !v.is_empty()),
-        );
         for word in never {
             assert!(!body.contains(&word), "the report holds {word}");
+        }
+        for user in ["USER", "USERNAME"]
+            .iter()
+            .filter_map(|name| std::env::var(name).ok())
+            .filter(|v| !v.is_empty())
+        {
+            assert!(!holds_word(&body, &user), "the report holds the user name {user}");
         }
         let hostname = Command::new("hostname").output().unwrap().stdout;
         let hostname = String::from_utf8_lossy(&hostname).trim().to_string();
