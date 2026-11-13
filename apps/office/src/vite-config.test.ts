@@ -236,8 +236,7 @@ test('the dev server refuses every request and websocket that is not from this c
   type Upgrade = (req: unknown, socket: unknown) => void;
   let middleware: Middleware | undefined;
   let upgrade: Upgrade | undefined;
-  // Only the two members the hook uses; the file's real Vite runs in
-  // middleware mode, where `httpServer` is null.
+  // A real socket here is always loopback, so a stand-in server gives the hook other peers.
   const server = {
     middlewares: { use: (fn: Middleware) => (middleware = fn) },
     httpServer: {

@@ -357,17 +357,49 @@ test('a device on the network that comes through Caddy is refused, for a page lo
   assert.deepEqual([named.status, named.text], [403, AWAY]);
 });
 
-test('a device on the network is refused on an exception route too, with the proof that route takes', async () => {
-  for (const at of [{ from: LAN }, { headers: { 'x-forwarded-for': LAN } }]) {
-    const update = await send(updateRoute.POST as Route, {
-      path: UPDATE_PATH,
-      body: JSON.stringify({ checked: true }),
-      ...at,
-      headers: { 'x-oddboro-update-token': TOKEN, ...at.headers }
-    });
-    assert.deepEqual([update.status, update.ran, update.text], [403, false, AWAY]);
-    const proof = await send(ok, { method: 'GET', path: OFFICE_PROOF_PATH, ...at });
-    assert.deepEqual([proof.status, proof.ran, proof.text], [403, false, AWAY]);
+/** A connector a test run's gateway reaches. The guard reads only the run's token, not the connector. */
+const NOTES = {
+  id: 'notes',
+  name: 'Notes',
+  readTools: [],
+  tools: [],
+  config: {}
+} as unknown as import('@oddboro/ledger').ConnectorRow;
+
+/**
+ * A request to each exception route with the proof that route takes, and no
+ * key. Keyed by the route ids, so a new exception route fails the type check
+ * until it has a row here.
+ */
+const withItsProof = (runToken: string): Record<(typeof EXCEPTION_ROUTES)[number], Sent> => ({
+  '/api/update': { path: UPDATE_PATH, headers: { 'x-oddboro-update-token': TOKEN } },
+  '/api/gateway/[connector]': {
+    path: `${GATEWAY_PATH}/${NOTES.id}`,
+    headers: { authorization: `Bearer ${runToken}` }
+  },
+  '/account/callback': { method: 'GET', path: '/account/callback?code=c&state=s' },
+  '/connect/callback': { method: 'GET', path: '/connect/callback?code=c&state=s' },
+  '/api/office-proof': { method: 'GET', path: `${OFFICE_PROOF_PATH}?nonce=n` }
+});
+
+test('a device on the network is refused on every exception route, with the proof that route takes', async () => {
+  const { token } = openGateway([{ connector: NOTES, level: 'read' }], 60_000);
+  try {
+    for (const [route, proved] of Object.entries(withItsProof(token))) {
+      // The same request from this computer passes, so only where it comes from refuses it below.
+      const here = await send(ok, proved);
+      assert.deepEqual([route, here.status, here.ran], [route, 200, true]);
+      for (const away of [{ from: LAN }, { headers: { 'x-forwarded-for': LAN } }]) {
+        const r = await send(ok, {
+          ...proved,
+          ...away,
+          headers: { ...proved.headers, ...away.headers }
+        });
+        assert.deepEqual([route, r.status, r.ran, r.text], [route, 403, false, AWAY]);
+      }
+    }
+  } finally {
+    await closeGateway(token);
   }
 });
 
@@ -439,15 +471,13 @@ test('the shell reports an update with its token, and nothing else reports one',
     });
     assert.deepEqual([token, r.status, r.ran], [token, 403, false]);
   }
-  // The token counts only from this computer, and only for updates.
+  // The token counts only from this computer.
   const away = await send(updateRoute.POST as Route, {
     ...report,
     from: '192.168.1.20',
     headers: { 'x-oddboro-update-token': TOKEN }
   });
   assert.deepEqual([away.status, away.ran], [403, false]);
-  const elsewhere = await send(ok, { headers: { 'x-oddboro-update-token': TOKEN } });
-  assert.deepEqual([elsewhere.status, elsewhere.ran], [403, false]);
   // The owner's page reaches the route, which still refuses a report without the token.
   const page = await send(updateRoute.POST as Route, {
     ...report,
@@ -456,15 +486,19 @@ test('the shell reports an update with its token, and nothing else reports one',
   assert.deepEqual([page.status, page.ran], [403, true]);
 });
 
+test("the shell's token opens no route but the update route, other exception routes included", async () => {
+  const paths = Object.entries(withItsProof('no-run'))
+    .filter(([route]) => route !== UPDATE_PATH)
+    .map(([, s]) => s.path);
+  for (const path of [...paths, '/api/goals']) {
+    // A POST, so a sign-in page or the office's proof cannot pass as a read.
+    const r = await send(ok, { path, headers: { 'x-oddboro-update-token': TOKEN } });
+    assert.deepEqual([path, r.status, r.ran], [path, 403, false]);
+  }
+});
+
 test("a run's token reaches its gateway while the run goes, and nothing else", async () => {
-  const notes = {
-    id: 'notes',
-    name: 'Notes',
-    readTools: [],
-    tools: [],
-    config: {}
-  } as unknown as import('@oddboro/ledger').ConnectorRow;
-  const { token } = openGateway([{ connector: notes, level: 'read' }], 60_000);
+  const { token } = openGateway([{ connector: NOTES, level: 'read' }], 60_000);
   const call = { path: '/api/gateway/notes', body: '{}' };
   const run = await send(ok, { ...call, headers: { authorization: `Bearer ${token}` } });
   assert.deepEqual([run.status, run.ran], [200, true]);
@@ -607,13 +641,6 @@ test('the app allows a screenshot in chat while other actions keep their smaller
 });
 
 const METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'];
-const NOTES = {
-  id: 'notes',
-  name: 'Notes',
-  readTools: [],
-  tools: [],
-  config: {}
-} as unknown as import('@oddboro/ledger').ConnectorRow;
 
 /** Each route file by its route id, with what it answers: each method a `+server.ts` exports, a page's load by GET. */
 async function routeFiles(): Promise<{ route: string; methods: string[] }[]> {
