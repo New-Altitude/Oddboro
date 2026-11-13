@@ -167,7 +167,9 @@ test("an Odd's leaving withdraws its asks and those about it, drops its tasks an
         { askId: 3 }
       ),
       // Work Rico handed her, yet to start: it fails back to Rico.
-      run(7, 'ada', 'hand_off', { is: 'queued' }, { threadId: 2, handOff: giveBack })
+      run(7, 'ada', 'hand_off', { is: 'queued' }, { threadId: 2, handOff: giveBack }),
+      // Going now: the stop closure ends it, and its own finish lands after.
+      run(8, 'ada', 'first_day', { is: 'running', startedAt: T0, unparked: null })
     ]
   });
   const c = changed(decide(rows, removal('ada', [[5, TITLE]]).e, NOW));
@@ -211,10 +213,11 @@ test("an Odd's leaving withdraws its asks and those about it, drops its tasks an
   };
   assert.deepEqual(after.followUps.get(5)?.run, failedRun);
   assert.deepEqual(after.followUps.get(7)?.run, failedRun);
-  assert.ok(
-    !c.put.some((p) => p.table === 'followUps' && 'row' in p && p.row.id === 6),
-    'a run an earlier leaving failed is not written again'
-  );
+  for (const [id, why] of [
+    [6, 'a run an earlier leaving failed is not written again'],
+    [8, 'a run going now is left to the stop closure']
+  ] as const)
+    assert.ok(!c.put.some((p) => p.table === 'followUps' && 'row' in p && p.row.id === id), why);
   // Rico hears its hand-off failed, in a pick-up on its own work.
   const back = [...after.followUps.values()].filter((f) => !rows.followUps.has(f.id));
   assert.deepEqual(
