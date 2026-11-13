@@ -1,7 +1,7 @@
 // Where a thread stands as its runs move, and a new run on it, as steps a
 // decider takes on its `Draft`. `settle` is the one place a thread's status
-// and holder are worked out, as `settleThread` in ../threads.ts is today, and
-// `stopThread` the one place a thread becomes stopped.
+// and holder are worked out, and `stopThread` the one place a thread becomes
+// stopped.
 //
 // Pure: every import that reaches the database is a type.
 import { fixedError } from '../errors.ts';
@@ -113,7 +113,7 @@ export function newRun(
 }
 
 /**
- * Adds a run, and settles the thread it works on, as `addFollowUp` does: so a
+ * Adds a run, and settles the thread it works on: so a
  * thread's holder and status never fall behind its runs. A run on work this
  * change opens points at the work's ref. Returns the run's ref.
  */
@@ -202,7 +202,7 @@ export function idOf(d: Draft, row: Inserted): number {
 }
 
 /**
- * Owe an Odd a run, as `followUp` and `addFollowUp` do. The answer to
+ * Owe an Odd a run, as `followUp` does. The answer to
  * something raised on a thread works on that thread, unless its kind serves
  * none. With `onlyWhileOpen`, nothing is put once that work ended. `chat` is
  * the card the owner answered on: the run replies under it only when it is
@@ -248,7 +248,7 @@ export function oweRun(
 
 /**
  * A colleague's result goes back to the lead that handed it the work, as a
- * `handed_back` run on the work, as `addFollowUp` does. Nothing
+ * `handed_back` run on the work. Nothing
  * goes back to a lead that left the office, since it runs nothing: true when
  * the result went back. `answered` marks a result that is the owner's own
  * answer, which no run followed.

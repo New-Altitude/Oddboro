@@ -500,8 +500,8 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   An answer that comes while the hub's `resume` has yet to start joins it as
   one more line, so hires landing together wake the hub once, and the claim
   returns the row as joined (`startFollowUp`), so the run reads every line.
-  Every follow-up on a thread is written through `addFollowUp`, which settles
-  the thread's holder and status (`settleThread`, the one place status is
+  Every follow-up on a thread is written through the work core, which settles
+  the thread's holder and status (`settle` in `src/work/threads.ts`, the one place status is
   worked out): the status is open until the
   work ends, and an ask or task raised on it that is still open keeps it
   open, however the hub's last run ended. Whether it waits on the owner is

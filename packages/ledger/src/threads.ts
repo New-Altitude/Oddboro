@@ -69,60 +69,6 @@ export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 /** The database, or a transaction under way on it. */
 export type Db = typeof db | Tx;
 
-/**
- * Write a follow-up, and move the thread it works on. Every follow-up on a
- * thread is written here, so a thread's holder and status never fall behind.
- */
-export async function addFollowUp(q: Db, values: typeof followUps.$inferInsert): Promise<number> {
-  const [row] = await q.insert(followUps).values(values).returning({ id: followUps.id });
-  if (values.threadId) await settleThread(q, values.threadId);
-  return row.id;
-}
-
-/**
- * Where a thread stands, from its runs: open while one has yet to end, the
- * hub parked it until a time or a task's end, or an ask or task raised on it is still open,
- * else as its latest run ended, and open before any has. Its holder is
- * whoever has the newest run still to end, else the hub. An ended thread
- * stays as it ended. The one place a thread's status is worked out.
- */
-export async function settleThread(q: Db, id: number): Promise<void> {
-  const [t] = await q.select().from(threads).where(eq(threads.id, id));
-  if (!t || t.endedAt) return;
-  const [pending] = await q
-    .select({ staffId: followUps.staffId })
-    .from(followUps)
-    .where(and(eq(followUps.threadId, id), isNull(followUps.outcome)))
-    .orderBy(desc(followUps.id))
-    .limit(1);
-  const [last] = await q
-    .select({ outcome: followUps.outcome })
-    .from(followUps)
-    .where(and(eq(followUps.threadId, id), isNotNull(followUps.outcome)))
-    .orderBy(desc(followUps.doneAt), desc(followUps.id))
-    .limit(1);
-  // However the last run ended, the owner's answer to what it raised brings the
-  // hub back, so the thread must not end before it. A run that ended waiting
-  // waits on that answer too, even once the desk holds nothing more of it.
-  const status: ThreadStatus =
-    pending ||
-    t.resumeAt ||
-    t.resumeOnTask ||
-    !last?.outcome ||
-    last.outcome === 'waiting' ||
-    (await waitingOn(q, [id])).length
-      ? 'open'
-      : last.outcome;
-  await q
-    .update(threads)
-    .set({
-      status,
-      holderId: pending?.staffId ?? t.hubId,
-      endedAt: status === 'done' || status === 'failed' ? new Date() : null
-    })
-    .where(eq(threads.id, id));
-}
-
 /** What an Odd is told when it would open a thread it may not lead (`assertMayLead`). */
 export const LEADS_NONE =
   "Nothing was opened. You serve a goal and have no job of your own, so you lead no work: the goal's lead hands each piece on. Pass the owner's words to the lead with tell_lead, then tell the owner you passed them on.";
