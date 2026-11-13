@@ -15,7 +15,9 @@ import type { EventOf } from '../src/work/events.ts';
 import { handOffProblem } from '../src/work/hand-offs.ts';
 import { applyChange, type LedgerLine, type WorkRows } from '../src/work/snapshot.ts';
 import { threadRow, type FollowUp, type Thread } from '../src/work/state.ts';
+import { leftBeforeStarting } from '../src/work/threads.ts';
 import {
+  answer,
   ask,
   changed,
   minutes,
@@ -637,6 +639,32 @@ test('a hand-off on new work names the work, its run and its carried files by In
   const insert = held.put.find((p) => p.table === 'threads' && 'ref' in p);
   assert.deepEqual(insert?.points, { heldBy: 'window ask' });
   assert.deepEqual(held.outside, []);
+});
+
+test('a yes to a hand-off held for a colleague who left since starts no run for them, and the lead hears once that it never went', () => {
+  const rows: WorkRows = {
+    ...rowsOf({
+      staff: [odd('ada'), odd('rico', { leftAt: T0 })],
+      threads: [thread(1, 'ada', { handOffsUsed: 8 })],
+      asks: [
+        ask(7, 'ada', {
+          kind: 'hand_offs',
+          threadId: 1,
+          held: { from: 'ada', to: 'rico', title: TITLE, brief: 'Sort them.' }
+        })
+      ]
+    }),
+    prepared: { sharing: { from: 'ada', title: TITLE, brief: 'Sort them.' } }
+  };
+  const after = applyChange(rows, changed(decide(rows, answer(7, 'approve'), NOW)));
+  const added = [...after.followUps.values()].filter((f) => !rows.followUps.has(f.id));
+  assert.deepEqual(
+    added.map((f) => [f.staffId, f.threadId]),
+    [['ada', 1]],
+    "one run, the lead's, and none for Rico"
+  );
+  const gone = leftBeforeStarting('Rico');
+  assert.equal((added[0].note ?? '').split(gone).length - 1, 1, `once in: ${added[0].note}`);
 });
 
 test('handOffProblem words a hand-off that did not go as takeHandOff and holdForWindow word it', () => {
