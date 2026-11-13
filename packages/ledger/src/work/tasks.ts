@@ -29,7 +29,7 @@ import {
   type WorkRows
 } from './snapshot.ts';
 import { askRow, type Ask, type Task, type Thread } from './state.ts';
-import { oweRun, raisedOn } from './threads.ts';
+import { hasLeft, LEFT_RAISES_NOTHING, oweRun, raisedOn } from './threads.ts';
 import { sameWanted, TWINNED } from './twins.ts';
 
 /** Whether a step of the task connects this tool; with `aws`, only an AWS step counts. */
@@ -60,6 +60,7 @@ export function taskGiven(
   now: Date
 ): Decided<Change<{ already: number } | null>> {
   const { task: k, oneOpen } = e;
+  if (k.staffId && hasLeft(rows, k.staffId)) return { refused: LEFT_RAISES_NOTHING };
   const there = oneOpen
     ? openTasks(rows).find(
         (t) =>

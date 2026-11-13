@@ -22,7 +22,7 @@ import {
 } from './snapshot.ts';
 import type { FollowUp } from './state.ts';
 import { taskEnded } from './tasks.ts';
-import { stopThread } from './threads.ts';
+import { leftBeforeStarting, stopThread } from './threads.ts';
 
 /**
  * What the Ledger names a run's work when the entry read no title for it.
@@ -161,7 +161,7 @@ export function oddRemoved(
             about: e.about.get(f.id) ?? CUT_OFF_WORK[f.kind],
             ended: {
               outcome: 'failed',
-              result: `${odd.name} left the office before starting this.`,
+              result: leftBeforeStarting(odd.name),
               joined: []
             }
           },

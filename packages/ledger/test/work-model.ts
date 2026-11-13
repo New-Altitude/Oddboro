@@ -3,6 +3,7 @@
 // thread. Each family's model is a work-<family>-model.ts beside this file.
 // Pure: no database.
 import type { Level } from '../src/access-words.ts';
+import type { Agent } from '../src/agents.ts';
 import type { AskKind, AskStatus, Outcome } from '../src/schema.ts';
 import type { LiveKind } from '../src/work/events.ts';
 import { OUTCOME_TITLE } from '../src/work/runs.ts';
@@ -38,11 +39,14 @@ export type RunRec = {
 };
 type ThreadRec = {
   id: number;
+  title: string;
   hub: string;
   holder: string;
   status: 'open' | 'done' | 'failed' | 'stopped';
   park: Park;
   leadsJobGoing: boolean;
+  /** The hand-offs this round of the work has taken. */
+  used: number;
 };
 export type AskRec = {
   id: number;
@@ -92,7 +96,13 @@ export type Heard = {
 };
 type Expected = {
   refused?:
-    'not waiting' | 'held' | 'ended' | 'not running' | 'answer refused' | 'answered already';
+    | 'not waiting'
+    | 'held'
+    | 'ended'
+    | 'not running'
+    | 'answer refused'
+    | 'answered already'
+    | 'not taken';
   /** The open item a raise or a gift found already there. */
   already?: number;
   /** The first id a run this event puts gets. */
@@ -111,12 +121,24 @@ type Expected = {
   failureReport?: boolean;
   delivered: Delivery[];
   heard: Heard[];
+  /** The event asks stopped work, or work whose lead left, to take something new. */
+  onStoppedWork?: boolean;
+  /** The clock woke this parked work, so its lead should hold one queued resume there. */
+  clockWake?: { threadId: number; lead: string; leadLeft: boolean };
+  /** A hand-off or tell_lead that goes: the files it carries, into which work (`new` for work this change opens). */
+  passes?: { threadId: number | 'new'; from: string };
+  /** What a hand-off that was not refused came to. */
+  handOff?: 'taken' | 'asked' | 'held';
+  /** An Odd let go now (`left`), or one gone already, which changes nothing. */
+  leaving?: 'left' | 'gone';
+  /** The Odd brought back now. */
+  broughtBack?: string;
 };
 /** The test's own record of the office, and what it expects of the last event. */
 export type Model = {
   at: number;
   owner: string;
-  odds: Map<string, { name: string; level: Level; left: boolean }>;
+  odds: Map<string, { name: string; level: Level; agent: Agent; left: boolean }>;
   threads: Map<number, ThreadRec>;
   runs: Map<number, RunRec>;
   asks: AskRec[];
@@ -124,6 +146,9 @@ export type Model = {
   owedSent: Set<number>;
   /** How many asks of each kind each place raised, and tasks each giver gave. */
   raised: Map<string, number>;
+  /** The Odds this sequence let go, and those it brought back. */
+  letGo: Set<string>;
+  broughtBack: Set<string>;
   expected: Expected;
 };
 
@@ -178,7 +203,7 @@ export function recordOf(rows: WorkRows): Model {
     odds: new Map(
       [...rows.staff.values()].map((o) => [
         o.id,
-        { name: o.name, level: o.level, left: !!o.leftAt }
+        { name: o.name, level: o.level, agent: o.agent, left: !!o.leftAt }
       ])
     ),
     threads: new Map(
@@ -186,11 +211,13 @@ export function recordOf(rows: WorkRows): Model {
         t.id,
         {
           id: t.id,
+          title: t.title,
           hub: t.hubId,
           holder: t.holderId,
           status: t.status,
           park: t.status !== 'open' ? { on: 'none' } : parkOf(t.park),
-          leadsJobGoing: t.runs.some((k) => rows.runsGoing.has(k))
+          leadsJobGoing: t.runs.some((k) => rows.runsGoing.has(k)),
+          used: t.handOffsUsed
         }
       ])
     ),
@@ -226,6 +253,8 @@ export function recordOf(rows: WorkRows): Model {
     ),
     owedSent: new Set(),
     raised: new Map(),
+    letGo: new Set(),
+    broughtBack: new Set(),
     expected: fresh(0)
   };
 }

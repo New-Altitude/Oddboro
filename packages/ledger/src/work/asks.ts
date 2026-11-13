@@ -33,7 +33,16 @@ import {
   type WorkRows
 } from './snapshot.ts';
 import { askRow, type Ask, type AskBase } from './state.ts';
-import { freeFromWindow, handOn, oweRun, raisedOn, stopThread } from './threads.ts';
+import {
+  freeFromWindow,
+  handOn,
+  hasLeft,
+  LEFT_RAISES_NOTHING,
+  leftBeforeStarting,
+  oweRun,
+  raisedOn,
+  stopThread
+} from './threads.ts';
 import { asksNoMore, TWINNED } from './twins.ts';
 
 /**
@@ -50,6 +59,7 @@ export function askRaised(
   now: Date
 ): Decided<Change<{ already: number } | null>> {
   const a = e.ask;
+  if (hasLeft(rows, a.staffId)) return { refused: LEFT_RAISES_NOTHING };
   const call = a.kind === 'call' ? a.call : undefined;
   const same = call
     ? [...rows.asks.values()]
@@ -236,8 +246,9 @@ export function askDecided(
       case 'approval_work':
       case 'give_standing':
         break;
+      // A colleague that left since the hand-off was held gets none: its lead hears so (`answerHandOffs`).
       case 'start_held': {
-        if (!ask.held || !ask.threadId) break;
+        if (!ask.held || !ask.threadId || hasLeft(d.rows, ask.held.to)) break;
         const handOff = rows.prepared.sharing;
         if (!handOff)
           throw fixedError('A held hand-off was approved with what it carries not prepared.');
@@ -415,7 +426,8 @@ function answerWindow(d: Draft, ask: Ask, now: Date): void {
 /**
  * The owner answered a `hand_offs` ask, as `answerHandOffs` in ../threads.ts
  * does. A yes already started the hand-off it held (`start_held`); the lead
- * hears the yes itself only when the owner wrote something with it. A no
+ * hears the yes itself only when the owner wrote something with it. One held
+ * for a colleague that left since never goes, and the lead hears why. A no
  * stops the work, the held hand-off never goes, and the lead hears so it can
  * say where the work stands.
  */
@@ -437,15 +449,20 @@ function answerHandOffs(
     );
     return;
   }
-  if (!a.held) {
-    // An ask raised before asks held their hand-off: the lead hands on again.
+  const { held } = a;
+  // An ask raised before asks held their hand-off, or one held for a
+  // colleague that left since: the yes starts a new round, the lead hands on again.
+  if (!held || hasLeft(d.rows, held.to)) {
     const t = d.rows.threads.get(a.threadId);
     if (t) putAll(d, [{ table: 'threads', row: { ...t, handOffsUsed: 0 } }]);
-    answerLead(d, a.threadId, `${answer} Hand on the next piece now.`, { askId: a.id }, now);
+    const gone = held
+      ? ` "${held.title}" never went: ${leftBeforeStarting(d.rows.staff.get(held.to)?.name ?? held.to)}`
+      : '';
+    answerLead(d, a.threadId, `${answer}${gone} Hand on the next piece now.`, { askId: a.id }, now);
     return;
   }
   if (!a.reason) return;
-  const { to, title } = a.held;
+  const { to, title } = held;
   answerLead(
     d,
     a.threadId,
