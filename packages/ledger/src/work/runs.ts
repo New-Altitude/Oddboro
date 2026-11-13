@@ -15,7 +15,15 @@ import type { Claimed, EventOf, LiveKind, RunEnded } from './events.ts';
 import { runCeiling, runsAtDraft, SERVES_NO_THREAD } from './kinds.ts';
 import { changeOf, draft, putAll, type Change, type WorkRows } from './snapshot.ts';
 import type { FollowUp, RunState, Task } from './state.ts';
-import { handBack, hasLeft, isHandOff, oweRun, settle, type HandOffRow } from './threads.ts';
+import {
+  handBack,
+  hasLeft,
+  isHandOff,
+  oweRun,
+  planGoal,
+  settle,
+  type HandOffRow
+} from './threads.ts';
 
 /**
  * The ledger title of each follow-up as it ends, before what it was about. The
@@ -84,7 +92,8 @@ type Lifted = Extract<RunState, { is: 'running' }>['unparked'];
 const notEnded = (f: FollowUp | undefined): f is LiveFollowUp => !!f && f.run.is !== 'ended';
 
 /**
- * Owe an Odd a run: a source's run, as `followUp` puts it. An Odd that has
+ * Owe an Odd a run: a source's run, as `followUp` puts it, or a goal's
+ * planning run on the goal's new work, as `addGoal` does. An Odd that has
  * left is owed nothing, as `onlyWhileOpen` puts nothing on ended work: its
  * leaving failed every run it had, and no later one may wait for it.
  */
@@ -94,7 +103,12 @@ export function runQueued(
   now: Date
 ): Decided<Change<null>> {
   const d = draft(rows);
-  if (!hasLeft(rows, e.run.staffId)) oweRun(d, e.run, e, now);
+  const { run, opens } = e;
+  if (hasLeft(rows, run.staffId)) return { change: changeOf(d, null), after: [] };
+  if (!opens) oweRun(d, run, e, now);
+  else if (run.kind === 'goal' && run.goalId !== undefined)
+    planGoal(d, { goal: run.goalId, title: opens.title, lead: run.staffId, chat: e.chat }, now);
+  else throw fixedError("Only a goal's planning run opens new work.");
   return { change: changeOf(d, null), after: [] };
 }
 

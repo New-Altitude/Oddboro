@@ -82,6 +82,11 @@ export type WorkEvent =
        * source puts its run on ended work too, so only that one sets this.
        */
       onlyWhileOpen?: true;
+      /**
+       * The run is a goal's planning run, on the goal's work, which opens in
+       * this change under the run's Odd with this title (`addGoal`).
+       */
+      opens?: { title: string };
     }
   | { kind: 'runClaimed'; id: number }
   | {
