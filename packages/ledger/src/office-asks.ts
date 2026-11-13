@@ -357,9 +357,15 @@ export async function raiseAsk(
   };
   // A caller's transaction owns the commit: the ask goes in with the rest of
   // its writes, and raising one leaves nothing for after it (`askRaised`).
+  // Nothing here could run an after-effect once that commits, so one fails
+  // the caller's transaction rather than be lost.
   const inCallers = 'rollback' in q;
   const raised = inCallers ? await raise(q) : await db.transaction(raise);
   if ('refused' in raised) throw new Error(raised.refused);
+  if (inCallers && raised.after.length)
+    throw fixedError(
+      "Raising an ask left work for after it, which a caller's transaction cannot run."
+    );
   if (!inCallers) await runAfters('askRaised', raised.after);
   const { row, already } = raised;
   // A repeat of a held call is the one there, whose precedent the Odd already

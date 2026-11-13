@@ -57,10 +57,16 @@ export async function giveTask(
     if (!row) throw fixedError('A task was given that is not there.');
     return { row, after: went.after };
   };
-  // A caller's transaction owns the commit, and giving a task leaves nothing for after it (`taskGiven`).
+  // A caller's transaction owns the commit, and giving a task leaves nothing for after it
+  // (`taskGiven`). Nothing here could run an after-effect once that commits, so one fails
+  // the caller's transaction rather than be lost.
   const inCallers = 'rollback' in q;
   const given = inCallers ? await give(q) : await db.transaction(give);
   if ('refused' in given) throw new Error(given.refused);
+  if (inCallers && given.after.length)
+    throw fixedError(
+      "Giving a task left work for after it, which a caller's transaction cannot run."
+    );
   if (!inCallers) await runAfters('taskGiven', given.after);
   return given.row;
 }
