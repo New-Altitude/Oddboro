@@ -184,13 +184,14 @@ const SEEDS: {
   oddRemoved: async (tx, { staffId }) => {
     // Its own asks, and any other ask about it.
     const open = await tx
-      .select({ id: asks.id, staffId: asks.staffId, held: asks.held })
+      .select({ id: asks.id, staffId: asks.staffId })
       .from(asks)
       .where(and(eq(asks.status, 'open'), or(eq(asks.staffId, staffId), eq(asks.odd, staffId))));
     const given = await openTaskIds(tx, staffId);
     return {
-      // Each ask's Odd hears its withdrawal, and a held hand-off names its colleague.
-      staff: [staffId, ...open.flatMap((a) => [a.staffId, ...one(a.held?.to)])],
+      // Each ask's Odd hears its withdrawal. A withdrawal is a no, which never
+      // starts a held hand-off, so its colleague is not read.
+      staff: [staffId, ...open.map((a) => a.staffId)],
       threads: await idsOf(
         tx,
         threads,
