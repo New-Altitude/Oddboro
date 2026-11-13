@@ -9,6 +9,7 @@ import type { oweCatchUp } from '../missed-runs.ts';
 import type { bringBack, removeOdd } from '../leaving.ts';
 import type { grantAccess } from '../office-access.ts';
 import type { GmailFilter } from '../filter-words.ts';
+import type { Carried, CarriedFile } from '../hand-offs.ts';
 import type { carryOutTogether, Decision } from '../office-asks.ts';
 import type { Unparked } from '../office-follow-ups.ts';
 import type { AskRow } from '../office.ts';
@@ -24,7 +25,7 @@ import type {
 } from '../schema.ts';
 import type { TaskEnded } from '../task-parking.ts';
 import type { FollowUpKind } from './kinds.ts';
-import type { PerKindInTx } from './snapshot.ts';
+import type { Inserted, PerKindInTx } from './snapshot.ts';
 import type { AskBase, FollowUp, RetiredKind, TaskBase } from './state.ts';
 
 /** A follow-up kind the office still starts. */
@@ -160,7 +161,54 @@ export type WorkEvent =
       /** The threads the Odd works on and does not lead, as the entry read them: the goals it serves are not loaded. */
       worksOn: ReadonlySet<number>;
     }
-  | { kind: 'clockWoke'; threadId: number };
+  | { kind: 'clockWoke'; threadId: number }
+  | {
+      kind: 'handedOff';
+      from: string;
+      to: string;
+      /** `files` already names each carried file where it lands, `<from>/<name>`. */
+      work: { title: string; brief: string; files?: string[] };
+      /**
+       * The work it goes on, or a new thread to open for it. The entry finds a
+       * goal's thread, and checks that a new one's lead may lead work, since
+       * both read rows the core does not load.
+       */
+      thread: { id: number } | { open: { title: string; hubId: string; goalId?: number } };
+      /** The key of the run handing it off. */
+      run?: string;
+      /** Files from outside the work, copied into the sender's part of it. */
+      carry: CarriedFile[];
+    }
+  | {
+      kind: 'toldLead';
+      staffId: string;
+      threadId: number;
+      /** The owner's whole message, and the part of it about this work. */
+      said: string;
+      words: string;
+      reading: string;
+      /** The chat's last exchange as the lead reads it, which the entry words from the tools each holds. */
+      exchange: string;
+      /** The threads the Odd works on and does not lead, as the entry read them: the goals it serves are not loaded. */
+      worksOn: ReadonlySet<number>;
+      /**
+       * The owner's attachments: `carry` each file to copy, under the name it
+       * lands at, and `noted` where each lands or why it does not, for the
+       * lead's note. The entry plans where each lands; the copy goes with the change.
+       */
+      files: { carry: CarriedFile[]; noted: Carried[] };
+    };
+
+export type { Inserted } from './snapshot.ts';
+
+/**
+ * Why a hand-off did not go, though the change still commits, on work that
+ * may be new in it: a goal's work its lead opened and the sender does not
+ * lead, or the usage window holding it until `at`. The words name the work's
+ * number, so they are made once the apply knows it (`handOffProblem`).
+ */
+export type HandOffHeld<T = number | Inserted> =
+  { notLed: T } | { window: T; share: number; at: string };
 
 /** The event of one kind, as its decider takes it. */
 export type EventOf<K extends WorkEvent['kind']> = Extract<WorkEvent, { kind: K }>;
@@ -192,6 +240,12 @@ export type WorkResults = {
   goalStatusChanged: null;
   parked: { at: Date } | { title: string };
   clockWoke: null;
+  /** Taken, held by the owner's yes, or not gone with what it wrote kept. */
+  handedOff:
+    | { id: Inserted; thread: number | Inserted; left: number }
+    | { asked: Inserted; thread: number | Inserted }
+    | { held: HandOffHeld };
+  toldLead: { lead: string; files?: Carried[] };
 };
 
 /** I/O an ask's answer does after the commit. office-decide.ts supplies it where it decides an ask. */
