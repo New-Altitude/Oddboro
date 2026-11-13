@@ -402,6 +402,20 @@ function broken(s: State, r: Model, events: WorkEvent[]): Broken[] {
     if (!said) fail(RULE.wake, `run ${x.wake.runId} holds ${show(f?.note)}`);
   }
 
+  // Before the answers' check, which a wake with no line to the lead also breaks.
+  if (x.clockWake && !x.clockWake.leadLeft) {
+    const { threadId, lead } = x.clockWake;
+    const waiting = [...s.rows.followUps.values()].filter(
+      (g) =>
+        g.staffId === lead &&
+        g.threadId === threadId &&
+        g.kind === 'resume' &&
+        g.run.is === 'queued'
+    );
+    if (waiting.length !== 1)
+      fail(RULE.clockWake, `thread ${threadId}: ${lead} holds ${show(waiting)}`);
+  }
+
   // A run that ended stays ended, whatever a loader makes of its row.
   for (const f of r.runs.values())
     if (f.is === 'ended' && s.rows.followUps.get(f.id)?.run.is !== 'ended')
@@ -511,19 +525,6 @@ function broken(s: State, r: Model, events: WorkEvent[]): Broken[] {
   }
   if (e.kind === 'handedOff' && r.broughtBack.has(e.to) && x.handOff && !change)
     fail(RULE.broughtBack, `the hand-off to ${e.to} was refused: ${show(d)}`);
-
-  if (x.clockWake && !x.clockWake.leadLeft) {
-    const { threadId, lead } = x.clockWake;
-    const waiting = [...s.rows.followUps.values()].filter(
-      (g) =>
-        g.staffId === lead &&
-        g.threadId === threadId &&
-        g.kind === 'resume' &&
-        g.run.is === 'queued'
-    );
-    if (waiting.length !== 1)
-      fail(RULE.clockWake, `thread ${threadId}: ${lead} holds ${show(waiting)}`);
-  }
 
   if (e.kind === 'handedOff' || e.kind === 'toldLead') {
     const files = e.kind === 'handedOff' ? e.carry : e.files.carry;
