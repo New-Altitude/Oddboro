@@ -801,7 +801,9 @@ test('random sequences of run events keep every rule', async (t) => {
         undefined,
         `seed ${failure?.seed}: ${failure?.detail}\n${show(failure?.events)}`
       );
-      for (const c of CASES[key]) assert.ok((met.get(c) ?? 0) > 0, `no sequence met: ${c}`);
+      // A run that stopped at another rule's failure met fewer cases, so only a full run counts them.
+      if (!failure)
+        for (const c of CASES[key]) assert.ok((met.get(c) ?? 0) > 0, `no sequence met: ${c}`);
     });
   }
   assert.equal(failure, undefined, show(failure));
