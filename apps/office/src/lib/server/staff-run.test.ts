@@ -35,6 +35,7 @@ import {
   agents,
   assertKeychainUntouched,
   awayFromHome,
+  bus,
   currentOffice,
   filesOf,
   gave,
@@ -146,7 +147,14 @@ test('a twin pair of access asks starts one carry-out, on the hand-off twin, tol
     [twin.ask.id]
   );
   const task = await L.giveTask('cleo', { title: 'Pick a label', why: 'w', steps: ['Pick one.'] });
-  const run = await runOf(carries[0].id, twin.ask.id);
+  // The floor shows the carry-out as serving the hand-off, so the giver's chat reads Cleo on it, not "has not started yet".
+  const serving = new Set<number | undefined>();
+  const seen = (e: { type: string; inProgress?: Record<string, { handOffId?: number }[]> }) => {
+    if (e.type === 'working') for (const w of e.inProgress?.cleo ?? []) serving.add(w.handOffId);
+  };
+  bus.on('event', seen);
+  const run = await runOf(carries[0].id, twin.ask.id).finally(() => bus.off('event', seen));
+  assert.deepEqual([...serving], [h.id]);
   assert.ok(
     run.system.includes(
       `This also answers your ask #${firstDay.ask.id}, which another of your runs raised for the same tool: do that work once, here.`
