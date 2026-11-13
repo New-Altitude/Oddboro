@@ -667,7 +667,7 @@ test('a yes to a hand-off held for a colleague who left since starts no run for 
   assert.equal((added[0].note ?? '').split(gone).length - 1, 1, `once in: ${added[0].note}`);
 });
 
-test('handOffProblem words a hand-off that did not go as takeHandOff and holdForWindow word it', () => {
+test('handOffProblem words a hand-off that did not go on work it does not lead, or that the usage window holds', () => {
   assert.equal(
     handOffProblem({ notLed: 12 }),
     'Work 12 is not work you lead. Hand off on work you lead, or start new work.'

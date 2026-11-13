@@ -300,11 +300,10 @@ export function handOn(
 }
 
 /**
- * The usage window holds a hand-off on a thread, as `holdForWindow` in
- * ../usage-window.ts does: the thread parks until the window resets, held by
- * the window's ask, which may be new in this change. Its park replaces any
- * other. Finished work opens again for a new round, with no hand-off counted.
- * Then the thread settles.
+ * The usage window holds a hand-off on a thread: the thread parks until the
+ * window resets, held by the window's ask, which may be new in this change. Its
+ * park replaces any other. Finished work opens again for a new round, with no
+ * hand-off counted. Then the thread settles.
  */
 export function holdForWindow(
   d: Draft,
@@ -332,8 +331,8 @@ const heldBy = (t: Thread | undefined, askId: number): t is Thread & { status: '
 
 /**
  * The usage window's hold lifts: each named open thread `askId` holds is
- * parked on nothing. True when the ask still holds another thread, as
- * `windowWoke` asks before it takes an unanswered ask off the desk.
+ * parked on nothing. True when the ask still holds another thread, which
+ * `clockWoke` asks before it takes an unanswered ask off the desk.
  */
 export function freeFromWindow(d: Draft, askId: number, threadIds: readonly number[]): boolean {
   const held = threadIds.flatMap((id) => {

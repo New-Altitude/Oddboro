@@ -316,7 +316,7 @@ type RealId = Awaited<ReturnType<typeof applyWork>>;
 /**
  * One event through the shell, on the office's database, with the core's own
  * loader and writer, the rows it loaded, and the real ids of a change it wrote.
- * Its own copy of `transitionWork`, since that gives neither the rows nor the ids.
+ * Its own copy of `transitionWork`, which gives the ids but not the rows it loaded.
  */
 export async function run(
   e: WorkEvent,

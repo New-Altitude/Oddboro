@@ -1028,7 +1028,6 @@ async function toldLead(colleague: string, work: number): Promise<Row> {
   const told = await T.tellLead({
     staffId: colleague,
     threadId: work,
-    owner: 'Sam',
     said,
     words: said,
     reading: 'Sam wants it done now.'
@@ -1868,7 +1867,7 @@ test("work parks only on a task its lead gave or a task on work it is on, and an
 test('work that has ended cannot be parked on a task', async () => {
   const { lead, work } = await ownWork('park-ended');
   const task = await aTask(lead, 'Proof the ended copy');
-  await db.update(threads).set({ endedAt: new Date() }).where(eq(threads.id, work));
+  await db.update(threads).set({ status: 'done', endedAt: new Date() }).where(eq(threads.id, work));
   assert.deepEqual(await P.parkOnTask(lead, work, task.id), {
     problem: `Work ${work} has ended, or is not work you lead.`
   });

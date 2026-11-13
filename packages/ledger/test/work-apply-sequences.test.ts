@@ -61,7 +61,7 @@ function applyAtSerials(rows: WorkRows, change: Change, next: Record<Table, numb
 
 /**
  * The usage windows the sequences run under, five hours long as `WINDOW_MS`
- * in usage-window.ts has them: one that began a moment after ask 8 was
+ * in office-usage.ts has them: one that began a moment after ask 8 was
  * raised, so the first hand-off it holds raises its ask, and one that began
  * before, so ask 8 holds work until the window resets mid-sequence.
  */

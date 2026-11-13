@@ -16,7 +16,7 @@ const { handOff } = await import('../src/hand-offs.ts');
 const { parkThread, parkedThreads, wakeThread } = await import('../src/threads.ts');
 const { goalsWindow } = await import('../src/goals.ts');
 const { decideAsk } = await import('../src/office.ts');
-const { WINDOW_RESET } = await import('../src/usage-window.ts');
+const { WINDOW_RESET } = await import('../src/work/parking.ts');
 const { parkOnTask } = await import('../src/task-parking.ts');
 const { MANAGER_ROLE } = await import('../src/managers.ts');
 

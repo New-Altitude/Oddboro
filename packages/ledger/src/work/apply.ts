@@ -43,24 +43,33 @@ import {
  * and the change written, in one transaction. With the caller's own `tx` the
  * caller owns the commit, and runs the after-effects once it commits, as
  * `transition` says. Every entry function that hands an event to the core
- * goes through here.
+ * goes through here. A change that went through comes with `real`, the ids
+ * of the rows it wrote, which the entry gives its caller in place of the
+ * refs in the change's result.
  */
-export function transitionWork<K extends WorkEvent['kind']>(
+export async function transitionWork<K extends WorkEvent['kind']>(
   e: EventOf<K>,
   o: { tx?: Tx; now?: Date } = {}
-): Promise<Decided<Change<WorkResults[K]>>> {
-  return transition(
+): Promise<{ refused: string } | (Changed<WorkResults[K]> & { real: RealId })> {
+  let real: RealId | undefined;
+  const decided = await transition(
     {
       name: e.kind,
       load: (tx) => loadWork(tx, e),
       decide: (rows, now) => decide(rows, e, now),
       apply: async (tx, change) => {
-        await applyWork(tx, change);
+        real = await applyWork(tx, change);
       }
     },
     o
   );
+  if (!('change' in decided)) return decided;
+  if (!real) throw fixedError('A change went through that was never written.');
+  return { ...decided, real };
 }
+
+/** A decided change, with what follows it. */
+type Changed<R> = Extract<Decided<Change<R>>, { change: unknown }>;
 
 /** The id each `ref` in a change stands for: a new row's, or the one a `perKind` effect returned. */
 type Ids = Map<string, number | string>;

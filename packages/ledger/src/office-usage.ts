@@ -35,6 +35,11 @@ export async function recordUsage(staffId: string | null, kind: UsageKind, byMod
   if (rows.length) await db.insert(usage).values(rows);
 }
 
+/** The plan's one row in plan_limits: the owner's Claude plan, whose windows each run reports. */
+export const PLAN_ROW = 'claude';
+/** The plan's 5-hour window: one that resets at a time began this long before it. */
+export const WINDOW_MS = 5 * 3_600_000;
+
 export type PlanWindows = {
   fiveHour: number;
   fiveHourResetsAt: Date | null;
@@ -46,7 +51,7 @@ export type PlanWindows = {
 export async function setPlanLimits(w: Partial<PlanWindows>): Promise<void> {
   await db
     .insert(planLimits)
-    .values({ id: 'claude', fiveHour: 0, sevenDay: 0, ...w, updatedAt: new Date() })
+    .values({ id: PLAN_ROW, fiveHour: 0, sevenDay: 0, ...w, updatedAt: new Date() })
     .onConflictDoUpdate({ target: planLimits.id, set: { ...w, updatedAt: new Date() } });
 }
 
@@ -80,7 +85,7 @@ export async function setOwnerName(name: string): Promise<void> {
 
 /** The plan windows as last reported. A window past its reset reads as unused. */
 export async function plan() {
-  const [row] = await db.select().from(planLimits).where(eq(planLimits.id, 'claude'));
+  const [row] = await db.select().from(planLimits).where(eq(planLimits.id, PLAN_ROW));
   if (!row) return null;
   const now = new Date();
   const fresh = (used: number, resetsAt: Date | null) => (resetsAt && resetsAt <= now ? 0 : used);

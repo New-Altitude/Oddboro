@@ -69,8 +69,7 @@ export async function runAfters(name: string, after: After[]): Promise<void> {
  * The order every transition locks tables in, so two transitions never wait
  * on each other. `plan_limits` comes first: a hand-off in a transition takes
  * it first, because a hand-off the usage window holds writes threads and asks
- * after it. Today's `takeHandOff` does not run in a transition, and locks the
- * thread before `holdForWindow` locks `plan_limits`.
+ * after it.
  */
 export const LOCK_ORDER = [
   'plan_limits',
