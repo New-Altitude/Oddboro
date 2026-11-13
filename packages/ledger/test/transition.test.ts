@@ -2,7 +2,7 @@
 // after-effects only after the commit. Run with `npm test -w @oddboro/ledger`.
 import assert from 'node:assert/strict';
 import { afterEach, mock, test } from 'node:test';
-import { eq, inArray } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import { ledger, staff } from '../src/schema.ts';
 import type { Tx } from '../src/threads.ts';
@@ -117,6 +117,65 @@ test("the caller's tx holds the transition's change, so its rollback takes it ba
   );
   assert.equal(await nameOf(), 'Ada');
   assert.deepEqual(seen, ['load', 'decide Ada', 'apply']);
+});
+
+/** Makes Postgres end the transaction with the error it gives a deadlock's loser. */
+const deadlock = (tx: Tx) =>
+  tx.execute(
+    sql`do $$ begin raise exception 'deadlock detected' using errcode = 'deadlock_detected'; end $$`
+  );
+
+test('a transition Postgres ends to break a deadlock runs again from the load, and its after-effects run once, after the commit', async () => {
+  const seen: string[] = [];
+  markCommits(seen);
+  const step = rename(seen, 'Ivy');
+  let ended = false;
+  const decided = await transition({
+    ...step,
+    apply: async (tx: Tx, change: string) => {
+      await step.apply(tx, change);
+      if (ended) return;
+      ended = true;
+      await deadlock(tx);
+    }
+  });
+  // The second load reads Ada: the first attempt's rename rolled back.
+  assert.deepEqual(seen, [
+    'load',
+    'decide Ada',
+    'apply',
+    'load',
+    'decide Ada',
+    'apply',
+    'commit',
+    'first',
+    'second'
+  ]);
+  assert.equal(await nameOf(), 'Ivy');
+  assert.ok('change' in decided);
+});
+
+test('a transition fails with its error after three deadlocks, or at once on any other error', async () => {
+  const fails = async (end: (tx: Tx) => Promise<unknown>, error: RegExp) => {
+    const seen: string[] = [];
+    await assert.rejects(
+      transition({
+        ...rename(seen, 'Jo'),
+        load: async (tx: Tx) => {
+          seen.push('load');
+          await end(tx);
+          return { name: 'Ada' };
+        }
+      }),
+      (err: Error) => error.test(String(err.cause))
+    );
+    return seen;
+  };
+  assert.deepEqual(await fails(deadlock, /deadlock detected/), ['load', 'load', 'load']);
+  assert.deepEqual(await fails((tx) => tx.execute(sql`select 1 / 0`), /division by zero/), [
+    'load'
+  ]);
+  assert.equal(await nameOf(), 'Ada');
 });
 
 test('a refusal writes nothing and runs no after-effect', async () => {
