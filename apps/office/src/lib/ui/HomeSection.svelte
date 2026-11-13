@@ -56,7 +56,9 @@
     {/if}
   </div>
   <p class="mt-1 text-xs text-muted">
-    {here?.name ?? profile.room}{seatNow ? `, ${seatNow.label}` : ', any free seat'}
+    {here?.name ?? profile.room}{seatNow ? `, ${seatNow.label}` : ', any free seat'}{here?.wing
+      ? ` · ${here.wing} wing`
+      : ''}
   </p>
   {#if changing}
     <div class="mt-2 flex flex-col gap-2 rounded-xl bg-raise p-3">

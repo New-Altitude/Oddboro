@@ -3,7 +3,7 @@
 import { and, asc, eq, lte } from 'drizzle-orm';
 import { db } from './db.ts';
 import { fixedError } from './errors.ts';
-import { pokes, roomNames, switchedOff } from './schema.ts';
+import { pokes, roomNames, roomWings, switchedOff } from './schema.ts';
 import type { PokeRow } from './office.ts';
 import { ofWorkingOdd } from './office-staff.ts';
 import { record } from './office-ledger.ts';
@@ -125,6 +125,56 @@ export async function setSwitch(office: string, obj: string, on: boolean): Promi
       .delete(switchedOff)
       .where(and(eq(switchedOff.office, office), eq(switchedOff.obj, obj)));
   else await db.insert(switchedOff).values({ office, obj }).onConflictDoNothing();
+}
+
+/** The wing each room of an office is in, by room id. A room with none is common space. */
+export async function roomWingsFor(office: string): Promise<Record<string, string>> {
+  const rows = await db.select().from(roomWings).where(eq(roomWings.office, office));
+  return Object.fromEntries(rows.map((r) => [r.room, r.wing]));
+}
+
+/**
+ * Put a room in a wing the owner names, or none (a blank wing) to make it
+ * common space again. `room` is the room's name, for the ledger line.
+ */
+export async function setRoomWing(
+  office: string,
+  roomId: string,
+  wing: string,
+  room: string
+): Promise<string> {
+  const next = wing.trim().replace(/\s+/g, ' ');
+  if (next.length > 24) throw fixedError('Keep a wing name to 24 characters');
+  const [was] = await db
+    .select()
+    .from(roomWings)
+    .where(and(eq(roomWings.office, office), eq(roomWings.room, roomId)));
+  if ((was?.wing ?? '') === next) return next;
+  if (!next)
+    await db.delete(roomWings).where(and(eq(roomWings.office, office), eq(roomWings.room, roomId)));
+  else
+    await db
+      .insert(roomWings)
+      .values({ office, room: roomId, wing: next })
+      .onConflictDoUpdate({
+        target: [roomWings.office, roomWings.room],
+        set: { wing: next, updatedAt: new Date() }
+      });
+  await record({
+    kind: 'work',
+    actor: 'owner',
+    title: next ? `Put ${room} in the ${next} wing` : `Made ${room} common space`
+  });
+  return next;
+}
+
+/**
+ * Carry wings over to a layout that names its rooms anew, by room id there.
+ * Part of the move, whose ledger line covers it.
+ */
+export async function carryWings(office: string, wings: Record<string, string>): Promise<void> {
+  const rows = Object.entries(wings).map(([room, wing]) => ({ office, room, wing }));
+  if (rows.length) await db.insert(roomWings).values(rows).onConflictDoNothing();
 }
 
 /** The names the owner gave an office's rooms, by room id. */

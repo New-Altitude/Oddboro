@@ -151,6 +151,9 @@ export const OWNER_ACTIONS = {
   'DELETE /api/pokes/[id]': { none: NO_ROW },
   'POST /api/reports/[id]': { none: NO_ROW },
   'PUT /api/rooms': { records: 'work' },
+  'PUT /api/rooms/wing': { records: 'work' },
+  // Moves the office into its layout with the new workspace: the move-in's row.
+  'POST /api/rooms': { records: 'work' },
   // The owner's name, and that the welcome is done (the `owner` table).
   'POST /api/setup': { none: NO_ROW },
   'POST /api/setup/address': { notAnAction: SETUP },
@@ -208,6 +211,11 @@ export const OWNER_ACTIONS = {
   'POST /api/staff/[id]/jobs': { none: NO_ROW },
   'PUT /api/staff/[id]/look': { records: 'work' },
   'PUT /api/staff/[id]/home': { records: 'work' },
+  'POST /api/homes': {
+    notAnAction:
+      'Asks the office where Odds should live; nothing is kept until the owner moves them.'
+  },
+  'PUT /api/homes': { records: 'work' },
   // Marks the Odd's delivered pokes read as its chat shows them.
   'POST /api/staff/[id]/pokes': { none: NO_ROW },
   'POST /api/staff/draft': {

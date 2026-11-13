@@ -33,6 +33,7 @@ test('a room lists its seats left to right, numbered, with whose each is', () =>
   );
   assert.deepEqual(rooms[0], {
     id: 'workspace',
+    place: 'workspace#0',
     name: 'Studio',
     seats: [
       { id: 'workspace#0/desk#0/seat', label: 'Desk 1' },
@@ -55,6 +56,16 @@ test('a hire lives where its role belongs, at a free seat, with why', () => {
     seat: 'workspace#0/desk#1/seat',
     why: 'A workspace, with desks to work at. Sits with Ivy.'
   });
+});
+
+test('an Odd already living in a room is never its own roommate', () => {
+  const staff = [
+    { id: 'ivy', name: 'Ivy', room: 'library', seat: 'library#0/library-table#0/seat' }
+  ];
+  const s = suggestHome({ id: 'ivy', role: 'Researcher' }, homeRooms(WORLD, SPOTS, staff), staff);
+  assert.equal(s?.room, 'library');
+  assert.equal(s?.seat, 'library#0/library-table#0/seat');
+  assert.equal(s?.why, 'A room for research and reading.');
 });
 
 test('a role whose room is full goes to a workspace, and says so', () => {

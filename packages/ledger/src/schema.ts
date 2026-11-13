@@ -1121,6 +1121,23 @@ export const roomNames = pgTable(
 );
 
 /**
+ * The wing each room belongs to, by the owner's own name for it: a part of
+ * their life, like Work or School. A room without a row is in no wing, a
+ * common space every Odd uses. `room` is the composed room's id, like
+ * `workspace#1`, as in `room_names`.
+ */
+export const roomWings = pgTable(
+  'room_wings',
+  {
+    office: text().notNull(),
+    room: text().notNull(),
+    wing: text().notNull(),
+    updatedAt: at('updated_at').notNull().defaultNow()
+  },
+  (t) => [primaryKey({ columns: [t.office, t.room] })]
+);
+
+/**
  * What the owner switched off in an office: a lamp, a screen, a fire. A prop
  * without a row is on. `obj` is the placed prop's id, like `library#3/desk-lamp#2`.
  */

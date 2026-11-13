@@ -5,6 +5,7 @@ import {
   guessesWaiting,
   MAC,
   roomNamesFor,
+  roomWingsFor,
   roster,
   serviceNames,
   switchedOffIn,
@@ -35,6 +36,7 @@ export const load: PageServerLoad = async () => {
     staff: staff.map((s) => toProfile(s, guesses[s.id])),
     desk: await desk(),
     roomNames: await roomNamesFor(office.id),
+    roomWings: await roomWingsFor(office.id),
     switchedOff: await switchedOffIn(office.id),
     messages: await unreadPokes(),
     // So the first paint already keeps a lead waiting on a colleague at its desk.

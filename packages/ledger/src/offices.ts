@@ -107,6 +107,8 @@ export type Destination = {
   rooms: Record<string, { name: string; desks: boolean }>;
   /** Work seats in each room. */
   seats: Record<string, number>;
+  /** Every seat an Odd can call home there, by spot id. */
+  spots: string[];
 };
 
 /**
@@ -137,8 +139,7 @@ export async function moveIn(
         set: { rooms: now, updatedAt: new Date() }
       });
     // Everybody works in the one office, and the card says which.
-    // A seat is a spot on the floor it leaves, so every home seat goes with it.
-    await tx.update(staff).set({ office: to.name, seat: null }).where(isNull(staff.leftAt));
+    await tx.update(staff).set({ office: to.name }).where(isNull(staff.leftAt));
     // Moving back: everybody starts where they worked last time.
     const [before] = await tx.select().from(officeRooms).where(eq(officeRooms.office, to.key));
     for (const p of people) {
@@ -168,8 +169,15 @@ export async function moveIn(
       taken[room] = (taken[room] ?? 0) + 1;
       if (room === p.room) continue;
       await tx.update(staff).set({ room }).where(eq(staff.id, p.id));
+      p.room = room;
       moved.push({ name: p.name, room: to.rooms[room]?.name ?? room });
     }
+    // A home seat stays only where the new floor still has it, in the room
+    // its Odd works in now: adding a room keeps everyone's seat.
+    const stays = new Set(to.spots);
+    for (const p of people)
+      if (p.seat && (!stays.has(p.seat) || p.seat.split('#')[0] !== p.room))
+        await tx.update(staff).set({ seat: null }).where(eq(staff.id, p.id));
   });
   await record({
     kind: 'work',

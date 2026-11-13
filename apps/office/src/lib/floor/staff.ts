@@ -42,7 +42,8 @@ const facingAlong = (dx: number, dy: number): Facing =>
   Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : dy > 0 ? 'down' : 'up';
 
 export class StaffActor {
-  readonly profile: StaffProfile;
+  /** The Odd as the office last told the page: its home changes with it. */
+  profile: StaffProfile;
   readonly sprite: Sprite;
   private shadow = new Graphics().ellipse(0, 0, 5, 1.6).fill({ color: 0x000000, alpha: 0.28 });
   activity: Activity = 'home';

@@ -29,6 +29,7 @@
   import Welcome from '#lib/ui/Welcome.svelte';
   import ProjectSessions from '#lib/ui/ProjectSessions.svelte';
   import HireDrawer from '#lib/ui/HireDrawer.svelte';
+  import HomesPanel from '#lib/ui/HomesPanel.svelte';
   import FileViewer from '#lib/ui/FileViewer.svelte';
   import ReportView from '#lib/ui/ReportView.svelte';
   import {
@@ -76,7 +77,16 @@
     x: number;
     y: number;
   };
-  type Label = { id: string; name: string; x: number; y: number; scale: number; width: number };
+  type Label = {
+    id: string;
+    name: string;
+    /** The wing the room is in, shown before its name. */
+    wing?: string;
+    x: number;
+    y: number;
+    scale: number;
+    width: number;
+  };
   /** A room sign is laid out once at 11px, as it reads at the usual fit, and scales with the floor. */
   const SIGN_ZOOM = 1.5;
   /** Only a preview goes below 1x, and a sign there would be too small to read. */
@@ -113,6 +123,9 @@
   let desk = $state<Desk>(data.desk);
   // svelte-ignore state_referenced_locally
   let roomNames = $state<Record<string, string>>(data.roomNames);
+  /** The wing each room is in, by room id; a room with none is common space. */
+  // svelte-ignore state_referenced_locally
+  let roomWings = $state<Record<string, string>>(data.roomWings);
   /** The lamps, screens and fires the owner switched off, by placed prop id. */
   // svelte-ignore state_referenced_locally
   let switchedOff = $state<string[]>(data.switchedOff);
@@ -208,6 +221,7 @@
     { id: 'services', label: 'Services' },
     { id: 'projects', label: 'Projects' },
     { id: 'hire', label: 'Hire' },
+    { id: 'homes', label: 'Homes' },
     { id: 'office', label: 'Office' }
   ] as const;
   /** The sections the top bar offers: Projects only in Advanced mode. */
@@ -366,7 +380,13 @@
   );
 
   /** Rooms an Odd can live in, any with a place to work, read or sort mail, each with its seats. */
-  const homes = $derived(homeRooms(world, office.world.spots, staff));
+  const homes = $derived(
+    homeRooms(
+      { rooms: world.rooms.map((r) => ({ ...r, wing: roomWings[r.id] })) },
+      office.world.spots,
+      staff
+    )
+  );
   const suggest = (hire: { role: string; remit?: string }) => suggestHome(hire, homes, staff);
 
   // Idle staff wander between these, mostly working, with real breaks.
@@ -508,6 +528,17 @@
     actors = actors.filter((a) => staff.some((p) => p.id === a.profile.id));
     // A redraw: the staffer changes clothes where they stand.
     for (const a of actors) a.wear(wearing[a.profile.id]);
+    // Each Odd takes its latest profile. One with a new home walks there now,
+    // unless it waits on the owner, is in a meeting or the owner is directing it.
+    for (const a of actors) {
+      const p = staff.find((x) => x.id === a.profile.id);
+      if (!p) continue;
+      const rehomed = p.room !== a.profile.room || p.seat !== a.profile.seat;
+      a.profile = p;
+      const want = forced[p.id];
+      if (rehomed && !manual[p.id] && !a.onTrip && want !== 'wait' && want !== 'meet')
+        sendFor(a, want, w.spots);
+    }
     const boarding: string[] = [];
     for (const p of staff) {
       if (actors.some((a) => a.profile.id === p.id) || !atlasCatalog[p.sprite]) continue;
@@ -599,6 +630,7 @@
         inProgress: Record<string, Work[]>;
         toStart: Record<string, Work[]>;
         roomNames: Record<string, string>;
+        roomWings: Record<string, string>;
         switchedOff: string[];
         messages: Record<string, number>;
         threads: HeldThread[];
@@ -625,6 +657,7 @@
       inProgress = next.inProgress;
       toStart = next.toStart;
       roomNames = next.roomNames;
+      roomWings = next.roomWings;
       switchedOff = next.switchedOff;
       messages = next.messages;
       threads = next.threads;
@@ -695,6 +728,7 @@
     if (id === 'projects') return openProject();
     if (id === 'services') return open({ id: 'services', kind: 'services' });
     if (id === 'goals') return open({ id: 'goals', kind: 'goals' });
+    if (id === 'homes') return open({ id: 'homes', kind: 'homes' });
     if (id === 'lessons') return openLessons();
     if (id === 'office') return open({ id: 'office', kind: 'office' });
     const hire = wins.list.findLast((w) => w.kind === 'hire');
@@ -717,6 +751,7 @@
     if (w.kind === 'projects') return 'Projects';
     if (w.kind === 'services') return 'Services';
     if (w.kind === 'goals') return 'Goals';
+    if (w.kind === 'homes') return 'Homes';
     if (w.kind === 'lessons') return 'Lessons';
     if (w.kind === 'office') return wins.titles[w.id] ?? 'Office';
     if (w.kind === 'setup') return welcomed ? 'Setup' : 'Welcome';
@@ -776,7 +811,12 @@
       // A move into another layout rebuilds the whole floor.
       // During the first run, and until its last drawn pieces land, the floor
       // already shows the office being moved into.
-      if (page.includes('reload')) return firstRun || landing ? void refresh() : location.reload();
+      if (page.includes('reload')) {
+        if (firstRun || landing) return void refresh();
+        // A room added from a window here: swap the floor in place, so the window stays open.
+        if (addingRoom) return void moveInPlace();
+        return location.reload();
+      }
       if (page.includes('refresh')) refresh();
       if (page.includes('version')) version++;
       if (page.includes('ledger')) ledgerVersion++;
@@ -831,7 +871,15 @@
             .filter((r) => signs && r.sign !== false && floor!.scale >= SIGN_MIN_ZOOM)
             .map((r) => {
               const p = floor!.toScreen((r.x + 1) * TILE, (r.y + 0.6) * TILE);
-              return { id: r.id, name: r.name, scale, width: (r.w - 2) * TILE * SIGN_ZOOM, ...p };
+              const wing = roomWings[r.id];
+              return {
+                id: r.id,
+                name: r.name,
+                ...(wing ? { wing } : {}),
+                scale,
+                width: (r.w - 2) * TILE * SIGN_ZOOM,
+                ...p
+              };
             });
         };
 
@@ -936,6 +984,34 @@
       }
     }
     return at;
+  }
+
+  /** True from the moment a window here adds a room until the floor has the new layout. */
+  let addingRoom = false;
+  /**
+   * Show the layout the office just moved into without reloading the page:
+   * the floor swaps to it, and every Odd settles at once where it belongs
+   * there, as when the office opens. Open windows stay as they were.
+   */
+  async function moveInPlace() {
+    addingRoom = false;
+    await invalidateAll();
+    if (!floor) return location.reload();
+    const w = data.office.world;
+    floor.swap(w, { fit: true });
+    liveWorld = undefined;
+    // Hires step off the bus where this floor's stop is.
+    start = arrival(w);
+    for (const a of actors) {
+      const id = a.profile.id;
+      delete manual[id];
+      const want = wantOf(a.profile);
+      forced[id] = want;
+      if (!(want ? sendFor(a, want, w.spots) : a.assign('work', w.spots, taken(a))))
+        a.assign('work', w.spots, taken(a));
+      a.arrive();
+    }
+    floor.invalidate();
   }
 
   /** What the first run asks of the floor, while the cards and captions run the story. */
@@ -1172,7 +1248,10 @@
             {/if}
           </form>
         {:else}
-          <span class="min-w-0 truncate">{l.name}</span>
+          <span class="min-w-0 truncate"
+            >{#if l.wing}<span class="text-sea/80">{l.wing} ·</span>
+            {/if}{l.name}</span
+          >
           <button
             class="pointer-events-auto -m-1 p-1 opacity-70 hover:text-ink hover:opacity-100 focus-visible:text-ink focus-visible:opacity-100"
             aria-label={`Rename ${l.name}`}
@@ -1356,6 +1435,8 @@
                 />
               {:else if w.kind === 'goals'}
                 <GoalsPanel {staff} {version} onthread={openThread} />
+              {:else if w.kind === 'homes'}
+                <HomesPanel {staff} {homes} onaddroom={() => (addingRoom = true)} />
               {:else if w.kind === 'lessons'}
                 <LessonsLibrary {staff} {version} bind:filter={w.filter} />
               {:else if w.kind === 'ledger'}
@@ -1393,6 +1474,8 @@
                   id={w.id}
                   rooms={homes}
                   {suggest}
+                  onSample={office.id === 'main-street'}
+                  onaddroom={() => (addingRoom = true)}
                   from={w.from}
                   onhired={(p) => {
                     close(w.id, true);
@@ -1402,6 +1485,8 @@
                   ondone={() => {
                     close(w.id, true);
                     refresh();
+                    // A persona joined: say where it lives, with the office's suggestion.
+                    open({ id: 'homes', kind: 'homes' });
                   }}
                 />
               {:else if w.kind === 'report'}

@@ -59,6 +59,8 @@ export {
   drawnParts,
   setLook,
   setHome,
+  setHomes,
+  carryHomes,
   hire
 } from './office-staff.ts';
 export {
@@ -239,5 +241,8 @@ export {
   switchedOffIn,
   setSwitch,
   roomNamesFor,
-  renameRoom
+  renameRoom,
+  roomWingsFor,
+  setRoomWing,
+  carryWings
 } from './office-pokes.ts';

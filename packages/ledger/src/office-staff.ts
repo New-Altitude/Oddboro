@@ -413,6 +413,56 @@ export async function setHome(
   await record({ kind: 'work', actor: 'owner', title: `Moved ${who.name}'s home to ${where}` });
 }
 
+/**
+ * Give several Odds new homes at once, so two can swap seats. The caller
+ * checks every room and seat against the floor, and that no seat is held
+ * twice once all have moved. One ledger line lists every move.
+ */
+export async function setHomes(
+  moves: { id: string; room: string; seat: string | null; words: string }[]
+): Promise<void> {
+  const changed: string[] = [];
+  await db.transaction(async (tx) => {
+    for (const m of moves) {
+      const [who] = await tx
+        .select()
+        .from(staff)
+        .where(and(eq(staff.id, m.id), isNull(staff.leftAt)));
+      if (!who) throw fixedError('No such Odd');
+      if (who.room === m.room && who.seat === m.seat) continue;
+      await tx.update(staff).set({ room: m.room, seat: m.seat }).where(eq(staff.id, m.id));
+      changed.push(`${who.name}: ${m.words}`);
+    }
+  });
+  if (!changed.length) return;
+  await record({
+    kind: 'work',
+    actor: 'owner',
+    title:
+      changed.length === 1
+        ? `Moved ${changed[0].replace(': ', "'s home to ")}`
+        : `Moved ${changed.length} Odds' homes`,
+    ...(changed.length > 1 ? { body: changed.join('\n') } : {})
+  });
+}
+
+/**
+ * Put Odds back in the homes they had, by room and seat, after a move into a
+ * layout that names them anew (`addWorkspace` in the office). It is part of
+ * that move, whose ledger line covers it, so it writes none of its own.
+ */
+export async function carryHomes(
+  homes: { id: string; room: string; seat: string | null }[]
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    for (const h of homes)
+      await tx
+        .update(staff)
+        .set({ room: h.room, seat: h.seat })
+        .where(and(eq(staff.id, h.id), isNull(staff.leftAt)));
+  });
+}
+
 export async function hire(h: Hire): Promise<StaffRow> {
   const base =
     h.name

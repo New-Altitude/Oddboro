@@ -60,8 +60,23 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    reading, and there its home seat (`seat`) whenever that is free; another
    Odd's home seat counts as taken (`taken` in the page). The owner sets the
    home under Home on the info page (`HomeSection.svelte`,
-   `PUT /api/staff/[id]/home`), and the hire window's Where step suggests one
-   from the role (`suggestHome` in `src/lib/staff/home.ts`). While a
+   `PUT /api/staff/[id]/home`) or for everyone at once in the Homes window
+   (`HomesPanel.svelte`, `PUT /api/homes`), whose Ask the office fills each
+   row with the office's pick and why (`recommendHomes` in
+   `src/lib/server/homes.ts`, one office run, `POST /api/homes`). The hire
+   window's Where step shows the plain rules' pick at once (`suggestHome` in
+   `src/lib/staff/home.ts`), then the office's, and adds a workspace with no
+   drawing (`addWorkspace` in `src/lib/server/rooms.ts`, `POST /api/rooms`):
+   Main Street first becomes the owner's own office with the same rooms, and
+   every Odd keeps its home, and every room its wing, by name. The Homes
+   window's Add a room adds a workspace or a meeting room the same way, at an
+   end and a row the owner picks. A room added from a window here swaps the
+   floor in place (`moveInPlace` in the page), so the window stays open;
+   any other move into a layout reloads the page. The Homes window's Wings
+   names each room's wing (`room_wings`, `PUT /api/rooms/wing`), shown before
+   the room's name on its sign. Each Odd on the
+   floor takes its latest profile on every office load, and one with a new
+   home walks there at once (`syncNow` in the page). While a
    colleague runs on work its lead handed it, the two sit together at a
    meeting table (`meet` spots) in the first meeting room with a seat for
    both (`meetingRooms` in `src/lib/staff/meetings.ts`), and the lead's tag
