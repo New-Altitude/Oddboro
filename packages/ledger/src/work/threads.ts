@@ -19,6 +19,18 @@ export const isHandOff = (f: FollowUp | undefined): f is HandOffRow => f?.kind =
 export const hasLeft = (rows: WorkRows, id: string): boolean => !!rows.staff.get(id)?.leftAt;
 
 /**
+ * What an Odd that has left hears when it raises an ask or gives a task: its
+ * run may still be finishing as the owner lets it go, and nothing it raises
+ * then may wait on the desk for an Odd who is gone.
+ */
+export const LEFT_RAISES_NOTHING =
+  'You have left the office, so nothing you raise reaches the Desk.';
+
+/** What the lead hears of work an Odd that left never started. */
+export const leftBeforeStarting = (name: string): string =>
+  `${name} left the office before starting this.`;
+
+/**
  * Whether something raised on a thread is still open on the owner's desk: an
  * ask raised on it, or a task given on it or from an ask raised on it, as
  * `waitingOn` reads it.

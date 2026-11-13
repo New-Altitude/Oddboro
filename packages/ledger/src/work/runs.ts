@@ -82,14 +82,18 @@ type Lifted = Extract<RunState, { is: 'running' }>['unparked'];
 /** A run not yet ended. A retired kind's row is always ended, so such a run is of a live kind. */
 const notEnded = (f: FollowUp | undefined): f is LiveRun => !!f && f.run.is !== 'ended';
 
-/** Owe an Odd a run: a source's run, as `followUp` puts it. */
+/**
+ * Owe an Odd a run: a source's run, as `followUp` puts it. An Odd that has
+ * left is owed nothing, as `onlyWhileOpen` puts nothing on ended work: its
+ * leaving failed every run it had, and no later one may wait for it.
+ */
 export function runQueued(
   rows: WorkRows,
   e: EventOf<'runQueued'>,
   now: Date
 ): Decided<Change<null>> {
   const d = draft(rows);
-  oweRun(d, e.run, e, now);
+  if (!hasLeft(rows, e.run.staffId)) oweRun(d, e.run, e, now);
   return { change: changeOf(d, null), after: [] };
 }
 
