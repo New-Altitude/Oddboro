@@ -8,15 +8,18 @@
 // `npm test -w @oddboro/office`; `ODD_NOW_SEEDS` sets how many sequences.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { Desk } from '@oddboro/ledger';
+import type { AskRow, Desk, HandOffLine } from '@oddboro/ledger';
 import { explore, type Explore } from '@oddboro/ledger/sequences';
 import {
   floorMode,
+  handOffProgress,
+  handOffWords,
   jobRunning,
   lineWords,
   oddNow,
   railCount,
   railRing,
+  readerProps,
   runFor,
   runsChanged,
   runWords,
@@ -26,7 +29,7 @@ import {
   type Show,
   type Snapshot
 } from '#lib/staff/odd-now.ts';
-import { ACTIVITY_LABEL, type Activity } from '#lib/staff/roster.ts';
+import { ACTIVITY_LABEL, type Activity, type StaffProfile } from '#lib/staff/roster.ts';
 import type { Work } from '#lib/staff/work.ts';
 
 const SEEDS = Number(process.env.ODD_NOW_SEEDS ?? 300);
@@ -129,6 +132,7 @@ const start = (): { state: State; record: Record_ } => {
     toStart: {},
     chatting: [],
     desk: deskOf([], []),
+    staff: [],
     messages: {},
     threads: [],
     activity,
@@ -632,4 +636,97 @@ test("the floor sends an Odd to the door while it waits on the owner, and to its
   );
   assert.equal(failed, undefined);
   reached(seen, ['leading', 'holding with a run going', 'chatting with a run going', 'queued']);
+});
+
+/** A hand-off Ada gave Bo, as the chat lists it; only the fields the words read matter. */
+const handOff = (more: Partial<HandOffLine>): HandOffLine => ({
+  id: 7,
+  threadId: 1,
+  at: new Date('2026-11-12T09:00:00.000Z'),
+  title: HAND_OFF_LABEL,
+  brief: 'Plan it',
+  from: 'Ada',
+  to: 'Bo',
+  fromId: 'ada',
+  toId: 'bo',
+  gave: true,
+  status: 'working',
+  answered: false,
+  backs: [],
+  ...more
+});
+
+/** The office with Bo running the hand-off above, and Dee, who has left, not on the roster. */
+const handOffOffice = (): Snapshot => ({
+  ids: IDS,
+  inProgress: { bo: [work(1, HAND_OFF_LABEL, { kind: 'follow-up', queued: false, followUp: 7 })] },
+  toStart: {},
+  chatting: [],
+  desk: deskOf([], []),
+  staff: IDS.map((id) => ({ id, name: NAMES[id] }) as StaffProfile),
+  messages: {},
+  threads: [],
+  activity: Object.fromEntries(IDS.map((id) => [id, 'work' as Activity])),
+  nameOf
+});
+
+test("the page's reader props give an Odd's screens its own state, any colleague's by id, and none for one who has left", () => {
+  const snap = handOffOffice();
+  const all = oddNow(snap);
+  const onplan = (_hires: AskRow[]) => {};
+  const props = readerProps(snap, all, 'ada', onplan);
+  assert.equal(props.now, all.ada);
+  assert.equal(props.nowOf('bo'), all.bo);
+  assert.equal(props.nowOf(GONE), undefined);
+  assert.equal(props.nowOf('constructor'), undefined);
+  assert.equal(props.desk, snap.desk);
+  assert.equal(props.staff, snap.staff);
+  assert.equal(props.onplan, onplan);
+});
+
+test('a hand-off line says the colleague is on it only while its run for that hand-off goes', () => {
+  const snap = handOffOffice();
+  const { nowOf } = readerProps(snap, oddNow(snap), 'ada', () => {});
+  assert.deepEqual(handOffProgress(handOff({}), nowOf), { text: 'Bo is on it', yours: false });
+  // Bo's other runs do not count: only its run for this hand-off.
+  assert.deepEqual(handOffProgress(handOff({ id: 8 }), nowOf), {
+    text: 'Bo has not started yet',
+    yours: false
+  });
+  const idle = { ...snap, inProgress: { bo: [work(2, 'Morning brief', { queued: false })] } };
+  assert.deepEqual(
+    handOffProgress(handOff({}), readerProps(idle, oddNow(idle), 'ada', () => {}).nowOf),
+    {
+      text: 'Bo has not started yet',
+      yours: false
+    }
+  );
+});
+
+test("a hand-off line keeps its words for a finished step and for a colleague who has left, and says back on it after the owner's answer", () => {
+  const snap = handOffOffice();
+  const { nowOf } = readerProps(snap, oddNow(snap), 'ada', () => {});
+  const left = handOff({ toId: GONE, to: 'Dee', status: 'failed' });
+  assert.equal(nowOf(GONE), undefined);
+  assert.deepEqual(handOffProgress(left, nowOf), {
+    text: 'Dee could not finish · Ada is taking it from here',
+    yours: false
+  });
+  assert.equal(handOffWords(handOff({ status: 'queued' }), false).text, 'Bo has not started yet');
+  const back = {
+    at: new Date('2026-11-12T10:00:00.000Z'),
+    outcome: 'waiting' as const,
+    text: 'Asked the owner',
+    answered: true,
+    pickUp: { status: 'done' as const }
+  };
+  assert.equal(handOffWords(handOff({ backs: [back] }), true).text, 'Bo is back on it');
+  assert.deepEqual(handOffWords(handOff({ status: 'waiting' }), false), {
+    text: 'Bo is waiting on you · Ada is taking it from here',
+    yours: true
+  });
+  assert.equal(
+    handOffWords(handOff({ status: 'done' }), false).text,
+    'Bo finished · Ada is taking it from here'
+  );
 });

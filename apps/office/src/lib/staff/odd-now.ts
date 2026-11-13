@@ -2,8 +2,8 @@
 // each screen shows for it. Every screen that says what an Odd is doing reads
 // it from here, so the floor tag, the card, the info page, the rail and the
 // Jobs tab cannot disagree. Pure, and safe in the browser.
-import type { Desk } from '@oddboro/ledger';
-import { ACTIVITY_LABEL, type Activity } from '#lib/staff/roster.ts';
+import type { AskRow, Desk, HandOffLine } from '@oddboro/ledger';
+import { ACTIVITY_LABEL, type Activity, type StaffProfile } from '#lib/staff/roster.ts';
 import { threadTag, type HeldThread } from '#lib/staff/thread-tags.ts';
 import type { Work } from '#lib/staff/work.ts';
 
@@ -16,8 +16,10 @@ export type Snapshot = {
   toStart: Record<string, Work[]>;
   /** The Odds with a chat reply to the owner going. A new hire's hello is a run, not a reply. */
   chatting: string[];
-  /** oddNow reads only each ask's and task's Odd. */
+  /** oddNow reads only each ask's and task's Odd; the card and the chat read the rest. */
   desk: Desk;
+  /** Every Odd in the office, as the card and the chat take them. */
+  staff: StaffProfile[];
   /** Each Odd's unread messages for the owner. */
   messages: Record<string, unknown>;
   threads: HeldThread[];
@@ -196,4 +198,67 @@ export function railCount(n: OddNow): number {
 /** Whether the rail rings the Odd: it waits on the owner. */
 export function railRing(n: OddNow): boolean {
   return WAITS_ON_OWNER[n.show.is];
+}
+
+/**
+ * Where a hand-off stands, in words, and whether the owner has to act. The
+ * colleague is on it only while its run for the hand-off goes, which the live
+ * state says; the row's status is as of the chat's last load.
+ */
+export function handOffWords(h: HandOffLine, onIt: boolean): { text: string; yours: boolean } {
+  if (h.status === 'queued' || h.status === 'working')
+    return onIt
+      ? // Back on it: the owner answered what an earlier step put on the desk.
+        { text: `${h.to} is ${h.backs.length ? 'back on it' : 'on it'}`, yours: false }
+      : { text: `${h.to} has not started yet`, yours: false };
+  // A denial or a dropped task is the owner's answer, not the colleague failing.
+  const ended = h.answered
+    ? 'You answered'
+    : {
+        done: `${h.to} finished`,
+        failed: `${h.to} could not finish`,
+        waiting: `${h.to} is waiting on you`
+      }[h.status];
+  const next = h.backs.at(-1)?.pickUp.status;
+  if (!next || next === 'queued' || next === 'working')
+    return { text: `${ended} · ${h.from} is taking it from here`, yours: h.status === 'waiting' };
+  // Something on the desk outranks how the pick-up went: it still needs the owner.
+  if (next === 'waiting' || h.status === 'waiting') return { text: 'Waiting on you', yours: true };
+  if (next === 'failed') return { text: `${h.from} could not pick it up`, yours: false };
+  return { text: h.status === 'done' ? 'Done' : ended, yours: false };
+}
+
+/** A hand-off line in the chat, read from its colleague's state: on it while its run for it goes. */
+export function handOffProgress(
+  h: HandOffLine,
+  nowOf: ReaderProps['nowOf']
+): { text: string; yours: boolean } {
+  return handOffWords(h, !!runFor(nowOf(h.toId), h.id));
+}
+
+/** What the page passes each screen that shows an Odd's state. */
+export type ReaderProps = {
+  /** This Odd's state. */
+  now: OddNow;
+  /** Any Odd's state, by id. Undefined for one the page does not hold, such as a colleague who has left. */
+  nowOf: (id: string) => OddNow | undefined;
+  desk: Desk;
+  staff: StaffProfile[];
+  onplan: (hires: AskRow[]) => void;
+};
+
+/** The props for one Odd's screens, from the page's map of every Odd's state. */
+export function readerProps(
+  s: Snapshot,
+  all: Record<string, OddNow>,
+  id: string,
+  onplan: (hires: AskRow[]) => void
+): ReaderProps {
+  return {
+    now: all[id],
+    nowOf: (other) => (Object.hasOwn(all, other) ? all[other] : undefined),
+    desk: s.desk,
+    staff: s.staff,
+    onplan
+  };
 }
