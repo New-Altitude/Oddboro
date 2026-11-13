@@ -425,7 +425,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   `handed_back` follow-up for the Odd that handed it, a restart's failure
   included, but for two: the colleague's run that ends waiting goes back
   only while something it raised is still open (`answeredAll`), and nothing
-  goes back to a lead that left the office (`leadLeft`). When the
+  goes back to a lead that left the office (`hasLeft` in `handBack`). When the
   owner answered all of it before the run ended, the answer already went
   back, or started a run whose result will. When the lead left, the
   colleague pokes the owner that it finished and could not hand it back, the

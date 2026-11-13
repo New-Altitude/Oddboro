@@ -22,7 +22,7 @@ import type { FollowUp, FollowUpBase, Thread, ThreadBase } from './state.ts';
 export type HandOffRow = FollowUp & { kind: 'hand_off' };
 export const isHandOff = (f: FollowUp | undefined): f is HandOffRow => f?.kind === 'hand_off';
 
-/** Whether an Odd left the office. One the rows do not hold reads as here, as `leadLeft` reads a missing row. */
+/** Whether an Odd left the office. One the rows do not hold reads as here. */
 export const hasLeft = (rows: WorkRows, id: string): boolean => !!rows.staff.get(id)?.leftAt;
 
 /**

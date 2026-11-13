@@ -209,7 +209,7 @@ export async function startFollowUp(
 
 /**
  * A colleague's result that no lead takes, since the lead that handed it the
- * work left the office (`leadLeft`): nothing picks the work up. The owner
+ * work left the office (`hasLeft`): nothing picks the work up. The owner
  * ruled that nothing goes on the desk for it. The colleague, the last Odd on
  * the work, pokes the owner now, and the Ledger keeps a line. What the
  * colleague did stays in the work's folder.
