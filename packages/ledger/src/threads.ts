@@ -496,7 +496,7 @@ export const LISTED: Record<ThreadStage, string> = {
   waiting_on_you: 'waiting on {owner}',
   done: 'finished',
   failed: 'could not finish',
-  stopped: '{owner} stopped it, so it cannot be continued'
+  stopped: 'it has stopped, so it cannot be continued'
 };
 
 /**

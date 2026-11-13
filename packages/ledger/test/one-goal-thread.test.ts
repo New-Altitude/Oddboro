@@ -423,8 +423,8 @@ test("after the owner stops the goal's thread, only a new plan opens it again: n
   assert.equal((await threadRow(goalThread)).status, 'stopped');
   assert.match(
     B.workLedBrief(await B.ledStories('marshall', 'chat')),
-    /^Where it stands: \{owner\} stopped it, so it cannot be continued\.$/m,
-    "the lead's chat says the owner stopped the goal's work"
+    /^Where it stands: it has stopped, so it cannot be continued\.$/m,
+    "the lead's chat says the goal's work has stopped"
   );
   assert.match(
     (await T.notLed({ hubId: 'marshall', threadId: goalThread })) ?? '',
