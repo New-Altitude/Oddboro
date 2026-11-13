@@ -128,6 +128,47 @@ export function addRun(d: Draft, run: Fresh<FollowUp>, now: Date): Inserted {
 }
 
 /**
+ * New work, opened in this change once the entry checked its lead may lead
+ * work, as `openThread` in ../threads.ts does. A goal set in the same change
+ * (a `perKind` effect's ref) is pointed at, so the work takes the goal's real id.
+ */
+export function openThread(
+  d: Draft,
+  open: { title: string; hubId: string; goalId?: number | Inserted },
+  runs: string[],
+  now: Date
+): Inserted {
+  const ref = 'thread';
+  const goal = open.goalId;
+  putAll(d, [
+    {
+      table: 'threads',
+      ref,
+      insert: {
+        title: open.title,
+        goalId: goal === undefined ? null : typeof goal === 'number' ? goal : idOf(d, goal),
+        hubId: open.hubId,
+        holderId: open.hubId,
+        handOffsUsed: 0,
+        runs,
+        createdAt: now,
+        status: 'open',
+        park: { on: 'none' }
+      },
+      ...(typeof goal === 'object' && { points: { goalId: goal.ref } })
+    }
+  ]);
+  return { ref };
+}
+
+/** The id this draft gave a row it inserted, or made up for a `perKind` effect, which its later steps read it by. */
+export function idOf(d: Draft, row: Inserted): number {
+  const id = d.ids.get(row.ref);
+  if (id === undefined) throw fixedError('A change named a row it did not insert.');
+  return id;
+}
+
+/**
  * Owe an Odd a run, as `followUp` and `addFollowUp` do. The answer to
  * something raised on a thread works on that thread, unless its kind serves
  * none. With `onlyWhileOpen`, nothing is put once that work ended. `chat` is
