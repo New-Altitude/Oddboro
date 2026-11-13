@@ -288,6 +288,13 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    with what each waits on, oldest first. A click on one opens
    the oldest thing it waits on, on the Desk, else its hub's chat, where it
    shows as a card. The list reloads when goals or threads change (`version`).
+   A goal can carry a project folder (`goals.project_folder`). The owner attaches, changes
+   or removes it in the goal, without granting access or moving files. Group by Project
+   brings its goals, progress and waiting work together. `GoalProject.svelte` reads
+   `/api/goals/[id]/project` for the shared work files and, in Advanced mode,
+   native sessions in that folder. Files use Storage's listing and the existing viewer.
+   No project folder is scanned, and no background file watcher runs.
+   `goal-projects.ts` validates the link with the existing folder checks.
    **Lessons** (`src/lib/ui/LessonsLibrary.svelte`) is what the office knows
    about the owner: every open lesson (`GET /api/lessons`, `libraryLessons`).
    It opens on About you, the lessons for every Odd; a filter per Odd shows
