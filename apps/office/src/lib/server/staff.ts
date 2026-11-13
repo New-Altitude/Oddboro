@@ -167,7 +167,7 @@ import { tooOldLine } from './versions.ts';
 export { activeReply, addToReply, chat, replyToOwnerTurn, stopReply } from './chat-run.ts';
 export { history, keepOwnerTurn } from './chat-turns.ts';
 export { runJob } from './job-run.ts';
-export { chatting, inProgress, isBusy, runsActive, stopRuns, working } from './run-state.ts';
+export { chatting, inProgress, isBusy, runsActive, stopRuns } from './run-state.ts';
 
 /** The owner's data folder, which every staffer may read, whatever tool it runs on. */
 const DATA = home('data');
