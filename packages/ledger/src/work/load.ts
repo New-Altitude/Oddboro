@@ -79,6 +79,7 @@ const SEEDS: {
   [K in WorkEvent['kind']]: (tx: Tx, e: EventOf<K>) => Seeds | Promise<Seeds>;
 } = {
   runQueued: (_, { run }) => ({
+    staff: [run.staffId],
     threads: one(run.threadId),
     asks: one(run.askId),
     tasks: one(run.taskId)
@@ -87,6 +88,7 @@ const SEEDS: {
   runFinished: (_, e) => ({ followUps: [e.id, ...e.ended.joined] }),
   staleRunsClosed: (_, e) => ({ followUps: [e.id] }),
   askRaised: async (tx, { ask }) => ({
+    staff: [ask.staffId],
     threads: one(ask.threadId),
     only: {
       asks: [
@@ -131,6 +133,7 @@ const SEEDS: {
     };
   },
   taskGiven: async (tx, { task, oneOpen }) => ({
+    staff: one(task.staffId),
     threads: one(task.threadId),
     // The open tasks, the Odd's own when it has one, an open connect task among them answering this one.
     only: { tasks: oneOpen ? await openTaskIds(tx, task.staffId ?? undefined) : [] }

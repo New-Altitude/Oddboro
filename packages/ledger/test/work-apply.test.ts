@@ -32,7 +32,13 @@ import { random } from '../src/sequences.ts';
 import type { Tx } from '../src/threads.ts';
 import type { After, Decided } from '../src/transition.ts';
 import { decide } from '../src/work/decide.ts';
-import type { AskEffects, EventOf, WorkEvent, WorkResults } from '../src/work/events.ts';
+import type {
+  AskEffects,
+  EventOf,
+  LeaveEffects,
+  WorkEvent,
+  WorkResults
+} from '../src/work/events.ts';
 import {
   applyChange,
   type Change,
@@ -67,7 +73,8 @@ const ODDS: Odd[] = [
   { id: 'lia', name: 'Lia', level: 'act', leftAt: null },
   { id: 'cal', name: 'Cal', level: 'draft', leftAt: null },
   { id: 'rae', name: 'Rae', level: 'read', leftAt: null },
-  { id: 'gus', name: 'Gus', level: 'act', leftAt: minutes(-60) }
+  { id: 'gus', name: 'Gus', level: 'act', leftAt: minutes(-60) },
+  { id: 'kit', name: 'Kit', level: 'read', leftAt: null }
 ].map((o) => ({ ...o, level: o.level as Level, agent: 'claude', manager: false }));
 
 const handOff = (from: string, more: Partial<HandOff> = {}): HandOff => ({
@@ -81,7 +88,8 @@ const handOff = (from: string, more: Partial<HandOff> = {}): HandOff => ({
  * One office with a run in each state the runs family decides: queued and
  * running pick-ups, a colleague's hand-off with an open ask on it, a result
  * from one that left, a thread parked on an open task, a running pick-up
- * whose lifted task ended meanwhile, and work whose lead left.
+ * whose lifted task ended meanwhile, work whose lead left, and work that
+ * nothing names but its lead.
  */
 async function seedOffice(): Promise<void> {
   await db.execute(
@@ -201,6 +209,10 @@ async function seedOffice(): Promise<void> {
     }
   ]);
   await seedAnswers();
+  // 10: no run, ask or task names it, so only the search for the work an Odd leads finds it.
+  await db
+    .insert(threads)
+    .values({ hubId: 'kit', holderId: 'kit', title: 'Kit alone', createdAt: T0 });
 }
 
 const FOLDER = { path: '/srv/plans', level: 'read' } as const;
@@ -220,15 +232,16 @@ const AWS_STEP: Step = {
 /**
  * What the owner has to answer, beside the runs: an access ask and its twin
  * off any work, a folder, a switch, a held hand-off, the usage window's ask
- * holding work, a held call, an ask of an Odd that left, and an answered
- * access ask with its twin whose connect task has work parked on it.
+ * holding work, a held call, an ask of an Odd that left, an answered
+ * access ask with its twin whose connect task has work parked on it, and an
+ * ask to bring back the Odd that left.
  */
 async function seedAnswers(): Promise<void> {
   const ask = { why: 'w', ifApproved: 'i', createdAt: T0 };
   const gmail = { connector: 'gmail', level: 'read' } as const;
   const drive = { connector: 'drive', level: 'read' } as const;
   const decided = { status: 'approved', decidedAt: minutes(-3) } as const;
-  // 3 to 12. Thread 7 is the window's hold and 8 the held hand-off's work, put in below.
+  // 3 to 13. Thread 7 is the window's hold and 8 the held hand-off's work, put in below.
   await db.insert(asks).values([
     { ...ask, staffId: 'cal', kind: 'access', title: 'Gmail', access: gmail, threadId: 2 },
     { ...ask, staffId: 'cal', kind: 'access', title: 'Gmail again', access: gmail },
@@ -254,7 +267,8 @@ async function seedAnswers(): Promise<void> {
       title: 'Drive too',
       access: drive,
       threadId: 4
-    }
+    },
+    { ...ask, staffId: 'lia', kind: 'bring_back', odd: 'gus', title: 'Bring Gus back?' }
   ]);
   const task = { why: 'w', createdAt: T0 };
   // 3: the connect task of ask 11; 4: on work; 5: the office's own.
@@ -278,8 +292,18 @@ async function seedAnswers(): Promise<void> {
     ]);
 }
 
+/** The four tables a change puts rows in, by their names in the database. */
+const TABLES = {
+  threads: 'threads',
+  asks: 'asks',
+  tasks: 'tasks',
+  followUps: 'follow_ups'
+} as const;
+type Table = keyof typeof TABLES;
+const TABLE_KEYS = Object.keys(TABLES) as Table[];
+
 /** Every row of the four tables, as states. */
-async function readRows(): Promise<Pick<WorkRows, 'threads' | 'followUps' | 'asks' | 'tasks'>> {
+async function readRows(): Promise<Pick<WorkRows, Table>> {
   const byId = <T extends { id: number }>(rows: T[]) => new Map(rows.map((r) => [r.id, r]));
   return {
     threads: byId((await db.select().from(threads)).map(parseThread)),
@@ -299,6 +323,45 @@ async function readWorld(): Promise<WorkRows> {
     owner: OWNER,
     prepared: {}
   };
+}
+
+/**
+ * Moves each table's serial into a band of its own, past the ids a decider
+ * guesses for new rows (the next after the highest it loaded), so a guessed
+ * id written anywhere, or an id taken from the wrong table, shows. Gives the
+ * id each table's next row gets.
+ */
+async function idsOffset(rows: Pick<WorkRows, Table>): Promise<Record<Table, number>> {
+  const next = { threads: 0, asks: 0, tasks: 0, followUps: 0 };
+  for (const [i, table] of TABLE_KEYS.entries()) {
+    // One change inserts far fewer than 100 rows into a table, so no guess reaches the serial.
+    const last = Math.max((i + 1) * 1_000_000, ...rows[table].keys()) + 100;
+    await db.execute(sql`select setval(pg_get_serial_sequence(${TABLES[table]}, 'id'), ${last})`);
+    next[table] = last + 1;
+  }
+  return next;
+}
+
+/**
+ * The rows `change` leaves in memory, each new row at the id the database
+ * gives it next. `applyChange` gives a new row the id after its table's
+ * highest, so a stand-in row just below the serial's next id, taken out
+ * after, makes each new row's id, and each id pointing at it, the real one.
+ */
+function applyAtSerials(rows: WorkRows, change: Change, next: Record<Table, number>): WorkRows {
+  const standIn = <T>(m: Map<number, T>, id: number) => new Map(m).set(id, [...m.values()][0]);
+  const after = applyChange(
+    {
+      ...rows,
+      threads: standIn(rows.threads, next.threads - 1),
+      asks: standIn(rows.asks, next.asks - 1),
+      tasks: standIn(rows.tasks, next.tasks - 1),
+      followUps: standIn(rows.followUps, next.followUps - 1)
+    },
+    change
+  );
+  for (const table of TABLE_KEYS) after[table].delete(next[table] - 1);
+  return after;
 }
 
 /** One event through the shell, on the office's database, with the core's own loader and writer, and the rows it loaded. */
@@ -326,6 +389,18 @@ const named = (d: Decided<Change>) =>
     ? { ...d, after: d.after.map((a: After) => ('record' in a ? a : { then: a.then })) }
     : d;
 
+/**
+ * A decision with its puts left out, for the sequences, which compare the
+ * puts by the rows they leave: a decider guesses a new row's id from the
+ * rows it read, so the loaded rows and the whole office guess apart, and a
+ * row pointing at a new one holds that guess until the apply writes the
+ * real id.
+ */
+const unput = (d: Decided<Change>) => {
+  const n = named(d);
+  return 'change' in n ? { ...n, change: { ...n.change, put: [] } } : n;
+};
+
 /** Each call an answer's effects make, by name. No decider may make one: the shell runs them after the commit. */
 const calls: string[] = [];
 const fakes: AskEffects = {
@@ -340,6 +415,24 @@ const fakes: AskEffects = {
   removeOdd: async (id) => void calls.push(`removeOdd ${id}`),
   bringBack: async (id) => void calls.push(`bringBack ${id}`)
 };
+/** A leaving's call after its commit, recorded with the answers' calls. */
+const leaveFakes: LeaveEffects = { stopRuns: (id) => void calls.push(`stopRuns ${id}`) };
+
+/** The owner lets an Odd go, as the staff route's Remove sends it. */
+const leaving = (staffId: string): EventOf<'oddRemoved'> => ({
+  kind: 'oddRemoved',
+  staffId,
+  line: { kind: 'hire', actor: 'owner', title: `Let ${staffId} go`, body: `${staffId} left.` },
+  about: new Map(),
+  effects: leaveFakes
+});
+
+/** The owner's yes to bringing an Odd back. */
+const bringingBack = (staffId: string): EventOf<'oddBroughtBack'> => ({
+  kind: 'oddBroughtBack',
+  staffId,
+  line: { kind: 'hire', actor: 'owner', title: `Brought ${staffId} back`, body: 'Back.' }
+});
 
 /** The owner's answer to an ask, as the desk sends it. */
 const answer = (
@@ -357,7 +450,58 @@ const answer = (
   ...more
 });
 
-/** Every event the runs family takes now, from the rows in memory and each claim's joined results. */
+/** The usage window past its guard, by default resetting long after ask 8 was raised, so no ask of this window is on the desk yet. */
+async function windowPastGuard(
+  resetsAt = minutes(400)
+): Promise<{ share: number; resetsAt: Date }> {
+  const share = 0.9;
+  await db
+    .insert(planLimits)
+    .values({ fiveHour: share, fiveHourResetsAt: resetsAt, sevenDay: 0.1 });
+  return { share, resetsAt };
+}
+
+/**
+ * The usage windows the sequences run under, five hours long as `WINDOW_MS`
+ * in usage-window.ts has them: one that began a moment after ask 8 was
+ * raised, so the first hand-off it holds raises its ask, and one that began
+ * before, so ask 8 holds work until the window resets mid-sequence.
+ */
+const WINDOWS = [
+  { resetsAt: minutes(300.5), began: minutes(0.5) },
+  { resetsAt: minutes(30), began: minutes(-270) }
+];
+
+/** The usage window as the whole office reads it: its ask is the last window ask raised since it began. */
+function windowOf(
+  w: WorkRows,
+  window: { share: number; resetsAt: Date; began: Date }
+): WorkRows['window'] {
+  const [ask] = [...w.asks.values()]
+    .filter((a) => a.kind === 'window' && a.createdAt > window.began)
+    .sort((a, b) => b.id - a.id);
+  return {
+    share: window.share,
+    resetsAt: window.resetsAt,
+    ask: ask ? { id: ask.id, status: ask.status } : null
+  };
+}
+
+/** A hand-off from Lia, on work it leads or on new work it opens. */
+const handOffOf = (
+  thread: EventOf<'handedOff'>['thread'],
+  more: Partial<EventOf<'handedOff'>> = {}
+): EventOf<'handedOff'> => ({
+  kind: 'handedOff',
+  from: 'lia',
+  to: 'cal',
+  work: { title: 'Check it', brief: 'Check.' },
+  thread,
+  carry: [],
+  ...more
+});
+
+/** Every event the work core takes now, from the rows in memory and each claim's joined results. */
 function offered(w: WorkRows, joined: Map<number, number[]>): WorkEvent[] {
   const events: WorkEvent[] = [
     {
@@ -373,10 +517,14 @@ function offered(w: WorkRows, joined: Map<number, number[]>): WorkEvent[] {
     { kind: 'runQueued', run: { staffId: 'cal', kind: 'carry_out', note: null, askId: 2 } },
     { kind: 'runQueued', run: { staffId: 'lia', kind: 'task_done', note: null, taskId: 1 } },
     { kind: 'runQueued', run: { staffId: 'rae', kind: 'edited', note: null } },
-    ...answersOffered(w)
+    ...answersOffered(w),
+    ...threadsOffered(w)
   ];
-  for (const id of w.followUps.keys()) {
-    events.push({ kind: 'runClaimed', id }, { kind: 'staleRunsClosed', id, about: 'the work' });
+  for (const [id, f] of w.followUps) {
+    events.push({ kind: 'runClaimed', id });
+    // A restart closes only the runs it cut off, the running ones. Offered for every run, the
+    // kind was refused so often that it never got through at the default seeds.
+    if (f.run.is === 'running') events.push({ kind: 'staleRunsClosed', id, about: 'the work' });
     for (const outcome of ['done', 'failed', 'waiting'] as const)
       events.push({
         kind: 'runFinished',
@@ -443,6 +591,40 @@ function answersOffered(w: WorkRows): WorkEvent[] {
   return events;
 }
 
+/**
+ * Every event the threads and leaving families take now: hand-offs, the
+ * owner's words passed to a lead, parks, the clock, and each Odd leaving and
+ * coming back. Cal works on threads 2 and 4, which Lia leads.
+ */
+function threadsOffered(w: WorkRows): WorkEvent[] {
+  const told = {
+    said: 'Send it on Friday, please.',
+    words: 'on Friday',
+    reading: 'It waits for Friday.',
+    exchange: '',
+    files: []
+  };
+  const events: WorkEvent[] = [
+    handOffOf({ open: { title: 'New work', hubId: 'lia' } }, { run: 'k4' }),
+    // New work for a goal Cal leads, which opens though this hand-off does not go.
+    handOffOf({ open: { title: 'Goal work', hubId: 'cal' } }),
+    handOffOf({ id: 2 }, { to: 'rae' }),
+    handOffOf({ id: 2 }, { to: 'gus' }),
+    { kind: 'parked', staffId: 'lia', threadId: 2, on: { task: 1 }, worksOn: new Set() },
+    { kind: 'parked', staffId: 'lia', threadId: 1, on: { task: 4 }, worksOn: new Set() },
+    { kind: 'parked', staffId: 'lia', threadId: 4, on: { at: minutes(20) }, worksOn: new Set() },
+    { kind: 'parked', staffId: 'cal', threadId: 9, on: { at: minutes(40) }, worksOn: new Set() }
+  ];
+  for (const id of w.threads.keys())
+    events.push(
+      handOffOf({ id }),
+      { kind: 'toldLead', staffId: 'cal', threadId: id, worksOn: new Set([2, 4]), ...told },
+      { kind: 'clockWoke', threadId: id }
+    );
+  for (const id of w.staff.keys()) events.push(leaving(id), bringingBack(id));
+  return events;
+}
+
 type Written = {
   reports: { staffId: string; title: string; body: string }[];
   pokes: { staffId: string; message: string }[];
@@ -471,39 +653,79 @@ function outsideOf(change: Change): Written {
   };
 }
 
-test('every runs and answers event decides on the loaded rows as on the whole office, and writes the rows applyChange gives', async () => {
+/** A kind each event kind is named in, so a kind added to `WorkEvent` fails the type check here until the sequences run it. */
+const KINDS = Object.keys({
+  runQueued: 0,
+  runClaimed: 0,
+  runFinished: 0,
+  staleRunsClosed: 0,
+  askRaised: 0,
+  askDecided: 0,
+  taskGiven: 0,
+  taskEnded: 0,
+  connectTasksDropped: 0,
+  goalStatusChanged: 0,
+  parked: 0,
+  clockWoke: 0,
+  oddRemoved: 0,
+  oddBroughtBack: 0,
+  handedOff: 0,
+  toldLead: 0
+} satisfies Record<WorkEvent['kind'], 0>);
+
+test('every work event decides on the loaded rows as on the whole office, and writes the rows applyChange gives', async () => {
   let events = 0;
   let changes = 0;
+  const changedBy = new Set<string>();
   for (let seed = 0; seed < SEEDS; seed++) {
     const rnd = random(seed);
     await seedOffice();
+    const window = WINDOWS[seed % WINDOWS.length];
+    await windowPastGuard(window.resetsAt);
     let world = await readWorld();
     const joined = new Map<number, number[]>();
     let last = { report: 0, poke: 0 };
     for (let n = 1; n <= LENGTH; n++) {
+      // Each kind as likely as any other, so a kind with few events still runs at the default seeds.
       const choices = offered(world, joined);
-      const e = choices[Math.floor(rnd() * choices.length)];
+      const kinds = [...new Set(choices.map((c) => c.kind))];
+      const kind = kinds[Math.floor(rnd() * kinds.length)];
+      const ofKind = choices.filter((c) => c.kind === kind);
+      const e = ofKind[Math.floor(rnd() * ofKind.length)];
       const at = `seed ${seed}, event ${n}: ${JSON.stringify(e)}`;
       const now = minutes(n);
+      const next = await idsOffset(world);
       const { got, loaded } = await run(e, now);
       // What an answer reads that takes I/O comes from the loader alone; the prepare test checks it.
-      const expected = decide({ ...world, prepared: loaded.prepared }, e, now);
+      const whole = {
+        ...world,
+        window: windowOf(world, { ...window, share: 0.9 }),
+        prepared: loaded.prepared
+      };
+      const expected = decide(whole, e, now);
       assert.deepStrictEqual(
-        named(got),
-        named(expected),
+        unput(got),
+        unput(expected),
         `the loaded rows decide as the whole office does, ${at}`
       );
       events++;
-      if (!('change' in expected)) continue;
+      if (!('change' in expected && 'change' in got)) continue;
       changes++;
-      world = applyChange(world, expected.change);
+      changedBy.add(e.kind);
+      const before = world;
+      world = applyAtSerials(before, expected.change, next);
+      assert.deepStrictEqual(
+        applyAtSerials(before, got.change, next),
+        world,
+        `the loaded rows' puts leave the office as the whole office's do, ${at}`
+      );
       if (e.kind === 'runClaimed' && 'change' in got)
         joined.set(
           e.id,
           (got.change.result as { joined: { id: number }[] }).joined.map((g) => g.id)
         );
       const rows = await readRows();
-      for (const table of ['threads', 'followUps', 'asks', 'tasks'] as const)
+      for (const table of TABLE_KEYS)
         assert.deepStrictEqual(rows[table], world[table], `${table} read back as in memory, ${at}`);
       const written = await writtenAfter(last);
       assert.deepStrictEqual(written, outsideOf(expected.change), `reports and pokes, ${at}`);
@@ -513,8 +735,12 @@ test('every runs and answers event decides on the loaded rows as on the whole of
       };
     }
   }
-  // A run that changed nothing would check nothing.
-  assert.ok(changes > SEEDS * 4, `${changes} of ${events} events changed rows`);
+  // A kind that never got through would check nothing of its loader or its writes.
+  assert.deepStrictEqual(
+    [...changedBy].sort(),
+    KINDS.toSorted(),
+    `${changes} of ${events} events changed rows`
+  );
   assert.deepStrictEqual(calls, [], 'no decider ran an effect while deciding');
 });
 
@@ -712,13 +938,6 @@ async function loadLocked(e: WorkEvent): Promise<{ rows: WorkRows; locks: Lock[]
   return { rows, locks };
 }
 
-const TABLES = {
-  threads: 'threads',
-  asks: 'asks',
-  tasks: 'tasks',
-  followUps: 'follow_ups'
-} as const;
-
 const WRITES_HERE = new Set<WorkEvent['kind']>([
   'handedOff',
   'toldLead',
@@ -801,33 +1020,14 @@ test('every loader locks in the one table order each row its decider reads, and 
     { kind: 'parked', staffId: 'lia', threadId: 2, on: { at: minutes(30) }, worksOn: new Set() },
     // Thread 7, which the window's ask 8 holds, due: the ask leaves the desk with it.
     { kind: 'clockWoke', threadId: 7 },
-    {
-      kind: 'oddRemoved',
-      staffId: 'cal',
-      line: { kind: 'hire', actor: 'owner', title: 'Let Cal go', body: 'Cal left.' },
-      about: new Map(),
-      effects: { stopRuns: () => {} }
-    },
-    {
-      kind: 'oddBroughtBack',
-      staffId: 'gus',
-      line: { kind: 'hire', actor: 'owner', title: 'Brought Gus back', body: 'Gus is back.' }
-    }
+    leaving('cal'),
+    // Ask 13 is another ask to bring Gus back, which the bring-back withdraws.
+    bringingBack('gus')
   ];
   await db
     .update(threads)
     .set({ resumeAt: minutes(-1) })
     .where(eq(threads.id, 7));
-  // 13: another ask to bring Gus back, which the bring-back withdraws.
-  await db.insert(asks).values({
-    staffId: 'lia',
-    kind: 'bring_back',
-    odd: 'gus',
-    title: 'Bring Gus back?',
-    why: 'w',
-    ifApproved: 'i',
-    createdAt: T0
-  });
   const every = new Set<string>();
   for (const e of events) {
     const { rows, locks } = await loadLocked(e);
@@ -954,27 +1154,6 @@ test('an answer runs its effects after its commit, never while it is decided', a
   calls.length = 0;
 });
 
-/** The usage window past its guard, resetting long after ask 8 was raised, so no ask of this window is on the desk yet. */
-async function windowPastGuard(): Promise<Date> {
-  const resetsAt = minutes(400);
-  await db.insert(planLimits).values({ fiveHour: 0.9, fiveHourResetsAt: resetsAt, sevenDay: 0.1 });
-  return resetsAt;
-}
-
-/** A hand-off from Lia, on work it leads or on new work it opens. */
-const handOffOf = (
-  thread: EventOf<'handedOff'>['thread'],
-  more: Partial<EventOf<'handedOff'>> = {}
-): EventOf<'handedOff'> => ({
-  kind: 'handedOff',
-  from: 'lia',
-  to: 'cal',
-  work: { title: 'Check it', brief: 'Check.' },
-  thread,
-  carry: [],
-  ...more
-});
-
 test('the usage window ask goes under the earliest hired manager, whatever their names', async () => {
   await seedOffice();
   const manager = { role: MANAGER_ROLE, variant: 'v', portrait: 'p', remit: 'r', desk: 'd' };
@@ -993,20 +1172,6 @@ test('the usage window ask goes under the earliest hired manager, whatever their
   );
 });
 
-/**
- * Moves each serial past the ids a decider guesses for new rows, the next
- * after the highest it loaded, so a guessed id written anywhere shows. Each
- * table starts at its own hundred, so an id taken from the wrong table shows too.
- */
-async function idsOffset(): Promise<void> {
-  for (const [table, last] of [
-    ['threads', 100],
-    ['asks', 200],
-    ['follow_ups', 300]
-  ] as const)
-    await db.execute(sql`select setval(pg_get_serial_sequence(${table}, 'id'), ${last})`);
-}
-
 /** A file outside the office for a hand-off to carry. */
 function fileToCarry(): { real: string; name: string; named: string } {
   const real = join(mkdtempSync(join(tmpdir(), 'oddboro-carry-')), 'notes.md');
@@ -1016,8 +1181,8 @@ function fileToCarry(): { real: string; name: string; named: string } {
 
 test('a hand-off the usage window holds on work already open points the work at the new window ask', async () => {
   await seedOffice();
-  await idsOffset();
-  const resetsAt = await windowPastGuard();
+  await idsOffset(await readRows());
+  const { resetsAt } = await windowPastGuard();
   const { got } = await run(handOffOf({ id: 2 }), minutes(1));
   assert.ok('change' in got, 'the hand-off is held, and its change commits');
   const [asked] = await db.select().from(asks).orderBy(desc(asks.id)).limit(1);
@@ -1031,7 +1196,7 @@ test('a hand-off the usage window holds on work already open points the work at 
 
 test('a hand-off that opens new work copies its files into that work by its real number', async () => {
   await seedOffice();
-  await idsOffset();
+  await idsOffset(await readRows());
   const file = fileToCarry();
   const { got } = await run(
     handOffOf({ open: { title: 'New work', hubId: 'lia' } }, { carry: [file] }),
@@ -1045,7 +1210,7 @@ test('a hand-off that opens new work copies its files into that work by its real
 
 test("a taken hand-off's result names the real run and work, never the decider's guesses", async () => {
   await seedOffice();
-  await idsOffset();
+  await idsOffset(await readRows());
   const { got } = await run(handOffOf({ open: { title: 'New work', hubId: 'lia' } }), minutes(1));
   assert.ok('change' in got);
   const result = got.change.result as WorkResults['handedOff'];
