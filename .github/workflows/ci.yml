@@ -102,6 +102,13 @@ jobs:
           NODE_OPTIONS: --test-reporter=spec --test-reporter-destination=stdout --test-reporter=../../scripts/test-times.ts --test-reporter-destination=${{ runner.temp }}/test-times/office.jsonl
         run: npx turbo run test --filter=@oddboro/office
 
+      # The release scripts' Node tests, then the shell's own Rust tests.
+      - name: Desktop tests
+        timeout-minutes: 10
+        env:
+          NODE_OPTIONS: --test-reporter=spec --test-reporter-destination=stdout --test-reporter=../../scripts/test-times.ts --test-reporter-destination=${{ runner.temp }}/test-times/desktop.jsonl
+        run: npx turbo run test --filter=@oddboro/desktop
+
       # Where the test time went, on the run's summary page: each suite's
       # total, the slowest tests and files, and any file that started but
       # never ended. It runs after a failed or timed-out test step too, and
