@@ -41,6 +41,10 @@ import { record } from './office-ledger.ts';
 import { ask } from './office-asks.ts';
 import { task, taskEnd, ownRunOf } from './office-tasks.ts';
 import { ownerName } from './office-usage.ts';
+import { CUT_OFF_RESULT, OUTCOME_TITLE } from './work/runs.ts';
+
+/** The run words live with the run's deciders; kept here too for this file's importers. */
+export { CUT_OFF_RESULT, OUTCOME_TITLE };
 
 // Follow-ups: work a staffer owes once the owner answers it or finishes a task it
 // gave them. The office starts each one as soon as it is written.
@@ -257,60 +261,6 @@ export async function startFollowUp(
 }
 
 /**
- * The ledger title of each follow-up as it ends, before what it was about. The
- * owner reads these in the Ledger window, so none names a thread or a hand-off.
- */
-export const OUTCOME_TITLE: Record<FollowUpKind, Record<Outcome, string>> = {
-  carry_out: { done: 'Did', failed: 'Failed', waiting: 'Waiting on {owner} for' },
-  rework: { done: 'Reworked', failed: 'Could not rework', waiting: 'Reworked' },
-  denied: {
-    done: 'Took in the no on',
-    failed: 'Could not take in the no on',
-    waiting: 'Waiting on {owner} after the no on'
-  },
-  task_done: {
-    done: 'Picked up after',
-    failed: 'Could not pick up after',
-    waiting: 'Waiting on {owner} after'
-  },
-  first_day: {
-    done: 'First day',
-    failed: 'First day stalled',
-    waiting: 'First day, waiting on {owner}'
-  },
-  goal: {
-    done: 'Planned the goal',
-    failed: 'Could not plan the goal',
-    waiting: 'Brought {owner} the plan for the goal'
-  },
-  hand_off: {
-    done: 'Did work a colleague handed over',
-    failed: 'Could not do work a colleague handed over',
-    waiting: 'Waiting on {owner} for work a colleague handed over'
-  },
-  handed_back: {
-    done: 'Picked up what a colleague finished',
-    failed: 'Could not pick up what a colleague finished',
-    waiting: 'Waiting on {owner} after a colleague finished'
-  },
-  resume: {
-    done: 'Picked back up',
-    failed: 'Could not pick back up',
-    waiting: 'Waiting on {owner} after picking back up'
-  },
-  answered: {
-    done: 'Acted on your answer to',
-    failed: 'Could not act on your answer to',
-    waiting: 'Waiting on {owner} after your answer to'
-  },
-  edited: {
-    done: "Read {owner}'s edit to",
-    failed: "Could not read {owner}'s edit to",
-    waiting: 'Waiting on {owner} after their edit to'
-  }
-};
-
-/**
  * A colleague's result that no lead takes, since the lead that handed it the
  * work left the office (`leadLeft`): nothing picks the work up. The owner
  * ruled that nothing goes on the desk for it. The colleague, the last Odd on
@@ -511,10 +461,6 @@ async function giveWaitBack(
 function endedAs(t: TaskRow): TaskEnded {
   return t.status === 'done' ? 'done' : t.withdrawn ? 'withdrawn' : 'dropped';
 }
-
-/** The result of a run a restart cut off. */
-export const CUT_OFF_RESULT =
-  'The office restarted while this was running, so it may be half done. Check it, then ask the Odd to finish it.';
 
 /**
  * Follow-ups a restart cut off mid-run. They fail rather than run twice.
