@@ -133,7 +133,7 @@ export function answerLead(
 ): number | undefined {
   const lead = r.threads.get(threadId)!.hub;
   const leadLeft = left(r, lead);
-  // A wake with no line leaves no marker to find, so R13 checks its row instead.
+  // A wake with no line leaves no marker to find, so the test checks the lead has a queued resume instead.
   if (marker !== null)
     r.expected.delivered.push({ lead, threadId, kind: 'resume', marker, leadLeft });
   if (leadLeft) {
@@ -338,7 +338,7 @@ const count = (r: Model, key: string) => r.raised.set(key, (r.raised.get(key) ??
 
 export function raise(r: Model, a: NewAsk): void {
   count(r, raiseKey(a));
-  // An Odd that left puts nothing on the desk (R10), whatever its run still does.
+  // An Odd that left puts nothing on the desk (nothing stays open for an Odd that left), whatever its run still does.
   if (left(r, a.staffId)) {
     r.expected.refused = 'not taken';
     meet('an ask raised by an Odd that left');
@@ -585,7 +585,7 @@ function hearAsk(
 
 /**
  * A held hand-off starts as the first of a new round; done or failed work
- * opens again for it. One for a colleague that left since never goes (R10):
+ * opens again for it. One for a colleague that left since never goes (nothing stays open for an Odd that left):
  * its lead hears so (`answerHandOffs`). One the usage window holds waits for
  * it, as a new hand-off does, and its lead hears so too.
  */

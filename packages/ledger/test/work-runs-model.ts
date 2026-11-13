@@ -71,7 +71,7 @@ function answeredAll(r: Model, handOffId: number): boolean {
 export function queue(r: Model, e: Extract<WorkEvent, { kind: 'runQueued' }>): void {
   r.owedSent.add(OWED.indexOf(e));
   const o = e.run;
-  // An Odd that left is owed nothing (R10): its leaving failed every run it had.
+  // An Odd that left is owed nothing (nothing stays open for an Odd that left): its leaving failed every run it had.
   if (left(r, o.staffId)) {
     meet('a run owed to an Odd that left');
     return;
