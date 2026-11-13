@@ -13,24 +13,27 @@ import type { After } from '../src/transition.ts';
 import { decide } from '../src/work/decide.ts';
 import type { EventOf } from '../src/work/events.ts';
 import { handOffProblem } from '../src/work/hand-offs.ts';
-import { applyChange, type Change, type LedgerLine, type WorkRows } from '../src/work/snapshot.ts';
+import { applyChange, type LedgerLine, type WorkRows } from '../src/work/snapshot.ts';
 import { threadRow, type FollowUp, type Thread } from '../src/work/state.ts';
-import { ask, minutes, odd, rowsOf, run, T0, task, thread } from './work-rows.ts';
+import {
+  ask,
+  changed,
+  minutes,
+  odd,
+  pokesOf,
+  reportsOf,
+  rowsOf,
+  run,
+  T0,
+  task,
+  thread
+} from './work-rows.ts';
 
 const NOW = minutes(10);
 const TITLE = 'Sort the invoices';
 /** What the clock's wake after a usage-window hold tells the lead, as today. */
 const WINDOW_RESET =
   'The usage window has reset, so hand-offs run again. Hand on the work the office held.';
-
-/** A change the decider made, failing the test on a refusal. */
-function changed<R>(d: { refused: string } | { change: Change<R> }): Change<R> {
-  if ('refused' in d) assert.fail(`refused: ${d.refused}`);
-  return d.change;
-}
-
-const pokesOf = (c: Change) => c.outside.flatMap((o) => (o.kind === 'poke' ? [o] : []));
-const reportsOf = (c: Change) => c.outside.flatMap((o) => (o.kind === 'report' ? [o] : []));
 
 /** The queued `resume` runs of `staffId` on thread `threadId`. */
 const queuedResumes = (rows: WorkRows, staffId: string, threadId: number): FollowUp[] =>
