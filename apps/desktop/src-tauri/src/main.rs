@@ -504,7 +504,10 @@ mod tests {
 
     #[test]
     fn the_launch_line_names_what_the_shell_opens() {
-        assert_eq!(opening(Some("http://127.0.0.1:4650"), 4500), "server http://127.0.0.1:4650");
+        assert_eq!(
+            opening(Some("http://127.0.0.1:4650"), 4500),
+            "server http://127.0.0.1:4650"
+        );
         assert_eq!(opening(None, 4590), "port 4590");
     }
 }
