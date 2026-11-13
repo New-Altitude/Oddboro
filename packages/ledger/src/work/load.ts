@@ -134,13 +134,7 @@ const SEEDS: {
     };
   },
   taskGiven: async (tx, { task, oneOpen }) => {
-    // Under READ COMMITTED, two transactions could each find no open connect
-    // task and each insert one, so one for the same tool waits on the other.
-    // Taken before any row lock, as `lockDesk` is.
-    if (oneOpen)
-      await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtext(${`connect:${oneOpen.connector}`}))`
-      );
+    if (oneOpen) await lockConnector(tx, oneOpen.connector);
     return {
       staff: one(task.staffId),
       threads: one(task.threadId),
@@ -161,6 +155,7 @@ const SEEDS: {
     };
   },
   connectTasksDropped: async (tx, e) => {
+    await lockConnector(tx, e.connector);
     // Only the tool's own tasks, so a park on any other open task cannot fail the drop.
     const open = await tx
       .select({ id: tasks.id, steps: tasks.steps })
@@ -511,6 +506,15 @@ const openTasksOf = (staffId: string | undefined): SQL | undefined =>
 /** Their ids. */
 const openTaskIds = (tx: Tx, staffId: string | undefined): Promise<number[]> =>
   idsOf(tx, tasks, openTasksOf(staffId));
+
+/**
+ * One transaction at a time on a tool's connect tasks, the first statement
+ * of each seed that reads them, before any row lock, as `lockDesk` is. Under
+ * READ COMMITTED, two gives could each find no open connect task and each
+ * insert one, and a drop could miss a task given after its read and leave it open.
+ */
+const lockConnector = (tx: Tx, connector: string) =>
+  tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`connect:${connector}`}))`);
 
 /**
  * The asks the owner's one answer settled with `from`: of a twinned kind,
