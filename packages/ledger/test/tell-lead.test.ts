@@ -382,20 +382,25 @@ test("a file the office could not copy is named in the lead's note as not come, 
 test("a removal landing while tell_lead passes the owner's words waits for it, so 'Passed to' always means the lead's pick-up holds the words", async (t) => {
   await db.insert(staff).values([odd('ivy', 'Ivy'), odd('kit', 'Kit')]);
   const work = await onThread('ivy', 'kit', 'Work its lead leaves');
-  const handOffs = await import('../src/hand-offs.ts');
+  const sharing = await import('../src/sharing.ts');
   const { removeOdd } = await import('../src/leaving.ts');
   let removal: Promise<unknown> | undefined;
-  t.mock.module(new URL('../src/hand-offs.ts', import.meta.url).href, {
+  t.mock.module(new URL('../src/sharing.ts', import.meta.url).href, {
     namedExports: {
-      ...handOffs,
-      // Synchronous, as the real one is: the removal starts, and is not awaited.
-      carryEach: (...a: Parameters<typeof handOffs.carryEach>) => {
+      ...sharing,
+      // tell_lead reads the tools after its checks and before the note. The
+      // removal starts here and gets a quarter second to land: where the
+      // checks and the note are separate steps it lands in that time, and the
+      // lead it removed never gets the note; here it waits for the note's
+      // transaction, so the time runs out and the note goes first.
+      heldTools: async (...a: Parameters<typeof sharing.heldTools>) => {
         removal = removeOdd('ivy');
-        return handOffs.carryEach(...a);
+        await Promise.race([removal, new Promise((done) => setTimeout(done, 250))]);
+        return sharing.heldTools(...a);
       }
     }
   });
-  // A copy that imports the hand-offs above, so its tellLead calls them.
+  // A copy that imports the sharing above, so its tellLead calls it.
   // The query loads a fresh copy of the module, whose type is the module's own.
   const fresh = '../src/threads.ts?removal';
   const { tellLead: telling } = (await import(fresh)) as typeof import('../src/threads.ts');
@@ -404,14 +409,15 @@ test("a removal landing while tell_lead passes the owner's words waits for it, s
     threadId: work,
     said,
     words: 'make the colours warmer.',
-    reading
+    reading,
+    exchange: 'Sam: make the colours warmer.\nKit: I will pass it on.'
   });
-  assert.ok(removal, 'the copy never ran');
-  await removal;
+  assert.ok(removal, 'the tools were never read');
+  assert.equal(await removal, undefined, 'the removal was refused');
   assert.ok('lead' in r, JSON.stringify(r));
   const notes = (await resumes(work)).filter((f) => f.staffId === 'ivy').map((f) => f.note ?? '');
   assert.ok(
     notes.some((n) => n.includes("Sam's words: make the colours warmer.")),
-    JSON.stringify(notes)
+    `tellLead returned ${JSON.stringify(r)}, and the lead's pick-ups hold ${JSON.stringify(notes)}`
   );
 });
