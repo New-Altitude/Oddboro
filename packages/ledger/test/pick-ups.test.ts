@@ -142,6 +142,25 @@ test('a no that comes while the colleague still runs goes back, and its run endi
   assert.equal(line.status, 'failed');
 });
 
+test('an ask tied to its hand-off alone, with no thread, still counts: a no while the colleague runs leaves its waiting end nothing stale to send', async () => {
+  const h = await give('paige', 'Price the hall');
+  assert.ok(await O.startFollowUp(h.id));
+  // `raises` also links the thread, which reaches the ask a second way.
+  const { ask } = await O.raiseAsk('paige', {
+    title: 'Call the hall',
+    why: 'The work needs it.',
+    ifApproved: 'I do it.',
+    handOffId: h.id
+  });
+  await O.decideAsk(ask.id, 'deny', null);
+  await O.finishFollowUp(h, 'Price the hall', 'waiting', 'Asked to call the hall.');
+  const backs = await onThread(h.threadId ?? 0, 'handed_back');
+  assert.deepEqual(
+    backs.map((b) => [b.handOff?.outcome, !!b.handOff?.answered]),
+    [['failed', true]]
+  );
+});
+
 test("a yes that comes while the colleague still runs starts its carry-out only once that run ends, and only the carry-out's result goes back", async () => {
   const h = await give('rex', 'Draft the invite');
   assert.ok(await O.startFollowUp(h.id));
