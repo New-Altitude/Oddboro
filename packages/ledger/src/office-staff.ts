@@ -323,6 +323,8 @@ export type Hire = Pick<
   StaffRow,
   'name' | 'role' | 'variant' | 'portrait' | 'room' | 'remit' | 'desk'
 > & {
+  /** Its home seat in that room (a floor spot id); any free seat there when left out. */
+  seat?: string | null;
   /** Its level; `HIRE_DEFAULTS` when left out. */
   permission?: Level;
   /** The office they work in, by name. */
@@ -391,6 +393,24 @@ export async function setLook(
   await saveParts(newParts, id);
   await db.update(staff).set({ look, portraitPx }).where(eq(staff.id, id));
   await record({ kind: 'work', actor: 'owner', title: `Redrew ${who.name}'s look` });
+}
+
+/**
+ * Give an Odd a new home: a room, and a seat in it or none for any free one.
+ * The caller checks both against the floor; `words` are their names there.
+ * The ledger keeps the change. A move to the home it has changes nothing.
+ */
+export async function setHome(
+  id: string,
+  home: { room: string; seat: string | null },
+  words: { room: string; seat?: string }
+): Promise<void> {
+  const who = await staffer(id);
+  if (!who) throw fixedError('No such Odd');
+  if (who.room === home.room && who.seat === home.seat) return;
+  await db.update(staff).set(home).where(eq(staff.id, id));
+  const where = words.seat ? `${words.seat} in ${words.room}` : words.room;
+  await record({ kind: 'work', actor: 'owner', title: `Moved ${who.name}'s home to ${where}` });
 }
 
 export async function hire(h: Hire): Promise<StaffRow> {

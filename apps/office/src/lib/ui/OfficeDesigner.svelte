@@ -74,7 +74,8 @@
     break: 'break room',
     library: 'library',
     gym: 'gym',
-    mail: 'mail room'
+    mail: 'mail room',
+    meeting: 'meeting room'
   };
 
   $effect(() => {

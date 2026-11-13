@@ -172,8 +172,11 @@ change.
   checks that Stop and Send now select only the named attempt.
 - **A room kind.** Start at `ROOM_KINDS` in `packages/world/src/generate.ts`.
   Check-types fails at `KIND_ABOUT` and `ROOM_ID`. No check: its furnishing
-  in `recipe()`, and the rooms an Odd names in a hire proposal (`hireFields`
-  in `mcp-run.ts`), which list Main Street's by hand.
+  in `recipe()`, its label in `KIND` in `OfficeDesigner.svelte`, the prefix
+  in `ROOM_PREFIX` (`places.ts`), the role words that suggest it as a home
+  (`RULES` in `apps/office/src/lib/staff/home.ts`), and the rooms an Odd
+  names in a hire proposal (`hireFields` in `mcp-run.ts`), which list Main
+  Street's by hand.
 - **A migration.** After a schema change, `npm run db:generate` writes it; a
   trigger, function or row goes in one by hand. `migrations.test.ts` fails a
   journal entry out of order or a file with no entry. No check runs it

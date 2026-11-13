@@ -58,6 +58,7 @@ export {
   lookCatalogue,
   drawnParts,
   setLook,
+  setHome,
   hire
 } from './office-staff.ts';
 export {

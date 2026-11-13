@@ -1,7 +1,7 @@
 <script lang="ts">
   // An Odd's info page, opened from its name in the panel's header: one
   // scrolling page of sections, the most useful first. Who it is and what it
-  // is doing now, with what its runs go through; what is in progress; its
+  // is doing now, with what its runs go through; its home; what is in progress; its
   // jobs, each to edit, with when it runs next; its job description; its
   // stats; its look, to redraw, with Send to a place; and Remove from the
   // office, which asks once on the page before it lets the Odd go. The
@@ -15,9 +15,11 @@
   import JobsSection from './JobsSection.svelte';
   import LookStudio from './LookStudio.svelte';
   import WorkSection from './WorkSection.svelte';
+  import HomeSection from './HomeSection.svelte';
   import { call } from './api.ts';
   import type { Work } from '../staff/work.ts';
   import { ACTIVITY_LABEL, type Activity, type StaffProfile } from '../staff/roster.ts';
+  import type { HomeRoom } from '../staff/home.ts';
 
   type Props = {
     profile: StaffProfile;
@@ -27,9 +29,11 @@
     work: Work[];
     /** Bumped to scroll to In progress. */
     focus: number;
+    /** Every room an Odd can live in, with its seats. */
+    homes: HomeRoom[];
     onsend: () => void;
   };
-  let { profile, activity, version, working, work, focus, onsend }: Props = $props();
+  let { profile, activity, version, working, work, focus, homes, onsend }: Props = $props();
 
   let inProgress = $state<HTMLElement>();
   $effect(() => {
@@ -121,6 +125,8 @@
       >{LEVEL_LABEL[profile.permission]} · Hired {hired}</span
     >
   </p>
+
+  <HomeSection {profile} {homes} />
 
   <div bind:this={inProgress} class="scroll-mt-3">
     <WorkSection {profile} items={work} />

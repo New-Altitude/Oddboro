@@ -26,7 +26,8 @@ import {
   OFFICE_ACCOUNT,
   officeAgent,
   offeredAgent,
-  parseLevel
+  parseLevel,
+  roster
 } from '@oddboro/ledger';
 import { parseSchedule } from '#lib/server/schedule.ts';
 import { firstDay } from '#lib/server/staff.ts';
@@ -35,9 +36,12 @@ import { currentOffice } from '#lib/server/space.ts';
 import { drawnFrom, problemsWith } from '#lib/server/looks.ts';
 import { toProfile } from '#lib/server/profile.ts';
 import { LIMITS } from '#lib/staff/roster.ts';
+import { seatProblem } from '#lib/staff/home.ts';
 import type { RequestHandler } from './$types';
 
-type Body = Partial<Record<'name' | 'role' | 'room' | 'permission' | 'remit' | 'desk', string>> & {
+type Body = Partial<
+  Record<'name' | 'role' | 'room' | 'seat' | 'permission' | 'remit' | 'desk', string>
+> & {
   tools?: unknown;
   agent?: unknown;
   account?: unknown;
@@ -74,6 +78,9 @@ export const POST: RequestHandler = async ({ request }) => {
   const problems = await problemsWith(drawn);
   if (problems.length) error(400, problems.join('; '));
   if (!rooms.has(room)) error(400, 'Pick a room on the floor');
+  const seat = typeof b.seat === 'string' && b.seat ? b.seat : null;
+  const seatWrong = seat && seatProblem(office.world.spots, room, seat, await roster());
+  if (seatWrong) error(400, seatWrong);
   if (!permission) error(400, 'Pick read, draft or act');
   // Left out, the hire runs on the column's default, Claude Code.
   const agent = b.agent === undefined ? undefined : offeredAgent(b.agent, currentPlatform());
@@ -111,6 +118,7 @@ export const POST: RequestHandler = async ({ request }) => {
       remit,
       desk,
       room,
+      seat,
       permission,
       agent,
       account,

@@ -466,6 +466,15 @@ const TRY: Record<Recording, (send: Send) => Promise<void>> = {
       params: { id: 'sam' },
       body: { text: 'You are Sam, who tests.', was: (await L.staffer('sam'))!.desk }
     }),
+  // Sam moves to the first room with a seat, at its first seat.
+  'PUT /api/staff/[id]/home': async (send) => {
+    const office = await currentOffice();
+    const seat = office.world.spots.find((s) => s.activity === 'work')!;
+    await send({
+      params: { id: 'sam' },
+      body: { room: seat.room.split('#')[0], seat: seat.id }
+    });
+  },
   'PUT /api/staff/[id]/look': (send) => {
     const l = look();
     return send({ params: { id: 'sam' }, body: { look: l.look, portraitPx: l.portraitPx } });

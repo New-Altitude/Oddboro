@@ -35,7 +35,8 @@ export const ROOM_KINDS = [
   'break',
   'library',
   'gym',
-  'mail'
+  'mail',
+  'meeting'
 ] as const;
 export const WALLS = ['plaster', 'brick', 'teal'] as const;
 export const FLOORS = ['oak', 'carpet', 'tile', 'rubber'] as const;
@@ -164,7 +165,9 @@ export const KIND_ABOUT: Record<RoomKind, string> = {
   break: 'a couch, a TV, arcade machines and beanbags: where Odds rest and play',
   library: 'shelves, armchairs and a reading table: where Odds read',
   gym: 'treadmills, weights, a bike and mats: where Odds exercise',
-  mail: 'a sorting table where mail and intake come in (one work seat)'
+  mail: 'a sorting table where mail and intake come in (one work seat)',
+  meeting:
+    'a meeting table with chairs and a whiteboard: where Odds working on one piece of work together sit'
 };
 
 /** Extras any room can ask for, and what each one is. */
@@ -1382,6 +1385,21 @@ function recipe(f: Furnisher, spec: RoomSpec): Piece[] {
       if (n >= 1) out.push(back(it('gym-treadmill')), back(it('gym-rack')));
       if (n >= 2) out.push(floor(it('gym-bench'), it('gym-kettlebells', 2, 1)));
       break;
+    case 'meeting': {
+      const table = (k: number) =>
+        must(
+          floor(
+            ...[0, 1, 2, 3].map((x) =>
+              it('kitchen-chair', x, 0, { variant: f.nth('kitchen-chair', x + k) })
+            ),
+            it('meeting-table', 0, 1, { variant: 'walnut' })
+          )
+        );
+      out.push(center(table(0)), wall('whiteboard'), wall('wall-clock'));
+      if (n >= 2) out.push(table(1));
+      out.push(corner('plant-tall'), corner('floor-lamp'), corner('plant-fern'));
+      break;
+    }
     case 'mail':
       out.push(
         center(must(floor(it('mail-sort-table')))),
@@ -1628,7 +1646,8 @@ const ROOM_ID: Record<RoomKind, string> = {
   break: 'break-room',
   library: 'library',
   gym: 'gym',
-  mail: 'mail-room'
+  mail: 'mail-room',
+  meeting: 'meeting-room'
 };
 
 /** Turn a spec into a floor plan and its rooms. Check the spec first. */

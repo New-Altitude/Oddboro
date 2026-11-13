@@ -42,6 +42,11 @@ export const staff = pgTable('staff', {
   portrait: text().notNull(),
   /** The room template it works in. */
   room: text().notNull().default('workspace'),
+  /**
+   * Its home seat in that room: the floor's spot id, like `workspace#0/desk#2/seat`.
+   * Null lets it take any free seat there. A move to another layout clears it.
+   */
+  seat: text(),
   permission: text().$type<Level>().notNull().default(HIRE_DEFAULTS.staff.permission),
   /** The coding tool its runs go through. The owner picks it at hire and on the Settings tab. */
   agent: text().$type<Agent>().notNull().default('claude'),

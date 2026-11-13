@@ -207,6 +207,7 @@ export const OWNER_ACTIONS = {
   'PUT /api/staff/[id]/description': { records: 'work' },
   'POST /api/staff/[id]/jobs': { none: NO_ROW },
   'PUT /api/staff/[id]/look': { records: 'work' },
+  'PUT /api/staff/[id]/home': { records: 'work' },
   // Marks the Odd's delivered pokes read as its chat shows them.
   'POST /api/staff/[id]/pokes': { none: NO_ROW },
   'POST /api/staff/draft': {

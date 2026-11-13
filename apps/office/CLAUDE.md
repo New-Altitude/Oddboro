@@ -57,7 +57,16 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    `setZone` before it shows a time.
 4. Each Odd is a `StaffActor` (`src/lib/floor/staff.ts`). It walks to a
    free spot for its activity, preferring its own `room` for work, intake and
-   reading. Where it stands is real state: an open ask or task from it puts
+   reading, and there its home seat (`seat`) whenever that is free; another
+   Odd's home seat counts as taken (`taken` in the page). The owner sets the
+   home under Home on the info page (`HomeSection.svelte`,
+   `PUT /api/staff/[id]/home`), and the hire window's Where step suggests one
+   from the role (`suggestHome` in `src/lib/staff/home.ts`). While a
+   colleague runs on work its lead handed it, the two sit together at a
+   meeting table (`meet` spots) in the first meeting room with a seat for
+   both (`meetingRooms` in `src/lib/staff/meetings.ts`), and the lead's tag
+   reads as with its colleague, not waiting on it; with no meeting room they
+   stay at their seats. Where it stands is real state: an open ask or task from it puts
    it outside the owner's door (`wait`), a running job puts it to work in its room,
    and so does a thread of its own a colleague holds (its tag reads "Waiting on
    <colleague>"; `wantOf` in the page), and otherwise it wanders between work and breaks. A free Odd's own

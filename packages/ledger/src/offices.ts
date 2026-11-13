@@ -137,7 +137,8 @@ export async function moveIn(
         set: { rooms: now, updatedAt: new Date() }
       });
     // Everybody works in the one office, and the card says which.
-    await tx.update(staff).set({ office: to.name }).where(isNull(staff.leftAt));
+    // A seat is a spot on the floor it leaves, so every home seat goes with it.
+    await tx.update(staff).set({ office: to.name, seat: null }).where(isNull(staff.leftAt));
     // Moving back: everybody starts where they worked last time.
     const [before] = await tx.select().from(officeRooms).where(eq(officeRooms.office, to.key));
     for (const p of people) {

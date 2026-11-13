@@ -33,10 +33,13 @@
   import { call } from './api.ts';
   import { wins } from './windows.svelte.ts';
   import type { StaffProfile } from '../staff/roster.ts';
+  import type { HomeRoom, Suggestion } from '../staff/home.ts';
 
   type Props = {
-    /** Rooms on the floor a staffer can work in: template id and name. */
-    rooms: { id: string; name: string }[];
+    /** Rooms on the floor a staffer can live in, each with its seats. */
+    rooms: HomeRoom[];
+    /** A home for a hire with this role, with why. */
+    suggest: (hire: { role: string; remit?: string }) => Suggestion | undefined;
     /** A hire a staffer proposed. Hiring from it approves that ask. */
     from?: { askId: number; staff: string; proposal: HireProposal };
     /** The window this hire is open in. */
@@ -45,7 +48,7 @@
     /** A persona hired here joined, through its own sign-in: the window closes. */
     ondone: () => void;
   };
-  let { rooms, from, id, onhired, ondone }: Props = $props();
+  let { rooms, suggest, from, id, onhired, ondone }: Props = $props();
 
   // Hire opens on a choice: make an Odd, or hire a persona New Altitude offers
   // the owner's account. A proposal skips the choice: it opens on the builder,
@@ -128,6 +131,26 @@
   let look = $state<Drawn | undefined>();
   let appearance = $state('');
   let room = $state('');
+  /** Its home seat in that room; empty for any free one. */
+  let seat = $state('');
+  /** The home the office suggested, shown with its why until the owner picks another. */
+  let homeTip = $state<Suggestion>();
+  const seats = $derived(rooms.find((r) => r.id === room)?.seats ?? []);
+  const seatName = $derived(seats.find((s) => s.id === seat)?.label);
+  /** Pick a room: its first free seat comes with it. */
+  function pickRoom(id: string) {
+    room = id;
+    seat = rooms.find((r) => r.id === id)?.seats.find((s) => !s.owner)?.id ?? '';
+  }
+  // Reaching Where with no room picked yet, the office suggests one from the role.
+  $effect(() => {
+    if (step !== 1 || room) return;
+    const s = untrack(() => suggest({ role, remit }));
+    if (!s) return;
+    homeTip = s;
+    room = s.room;
+    seat = s.seat ?? '';
+  });
   let brief = $state('');
   let remit = $state('');
   let desk = $state('');
@@ -183,9 +206,9 @@
     role = p.role;
     remit = p.remit;
     permission = p.permission;
-    room =
-      rooms.find((r) => r.id === p.room || r.name.toLowerCase() === p.room?.toLowerCase())?.id ??
-      '';
+    pickRoom(
+      rooms.find((r) => r.id === p.room || r.name.toLowerCase() === p.room?.toLowerCase())?.id ?? ''
+    );
     tools = p.tools;
     appearance = p.appearance ?? '';
     if (p.job) {
@@ -262,6 +285,7 @@
         portraitPx: look?.portraitPx,
         newParts: look?.newParts,
         room,
+        seat: seat || null,
         permission,
         agent,
         account: pickedAccount,
@@ -529,17 +553,62 @@
           onbusy={(b) => (wins.busy[id] = b)}
         />
       {:else if step === 1}
-        <div class="text-xs text-muted">The room {name || 'they'} works in.</div>
+        <div class="text-xs text-muted">
+          Where {name || 'they'} lives: a room, and a seat of their own.
+        </div>
+        {#if homeTip}
+          {@const at = rooms.find((r) => r.id === homeTip?.room)}
+          <div class="rounded-xl bg-raise px-3 py-2 text-xs">
+            <div class="flex items-center justify-between gap-2">
+              <span class="font-medium text-ink"
+                >Suggested: {at?.name}{homeTip.seat
+                  ? `, ${at?.seats.find((s) => s.id === homeTip?.seat)?.label}`
+                  : ''}</span
+              >
+              {#if room !== homeTip.room || seat !== (homeTip.seat ?? '')}
+                <button
+                  class="text-sea hover:underline"
+                  onclick={() => {
+                    room = homeTip!.room;
+                    seat = homeTip!.seat ?? '';
+                  }}>Use this</button
+                >
+              {/if}
+            </div>
+            <div class="mt-0.5 text-muted">{homeTip.why}</div>
+          </div>
+        {/if}
         <div class="grid grid-cols-2 gap-2">
           {#each rooms as r (r.id)}
             <button
               class="rounded-xl px-3 py-2 text-start {room === r.id
                 ? 'bg-sea/25 ring-1 ring-sea'
                 : 'bg-raise'}"
-              onclick={() => (room = r.id)}>{r.name}</button
+              onclick={() => pickRoom(r.id)}>{r.name}</button
             >
           {/each}
         </div>
+        {#if seats.length}
+          <div class="text-xs text-muted">Their seat</div>
+          <div class="flex flex-wrap gap-1.5">
+            {#each seats as s (s.id)}
+              <button
+                class="rounded-lg px-2.5 py-1 text-xs disabled:opacity-50 {seat === s.id
+                  ? 'bg-sea/25 ring-1 ring-sea'
+                  : 'bg-raise'}"
+                disabled={!!s.owner}
+                title={s.owner ? `${s.owner.name}'s seat` : undefined}
+                onclick={() => (seat = s.id)}>{s.label}{s.owner ? ` · ${s.owner.name}` : ''}</button
+              >
+            {/each}
+            <button
+              class="rounded-lg px-2.5 py-1 text-xs {seat === ''
+                ? 'bg-sea/25 ring-1 ring-sea'
+                : 'bg-raise'}"
+              onclick={() => (seat = '')}>Any free seat</button
+            >
+          </div>
+        {/if}
       {:else if step === 2}
         <label class="flex flex-col gap-1">
           <span class="text-xs text-muted">What is the job, in a sentence?</span>
@@ -625,7 +694,7 @@
           </div>
           <div>
             <dt class="text-xs text-muted">Where</dt>
-            <dd>{rooms.find((r) => r.id === room)?.name}</dd>
+            <dd>{rooms.find((r) => r.id === room)?.name}{seatName ? `, ${seatName}` : ''}</dd>
           </div>
           <div>
             <dt class="text-xs text-muted">For</dt>

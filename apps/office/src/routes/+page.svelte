@@ -47,6 +47,8 @@
   import SidePanel from '#lib/ui/SidePanel.svelte';
   import { fly } from 'svelte/transition';
   import { placesFor, type Place } from '#lib/staff/places.ts';
+  import { homeRooms, suggestHome } from '#lib/staff/home.ts';
+  import { meetingRooms } from '#lib/staff/meetings.ts';
   import PixelIcon from '#lib/ui/PixelIcon.svelte';
   import { call, type ApiUrl } from '#lib/ui/api.ts';
   import { setZone, zone, zoneName, zoneShort } from '@oddboro/ledger/time';
@@ -322,6 +324,14 @@
       ...Object.keys(messages)
     ])
   );
+  /** The meeting room each Odd sharing live work sits in, by Odd id. */
+  const meetings = $derived(
+    meetingRooms(threads, {
+      spots: office.world.spots,
+      working: (id) => !!working[id],
+      waits: (id) => waiting.has(id)
+    })
+  );
   /** Each staffer's thread a colleague holds, or holds for its lead, in words. */
   const threadTags = $derived(
     Object.fromEntries(
@@ -330,7 +340,8 @@
         threadTag({
           id: p.id,
           threads,
-          working: !!working[p.id],
+          // A lead in a meeting is with its colleague, not waiting on it.
+          working: !!working[p.id] || !!meetings[p.id],
           nameOf: (id) => staff.find((s) => s.id === id)?.name ?? id
         })
       ])
@@ -354,18 +365,9 @@
       (desk.away.length ? 1 : 0)
   );
 
-  /** Rooms a new hire can work in: any with a place to work, read or sort mail. */
-  const hireRooms = $derived.by(() => {
-    const out = new Map<string, string>();
-    for (const r of world.rooms) {
-      const id = r.id.split('#')[0];
-      const works = office.world.spots.some(
-        (s) => s.room === r.id && ['work', 'intake', 'read'].includes(s.activity)
-      );
-      if (works && !out.has(id)) out.set(id, r.name);
-    }
-    return [...out].map(([id, name]) => ({ id, name }));
-  });
+  /** Rooms an Odd can live in, any with a place to work, read or sort mail, each with its seats. */
+  const homes = $derived(homeRooms(world, office.world.spots, staff));
+  const suggest = (hire: { role: string; remit?: string }) => suggestHome(hire, homes, staff);
 
   // Idle staff wander between these, mostly working, with real breaks.
   const IDLE_WEIGHTS: Partial<Record<Activity, number>> = {
@@ -428,9 +430,18 @@
   const wantOf = (p: StaffProfile): Activity | undefined =>
     waiting.has(p.id)
       ? 'wait'
-      : working[p.id] || threadTags[p.id]?.waitsOn
-        ? jobActivity(p)
-        : undefined;
+      : meetings[p.id]
+        ? 'meet'
+        : working[p.id] || threadTags[p.id]?.waitsOn
+          ? jobActivity(p)
+          : undefined;
+
+  /** Send a staffer to do `want`: a meeting in its room, else work at its own seat. */
+  function sendFor(a: StaffActor, want: Activity | undefined, spots = office.world.spots) {
+    const id = a.profile.id;
+    if (want === 'meet' && a.assign('meet', spots, taken(a), meetings[id])) return true;
+    return a.assign(want && want !== 'meet' ? want : jobActivity(a.profile), spots, taken(a));
+  }
 
   const taken = (except?: StaffActor) => {
     const off = new Set(switchedOff);
@@ -438,6 +449,11 @@
       ...(actors
         .filter((a) => a !== except)
         .map((a) => a.spotId)
+        .filter(Boolean) as string[]),
+      // Another Odd's home seat is kept for it, there or not.
+      ...(staff
+        .filter((p) => p.id !== except?.profile.id)
+        .map((p) => p.seat)
         .filter(Boolean) as string[]),
       // Nobody works at a desk whose screen the owner switched off.
       ...office.world.spots.filter((s) => s.activity === 'work' && off.has(s.obj)).map((s) => s.id)
@@ -513,7 +529,11 @@
         const want = wantOf(p);
         forced[p.id] = want;
         const free = new Set(w.spots.map((s) => s.activity));
-        if (!a.assign(want ?? pickActivity(free, 'home'), w.spots, taken(a)))
+        if (
+          !(want
+            ? sendFor(a, want, w.spots)
+            : a.assign(pickActivity(free, 'home'), w.spots, taken(a)))
+        )
           a.assign('work', w.spots, taken(a));
         a.arrive();
       }
@@ -840,7 +860,8 @@
             const want = wantOf(a.profile);
             if (want !== forced[id]) {
               forced[id] = want;
-              a.assign(want ?? 'work', w.spots, taken(a));
+              if (want) sendFor(a, want, w.spots);
+              else a.assign('work', w.spots, taken(a));
             }
           }
           const now = performance.now();
@@ -1370,7 +1391,8 @@
               {:else if w.kind === 'hire'}
                 <HireDrawer
                   id={w.id}
-                  rooms={hireRooms}
+                  rooms={homes}
+                  {suggest}
                   from={w.from}
                   onhired={(p) => {
                     close(w.id, true);
@@ -1484,6 +1506,7 @@
             manual={!!manual[profile.id]}
             sentTo={manual[profile.id]}
             {held}
+            {homes}
             onsend={(place) => send(profile.id, place)}
             onschedule={() => backToSchedule(profile.id)}
             onchatstart={() => chatStart(profile.id)}
