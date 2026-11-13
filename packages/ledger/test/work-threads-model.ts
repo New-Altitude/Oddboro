@@ -425,6 +425,7 @@ export function newRounds(r: Model, e: WorkEvent, was: Map<number, string>): voi
   }
   if (e.kind !== 'askDecided' || e.decision !== 'approve') return;
   const a = askOf(r, e.id);
+  // One held for a colleague that left never went, so the new round has none.
   if (a?.kind === 'hand_offs' && a.held && a.threadId !== null && a.decidedAt === r.at)
-    r.threads.get(a.threadId)!.used = 1;
+    r.threads.get(a.threadId)!.used = left(r, a.held.to) ? 0 : 1;
 }

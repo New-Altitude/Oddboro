@@ -72,7 +72,8 @@ import {
 } from './work-threads-model.ts';
 
 // How many seeds the test runs; set WORK_SEQUENCES_SEEDS for a longer run.
-const SEEDS = Number(process.env.WORK_SEQUENCES_SEEDS ?? 200);
+// Enough that each rule's rarer cases meet, such as a run owed to an Odd that left.
+const SEEDS = Number(process.env.WORK_SEQUENCES_SEEDS ?? 1000);
 const LENGTH = 30;
 
 // OUTCOME_TITLE has a title for every outcome, so its keys are every outcome.
@@ -323,6 +324,19 @@ function broken(s: State, r: Model, events: WorkEvent[]): Broken[] {
   const newLines = (g: FollowUp) => notesOf(g).slice(notesOf(s.prev.followUps.get(g.id)).length);
   const touched = (g: FollowUp) => !s.prev.followUps.has(g.id) || newLines(g).length > 0;
 
+  // First, so work left open for an Odd that left reads as that, not as the
+  // thread or model mismatch it also makes. Only Odds this sequence let go:
+  // the seed's Theo left before it, holding the queued results the lead-left
+  // rule needs.
+  for (const id of r.letGo) {
+    const open = [
+      ...[...s.rows.asks.values()].filter((a) => a.staffId === id && a.status === 'open'),
+      ...[...s.rows.tasks.values()].filter((k) => k.staffId === id && k.status === 'open'),
+      ...[...s.rows.followUps.values()].filter((f) => f.staffId === id && f.run.is === 'queued')
+    ];
+    if (open.length > 0) fail(RULE.leftClosed, `${id} left, and holds ${show(open)}`);
+  }
+
   if (e.kind === 'runFinished' && (x.refused === 'ended') !== !change)
     fail(RULE.secondFinish, `run ${e.id}: expected ${x.refused ?? 'a change'}, got ${show(d)}`);
 
@@ -504,17 +518,6 @@ function broken(s: State, r: Model, events: WorkEvent[]): Broken[] {
       fail(RULE.onePark, `thread ${t.id} is parked ${show(t.park)}`);
   }
 
-  // Only Odds this sequence let go: the seed's Theo left before it, holding
-  // the queued results the lead-left rule needs.
-  for (const id of r.letGo) {
-    const open = [
-      ...[...s.rows.asks.values()].filter((a) => a.staffId === id && a.status === 'open'),
-      ...[...s.rows.tasks.values()].filter((k) => k.staffId === id && k.status === 'open'),
-      ...[...s.rows.followUps.values()].filter((f) => f.staffId === id && f.run.is === 'queued')
-    ];
-    if (open.length > 0) fail(RULE.leftClosed, `${id} left, and holds ${show(open)}`);
-  }
-
   if (x.broughtBack) {
     const back = s.rows.staff.get(x.broughtBack);
     const jobsOn = (change?.outside ?? []).some(
@@ -668,19 +671,6 @@ function loadedFor(rows: WorkRows, e: WorkEvent): WorkRows {
   };
 }
 
-/** The event comes from an Odd the record says left. */
-function fromLeft(r: Model, e: WorkEvent): boolean {
-  const by =
-    e.kind === 'askRaised'
-      ? e.ask.staffId
-      : e.kind === 'taskGiven'
-        ? e.task.staffId
-        : e.kind === 'runQueued'
-          ? e.run.staffId
-          : null;
-  return by !== null && !!r.odds.get(by)?.left;
-}
-
 /** Every ask an Odd may raise now, each place raising each kind at most twice. */
 function raises(r: Model): WorkEvent[] {
   const title = `Ask ${Math.max(...r.asks.map((a) => a.id)) + 1}`;
@@ -794,12 +784,11 @@ const sequences: Explore<State, WorkEvent, Model> = {
         ended: { outcome, result: `Ran: ${outcome}`, joined: r.runs.get(id)!.joined }
       }))
     ]),
-    // askRaised, taskGiven and runQueued take an Odd whose row has left
-    // today, the raise-after-removal race the rule on leaving names. Until
-    // their deciders refuse it, no such event comes from an Odd that left.
-    ...[...OWED.filter((_, i) => !r.owedSent.has(i)), ...raises(r), ...gives(r)].filter(
-      (e) => !fromLeft(r, e)
-    ),
+    // From an Odd that left too: its last run may still raise or be owed
+    // work as the owner lets it go, the race the rule on leaving closes.
+    ...OWED.filter((_, i) => !r.owedSent.has(i)),
+    ...raises(r),
+    ...gives(r),
     ...r.asks.flatMap(answers),
     ...[...r.tasks.values()].flatMap(ends),
     ...DROPS,
@@ -915,7 +904,10 @@ const CASES: Record<keyof typeof RULE, string[]> = {
     "a leaving stopping the Odd's work",
     'a leaving withdrawing an ask',
     'a leaving withdrawing a task',
-    'a leaving failing a run yet to start'
+    'a leaving failing a run yet to start',
+    'an ask raised by an Odd that left',
+    'a task given by an Odd that left',
+    'a run owed to an Odd that left'
   ],
   broughtBack: [
     'an Odd brought back',
