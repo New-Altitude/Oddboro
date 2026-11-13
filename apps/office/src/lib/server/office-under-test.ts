@@ -27,12 +27,26 @@ import { onPath } from './on-path.ts';
 export const folder = mkdtempSync(join(tmpdir(), 'oddboro-staff-run-'));
 /** The owner's data folder in the office's home, which every Odd reads. */
 export const ownerData = join(folder, 'data');
-const port = await new Promise<number>((done) => {
-  const s = createServer().listen(0, '127.0.0.1', () => {
-    const p = (s.address() as { port: number }).port;
-    s.close(() => done(p));
-  });
-});
+/**
+ * The test database's port. A port the system picks (listen on 0) comes from
+ * the range it also gives outgoing connections, and the database listens only
+ * later: in between, another test file's database or any connection could
+ * take it, and the database's listen then kills this process (EADDRINUSE).
+ * So: below every system's range for those (Linux 32768, the Mac and Windows
+ * 49152), by process id, which no two test files running at once share, and
+ * the next one up if something already listens there.
+ */
+async function databasePort(): Promise<number> {
+  for (let port = 20_000 + (process.pid % 12_000); ; port = port >= 31_999 ? 20_000 : port + 1) {
+    const free = await new Promise<boolean>((done) => {
+      const s = createServer()
+        .once('error', () => done(false))
+        .listen(port, '127.0.0.1', () => s.close(() => done(true)));
+    });
+    if (free) return port;
+  }
+}
+const port = await databasePort();
 // The stand-in for Claude Code: it reads the message, then reports one tool
 // call and a result that carries what the office gave the run, the variables
 // Run commands sets among it, and whether the git template folder those name
