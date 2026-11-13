@@ -204,8 +204,9 @@ function pointAt(row: Tables[keyof Tables], field: string, id: number): void {
  * A change being decided, step by step. Each step reads `rows`, the loaded
  * rows as the puts so far leave them, so a helper sees what the steps before
  * it wrote. A later put of a row this change inserts folds into that insert,
- * so the change writes each new row once. `outside` is fixed when the draft
- * starts, so a put can point at a `perKind` effect's ref from the first step.
+ * so the change writes each new row once. Its `perKind` effects are fixed
+ * when the draft starts, so a put can point at one's ref from the first step;
+ * `foldIn` adds other outside writes.
  */
 export type Draft = {
   readonly loaded: WorkRows;
@@ -246,6 +247,38 @@ function insertOf(
     (q) => 'ref' in q && q.table === p.table && d.ids.get(q.ref) === p.row.id
   );
   return at < 0 ? undefined : { at, put: d.put[at] as Extract<Put, { ref: string }> };
+}
+
+/**
+ * Puts the change another decider made of `d.rows` into `d`, so one event
+ * makes several decisions in order, each by its own family's decider. Each
+ * ref the change names becomes `<tag> <ref>`, so two folded changes never
+ * share one. A `perKind` effect cannot fold in: the ids made up for them are
+ * fixed when the draft starts.
+ */
+export function foldIn(d: Draft, change: Change, tag: string): void {
+  const named = new Set(change.put.flatMap((p) => ('ref' in p ? [p.ref] : [])));
+  const renamed = (ref: string) => (named.has(ref) ? `${tag} ${ref}` : ref);
+  for (const o of change.outside) {
+    if (o.kind === 'perKind')
+      throw fixedError('A change with writes of its own cannot fold into another.');
+    d.outside.push(
+      o.kind !== 'attachments'
+        ? o
+        : { ...o, to: 'ask' in o.to ? { ask: renamed(o.to.ask) } : { task: renamed(o.to.task) } }
+    );
+  }
+  putAll(
+    d,
+    change.put.map((p): Put => {
+      if (!('ref' in p)) return p;
+      const points = p.points
+        ? Object.fromEntries(Object.entries(p.points).map(([field, ref]) => [field, renamed(ref)]))
+        : undefined;
+      // The same put under its new name: only `ref` and `points` change.
+      return { ...p, ref: renamed(p.ref), ...(points && { points }) } as Put;
+    })
+  );
 }
 
 /** The finished change. */

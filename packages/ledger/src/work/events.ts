@@ -151,7 +151,16 @@ export type WorkEvent =
       /** Only this Odd's tasks; with none, every Odd's. */
       staffId?: string;
     }
-  | { kind: 'goalStatusChanged'; goalId: number; status: GoalStatus };
+  | { kind: 'goalStatusChanged'; goalId: number; status: GoalStatus }
+  | {
+      kind: 'parked';
+      staffId: string;
+      threadId: number;
+      on: { at: Date } | { task: number };
+      /** The threads the Odd works on and does not lead, as the entry read them: the goals it serves are not loaded. */
+      worksOn: ReadonlySet<number>;
+    }
+  | { kind: 'clockWoke'; threadId: number };
 
 /** The event of one kind, as its decider takes it. */
 export type EventOf<K extends WorkEvent['kind']> = Extract<WorkEvent, { kind: K }>;
@@ -181,6 +190,8 @@ export type WorkResults = {
   taskEnded: null;
   connectTasksDropped: null;
   goalStatusChanged: null;
+  parked: { at: Date } | { title: string };
+  clockWoke: null;
 };
 
 /** I/O an ask's answer does after the commit. office-decide.ts supplies it where it decides an ask. */
