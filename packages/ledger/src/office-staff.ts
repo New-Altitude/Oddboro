@@ -291,7 +291,7 @@ export async function setOwnTool(
   which: OwnSwitch,
   on: boolean
 ): Promise<{ refused: string } | undefined> {
-  const changed = await changeOwnTools(db, id, [which], on);
+  const changed = await changeOwnTools(db, id, { which: [which], on });
   if (!changed || 'refused' in changed) return changed;
   if (!changed.on.length) return;
   const n = changed.before.name;
@@ -321,8 +321,7 @@ export async function setOwnTool(
 export async function changeOwnTools(
   q: Db,
   id: string,
-  which: readonly OwnSwitch[],
-  on: boolean
+  { which, on }: { which: readonly OwnSwitch[]; on: boolean }
 ): Promise<
   { before: StaffRow; after: StaffRow; on: OwnSwitch[] } | { refused: string } | undefined
 > {

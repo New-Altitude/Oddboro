@@ -270,12 +270,10 @@ function yesInTx(a: AskRow, folder: FolderRequest | undefined): PerKindInTx[] {
       run: async (tx) => {
         const odd = await staffer(a.staffId, tx);
         if (!odd) return;
-        const changed = await changeOwnTools(
-          tx,
-          a.staffId,
-          switchesOff(odd, a.switches ?? []),
-          true
-        );
+        const changed = await changeOwnTools(tx, a.staffId, {
+          which: switchesOff(odd, a.switches ?? []),
+          on: true
+        });
         if (changed && 'refused' in changed)
           throw fixedError(
             "This Odd's tool cannot run commands here. Move it to another tool on its Settings tab first"
