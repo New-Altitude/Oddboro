@@ -1711,7 +1711,10 @@ the persona's voice.
    sends the owner's words and the hands' report, cut to fit 4,000
    characters, to `<issuer>/<slug>/stream`. A chat sends its earlier answered
    exchanges and keeps the door's session in the Odd's folder. Any answer but
-   `answered` returns a one-line note and the report, so no work is lost. A
+   `answered` fails the run with a one-line note and the report, so no work
+   is lost and nothing counts as done without the persona: a follow-up drops
+   the hands' Outcome line, and a chat shows no sign-in card (the persona's
+   access is its own, item 5). Stop cancels the call to the door. An answered
    follow-up keeps the hands' Outcome line after the voice. Every other
    run, such as a draft or a follow-up that reads the owner's no or edit
    for a lesson, stays with the hands. Every word sent to the door is in
