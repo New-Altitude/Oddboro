@@ -8,7 +8,7 @@
 
 <Meta
   title="{data.doc.title} · {SITE.name}"
-  description="How {SITE.name} treats your data. The short version: the office runs on your computer, and this site collects nothing."
+  description="How {SITE.name} treats your data. The short version: the office runs on your computer, and this site asks before PostHog counts your visit."
   path="/privacy/"
 />
 

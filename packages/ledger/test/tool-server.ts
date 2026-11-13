@@ -53,9 +53,15 @@ export async function toolServer(staffId: string, env: Record<string, string>): 
   return client;
 }
 
-after(async () => {
-  for (const c of clients) await c.close();
-  await sql.end();
-  await stopDatabase();
-  rmSync(folder, { recursive: true, force: true });
-});
+// The tool servers close together: a file can start over 60, and each close
+// may wait up to 4 seconds for its server to end. The cleanup has a limit of its
+// own, since a slow runner took it past the 15 seconds each test gets.
+after(
+  async () => {
+    await Promise.all(clients.map((c) => c.close()));
+    await sql.end();
+    await stopDatabase();
+    rmSync(folder, { recursive: true, force: true });
+  },
+  { timeout: 60_000 }
+);

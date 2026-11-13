@@ -75,8 +75,10 @@ function note(name: string, a: Unanswered): string {
  * Run a persona Odd: a quiet one answers its quiet line and runs nothing.
  * Otherwise the hands run (`runTool`, passed in so this module needs nothing
  * of staff.ts's at load), and only their tool steps reach `onEvent`; then the
- * door answers. A door that does not answer still gets the owner the report,
- * under a note. A follow-up keeps the hands' Outcome line, after the voice.
+ * door answers. A follow-up keeps the hands' Outcome line, after the voice. A
+ * door that does not answer fails the run, with the hands' report under a
+ * note: the work waited on the persona's judgment, so a follow-up's Outcome
+ * line goes and a task it carries out stays open. Stop ends the wait at once.
  */
 export async function personaRun(
   who: StaffRow,
@@ -109,16 +111,16 @@ export async function personaRun(
   const answer = await askPersona(
     who,
     voiceMessage({ kind: opts.kind, owner: await ownerName(), asked, report }),
-    opts.kind === 'chat' ? { ownerSaid: asked } : undefined
+    { ...(opts.kind === 'chat' ? { chat: { ownerSaid: asked } } : {}), signal: opts.signal }
   );
-  let reply: string;
-  if (answer.outcome === 'answered')
-    reply = [answer.frame, answer.reply, answer.caveat].filter(Boolean).join('\n\n');
-  else {
-    reply = `${note(who.name, answer)}\n\n${report}`;
+  if (answer.outcome !== 'answered') {
     if (answer.outcome === 'refused_access') await setQuiet(who.id, 'access');
     if (answer.outcome === 'grant') await setQuiet(who.id, 'grant');
+    const text = `${note(who.name, answer)}\n\n${report}`;
+    opts.onEvent?.({ type: 'error', message: text });
+    return { ok: false, text };
   }
+  const reply = [answer.frame, answer.reply, answer.caveat].filter(Boolean).join('\n\n');
   const text = outcome ? `${reply}\n\n${outcome[0].trim()}` : reply;
   opts.onEvent?.({ type: 'delta', text: reply });
   opts.onEvent?.({ type: 'done', text });

@@ -5,6 +5,15 @@ import { CHAT_REQUEST_BYTES } from '../staff/chat-input.ts';
 // whatever headers it likes. So `guardOffice` (the server's `handle` in
 // hooks.server.ts) checks every request before a route sees it:
 //
+// - The request must come from this computer (`fromThisComputer`, in
+//   this-computer.ts, which Vite's dev server asks first too). Through
+//   Caddy, which on a Mac and Linux listens on every address, the connection
+//   is always from 127.0.0.1, so the office reads the address Caddy forwards
+//   for (X-Forwarded-For), which Caddy writes itself. A program on this
+//   computer can write that header too; this check keeps out other machines,
+//   not other programs. Every entry counts, since a Caddy that trusts the
+//   client appends to what it sent, and an entry that is not a plain address
+//   (a port, brackets, a name, empty) counts as another computer.
 // - The Host must be one of the office's own names. A page that points a
 //   name of its own at 127.0.0.1 (DNS rebinding) counts as same-origin to the
 //   browser, so only the name it asked for gives it away.
@@ -49,6 +58,7 @@ import {
 } from '@oddboro/ledger/owner-key';
 import { HOSTS } from './hosts.ts';
 import { fromRun } from './gateway.ts';
+import { fromThisComputer, NOT_THIS_COMPUTER } from './this-computer.ts';
 import { fromShell } from './update.ts';
 
 /**
@@ -117,7 +127,7 @@ function provesItself(event: RequestEvent): boolean {
   const { request } = event;
   const path = event.url.pathname;
   if (!isExceptionPath(path)) return false;
-  if (path === UPDATE_PATH) return fromShell(request, event.getClientAddress());
+  if (path === UPDATE_PATH) return fromShell(request);
   if (isGatewayPath(path)) return fromRun(request);
   return (
     (request.method === 'GET' || request.method === 'HEAD') && OWN_PROOF.some((p) => p === path)
@@ -148,6 +158,13 @@ function refuseKeyless(url: URL): Response {
 /** The server's `handle`: every request passes here before a route sees it. */
 export const guardOffice: Handle = async ({ event, resolve }) => {
   const { request, url } = event;
+  if (
+    !fromThisComputer({
+      forwardedFor: request.headers.get('x-forwarded-for'),
+      peer: event.getClientAddress()
+    })
+  )
+    return refuse(NOT_THIS_COMPUTER);
   if (!toThisOffice(request)) return refuse('This office answers only at its own address');
   if (!provesItself(event)) {
     const given = request.method === 'GET' ? url.searchParams.get(OWNER_PARAM) : null;

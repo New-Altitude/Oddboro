@@ -1316,8 +1316,9 @@ pieces under 3,900 bytes a line, so no value is on a command line.
 
 17. **Updates.** The shell (`apps/desktop`) finds, downloads and checks a
     new version, then tells the server through `/api/update`
-    (`src/lib/server/update.ts`). Only the shell may report one: from
-    127.0.0.1 with the `ODDBORO_UPDATE_TOKEN` it passed in. The office picks
+    (`src/lib/server/update.ts`). Only the shell may report one: from this
+    computer (rule 1 of "Who the office answers") with the
+    `ODDBORO_UPDATE_TOKEN` it passed in. The office picks
     `installAt`: the start of the owner's next window (02:00 to 04:00 office
     time by default, `app_update` in the ledger), or now when the owner presses
     Install now. The rules are in `@oddboro/ledger/update-window`. From 15
@@ -1536,7 +1537,8 @@ address when it is trusted and the office proves itself there through Caddy.
 
 Any program on the computer, and any page open in the owner's browser, can
 send requests to the office with whatever headers it likes. So the office
-answers only a request that carries the owner's key. `guardOffice`
+answers only a request from this computer that carries the owner's key, but
+for a few exact routes that prove themselves another way. `guardOffice`
 (`src/lib/server/owner-page.ts`, the first step of the server's `handle` in
 `hooks.server.ts`, before Sentry's) checks every route and API request before
 the route sees it, in every mode. Files built into the page (scripts, styles,
@@ -1546,12 +1548,25 @@ moves, the adapter takes the office's origin to be https, so that check
 refuses the owner's own http page. So the page's `call()` (`src/lib/ui/api.ts`)
 sends every action as JSON, body or not.
 
-1. The Host must be one of the office's names, whatever the port: 127.0.0.1,
+1. The request must come from this computer (`fromThisComputer`): the
+   connection's address and every address in X-Forwarded-For are loopback
+   (127.0.0.0/8, ::1, or ::ffff:127.x), and anything else, an entry that is
+   not a plain address included, gets 403, reads too. Through Caddy the
+   connection is always from 127.0.0.1, and Caddy writes the client it served
+   into that header and drops one the client sent, or adds the real address
+   last when it trusts the client, so this is what keeps another machine on
+   the network out. A program on this computer can write the header too; this
+   rule is not for that. The built server serves the files built into the
+   page before it. Under `vite dev`, which setup and the login service run,
+   the same rule (`src/lib/server/this-computer.ts`) runs first in
+   `ownerOnly` (rule 6), so Vite's own routes and its live-reload
+   websocket refuse another machine too.
+2. The Host must be one of the office's names, whatever the port: 127.0.0.1,
    [::1], localhost, the addresses through Caddy (`HOSTS` in
    `src/lib/server/hosts.ts`) and the app's `ORIGIN`. A site that points its
    own name at 127.0.0.1 looks same-origin to the browser, so only the name
    gives it away. A route asked by any other name gets 403.
-2. The key is one file, `owner-key`, in the office's folder
+3. The key is one file, `owner-key`, in the office's folder
    (`@oddboro/ledger/owner-key`). The office makes it as it starts
    (`init` in `hooks.server.ts`, and `ownerOnly` in dev). A key file that
    holds no key stops the start with one line, saying to move it aside, and
@@ -1566,15 +1581,16 @@ sends every action as JSON, body or not.
    does every request of the release smoke (`officeFetch` in
    `apps/desktop/scripts/driver.ts`). A wrong key in the address is refused
    like none. No caller sends the key to an address before the office proves,
-   in that run, that it answers there (rule 3's `/api/office-proof`):
+   in that run, that it answers there (rule 4's `/api/office-proof`):
    setup proves each address it may open (`setupAddress` in
    `packages/ledger/src/setup-address.ts`), the smoke proves its office once
    a run, and the office's own look at its address sends no key at all.
-3. A request without the key, a read included, reaches only an exact exception
+4. A request without the key, a read included, reaches only an exact exception
    route (`EXCEPTION_ROUTES`, judged by `isExceptionPath` on the text the server
    routes on; SvelteKit decodes that text before it routes, and no exception
    route or route parameter matches a `%`, so the guard and the router read
-   it the same), each with its own proof. `/api/update`
+   it the same), each with its own proof, and only from this computer
+   (rule 1). `/api/update`
    takes the shell's token (`fromShell` in `src/lib/server/update.ts`).
    `/api/gateway/<id>` takes a run's token (`fromRun` in `gateway.ts`).
    `/account/callback` and `/connect/callback` take GET or HEAD, sent back by
@@ -1585,19 +1601,21 @@ sends every action as JSON, body or not.
    key there (`provesOffice` in `@oddboro/ledger/office-proof`). Anything else
    gets 403: a short line for an `/api/` path, a page saying how to open the
    office for any other.
-4. With the key, anything but GET, HEAD and OPTIONS must also come from the
+5. With the key, anything but GET, HEAD and OPTIONS must also come from the
    owner's page (`fromOwnerPage`), the second factor: a page on another
    localhost port is same-site, so it carries the cookie too. Sec-Fetch-Site
    says same-origin, or, with none, the Origin names the Host asked, whatever
    the scheme, since through Caddy the page is https and the office http.
    With neither, 403.
-5. In dev, Vite answers many requests before `handle` does: its files,
+6. In dev, Vite answers many requests before `handle` does: its files,
    modules, `/@fs` and live-reload websocket. `ownerOnly` in `vite.config.ts`
-   is the first plugin, and applies rule 3 to them from the same module,
-   closing a websocket upgrade that has no key.
-6. Vite's dev server has its own route, `/__open-in-editor`, that opens a file
+   is the first plugin, and applies rules 1 and 4 to them from the same
+   modules: another machine gets 403, and a websocket upgrade that is not
+   from this computer or has no key is closed.
+7. Vite's dev server has its own route, `/__open-in-editor`, that opens a file
    in an editor and runs before the handle. `noEditorLaunch` in
-   `vite.config.ts` refuses it with 403, always: nothing in the office uses it.
+   `vite.config.ts` refuses it with 403, always, this computer included:
+   nothing in the office uses it.
 
 The key does not keep out every program on this computer. A program running
 as the owner can read it, as it can read the database beside it. And a
@@ -1776,7 +1794,10 @@ the persona's voice.
    sends the owner's words and the hands' report, cut to fit 4,000
    characters, to `<issuer>/<slug>/stream`. A chat sends its earlier answered
    exchanges and keeps the door's session in the Odd's folder. Any answer but
-   `answered` returns a one-line note and the report, so no work is lost. A
+   `answered` fails the run with a one-line note and the report, so no work
+   is lost and nothing counts as done without the persona: a follow-up drops
+   the hands' Outcome line, and a chat shows no sign-in card (the persona's
+   access is its own, item 5). Stop cancels the call to the door. An answered
    follow-up keeps the hands' Outcome line after the voice. Every other
    run, such as a draft or a follow-up that reads the owner's no or edit
    for a lesson, stays with the hands. Every word sent to the door is in

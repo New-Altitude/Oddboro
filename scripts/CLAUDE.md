@@ -15,6 +15,7 @@ first in `npm run lint` through `lint:guards`.
 - `outbound.ts`. Not a guard: the list `check-outbound.ts` reads. Each entry says where a file's calls go, what they send and whose yes covers them.
 - `test-times.ts`. Not a guard: a reporter for Node's test runner. CI's test steps add it through `NODE_OPTIONS`, and it writes one JSON line as each test file starts and ends and as each top-level test finishes, so a hang still shows which file never ended.
 - `test-summary.ts`. Not a guard: reads those lines and prints each suite's time, the 20 slowest tests, the 10 slowest files and any file that never ended, to the log and the CI run's summary page.
+- `hang-report.ts`. Not a guard: runs a CI test step's command, and if it is still going after the minutes given, records each test process's CPU and state, its JavaScript stack and what keeps it alive (from Node's report on SIGUSR2), and on a Mac its native stack, then stops the step. Windows only runs the command.
 - `lib/files.ts`. The shared file list, comment stripper and reporter.
 
 ## Later

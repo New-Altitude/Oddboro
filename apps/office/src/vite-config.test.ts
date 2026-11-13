@@ -1,6 +1,7 @@
-// The dev server asks for the owner's key before Vite answers anything, and
-// launches no editor for any page: Vite's own dev server with the office's
-// plugins, in a throwaway folder. Run with `npm test -w @oddboro/office`.
+// The dev server answers only this computer, asks for the owner's key before
+// Vite answers anything, and launches no editor for any page: Vite's own dev
+// server with the office's plugins, in a throwaway folder, and the guard
+// plugin's hook on a stand-in server. Run with `npm test -w @oddboro/office`.
 import { home } from '@oddboro/ledger/home';
 import {
   NOT_THE_OWNER_PAGE,
@@ -9,7 +10,8 @@ import {
   OWNER_KEY_FILE,
   OWNER_PARAM,
   ownerCookie,
-  ownerKey
+  ownerKey,
+  UPDATE_PATH
 } from '@oddboro/ledger/owner-key';
 import { REQUEST_TARGETS } from '@oddboro/ledger/request-targets';
 import assert from 'node:assert/strict';
@@ -25,7 +27,7 @@ import { Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import path, { join } from 'node:path';
 import { after, test } from 'node:test';
-import { createServer } from 'vite';
+import { createServer, type ViteDevServer } from 'vite';
 import config, {
   buildOptions,
   ipv6Loopback,
@@ -35,6 +37,7 @@ import config, {
   ownerOnlyMiddleware,
   siteUrl
 } from '../vite.config.ts';
+import { NOT_THIS_COMPUTER } from './lib/server/this-computer.ts';
 
 const folder = mkdtempSync(join(tmpdir(), 'oddboro-vite-'));
 const launched = join(folder, 'launched.log');
@@ -117,9 +120,12 @@ function upgrade(headers: Record<string, string>, host = '127.0.0.1'): Promise<n
   });
 }
 
-/** What the middleware did with one request: whether it handed it on, and what it answered. */
+/** What the middleware did with one request from this computer: whether it handed it on, and what it answered. */
 function throughMiddleware(url: string, cookie?: string) {
-  const req = new IncomingMessage(new Socket());
+  const socket = new Socket();
+  // A socket that never connected has no address, which counts as another computer.
+  Object.defineProperty(socket, 'remoteAddress', { value: '127.0.0.1' });
+  const req = new IncomingMessage(socket);
   req.url = url;
   if (cookie) req.headers.cookie = cookie;
   const answer = { handedOn: 0, status: 0, type: '', body: '' };
@@ -218,10 +224,96 @@ test('on [::1] at its port the dev server keeps the same key rule and live reloa
   assert.equal(await upgrade({ cookie: ownerCookie() }, '::1'), 101);
 });
 
-test("the office's dev config asks for the key before any other plugin, then refuses the editor route", () => {
+test("the office's dev config asks where a request came from and for the key before any other plugin, then refuses the editor route", () => {
   const { plugins } = config({ command: 'serve', mode: 'development' });
   assert.equal((plugins?.[0] as { name?: string }).name, ownerOnly().name);
+  assert.equal(ownerOnly().enforce, 'pre');
   assert.equal((plugins?.[1] as { name?: string }).name, noEditorLaunch().name);
+});
+
+test('the dev server refuses every request and websocket that is not from this computer, with the key or on an exception route', () => {
+  type Middleware = (req: unknown, res: unknown, next: () => void) => void;
+  type Upgrade = (req: unknown, socket: unknown) => void;
+  let middleware: Middleware | undefined;
+  let upgrade: Upgrade | undefined;
+  // Only the two members the hook uses; the file's real Vite runs in
+  // middleware mode, where `httpServer` is null.
+  const server = {
+    middlewares: { use: (fn: Middleware) => (middleware = fn) },
+    httpServer: {
+      prependListener: (event: string, fn: Upgrade) => {
+        assert.equal(event, 'upgrade');
+        upgrade = fn;
+      }
+    }
+  } as unknown as ViteDevServer;
+  const hook = ownerOnly().configureServer;
+  assert.equal(typeof hook, 'function');
+  (hook as (server: ViteDevServer) => void)(server);
+  assert.ok(middleware && upgrade);
+
+  const rows: { what: string; peer?: string; header?: string | string[]; ok: boolean }[] = [
+    { what: 'a LAN device straight to the port', peer: '192.168.1.103', ok: false },
+    { what: 'a LAN device through Caddy', peer: '127.0.0.1', header: '192.168.1.103', ok: false },
+    {
+      what: 'a forged loopback in front of a LAN address',
+      peer: '127.0.0.1',
+      header: '127.0.0.1, 192.168.1.103',
+      ok: false
+    },
+    {
+      what: 'the header given twice, one from the LAN',
+      peer: '127.0.0.1',
+      header: ['127.0.0.1', '192.168.1.103'],
+      ok: false
+    },
+    { what: 'a LAN IPv6 device', peer: 'fe80::1', ok: false },
+    { what: 'a connection with no address', ok: false },
+    { what: 'this computer through Caddy', peer: '127.0.0.1', header: '127.0.0.1', ok: true },
+    { what: 'this computer with no header', peer: '127.0.0.1', ok: true },
+    { what: 'this computer over IPv6', peer: '::1', header: '::1', ok: true },
+    { what: 'this computer as a mapped address', peer: '::ffff:127.0.0.1', ok: true }
+  ];
+  // Each passes the key rule, so where it comes from is all that can refuse it.
+  const keyed = [
+    { url: '/@vite/client', cookie: ownerCookie() },
+    { url: UPDATE_PATH, cookie: undefined }
+  ];
+  for (const { what, peer, header, ok } of rows) {
+    for (const { url, cookie } of keyed) {
+      const req = {
+        url,
+        headers: {
+          ...(header === undefined ? {} : { 'x-forwarded-for': header }),
+          ...(cookie === undefined ? {} : { cookie })
+        },
+        socket: { remoteAddress: peer }
+      };
+      const res = {
+        statusCode: 200,
+        body: undefined as string | undefined,
+        end: (b: string) => (res.body = b)
+      };
+      let passed = false;
+      middleware(req, res, () => (passed = true));
+      assert.equal(passed, ok, `${what} ${url}: next()`);
+      assert.equal(res.statusCode, ok ? 200 : 403, `${what} ${url}: status`);
+      assert.equal(res.body, ok ? undefined : NOT_THIS_COMPUTER, `${what} ${url}: body`);
+    }
+
+    const socket = { destroyed: false, destroy: () => (socket.destroyed = true) };
+    upgrade(
+      {
+        headers: {
+          ...(header === undefined ? {} : { 'x-forwarded-for': header }),
+          cookie: ownerCookie()
+        },
+        socket: { remoteAddress: peer }
+      },
+      socket
+    );
+    assert.equal(socket.destroyed, !ok, `${what}: websocket closed`);
+  }
 });
 
 test('the Sentry build plugin never reports the build and uploads only with a token', () => {

@@ -16,6 +16,7 @@ import type { Duplex } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
 import { ownerKeyAtStart } from './src/lib/server/owner-key-start.ts';
+import { fromThisComputer, NOT_THIS_COMPUTER } from './src/lib/server/this-computer.ts';
 
 /** The repository's root folder, where every uploaded map's sources start. */
 const REPO = fileURLToPath(new URL('../..', import.meta.url));
@@ -59,6 +60,15 @@ export function buildOptions(env: NodeJS.ProcessEnv) {
   };
 }
 
+/** True when a request to Vite's server, or its websocket, comes from this computer. */
+function nodeFromThisComputer(req: IncomingMessage): boolean {
+  const header = req.headers['x-forwarded-for'];
+  return fromThisComputer({
+    forwardedFor: Array.isArray(header) ? header.join(',') : header,
+    peer: req.socket.remoteAddress ?? ''
+  });
+}
+
 /**
  * A request's target split once, at its first `?`: the path is the raw text
  * before it, and the key is the owner's parameter in the query after it. Vite
@@ -73,17 +83,24 @@ function target(raw: string): { path: string; key: string | null } {
 }
 
 /**
- * The owner's key rule at the dev server's door, the same one the office's
- * `guardOffice` keeps: a request goes on with the key in its cookie, with the
- * right key in its address (the office then sets the cookie), or to an exact
- * exception route, whose own proof the office checks after. Anything else gets
- * the office's refusal. A wrong key in the address is refused like no key.
+ * Two of the office's `guardOffice` rules at the dev server's door, where the
+ * request comes from and the owner's key. A request not from this computer
+ * gets 403, whatever it carries. One from this computer goes on with the key
+ * in its cookie, with the right key in its address (the office then sets the
+ * cookie), or to an exact exception route, whose own proof the office checks
+ * after. Anything else gets the office's refusal. A wrong key in the address
+ * is refused like no key.
  */
 export function ownerOnlyMiddleware(
   req: IncomingMessage,
   res: ServerResponse,
   next: () => void
 ): void {
+  if (!nodeFromThisComputer(req)) {
+    res.statusCode = 403;
+    res.end(NOT_THIS_COMPUTER);
+    return;
+  }
   const { path, key } = target(req.url ?? '');
   if (hasOwnerKey(req.headers.cookie ?? null) || isOwnerKey(key) || isExceptionPath(path)) {
     next();
@@ -96,14 +113,19 @@ export function ownerOnlyMiddleware(
 }
 
 /**
- * In dev, Vite answers many requests before the office's own check runs:
- * `/@fs/<any file>`, `/@vite/client`, the project's files, and live reload.
- * So this plugin, the first, applies the owner's key rule ahead of all of them.
+ * Under `vite dev`, which setup and the login service run, Vite answers many
+ * requests before the office's own check runs: `/@fs/<any file>`,
+ * `/@vite/client`, the project's files, and live reload. So this plugin, the
+ * first, applies the rule that a request comes from this computer, then the
+ * owner's key rule, ahead of all of them.
  */
 export function ownerOnly(): Plugin {
   return {
     name: 'oddboro:owner-only',
     apply: 'serve',
+    enforce: 'pre',
+    // Three of Vite's middlewares run before this one: reject-invalid, CORS and host check.
+    // None serves content, and CORS hands a preflight on because SvelteKit sets `preflightContinue`.
     configureServer(server) {
       // Kit runs the office's init(), which makes the key, only inside its
       // request handler, on the first request. This guard refuses a request
@@ -115,9 +137,10 @@ export function ownerOnly(): Plugin {
       // Vite adds its live-reload upgrade listener when it makes the server,
       // before this hook runs. A listener added with `on` would run after
       // Vite's, which has already sent its 101 by then, so this one goes
-      // first and closes an upgrade without the key.
+      // first and closes an upgrade not from this computer or without the key.
       server.httpServer?.prependListener('upgrade', (req: IncomingMessage, socket: Duplex) => {
-        if (!hasOwnerKey(req.headers.cookie ?? null)) socket.destroy();
+        if (!nodeFromThisComputer(req) || !hasOwnerKey(req.headers.cookie ?? null))
+          socket.destroy();
       });
       // Middleware added here runs before Vite's file, module and page middleware.
       server.middlewares.use(ownerOnlyMiddleware);
@@ -145,8 +168,8 @@ export function ipv6Loopback(): Plugin {
  * Vite's dev server has a route, `/__open-in-editor`, that opens a file in an
  * editor, and it runs before the office's own check (`guardOffice`). Nothing
  * in the office uses it; only Vite's error overlay links there. So it is
- * refused outright, rather than through the office's check, which would bring
- * the server's modules into this config.
+ * refused outright, for this computer too, rather than through the office's
+ * check, which would bring the server's modules into this config.
  */
 export function noEditorLaunch(): Plugin {
   return {
@@ -181,7 +204,8 @@ export function siteUrl(env: Record<string, string | undefined> = process.env): 
 // they reload on save.
 const port = Number(process.env.ODDBORO_PORT) || 4500;
 export default defineConfig(({ command }) => ({
-  // Sentry's plugin goes before SvelteKit's, as Sentry's setup asks.
+  // The loopback and key rules first, the earliest door. Sentry's plugin goes
+  // before SvelteKit's, as Sentry's setup asks.
   plugins: [
     ownerOnly(),
     noEditorLaunch(),

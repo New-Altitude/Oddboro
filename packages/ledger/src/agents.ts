@@ -118,8 +118,10 @@ export const offeredAgent = (v: unknown, platform: NodeJS.Platform): Agent | und
 export const MIN_VERSIONS: Record<Agent, string> = {
   claude: '2.1.318',
   codex: '0.166.0',
-  // Grok's office runs send pictures as --prompt-json blocks, measured on 1.0.62.
-  grok: '1.0.62',
+  // Grok's runs read their message, and pictures as content blocks, from a
+  // --prompt-file, and the system prompt from an agent file with
+  // prompt_mode: extend; measured on 1.0.77.
+  grok: '1.0.77',
   gemini: '0.66.0'
 };
 

@@ -30,7 +30,8 @@ an app; `ledger` imports `world` and `sprites`, and `world` imports `sprites`.
 - `apps/site`. The public site, static. It reads `sprites` and `world` only.
 - `scripts`. The lint guards: plain Node, no dependencies.
 - `.github/workflows`. `ci.yml` runs the checks on every pull request, on a
-  Mac, Linux and Windows; `release.yml` builds the app; `codeql.yml` scans.
+  Mac, Linux and Windows, unless it changes only the site or the docs;
+  `site.yml` checks those; `release.yml` builds the app; `codeql.yml` scans.
 
 ## One function per job
 
@@ -60,7 +61,7 @@ Before writing a helper, use the one that already does the job.
 | Run as the office, not as an Odd                        | `runAsOffice()`                                       | `apps/office/src/lib/server/office-run.ts`             |
 | Give the page an Odd                                    | `toProfile()`                                         | `apps/office/src/lib/server/profile.ts`                |
 | Reach an outside tool's server, for the owner or a run  | `upstream()`, through the run's gateway               | `apps/office/src/lib/server/access.ts`                 |
-| Refuse a request without the owner's key                | `guardOffice`                                         | `apps/office/src/lib/server/owner-page.ts`             |
+| Refuse another computer, or a request without the key   | `guardOffice`                                         | `apps/office/src/lib/server/owner-page.ts`             |
 | Call the office from the page                           | `call()`, `stream()`, `follow()`                      | `apps/office/src/lib/ui/api.ts`                        |
 | Fail a lint guard                                       | `report()`                                            | `scripts/lib/files.ts`                                 |
 | Test against a database, the tool server, or the office | `pglite.ts`, `tool-server.ts`, `office-under-test.ts` | `packages/ledger/test/`, `apps/office/src/lib/server/` |

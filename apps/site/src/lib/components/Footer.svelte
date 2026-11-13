@@ -1,6 +1,7 @@
 <script lang="ts">
   import { SITE } from '#lib/site.ts';
   import GitHubMark from './GitHubMark.svelte';
+  import { askAgain } from '#lib/analytics.svelte.ts';
 
   const year = new Date().getFullYear();
   const link = 'text-muted hover:text-ink rounded-md text-sm';
@@ -22,6 +23,7 @@
       <a href="/releases/" class={link}>Releases</a>
       <a href="/privacy/" class={link}>Privacy</a>
       <a href="/terms/" class={link}>Terms</a>
+      <button type="button" onclick={askAgain} class={link}>Cookie settings</button>
       <a href="{SITE.github}/blob/main/LICENSE" class={link} rel="noopener">License</a>
       <a href={SITE.github} class="{link} flex items-center gap-1.5" rel="noopener">
         <GitHubMark class="size-4" />
