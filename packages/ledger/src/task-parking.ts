@@ -30,6 +30,7 @@ export async function parkOnTask(
 
 /**
  * How a task ended, as the work parked on it hears it: `withdrawn` is the
- * office or its Odd taking it off the desk (`withdrawTask`), never the owner's drop.
+ * office or its Odd taking it off the desk (`withdrawTask`, or `oddRemoved` as its
+ * Odd left), never the owner's drop.
  */
 export type TaskEnded = 'done' | 'dropped' | 'withdrawn';

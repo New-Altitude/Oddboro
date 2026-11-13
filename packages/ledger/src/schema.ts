@@ -454,9 +454,10 @@ export const tasks = pgTable(
     status: text().$type<TaskStatus>().notNull().default('open'),
     note: text(),
     /**
-     * True when the office or the task's Odd took it off the desk (`withdrawTask`),
-     * never the owner. Such a task reads as dropped, so this keeps how it ended,
-     * even once an Odd that left is brought back.
+     * True when the office or the task's Odd took it off the desk (`withdrawTask`,
+     * or `oddRemoved` as its Odd left), never the owner. Such a task reads as
+     * dropped, so this keeps how it ended, even once an Odd that left is
+     * brought back.
      */
     withdrawn: boolean().notNull().default(false),
     createdAt: created(),

@@ -13,6 +13,13 @@ Drizzle ORM over the `postgres` driver. Server only, except `./time`,
 progress. `reserveRun` and `releaseRun` own its lifetime; the office derives
 its slot queue and chat state from these entries. It holds no saved office data.
 
+`src/work/` is the work core: what happens to threads, follow-ups, asks and
+tasks, as events (`WorkEvent` in `src/work/events.ts`), each decided by one
+pure function (`DECIDERS` in `src/work/decide.ts`) and written in one
+transaction (`transitionWork` in `src/work/apply.ts`, over `transition` in
+`src/transition.ts`). `docs/architecture.md` says how a system that keeps
+state takes this shape.
+
 Where a new kind of thing starts, the shared function for each job, and the
 check that catches a missed place: `docs/architecture.md`.
 
@@ -184,7 +191,8 @@ their change triggers; `0028_advanced_mode` adds `owner.advanced_at` and
 - A follow-up (carry out an approved ask, rework one the owner sent back, pick
   up after a task the owner finished, read why the owner said no, read the
   owner's edit to a file) runs once. Older rows may also be
-  `feedback`, from before feedback became a chat reply. `startFollowUp` claims it in the
+  `feedback`, from before feedback became a chat reply; such a row reads as
+  ended and never runs (`RETIRED_KINDS` in `src/work/state.ts`). `startFollowUp` claims it in the
   database before the run, and `finishFollowUp` records the outcome. An Odd
   runs once at a time on a thread: any follow-up on one but a `hand_off`
   waits while a run of the same Odd there has yet to end (`waitsOnOwnRun`),
@@ -483,8 +491,8 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   a `resume` follow-up), by `resume_at`'s `after_task` (`parkOnTask`, which takes
   only a task the hub gave or one on work it is on, any other reading as no
   task, sets `threads.resume_on_task` and clears the time; `wakeParked` wakes it when the
-  task is done or dropped, or taken off the desk (`withdrawTask`, as the task's Odd leaves
-  the office or through its `withdraw` tool), which wakes it as a drop does, and says which,
+  task is done or dropped, or taken off the desk (as the task's Odd leaves the office,
+  `oddRemoved` in `src/work/leaving.ts`, or through its `withdraw` tool, `withdrawTask`), which wakes it as a drop does, and says which,
   and when a run on the task's own work picks up too, names that work, whose lead carries its
   own part (never a lead that left the office, which runs nothing), or for a task on no work
   says another run of the hub's does, as one does when the owner finishes or drops it (`OWN_RUN`):
@@ -853,8 +861,11 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   - To add an ask kind, start at `ASK_KINDS` in `src/schema.ts`, then its row
     in `OWNER_ANSWERS` (`src/desk-answers.ts`), which says what each answer
     does.
-  - To add a follow-up kind, start at `FOLLOW_UP_KINDS` in `src/schema.ts`,
-    then its rows in `AT_DRAFT` and `SERVES_NO_THREAD` (`src/hand-offs.ts`).
+  - To add a follow-up kind, start at `FOLLOW_UP_KINDS` in `src/work/kinds.ts`,
+    then its rows in `AT_DRAFT` and `SERVES_NO_THREAD` beside it.
+  - To add a work event, start at `WorkEvent` in `src/work/events.ts`, then
+    its row in `WorkResults` beside it and its decider in `DECIDERS`
+    (`src/work/decide.ts`).
   - To add a connector kind, start at `CONNECTOR_KINDS` in `src/schema.ts`.
   - To add a desk item, start at `DESK_ITEMS` in `src/desk-answers.ts`.
   - To add a goal status, start at `GOAL_STATUSES` in `src/schema.ts`, then
@@ -942,8 +953,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
 Each line says what to do when its trigger comes.
 
 - Building NEW-1651 or NEW-1654, whichever comes first: give each run one
-  row of its own, with `runs.jobId` optional, usage pointing at the run, and
-  one reader per tool of that tool's stream.
+  row of its own, with `runs.jobId` optional and usage pointing at the run.
 - Before any change to what Odds are told (the lines in `capabilities.ts`,
   the office's `house.ts` or a run's brief): add snapshot tests of each kind
   of run's prompt, so the change shows as a diff in review.
