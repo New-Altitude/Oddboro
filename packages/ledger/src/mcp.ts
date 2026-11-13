@@ -7,6 +7,7 @@
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { server } from './mcp-run.ts';
 import './mcp-people.ts';
+import './mcp-updates.ts';
 
 await server.connect(new StdioServerTransport());
 // The database pool would keep the process alive after Claude Code hangs up.

@@ -69,3 +69,20 @@ test("a run below the Odd's level names its level, and the rest only when set", 
     }
   );
 });
+
+test('only an owner chat gets the updater snapshot', () => {
+  const update = {
+    current: '0.0.10',
+    managed: true,
+    ready: false,
+    version: null,
+    installAt: null,
+    checking: false,
+    checked: null
+  };
+  assert.equal(officeEnv({ ...plain, update }).ODDBORO_UPDATE_STATUS, undefined);
+  assert.deepEqual(
+    JSON.parse(officeEnv({ ...plain, update, ownerSaid: 'Check updates' }).ODDBORO_UPDATE_STATUS),
+    update
+  );
+});
