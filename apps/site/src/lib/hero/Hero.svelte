@@ -629,6 +629,27 @@
   }
 </script>
 
+<!-- The lot is the largest thing on a first visit, and the stylesheet names it
+     only through a variable, so the browser would find it late. The system
+     setting picks the theme for a first visit; a stored pick that differs
+     costs one extra image. -->
+<svelte:head>
+  <link
+    rel="preload"
+    as="image"
+    href="/art/lot.png"
+    media="(prefers-color-scheme: dark)"
+    fetchpriority="high"
+  />
+  <link
+    rel="preload"
+    as="image"
+    href="/art/day/lot.png"
+    media="(prefers-color-scheme: light)"
+    fetchpriority="high"
+  />
+</svelte:head>
+
 <section class="relative overflow-hidden" aria-labelledby="hero-title">
   <div
     class="pointer-events-none absolute inset-0 bg-[radial-gradient(70%_55%_at_70%_0%,var(--color-sea-deep)_0%,transparent_70%)] opacity-70"
@@ -675,13 +696,11 @@
       </p>
     </div>
 
-    <div class="min-w-0">
+    <div class="column min-w-0">
       <div
         bind:this={wrap}
         use:visible={seen}
         class="stage rounded-card border-hairline bg-night relative mx-auto max-w-full overflow-hidden border"
-        style:width="{W}px"
-        style:height="{H}px"
       >
         <div
           bind:this={root}
@@ -844,8 +863,7 @@
 
       <div
         bind:this={controls}
-        class="mx-auto mt-3 flex min-h-8 max-w-full items-center justify-between gap-4 px-1"
-        style:width="{W}px"
+        class="controls mx-auto mt-3 flex min-h-8 max-w-full items-center justify-between gap-4 px-1"
       >
         <p class="text-faint flex items-center gap-2 text-xs" aria-hidden="true">
           <span class="size-1.5 rounded-full {ended ? 'bg-faint' : 'bg-sea'}"></span>
@@ -869,8 +887,32 @@
 </section>
 
 <style>
+  /* The stage's first size, before layout() runs, is the one layout() will
+     pick, so nothing below it moves when the script arrives. These are the
+     scene's width and height from scene.json, and the half of each that
+     fit() picks when the column is narrower than the scene. */
+  .column {
+    container-type: inline-size;
+  }
+  .stage,
+  .controls {
+    width: 640px;
+  }
   .stage {
+    height: 616px;
     box-shadow: var(--shadow-float), var(--shadow-glow);
+  }
+  @container (width < 640px) {
+    .stage,
+    .controls {
+      width: 320px;
+    }
+    .stage {
+      height: 308px;
+    }
+    .scene {
+      transform: scale(0.5);
+    }
   }
   .sound {
     border: 1px solid var(--color-hairline);

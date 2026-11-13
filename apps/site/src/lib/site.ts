@@ -13,7 +13,7 @@ export const SITE = {
   github: 'https://github.com/New-Altitude/Oddboro',
   releases: 'https://github.com/New-Altitude/Oddboro/releases',
   company: 'New Altitude, Inc.',
-  ogImage: '/art/og.png'
+  ogImage: '/share.png'
 } as const;
 
 /** The homepage sections, in page order. The header's nav and the footer read this. */

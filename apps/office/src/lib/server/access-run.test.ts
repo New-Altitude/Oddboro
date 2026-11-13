@@ -18,6 +18,7 @@ import { homedir, hostname, networkInterfaces, tmpdir, type NetworkInterfaceInfo
 import { dirname, join, matchesGlob } from 'node:path';
 import { test } from 'node:test';
 import {
+  bin,
   chat,
   chatOf,
   filesOf,
@@ -434,15 +435,18 @@ test(
   onMac,
   async () => {
     // A Claude Code that fails every run with the refusal words. The network
-    // was never opened, so they cannot be a refusal of it.
-    const bin = join(folder, 'refusal-words-bin');
-    mkdirSync(bin, { recursive: true });
-    const claude = join(bin, 'claude');
+    // was never opened, so they cannot be a refusal of it. Its version and
+    // sign-in checks are the usual stand-in's: they send no stdin, so waiting
+    // on it held each until the office gave up on it.
+    const refusing = join(folder, 'refusal-words-bin');
+    mkdirSync(refusing, { recursive: true });
+    const claude = join(refusing, 'claude');
     writeFileSync(
       claude,
       `#!/usr/bin/env node
+if (process.argv[2] !== '-p') require(${JSON.stringify(join(bin, 'claude'))});
 // A chat's stdin stays open until its result, so it fails on its first line.
-process.stdin.once('data', () => {
+else process.stdin.once('data', () => {
   process.stderr.write('Overly broad patterns like "*" are not allowed\\n');
   process.exit(1);
 });
@@ -452,7 +456,7 @@ process.stdin.once('data', () => {
     await setOwn('eli', { commands: true });
     try {
       const errors: string[] = [];
-      await withEnv({ PATH: `${bin}:${process.env.PATH}` }, () =>
+      await withEnv({ PATH: `${refusing}:${process.env.PATH}` }, () =>
         chat('eli', 'Hello.', (e) => {
           if (e.type === 'error') errors.push(e.message);
         })

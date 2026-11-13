@@ -86,8 +86,10 @@ else (async () => {
     schedule,
     instructions: 'Independent check.'
   });
+  // Due now: the change wakes the clock, which runs a job up to a minute late
+  // on time (ON_TIME_MS), so no test waits for a time to come.
   const due = async (id: number) => {
-    const time = new Date(Date.now() + 1200);
+    const time = new Date();
     await L.setNextRun(id, time);
     return time;
   };

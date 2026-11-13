@@ -29,9 +29,20 @@
   const section = 'mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:px-8 lg:py-28';
   // Every other section sits on a slightly raised band, so the page has a rhythm.
   const band = new Set(['how-it-works', 'goals', 'open-source']);
+
+  // Tells Google the site's name, so search results say Oddboro, not oddboro.com.
+  const website = JSON.stringify({
+    '@context': 'https://schema.org',
+    '@type': 'WebSite',
+    name: SITE.name,
+    url: `${SITE.url}/`
+  });
 </script>
 
 <Meta path="/" ogTitle={SITE.ogTitle} ogDescription={SITE.ogDescription} />
+<svelte:head>
+  {@html `<script type="application/ld+json">${website}</script>`}
+</svelte:head>
 
 <Hero />
 

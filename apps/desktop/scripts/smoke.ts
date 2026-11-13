@@ -503,9 +503,18 @@ async function smokeApp(): Promise<void> {
         if (!out.includes('Notarized Developer ID')) throw new Error(out);
         return out;
       });
-      await step('its notarization ticket is stapled', true, () =>
-        run('xcrun', ['stapler', 'validate', dir])
-      );
+      // stapler asks Apple's servers too, and a dropped connection there is no
+      // fault of the build: up to three tries for that, none for a bad ticket.
+      await step('its notarization ticket is stapled', true, async () => {
+        for (let attempt = 1; ; attempt++) {
+          try {
+            return run('xcrun', ['stapler', 'validate', dir]);
+          } catch (e) {
+            if (attempt === 3 || !String(e).includes('NSURLErrorDomain')) throw e;
+            await sleep(10_000);
+          }
+        }
+      });
     }
   }
   const claude = CI && !args.installed;

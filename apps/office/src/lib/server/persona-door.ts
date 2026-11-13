@@ -103,13 +103,14 @@ function answerOf(outcome: DoorOutcome, b: Record<string, unknown>): DoorAnswer 
  * conversation: its earlier answered exchanges go with it, and an answered
  * turn joins them under the id the door gave back. A turn the door did not
  * answer adds nothing, so a note of the office's is never sent back as the
- * persona's words.
+ * persona's words. `signal`, the run's Stop, ends the wait as its time limit does.
  */
 export async function askDoor(turn: {
   url: string;
   token: string;
   message: string;
   chat?: { odd: string; ownerSaid: string };
+  signal?: AbortSignal;
 }): Promise<DoorAnswer> {
   const session = turn.chat
     ? readSession(turn.chat.odd)
@@ -128,7 +129,10 @@ export async function askDoor(turn: {
         ...(turn.chat ? { priorTurns: session.priorTurns.slice(-PRIOR_TURNS_MAX) } : {}),
         locale: 'en-US'
       }),
-      signal: AbortSignal.timeout(DOOR_TIMEOUT_MS)
+      signal: AbortSignal.any([
+        AbortSignal.timeout(DOOR_TIMEOUT_MS),
+        ...(turn.signal ? [turn.signal] : [])
+      ])
     });
     if (res.status === 401) return { outcome: 'grant' };
     // A slow turn's answer starts with keep-alive spaces, which JSON.parse skips.

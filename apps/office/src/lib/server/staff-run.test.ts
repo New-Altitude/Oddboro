@@ -25,6 +25,7 @@ import {
 import { randomBytes, randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
+import { setTimeout as wait } from 'node:timers/promises';
 import { mock, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import type { McpServer } from './launch.ts';
@@ -954,29 +955,35 @@ test('Grok runs starting together share one renewal of their sign-in', async () 
   });
 });
 
-test('a renewal that hangs and ignores SIGTERM is killed at 30 seconds, and the run goes on', async () => {
+test('a renewal that hangs and ignores SIGTERM is killed at 30 seconds, and the run goes on', async (t) => {
   const { grokSignedOut } = await import('./grok.ts');
   const hang = join(folder, 'accounts', 'grok', 'office', 'hang.pid');
   // 0 until grok models starts; process.kill reads 0 as this whole process group.
   const pid = () => Number(readFileSync(hang, 'utf8'));
   await withGrokSignIn({ auth: 12 * 60_000 }, async () => {
     writeFileSync(hang, '');
-    let timer: NodeJS.Timeout | undefined;
+    // The office's 30 seconds pass on a mock clock, while grok models runs
+    // for real. The test's own waits are timers/promises, which stays real.
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    let ended = false;
+    const renewal = grokSignedOut(5 * 60_000).finally(() => (ended = true));
     try {
-      const started = Date.now();
-      const ended = await Promise.race([
-        grokSignedOut(5 * 60_000).then((refused) => ({ refused })),
-        new Promise<false>((stop) => (timer = setTimeout(() => stop(false), 40_000)))
-      ]);
-      const took = Date.now() - started;
-      assert.ok(ended, 'the renewal was still going at 40 seconds');
-      // The sign-in still has 12 minutes, so the killed renewal refuses nothing.
-      assert.equal(ended.refused, undefined, 'the run was refused after its renewal was killed');
-      assert.ok(took >= 29_000 && took < 35_000, `the renewal ended after ${took} ms`);
+      for (let i = 0; i < 500 && !(pid() > 0); i++) await wait(20);
       assert.ok(pid() > 0, 'grok models never started');
+      t.mock.timers.tick(29_999);
+      // Long enough for a killed grok models to be heard closing.
+      await wait(500);
+      assert.equal(ended, false, 'the renewal ended before 30 seconds');
+      t.mock.timers.tick(1);
+      const result = await Promise.race([
+        renewal.then((refused) => ({ refused })),
+        wait(10_000, undefined, { ref: false })
+      ]);
+      assert.ok(result, 'the renewal was still going 10 seconds after its 30');
+      // The sign-in still has 12 minutes, so the killed renewal refuses nothing.
+      assert.equal(result.refused, undefined, 'the run was refused after its renewal was killed');
       assert.throws(() => process.kill(pid(), 0), { code: 'ESRCH' }, 'grok models still runs');
     } finally {
-      clearTimeout(timer);
       try {
         if (pid() > 0) process.kill(pid(), 'SIGKILL');
       } catch {

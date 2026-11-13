@@ -123,16 +123,18 @@ fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
     let target = env!("ODDBORO_TARGET");
     let pid = std::process::id();
     let port = env::port();
+    // The dev escape hatch: open a server that already runs, such as vite dev.
+    let server_url = std::env::var("ODDBORO_SERVER_URL").ok();
+    let opens = opening(server_url.as_deref(), port);
     let home = env::office_home().display().to_string();
     let webview = tauri::webview_version().unwrap_or_else(|e| format!("unknown ({e})"));
     server::note(
         &env::log_file(),
         &format!(
-            "Oddboro {version} ({target}) opening: pid {pid}, port {port}, home {home}, webview {webview}"
+            "Oddboro {version} ({target}) opening: pid {pid}, {opens}, home {home}, webview {webview}"
         ),
     );
-    // The dev escape hatch: open a server that already runs, such as vite dev.
-    if let Ok(url) = std::env::var("ODDBORO_SERVER_URL") {
+    if let Some(url) = server_url {
         match Url::parse(&url) {
             Ok(url) => open_main(app, &url),
             Err(e) => fail(
@@ -485,4 +487,27 @@ fn alert(app: &AppHandle, message: &str) {
 fn fail(app: &AppHandle, code: i32, message: &str) {
     alert(app, message);
     app.exit(code);
+}
+
+/// What the launch line says the shell opens: the server `ODDBORO_SERVER_URL`
+/// names, which leaves `ODDBORO_PORT` unused, or the port its own server takes.
+fn opening(server_url: Option<&str>, port: u16) -> String {
+    match server_url {
+        Some(url) => format!("server {url}"),
+        None => format!("port {port}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::opening;
+
+    #[test]
+    fn the_launch_line_names_what_the_shell_opens() {
+        assert_eq!(
+            opening(Some("http://127.0.0.1:4650"), 4500),
+            "server http://127.0.0.1:4650"
+        );
+        assert_eq!(opening(None, 4590), "port 4590");
+    }
 }
