@@ -5,12 +5,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { and, eq } from 'drizzle-orm';
-import { asks, staff } from '../src/schema.ts';
+import { asks, ledger, staff } from '../src/schema.ts';
 import { db } from './pglite.ts';
 
 // The precedent a raise looks up embeds nothing: no Ollama answers here.
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
-const { raiseCall } = await import('../src/office.ts');
+const { approveCall, raiseCall } = await import('../src/office.ts');
 
 await db.insert(staff).values({
   id: 'paige',
@@ -42,4 +42,25 @@ test('the same call held twice at once goes on the desk once, and the second hea
     both.map((r) => r.ask.id),
     [open[0].id, open[0].id]
   );
+});
+
+test('a yes to a held call keeps what the call returned on the ask, and its ledger line names it', async () => {
+  const { ask } = await raiseCall(
+    { staffId: 'paige', run: 'k-2' },
+    { connector: 'gmail', tool: 'label', arguments: { ids: ['m3'] } },
+    'Gmail',
+    { title: 'Label an email', why: 'It is a bill.' }
+  );
+  const at = new Date().toISOString();
+  assert.ok(
+    await approveCall(ask.id, { ...ask.call!, result: { ok: true, text: 'Labelled m3.', at } })
+  );
+  const [kept] = await db.select().from(asks).where(eq(asks.id, ask.id));
+  assert.equal(kept.call?.result?.text, 'Labelled m3.');
+  const [line] = await db
+    .select()
+    .from(ledger)
+    .where(and(eq(ledger.askId, ask.id), eq(ledger.kind, 'decision')));
+  assert.match(line.title, /^Made: /);
+  assert.match(line.body ?? '', /It returned: Labelled m3\./);
 });
