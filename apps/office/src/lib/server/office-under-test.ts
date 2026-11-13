@@ -268,8 +268,9 @@ chmodSync(join(bin, 'claude'), 0o755);
 // "grok login" logs its arguments and home in logins.jsonl and its pid in
 // login.pid, prints its sign-in page, and waits for login.go in its home:
 // then it keeps a sign-in for owner@example.com and ends. "grok logout"
-// adds a dot to logouts.log. Its message (`--single`) takes the markers
-// every stand-in takes (`SHARED`), with Claude Code's failed result.
+// adds a dot to logouts.log. Its message, from a plain-text prompt file
+// (`--prompt-file`), takes the markers every stand-in takes (`SHARED`), with
+// Claude Code's failed result.
 writeFileSync(
   join(bin, 'grok'),
   `#!/usr/bin/env node

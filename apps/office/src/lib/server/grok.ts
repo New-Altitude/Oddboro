@@ -262,7 +262,7 @@ function promptFile(h: GrokHome, key: string, message: string, images: RunImage[
 }
 const PROMPT_ENDS = ['.prompt.txt', '.prompt.json'] as const;
 
-/** Grok takes its message as an argument, so its launch has no input (`LAUNCHES.grok` in cli.ts). */
+/** Grok reads its message from its prompt file, so its launch has no input (`LAUNCHES.grok` in cli.ts). */
 type GrokLaunch = Omit<Launch, 'stdin'>;
 
 /** A sandbox profile, kept in the Grok home's sandbox.toml. */
