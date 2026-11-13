@@ -120,19 +120,22 @@ export type TaskEffect = Extract<
 >;
 
 /**
- * Whether each effect of a task's end starts a run on the task's own work:
- * always, only when the task is on a piece of work (an answer goes back there,
- * and reaches nobody otherwise), or never. Each such run and the work parked
- * on the task are told of each other (`finishTask`), or both do the parked work.
+ * Whether each effect of a task's end starts a run of the task's own: always;
+ * on its work, else its Odd, as an answer does: it goes back to the work the
+ * task is on, and on no work to the Odd that gave it, as an `answered` run,
+ * unless that Odd took the task off the desk or the task came on a hand-off,
+ * whose lead the answer goes to instead; or never. Each such run and the work
+ * parked on the task are told of each other (`ownRunOf`), or both do the
+ * parked work.
  */
 export const OWN_RUN = {
   carry_out: 'always',
   task_done: 'always',
-  answer_back: 'on its work',
+  answer_back: 'on its work, else its Odd',
   wake_parked: 'never'
 } as const satisfies Record<
   Exclude<TaskEffect, { none: string }>,
-  'always' | 'on its work' | 'never'
+  'always' | 'on its work, else its Odd' | 'never'
 >;
 
 export type AskAnswer = {

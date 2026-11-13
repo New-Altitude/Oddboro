@@ -160,17 +160,24 @@ export function taskEffects(
 }
 
 /**
- * The run on an ended task's own work that `wakeParked` tells parked work
- * of, if one picks up: whether the task's end starts a run there
- * (`OWN_RUN`), and never on stopped work or work whose lead left the office,
- * which runs nothing.
+ * The run of an ended task's own, on its work or for its Odd, that
+ * `wakeParked` tells parked work of, if one picks up: whether the task's end
+ * starts one (`OWN_RUN`), and never on stopped work or work whose lead left
+ * the office, which runs nothing.
  */
 export function ownRunOf(rows: WorkRows, t: Task): OwnRun | undefined {
-  const { effects, ownThread } = taskEffects(rows, t);
+  const { from, effects, ownThread } = taskEffects(rows, t);
+  // On no work, the answer goes where `answer_back` in `taskEnded` sends it.
+  // Only the Odd that gave such a task can park on it, so an Odd gave it.
+  const toItsOdd =
+    ownThread === null &&
+    !(t.handOffId ?? from?.handOffId) &&
+    !(t.status === 'dropped' && t.withdrawn);
   const ownRuns = effects.some(
     (e) =>
       typeof e === 'string' &&
-      (OWN_RUN[e] === 'always' || (OWN_RUN[e] === 'on its work' && ownThread !== null))
+      (OWN_RUN[e] === 'always' ||
+        (OWN_RUN[e] === 'on its work, else its Odd' && (ownThread !== null || toItsOdd)))
   );
   if (!ownRuns) return undefined;
   const own = ownThread === null ? undefined : rows.threads.get(ownThread);
