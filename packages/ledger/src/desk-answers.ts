@@ -69,14 +69,16 @@ export const askReplaced = (a: { status: AskStatus; reason: string | null }): bo
  *   (`giveFolder`), and the work that waited on it starts, once for each place
  *   a result goes back to.
  * - `turn_on`: the switches the ask names turned on with the yes
- *   (`turnOnSwitches`), and the work that waited on them starts, once for each
+ *   (`changeOwnTools`), and the work that waited on them starts, once for each
  *   place a result goes back to.
  * - `start_held`: the hand-off the ask held starts, as the ask is claimed.
  * - `answer_window`: the usage window's answer (`answerWindow`).
  * - `answer_hand_offs`: the yes or no to more hand-offs goes to the thread's hub
  *   (`answerHandOffs`).
  * - `answer_back`: the answer itself goes to the hand-off or thread it was
- *   raised on (`answerLater`). Raised on neither, it reaches nobody.
+ *   raised on (`answerLater`). Raised on neither, it wakes the Odd that raised
+ *   it, once, as an `answered` run (`offWorkAnswer`); a goal's or a hire's yes
+ *   does not.
  * - `rework`: a `rework` follow-up, with what to change.
  * - `denied_lesson`: a `denied` follow-up, when the no carries a reason.
  * - `task_done`: a `task_done` follow-up, to pick up what waited on the task.
@@ -146,14 +148,8 @@ export type AskAnswer = {
    */
   iterate: readonly AskEffect[] | 'refused';
 };
-/**
- * An answer with no run to follow it, to an ask raised on no hand-off and no
- * thread, tells the Odd that asked nothing: a yes to a hire or a goal, and a
- * no with no reason.
- */
-const OFF_A_THREAD = { none: 'NEW-1715' };
 /** A no: the answer goes back, and its reason is a lesson for the Odd that asked. */
-const NO: readonly AskEffect[] = ['answer_back', 'denied_lesson', OFF_A_THREAD];
+const NO: readonly AskEffect[] = ['answer_back', 'denied_lesson'];
 const REWORK: readonly AskEffect[] = ['rework'];
 
 export const OWNER_ANSWERS = {
@@ -161,12 +157,12 @@ export const OWNER_ANSWERS = {
     approval: { approve: ['carry_out'], deny: NO, iterate: REWORK },
     access: { approve: ['grant_access'], deny: NO, iterate: REWORK },
     hire: {
-      approve: { by: 'Approve a hire by hiring', then: ['answer_back', OFF_A_THREAD] },
+      approve: { by: 'Approve a hire by hiring', then: ['answer_back'] },
       deny: NO,
       iterate: REWORK
     },
     // Setting the goal wakes the Office Manager to plan it, on the goal's thread.
-    goal: { approve: ['approval_work', 'answer_back', OFF_A_THREAD], deny: NO, iterate: REWORK },
+    goal: { approve: ['approval_work', 'answer_back'], deny: NO, iterate: REWORK },
     // A plan is always raised on its goal's thread, so its answer always reaches the lead.
     plan: {
       approve: ['approval_work', 'answer_back'],
@@ -183,7 +179,7 @@ export const OWNER_ANSWERS = {
     reply: {
       approve: {
         by: 'Send the reply, or save it to Gmail drafts',
-        then: ['answer_back', OFF_A_THREAD]
+        then: ['answer_back']
       },
       deny: NO,
       iterate: REWORK
@@ -191,7 +187,7 @@ export const OWNER_ANSWERS = {
     filter: {
       approve: {
         by: 'Create the filter from its card on the desk',
-        then: ['answer_back', OFF_A_THREAD]
+        then: ['answer_back']
       },
       deny: NO,
       iterate: REWORK
@@ -208,9 +204,9 @@ export const OWNER_ANSWERS = {
       deny: NO,
       iterate: REWORK
     },
-    remove: { approve: ['answer_back', OFF_A_THREAD, 'odd_leaves'], deny: NO, iterate: 'refused' },
+    remove: { approve: ['answer_back', 'odd_leaves'], deny: NO, iterate: 'refused' },
     bring_back: {
-      approve: ['answer_back', OFF_A_THREAD, 'odd_returns'],
+      approve: ['answer_back', 'odd_returns'],
       deny: NO,
       iterate: 'refused'
     },

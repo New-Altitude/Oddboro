@@ -139,9 +139,9 @@ const cellOf = (kind: AskKind, decision: Decision) =>
  * ask changes nothing an Odd sees on a no, so only its cell can hold it.
  */
 type Pin = { cell: AskAnswer[Decision]; onThread: string[]; onNone?: string[] };
-const OFF_A_THREAD = { none: 'NEW-1715' };
+// A no with a reason on no work: the denied run carries the answer, so no answered run goes too.
 const NO: Pin = {
-  cell: ['answer_back', 'denied_lesson', OFF_A_THREAD],
+  cell: ['answer_back', 'denied_lesson'],
   onThread: ['denied:ada', 'resume:ada'],
   onNone: ['denied:ada']
 };
@@ -165,7 +165,7 @@ const PINNED: Record<AskKind, Record<Decision, Pin>> = {
   },
   hire: {
     approve: {
-      cell: { by: 'Approve a hire by hiring', then: ['answer_back', OFF_A_THREAD] },
+      cell: { by: 'Approve a hire by hiring', then: ['answer_back'] },
       onThread: ['resume:ada'],
       onNone: []
     },
@@ -176,10 +176,10 @@ const PINNED: Record<AskKind, Record<Decision, Pin>> = {
     approve: {
       cell: {
         by: 'Send the reply, or save it to Gmail drafts',
-        then: ['answer_back', OFF_A_THREAD]
+        then: ['answer_back']
       },
       onThread: ['resume:ada'],
-      onNone: []
+      onNone: ['answered:ada']
     },
     deny: NO,
     iterate: REWORK
@@ -188,10 +188,10 @@ const PINNED: Record<AskKind, Record<Decision, Pin>> = {
     approve: {
       cell: {
         by: 'Create the filter from its card on the desk',
-        then: ['answer_back', OFF_A_THREAD]
+        then: ['answer_back']
       },
       onThread: ['resume:ada'],
-      onNone: []
+      onNone: ['answered:ada']
     },
     deny: NO,
     iterate: REWORK
@@ -224,7 +224,7 @@ const PINNED: Record<AskKind, Record<Decision, Pin>> = {
   },
   goal: {
     approve: {
-      cell: ['approval_work', 'answer_back', OFF_A_THREAD],
+      cell: ['approval_work', 'answer_back'],
       onThread: ['goal:max', 'resume:ada'],
       onNone: ['goal:max']
     },
@@ -250,18 +250,18 @@ const PINNED: Record<AskKind, Record<Decision, Pin>> = {
   // Ada asks about another Odd, so the one that leaves or comes back is never Ada.
   remove: {
     approve: {
-      cell: ['answer_back', OFF_A_THREAD, 'odd_leaves'],
+      cell: ['answer_back', 'odd_leaves'],
       onThread: ['resume:ada'],
-      onNone: []
+      onNone: ['answered:ada']
     },
     deny: NO,
     iterate: REFUSED
   },
   bring_back: {
     approve: {
-      cell: ['answer_back', OFF_A_THREAD, 'odd_returns'],
+      cell: ['answer_back', 'odd_returns'],
       onThread: ['resume:ada'],
-      onNone: []
+      onNone: ['answered:ada']
     },
     deny: NO,
     iterate: REFUSED
@@ -277,7 +277,7 @@ const PINNED: Record<AskKind, Record<Decision, Pin>> = {
     approve: {
       cell: ['give_standing', 'answer_back'],
       onThread: ['resume:ada', 'standing:ada'],
-      onNone: ['standing:ada']
+      onNone: ['answered:ada', 'standing:ada']
     },
     deny: NO,
     iterate: REFUSED
@@ -377,7 +377,11 @@ const raise: Record<AskKind, (onThread: boolean) => Promise<Raised>> = {
       .values({ staffId: 'max', kind: 'window', title: 'Keep going?', why: 'w', ifApproved: 'i' })
       .returning({ id: asks.id });
     const id = await thread();
-    await db.update(threads).set({ heldBy: a.id }).where(eq(threads.id, id));
+    // Held until the window resets, as the office holds it: a hold always has its reset time.
+    await db
+      .update(threads)
+      .set({ heldBy: a.id, resumeAt: new Date(Date.now() + 3_600_000) })
+      .where(eq(threads.id, id));
     return { id: a.id };
   },
   // A yes turns the switch on, so each ask starts with it off.
@@ -589,10 +593,11 @@ test("every ask kind's yes, no and send-back has the row pinned here, and reache
     }
 });
 
-/** Each answer that tells the Odd nothing when its ask was raised on no thread. */
-const SILENT_OFF_A_THREAD: readonly (readonly [AskKind, Decision])[] = [
-  ['hire', 'approve'],
-  ['goal', 'approve'],
+/**
+ * Each answer that starts no run of its own when given with no reason. On an
+ * ask raised on no thread, the answer itself is the only word the Odd gets.
+ */
+const NO_RUN_OF_ITS_OWN: readonly (readonly [AskKind, Decision])[] = [
   ['reply', 'approve'],
   ['filter', 'approve'],
   ['approval', 'deny'],
@@ -610,22 +615,25 @@ const SILENT_OFF_A_THREAD: readonly (readonly [AskKind, Decision])[] = [
   ['bring_back', 'deny'],
   ['standing', 'deny']
 ];
-const namesNew1715 = (kind: AskKind, decision: Decision) =>
-  effectsOf(cellOf(kind, decision)).some((e) => typeof e === 'object' && e.none === 'NEW-1715');
 
-test('a yes to a hire, a goal, a reply, a filter, letting an Odd go or bringing one back, or a no with no reason, to an ask raised on no thread tells the Odd nothing, and only those rows name NEW-1715', async () => {
-  for (const [kind, decision] of SILENT_OFF_A_THREAD) {
+test('an answer with no run of its own, a no with no reason among them, to an ask raised on no thread wakes the Odd that raised it once with the answer, and no row is left to name NEW-1715', async () => {
+  for (const [kind, decision] of NO_RUN_OF_ITS_OWN) {
     const where = `${kind} ${decision}`;
     const { id } = await raise[kind](false);
     const mark = await markNow();
     await answer(kind, decision, id, null);
     const toAda = (await reached(mark)).filter((r) => r.endsWith(':ada'));
-    assert.deepEqual(toAda, [], where);
+    assert.deepEqual(toAda, ['answered:ada'], where);
+    const [woke] = await db.select().from(followUps).where(eq(followUps.askId, id));
+    const title = (await askRow(id))?.title ?? '';
+    assert.ok(woke?.note?.includes(`"${title}"`), `${where}: ${woke?.note}`);
   }
   const naming = ASK_KINDS.flatMap((kind) =>
-    DECISIONS.filter((d) => namesNew1715(kind, d)).map((d) => `${kind} ${d}`)
+    DECISIONS.filter((d) =>
+      effectsOf(cellOf(kind, d)).some((e) => typeof e === 'object' && e.none === 'NEW-1715')
+    ).map((d) => `${kind} ${d}`)
   );
-  assert.deepEqual(naming.sort(), SILENT_OFF_A_THREAD.map(([k, d]) => `${k} ${d}`).sort());
+  assert.deepEqual(naming, []);
 });
 
 test("a done or dropped task, a done task with no Odd, and a goal's pause, met or drop have the rows pinned here and reach the Odd as pinned, and a none names its Linear row", async () => {

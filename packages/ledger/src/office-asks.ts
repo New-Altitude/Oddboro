@@ -2,10 +2,12 @@
 // answer covers.
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { db } from './db.ts';
-import { goalThread, keepRun, raisedOn, type Db, type Tx } from './threads.ts';
+import { goalThread, type Db, type Tx } from './threads.ts';
+import { fixedError } from './errors.ts';
+import { runAfters } from './transition.ts';
+import { transitionWork } from './work/apply.ts';
 import {
   asks,
-  attachments,
   tasks,
   type AccessRequest,
   type AskKind,
@@ -20,11 +22,9 @@ import {
 } from './schema.ts';
 import { switchesSaid, type OwnSwitch } from './access-words.ts';
 import { sameCriteria, type GmailFilter } from './filter-words.ts';
-import { ASK_REPLACED } from './desk-answers.ts';
 import type { AskRow, LedgerRow } from './office.ts';
 import { precedent } from './office-ledger.ts';
 import { followUp } from './office-follow-ups.ts';
-import { mediaTypeOf } from './office-tasks.ts';
 import { TWINNED, asksNoMore, sameWanted, carriedOutBy } from './work/twins.ts';
 
 // Asks
@@ -312,22 +312,31 @@ export async function raiseAsk(
      */
     run?: string;
   }
-): Promise<{ ask: AskRow; precedent: LedgerRow[] }> {
+): Promise<{ ask: AskRow; precedent: LedgerRow[]; already: boolean }> {
   const { attach, run, ...fields } = a;
   const kind = a.kind ?? (a.access ? 'access' : a.hire ? 'hire' : 'approval');
-  const ask = await db.transaction(async (tx) => {
+  const raised = await db.transaction(async (tx) => {
     // An Odd's own ask may not repeat one on the desk, a reply may not
     // answer an email twice, and a filter may not file the same mail twice.
     // A folder or switch ask may not repeat one from the same place.
-    // Office-raised kinds and access twins are left alone.
-    if (ONCE_ONLY.includes(kind) || a.reply || a.filter || a.folder || a.switches || a.standing) {
+    // Office-raised kinds and access twins are left alone. A held call the
+    // core finds open already, under this lock, so two at once raise one.
+    if (
+      ONCE_ONLY.includes(kind) ||
+      a.reply ||
+      a.filter ||
+      a.folder ||
+      a.switches ||
+      a.standing ||
+      a.call
+    ) {
       await lockDesk(tx, staffId);
       if (a.reply) await refuseSecondReply(tx, staffId, a.reply, a.revises);
       else if (a.filter) await refuseSecondFilter(tx, staffId, a.filter, a.revises);
       else if (a.folder) await refuseSecondFolder(tx, staffId, { ...a, folder: a.folder });
       else if (a.switches) await refuseSecondSwitch(tx, staffId, { ...a, switches: a.switches });
       else if (a.standing) await refuseSecondStanding(tx, staffId, a.standing, a.revises);
-      else await refuseRepeat(tx, staffId, a.title, a.revises);
+      else if (!a.call) await refuseRepeat(tx, staffId, a.title, a.revises);
     }
     // A plan goes on its goal's one thread, whatever run raised it: a chat,
     // the weekly review, or the goal's own planning run. So approving it
@@ -335,37 +344,25 @@ export async function raiseAsk(
     const on = a.plan
       ? { handOffId: undefined, threadId: await goalThread(tx, a.plan.goalId, staffId) }
       : {};
-    const [row] = await tx
-      .insert(asks)
-      .values({
-        staffId,
-        ...fields,
-        kind,
-        ...on
-      })
-      .returning();
-    // A new version the Odd made of its own ask, still open, takes its place
-    // on the desk: the old one closes as replaced, so the owner sees one.
-    if (a.revises)
-      await tx
-        .update(asks)
-        .set({ status: 'revise', reason: ASK_REPLACED, decidedAt: new Date() })
-        .where(and(eq(asks.id, a.revises), eq(asks.staffId, staffId), eq(asks.status, 'open')));
-    if (row.threadId) {
-      // The thread keeps the run's key, so the owner's answer cannot start the
-      // hub there while the run that raised it, such as a chat, still goes.
-      await keepRun(tx, row.threadId, { key: run, by: staffId });
-      await raisedOn(tx, row.threadId, { plan: !!a.plan });
-    }
-    if (attach?.length)
-      await tx
-        .insert(attachments)
-        .values(
-          attach.map((path) => ({ staffId, path, mediaType: mediaTypeOf(path), askId: row.id }))
-        );
-    return row;
+    const went = await transitionWork(
+      { kind: 'askRaised', ask: { staffId, ...fields, kind, ...on }, attach, run },
+      { tx }
+    );
+    if ('refused' in went) return went;
+    const already = went.change.result?.already;
+    const row = await ask(already ?? went.real({ ref: 'ask' }), tx);
+    if (!row) throw fixedError('An ask was raised that is not there.');
+    return { row, already: already !== undefined, after: went.after };
   });
-  return { ask, precedent: await precedent(`${a.title}\n${a.why}`) };
+  if ('refused' in raised) throw new Error(raised.refused);
+  await runAfters('askRaised', raised.after);
+  const { row, already } = raised;
+  // A repeat of a held call is the one there, whose precedent the Odd already had.
+  return {
+    ask: row,
+    precedent: already ? [] : await precedent(`${a.title}\n${a.why}`),
+    already
+  };
 }
 
 export async function ask(id: number, q: Db = db): Promise<AskRow | undefined> {

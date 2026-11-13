@@ -175,7 +175,7 @@ their change triggers; `0028_advanced_mode` adds `owner.advanced_at` and
   desk, with where each stands; the office shows them in its chat. A folder
   or switch ask also carries its folder (shown, as the Desk shows it), its
   switches and its why, so the chat can show the card. Answering it still
-  goes through `giveFolder`, or approval and `turnOnSwitches`, as on the
+  goes through `giveFolder`, or approval and `changeOwnTools`, as on the
   Desk, and `chat` reaches only the carry-out of the ask answered there. No
   migration.
   `replyToReport` is the owner's feedback, given as a chat reply: it marks the
@@ -673,7 +673,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   them (`switchAskRefused`, `commandsHow`). `raiseAsk` refuses a repeat from
   the same place that one open covers; one from another place asking no more
   is a twin (`asksNoMore`). A plain approve turns them on in the transaction
-  that approves it (`turnOnSwitches`), refused and left open when the Odd's
+  that approves it (`changeOwnTools`, the Settings tab's own change), refused and left open when the Odd's
   tool can no longer run commands, with one ledger line in the Settings tab's
   words and its network note, and starts one `carry_out` per place
   (`carryOutTogether`). `test/switch-asks.test.ts` holds it, the tool included.
@@ -741,7 +741,8 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   Odd's own open asks and tasks off the owner's desk when the owner says so.
   An ask goes through `withdrawAsk` (the office's no, quoting the owner's
   words, no `denied` run, a held call never made), a task through
-  `withdrawTask`; anything not the Odd's or not open is left as it is.
+  `withdrawTask`; anything not the Odd's, or that the owner answered first, is
+  left as it is.
   `test/withdraw.test.ts` holds it.
 - `draft_bug_report`, every Odd's, offered only in a chat (`OWNER_SAID`),
   keeps a bug report's title and details for the run in the Odd's folder

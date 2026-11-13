@@ -23,7 +23,7 @@ import {
 // Read only inside functions, so the import cycle with managers.ts is safe.
 import { MANAGER_ROLE } from './managers.ts';
 import { currentPlatform } from './platform.ts';
-import { levelAtMost, type Level } from './access-words.ts';
+import { levelAtMost, type Level, type OwnSwitch } from './access-words.ts';
 import { isGrantable, OFFICE_TOOLS, ON_BY_DEFAULT } from './tools.ts';
 import { HIRE_DEFAULTS } from './grantable.ts';
 import { lookSignature, type DrawnPart, type LookSpec } from '@oddboro/sprites/look';
@@ -288,21 +288,13 @@ export async function setModel(
  */
 export async function setOwnTool(
   id: string,
-  which: 'commands' | 'web',
+  which: OwnSwitch,
   on: boolean
 ): Promise<{ refused: string } | undefined> {
-  const before = await staffer(id);
-  if (!before) return;
-  if (which === 'commands') {
-    const refused = commandsRefused(before.agent);
-    if (refused) return refused;
-  }
-  if (before[which] === on) return;
-  await db
-    .update(staff)
-    .set({ [which]: on })
-    .where(eq(staff.id, id));
-  const n = before.name;
+  const changed = await changeOwnTools(db, id, [which], on);
+  if (!changed || 'refused' in changed) return changed;
+  if (!changed.on.length) return;
+  const n = changed.before.name;
   const title =
     which === 'commands'
       ? on
@@ -315,8 +307,39 @@ export async function setOwnTool(
     kind: 'access',
     actor: 'owner',
     title,
-    ...networkNote(before, { ...before, [which]: on })
+    ...networkNote(changed.before, changed.after)
   });
+}
+
+/**
+ * Set a working Odd's own switches in `which` to `on`, in `q`, the one change
+ * both the Settings tab (`setOwnTool`) and a switch ask's yes make. Ones
+ * already set stay as they are, and `on` names those that changed. Run
+ * commands in `which` is refused for a tool that does not follow the switch
+ * on this system, before anything changes. The caller writes the ledger line.
+ */
+export async function changeOwnTools(
+  q: Db,
+  id: string,
+  which: readonly OwnSwitch[],
+  on: boolean
+): Promise<
+  { before: StaffRow; after: StaffRow; on: OwnSwitch[] } | { refused: string } | undefined
+> {
+  const before = await staffer(id, q);
+  if (!before) return;
+  if (which.includes('commands')) {
+    const refused = commandsRefused(before.agent);
+    if (refused) return refused;
+  }
+  const changing = which.filter((s) => before[s] !== on);
+  if (!changing.length) return { before, after: before, on: changing };
+  const [after] = await q
+    .update(staff)
+    .set(Object.fromEntries(changing.map((s) => [s, on])))
+    .where(eq(staff.id, id))
+    .returning();
+  return after && { before, after, on: changing };
 }
 
 export type Hire = Pick<

@@ -9,7 +9,7 @@ import type { Agent } from '../agents.ts';
 import { fixedError } from '../errors.ts';
 import type { CarriedFile } from '../hand-offs.ts';
 import type { record } from '../office-ledger.ts';
-import type { AskRow, StaffRow } from '../office.ts';
+import type { StaffRow } from '../office.ts';
 import type { AskStatus, HandOff } from '../schema.ts';
 import type { Tx } from '../threads.ts';
 import type { Ask, FollowUp, Task, Thread } from './state.ts';
@@ -106,8 +106,7 @@ export type LedgerLine = Parameters<typeof record>[0];
 export type PerKindInTx = {
   /** Names it in an error, and is the `ref` a put may point at. */
   name: string;
-  /** `ask`: the ask this change claims, on an ask's answer. */
-  run: (tx: Tx, ask?: AskRow) => Promise<{ id: string | number } | void>;
+  run: (tx: Tx) => Promise<{ id: string | number } | void>;
 };
 
 /** A write inside the transaction outside the four tables, as named data. */

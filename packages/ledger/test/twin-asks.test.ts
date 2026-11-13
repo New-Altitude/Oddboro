@@ -84,6 +84,12 @@ test('a no answers both, and only the first starts a run to read why', async () 
     denied.map((f) => f.askId),
     [first.id]
   );
+  // The denied run tells the Odd the no for both: neither ask, on no work, wakes it again.
+  const answered = await db.select().from(followUps).where(eq(followUps.kind, 'answered'));
+  assert.deepEqual(
+    answered.filter((f) => f.askId === first.id || f.askId === twin.id),
+    []
+  );
 });
 
 test('an ask for more than the first is no twin: both show, and an answer to the bigger one answers the smaller', async () => {
