@@ -1189,6 +1189,36 @@ test('a lead run that ended a park on a task fails after the task was dropped: t
   assert.equal((await threadOf(work)).resumeOnTask, null);
 });
 
+test('a failed run that gives back a park on a task that ended wakes the work in the same transaction', async () => {
+  const { work, task, back } = await liftedPark('fails-wake-refused', 'Fold the flyer');
+  await O.finishTask(task.id, true, null);
+  // The wake's own write fails, wherever the code makes it. Written with the
+  // run's end, it takes the end with it, so the run can end again; written
+  // after, the run has ended and nothing wakes the work again.
+  await db.execute(
+    sql.raw(`create function refuse_wake() returns trigger language plpgsql as $$
+      begin
+        if new.thread_id = ${work} and new.kind = 'resume' then raise exception 'wake refused'; end if;
+        return new;
+      end $$`)
+  );
+  await db.execute(
+    sql.raw(
+      'create trigger refuse_wake before insert on follow_ups for each row execute function refuse_wake()'
+    )
+  );
+  try {
+    // The database's own error, which drizzle wraps as the cause of its own.
+    await assert.rejects(fails(back), (err: Error) => /wake refused/.test(String(err.cause)));
+  } finally {
+    await db.execute(sql.raw('drop trigger refuse_wake on follow_ups'));
+    await db.execute(sql.raw('drop function refuse_wake()'));
+  }
+  assert.equal((await byId(back.id)).outcome, null, 'the run did not end without its wake');
+  assert.equal(await fails(back), true);
+  assert.equal((await onThread(work, 'resume')).length, 1);
+});
+
 test('a lead run that ended a park on a task and ends waiting on the owner leaves the park ended, so the task wakes nothing', async () => {
   const { lead, work, task, back } = await liftedPark('waits', 'Sign the leaflet');
   // What the run waits on, which brings its lead back once the owner answers.
