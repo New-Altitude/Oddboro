@@ -2,7 +2,8 @@
 // migration, in an in-memory PGlite that stands in for db.ts (pglite.ts). Run
 // with `npm test -w @oddboro/ledger`.
 import assert from 'node:assert/strict';
-import { beforeEach, test } from 'node:test';
+import { beforeEach, test, type TestContext } from 'node:test';
+import type { Transaction } from '@electric-sql/pglite';
 import { eq } from 'drizzle-orm';
 import { followUps, staff, threads } from '../src/schema.ts';
 // A type alone: the module itself loads below, once db.ts is this database.
@@ -121,13 +122,78 @@ test('an Odd holding the cap must replace a lesson to keep another', async () =>
   assert.equal(swap.status, 'live');
 });
 
-test('two Odds keeping lessons for the office at the same moment never take it past the cap', async () => {
+/** Whether this session holds the advisory lock `pg_advisory_xact_lock(hashtext($1))` takes. */
+const LOCK_HELD = `select exists (select 1 from pg_locks where locktype = 'advisory' and granted
+  and objsubid = 1 and ((classid::bigint << 32) | objid::bigint) = hashtext($1)::bigint) as held`;
+
+/**
+ * Each statement on the lessons table that `run` sends, and whether it ran
+ * inside a transaction holding the advisory lock `lock`, read from pg_locks
+ * just before the statement. It watches the PGlite client under drizzle, so
+ * the office's own code runs unchanged.
+ */
+async function lessonStatements(
+  t: TestContext,
+  lock: string,
+  run: () => Promise<unknown>
+): Promise<{ text: string; locked: boolean }[]> {
+  const seen: { text: string; locked: boolean }[] = [];
+  const onLessons = (text: string) => /\b(from|into|update)\s+"lessons"/i.test(text);
+  const client = db.$client;
+  const query = client.query.bind(client);
+  const transaction = client.transaction.bind(client);
+  t.mock.method(client, 'query', (...args: Parameters<typeof client.query>) => {
+    if (onLessons(args[0])) seen.push({ text: args[0], locked: false });
+    return query(...args);
+  });
+  t.mock.method(client, 'transaction', (fn: (tx: Transaction) => Promise<unknown>) =>
+    transaction((tx) =>
+      fn(
+        new Proxy(tx, {
+          get(target, key) {
+            if (key === 'query')
+              return async (...args: Parameters<Transaction['query']>) => {
+                if (onLessons(args[0])) {
+                  const [{ held }] = (await target.query<{ held: boolean }>(LOCK_HELD, [lock]))
+                    .rows;
+                  seen.push({ text: args[0], locked: held });
+                }
+                return target.query(...args);
+              };
+            const value: unknown = Reflect.get(target, key);
+            return typeof value === 'function' ? value.bind(target) : value;
+          }
+        })
+      )
+    )
+  );
+  await run();
+  return seen;
+}
+
+// PGlite cannot show this race itself: it is one Postgres session, it runs one
+// transaction at a time (a second waits for the first to commit), and an
+// advisory lock re-enters in the session that holds it. So the test checks
+// what stops the race on a Postgres with many sessions: the open count and the
+// insert run inside one transaction while the office's advisory lock is held,
+// which Postgres turns into one keep at a time per scope.
+test('two Odds keeping lessons for the office at the same moment never take it past the cap', async (t) => {
   for (let i = 1; i < L.LESSON_CAP; i++)
     await kept(say('ziva', `office rule number ${i} applies`, { scope: 'everyone' }));
-  const answers = await Promise.all([
-    say('ziva', 'one office rule from ziva', { scope: 'everyone' }),
-    say('jamal', 'one office rule from jamal', { scope: 'everyone' })
-  ]);
+  let answers: Awaited<ReturnType<typeof say>>[] = [];
+  const statements = await lessonStatements(t, 'lessons:everyone', async () => {
+    answers = await Promise.all([
+      say('ziva', 'one office rule from ziva', { scope: 'everyone' }),
+      say('jamal', 'one office rule from jamal', { scope: 'everyone' })
+    ]);
+  });
+  // Both keeps read the open lessons, and one writes.
+  assert.equal(statements.filter((s) => /^select/i.test(s.text)).length, 2);
+  assert.equal(statements.filter((s) => /^insert/i.test(s.text)).length, 1);
+  assert.deepEqual(
+    statements.filter((s) => !s.locked).map((s) => s.text),
+    []
+  );
   const [{ open }] = await sql<{ open: number }>`
     select count(*)::int as open from lessons
     where staff_id is null and status in ('live', 'waiting')`;
