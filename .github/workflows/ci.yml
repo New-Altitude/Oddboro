@@ -102,6 +102,14 @@ jobs:
           NODE_OPTIONS: --test-reporter=spec --test-reporter-destination=stdout --test-reporter=../../scripts/test-times.ts --test-reporter-destination=${{ runner.temp }}/test-times/office.jsonl
         run: npx turbo run test --filter=@oddboro/office
 
+      # The smoke test's driver and the release's artifact check. The draft
+      # job runs them too, but only once a release is being built.
+      - name: Desktop tests
+        timeout-minutes: 10
+        env:
+          NODE_OPTIONS: --test-reporter=spec --test-reporter-destination=stdout --test-reporter=../../scripts/test-times.ts --test-reporter-destination=${{ runner.temp }}/test-times/desktop.jsonl
+        run: npx turbo run test --filter=@oddboro/desktop
+
       # 15 minutes, not the Node suites' 10: cargo check above leaves no
       # linked binaries, so a run with a cold cache compiles the whole
       # desktop shell before its first test.
