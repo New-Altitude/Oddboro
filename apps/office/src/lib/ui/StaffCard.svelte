@@ -28,7 +28,7 @@
     working: string | undefined;
     /** Everything it is working on now. */
     work: Work[];
-    /** Open the info page at In progress, e.g. from the agents list. `n` changes to ask again. */
+    /** Open In progress or Chat. `n` changes to ask again. */
     show?: { tab: 'work' | 'chat'; n: number };
     /** Opens something the staffer delivered, on the start side. */
     onitem: (item: Delivered) => void;
