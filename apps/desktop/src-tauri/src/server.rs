@@ -181,7 +181,7 @@ impl Server {
             // any means, so the server can treat its end as "quit".
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(log.try_clone()?)
+            .stderr(Stdio::piped())
             .envs(
                 (!self.update_token.is_empty())
                     .then_some(("ODDBORO_UPDATE_TOKEN", self.update_token.as_str())),
@@ -218,6 +218,10 @@ impl Server {
         // closes. It is in place before the relay starts, so the first
         // Keychain answer has somewhere to go.
         *NODE_STDIN.lock().unwrap_or_else(|e| e.into_inner()) = child.stdin.take();
+        if let Some(err) = child.stderr.take() {
+            let log = log.try_clone()?;
+            thread::spawn(move || stamped(err, log));
+        }
         if let Some(out) = child.stdout.take() {
             thread::spawn(move || relay(out, log));
         }
@@ -520,24 +524,44 @@ fn route(line: &str) -> Route<'_> {
 /// Node's stdin, a notification request to the system as Oddboro's own, a
 /// Check now to the update watcher, everything else to the log.
 fn relay(out: impl Read, mut log: File) {
-    for line in BufReader::new(out).lines().map_while(Result::ok) {
+    for line in lines(out) {
         match route(&line) {
             Route::Secret => match crate::secrets::answer(&line, &crate::secrets::Login) {
                 Some(reply) => to_node(&reply),
                 None => {
                     let _ = writeln!(
                         log,
-                        "oddboro: a Keychain request from the office could not be read"
+                        "oddboro: {} a Keychain request from the office could not be read",
+                        stamp()
                     );
                 }
             },
             Route::Check => crate::update::check_now(),
             Route::Notify(title, text) => notify(title, text),
             Route::Log => {
-                let _ = writeln!(log, "{line}");
+                let _ = writeln!(log, "{} {line}", stamp());
             }
         }
     }
+}
+
+/// Node's stderr: every line to the log, with the time.
+fn stamped(out: impl Read, mut log: File) {
+    for line in lines(out) {
+        let _ = writeln!(log, "{} {line}", stamp());
+    }
+}
+
+/// A child's output line by line, read as bytes: a line that is not UTF-8
+/// would end `BufRead::lines`, and the child would then block on a full pipe.
+fn lines(out: impl Read) -> impl Iterator<Item = String> {
+    BufReader::new(out)
+        .split(b'\n')
+        .map_while(Result::ok)
+        .map(|bytes| {
+            let line = String::from_utf8_lossy(&bytes);
+            line.strip_suffix('\r').unwrap_or(&line).to_string()
+        })
 }
 
 /// One line on Node's stdin, in one write.
@@ -605,12 +629,16 @@ pub fn note(path: &Path, line: &str) {
         let _ = fs::create_dir_all(dir);
     }
     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default();
-        let stamp = utc(now.as_secs(), now.subsec_millis());
-        let _ = writeln!(file, "oddboro: {stamp} {line}");
+        let _ = writeln!(file, "oddboro: {} {line}", stamp());
     }
+}
+
+/// Now, in UTC.
+fn stamp() -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    utc(now.as_secs(), now.subsec_millis())
 }
 
 /// Seconds since 1970 as `2026-11-08T06:15:40.123Z`. The date comes from
@@ -681,5 +709,23 @@ mod tests {
         assert_eq!(utc(951_782_400, 5), "2000-02-29T00:00:00.005Z");
         assert_eq!(utc(1_794_095_284, 123), "2026-11-07T23:48:04.123Z");
         assert_eq!(utc(4_102_444_799, 999), "2099-12-31T23:59:59.999Z");
+    }
+
+    #[test]
+    fn each_line_from_node_gets_the_time_and_a_bad_byte_ends_nothing() {
+        let name = format!("oddboro-stamped-{}.log", std::process::id());
+        let path = std::env::temp_dir().join(name);
+        let input = b"office: ready\n\xff not utf-8\r\nthe last line";
+        stamped(&input[..], File::create(&path).unwrap());
+        let text = fs::read_to_string(&path).unwrap();
+        let _ = fs::remove_file(&path);
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 3, "{text}");
+        let expected = ["office: ready", "\u{fffd} not utf-8", "the last line"];
+        for (line, rest) in lines.iter().zip(expected) {
+            let (time, after) = line.split_once(' ').unwrap();
+            assert!(time.len() == 24 && time.ends_with('Z'), "{line}");
+            assert_eq!(after, rest);
+        }
     }
 }
