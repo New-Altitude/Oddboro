@@ -472,7 +472,10 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   them cannot lose it) starts the held hand-off as the first of a new round,
   with what it carries worked out at the yes (`sharing`), so its result
   brings the hub back; the hub hears the yes itself only when
-  the owner wrote something with it. A no stops the thread, the held hand-off
+  the owner wrote something with it. Past the usage window's guard the yes
+  does not start it: the thread waits for the window as a new hand-off's
+  does (below), its round starts afresh, and the hub wakes now to hear that
+  it hands it on again once the work picks back up. A no stops the thread, the held hand-off
   never goes, and the hub wakes to say where the work stands. An ask raised
   before asks held their hand-off wakes the hub to hand on again. The hub moves it on by a colleague finishing, by
   `resume_at` (`parkThread`; the office clock calls `wakeThread`, which starts
@@ -531,7 +534,8 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   lists a goal's under it, and every thread for no goal still under way or
   waiting as other work.
 - New hand-offs to Odds on Claude Code wait while the plan's 5-hour usage window is nearly used up
-  (`handedOff` in `src/work/hand-offs.ts`). Runs report the share used and the reset time
+  (`handedOff` in `src/work/hand-offs.ts`), and so does a held one the owner
+  says yes to (`start_held`): both ask `windowHolds`. Runs report the share used and the reset time
   (`plan_limits`); the window's size in tokens is not known. Past
   `WINDOW_GUARD` (85%), the hand-off decider refuses each new
   hand-off to an Odd on Claude Code without counting it (one to an Odd on

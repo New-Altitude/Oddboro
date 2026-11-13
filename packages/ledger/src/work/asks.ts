@@ -21,7 +21,8 @@ import {
   startCarryOuts,
   turnedOn
 } from './answers.ts';
-import type { AskDone, EventOf } from './events.ts';
+import type { AskDone, EventOf, HandOffHeld } from './events.ts';
+import { handOffProblem, windowHolds } from './hand-offs.ts';
 import {
   changeOf,
   draft,
@@ -37,6 +38,7 @@ import {
   freeFromWindow,
   handOn,
   hasLeft,
+  holdForWindow,
   LEFT_RAISES_NOTHING,
   leftBeforeStarting,
   oweRun,
@@ -45,6 +47,9 @@ import {
   stopThread
 } from './threads.ts';
 import { asksNoMore, TWINNED } from './twins.ts';
+
+/** A hand-off the usage window holds: its work, the window's share used, and the reset's time. */
+type WindowWait = Extract<HandOffHeld<number>, { window: number }>;
 
 /**
  * The name of a goal yes's own write, which sets the goal (`approveGoal`):
@@ -247,6 +252,8 @@ export function askDecided(
   const offWork: Ask[] = [];
   // A goal yes's planning run, put before the answer goes back in the cell's order, replies under the card alone.
   let planned = false;
+  // A held hand-off the usage window keeps waiting at the yes, which its lead hears (`answerHandOffs`).
+  let waits: WindowWait | undefined;
   const cell = effectsOf(ask.kind, decision);
   for (const effect of cell) {
     if (typeof effect === 'object') continue;
@@ -265,8 +272,20 @@ export function askDecided(
       case 'give_standing':
         break;
       // A colleague that left since the hand-off was held gets none: its lead hears so (`answerHandOffs`).
+      // Past the usage window's guard it waits for the window, as a new hand-off does.
       case 'start_held': {
         if (!ask.held || !ask.threadId || hasLeft(d.rows, ask.held.to)) break;
+        const to = d.rows.staff.get(ask.held.to);
+        if (!to) throw fixedError('A held hand-off was approved with its colleague not loaded.');
+        const hold = windowHolds(d, { to, lead: ask.held.from }, after, now);
+        if (hold) {
+          // The yes still starts a new round, so the lead's hand-off once the window lets it is its first.
+          const t = d.rows.threads.get(ask.threadId);
+          if (t) putAll(d, [{ table: 'threads', row: { ...t, handOffsUsed: 0 } }]);
+          holdForWindow(d, { threadId: ask.threadId, at: hold.resetsAt, ask: hold.by }, now);
+          waits = { window: ask.threadId, share: hold.share, at: hold.at };
+          break;
+        }
         const handOff = rows.prepared.sharing;
         if (!handOff)
           throw fixedError('A held hand-off was approved with what it carries not prepared.');
@@ -329,7 +348,7 @@ export function askDecided(
         break;
       case 'answer_hand_offs':
         if (ask.threadId)
-          answerHandOffs(d, { ...ask, threadId: ask.threadId }, approved, answer, now);
+          answerHandOffs(d, { ...ask, threadId: ask.threadId }, { approved, answer, waits }, now);
         else if (!back(ask)) offWork.push(ask);
         break;
       case 'answer_back':
@@ -441,19 +460,21 @@ function answerWindow(d: Draft, ask: Ask, now: Date): void {
 }
 
 /**
- * The owner answered a `hand_offs` ask. A yes already started the hand-off it held (`start_held`); the lead
- * hears the yes itself only when the owner wrote something with it. One held
- * for a colleague that left since never goes, and the lead hears why. A no
- * stops the work, the held hand-off never goes, and the lead hears so it can
- * say where the work stands.
+ * The owner answered a `hand_offs` ask. A yes already started the hand-off it
+ * held (`start_held`); the lead hears the yes itself only when the owner wrote
+ * something with it. One the usage window `waits` for did not start: the lead
+ * hears so now, since nothing else names that hand-off to them, and hands it
+ * on again once the window lets it. One held for a colleague that left since
+ * never goes, and the lead hears why. A no stops the work, the held hand-off
+ * never goes, and the lead hears so it can say where the work stands.
  */
 function answerHandOffs(
   d: Draft,
   a: Ask & { threadId: number },
-  approved: boolean,
-  answer: string,
+  o: { approved: boolean; answer: string; waits: WindowWait | undefined },
   now: Date
 ): void {
+  const { approved, answer } = o;
   if (!approved) {
     stopThread(d, a.threadId, now);
     answerLead(
@@ -477,12 +498,23 @@ function answerHandOffs(
     answerLead(d, a.threadId, `${answer}${gone} Hand on the next piece now.`, { askId: a.id }, now);
     return;
   }
-  if (!a.reason) return;
   const { to, title } = held;
+  const name = d.rows.staff.get(to)?.name ?? to;
+  if (o.waits) {
+    answerLead(
+      d,
+      a.threadId,
+      `${answer} "${title}" has not gone to ${name} yet: hand it on again once this work picks back up, as the first hand-off of a new round. ${handOffProblem(o.waits)}`,
+      { askId: a.id },
+      now
+    );
+    return;
+  }
+  if (!a.reason) return;
   answerLead(
     d,
     a.threadId,
-    `${answer} "${title}" went to ${d.rows.staff.get(to)?.name ?? to} as you handed it, the first hand-off of a new round, and its result brings you back. Do not hand it on again.`,
+    `${answer} "${title}" went to ${name} as you handed it, the first hand-off of a new round, and its result brings you back. Do not hand it on again.`,
     { askId: a.id },
     now
   );

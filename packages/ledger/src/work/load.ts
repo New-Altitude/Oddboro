@@ -67,10 +67,10 @@ const one = <T>(id: T | null | undefined): T[] => (id == null ? [] : [id]);
 /**
  * A kind of event added to `WorkEvent` fails the type check here until it
  * names its rows. Each reads what it needs to name them before any lock but
- * the plan's, which comes first in `LOCK_ORDER`: only a hand-off holds work
- * for the usage window, and it does so under that lock, so a read made under
- * it sees every hold. A leaving locks its Odd's row before its reads, for
- * the same reason (`oddRemoved`).
+ * the plan's, which comes first in `LOCK_ORDER`: only a hand-off, new or a
+ * held one's yes, holds work for the usage window, and it does so under that
+ * lock, so a read made under it sees every hold. A leaving locks its Odd's
+ * row before its reads, for the same reason (`oddRemoved`).
  */
 const SEEDS: {
   [K in WorkEvent['kind']]: (tx: Tx, e: EventOf<K>) => Seeds | Promise<Seeds>;
@@ -106,6 +106,10 @@ const SEEDS: {
     const [a] = await tx.select().from(asks).where(eq(asks.id, e.id));
     if (!a) return {};
     const yes = e.decision === 'approve';
+    // A yes that starts a held hand-off asks the usage window first, as a new hand-off does.
+    const startsHeld = effectsOf(a.kind, e.decision).includes('start_held');
+    if (startsHeld) await lockRows(tx, 'plan_limits', [PLAN_ROW], 'update');
+    const window = startsHeld ? await windowNow(tx) : undefined;
     // The Odd's open asks of a twinned kind, which a yes or a no answers too.
     const twins =
       TWINNED.includes(a.kind) && e.decision !== 'iterate'
@@ -131,7 +135,9 @@ const SEEDS: {
         ...(yes && a.kind === 'goal' ? one((await manager(tx))?.id) : [])
       ],
       // A switch or folder yes changes the Odd's own row with the claim.
-      update: yes && (a.kind === 'switch' || a.kind === 'folder') ? ['staff', 'asks'] : ['asks']
+      update: yes && (a.kind === 'switch' || a.kind === 'folder') ? ['staff', 'asks'] : ['asks'],
+      // The window and its ask, and every Odd, which a new window ask names, as for a hand-off.
+      ...(startsHeld && { only: { asks: one(window?.ask) }, window, everyOdd: true as const })
     };
   },
   taskGiven: async (tx, { task, oneOpen }) => {
@@ -344,7 +350,7 @@ export async function loadWork(tx: Tx, e: WorkEvent): Promise<WorkRows> {
     followUps: new Map(rows.followUps.map((f) => [f.id, f])),
     asks: new Map(rows.asks.map((a) => [a.id, a])),
     tasks: new Map(rows.tasks.map((k) => [k.id, k])),
-    // Only a hand-off reads the usage window.
+    // Only a hand-off, new or held, reads the usage window.
     window: seeds.window
       ? {
           share: seeds.window.share,

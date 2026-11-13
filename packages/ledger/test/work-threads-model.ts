@@ -4,7 +4,17 @@
 import type { Carried, CarriedFile } from '../src/hand-offs.ts';
 import type { EventOf, WorkEvent } from '../src/work/events.ts';
 import { answerLead, decideAsk, endTask } from './work-answers-model.ts';
-import { askOf, insert, left, meet, newRun, settle, type Model } from './work-model.ts';
+import {
+  askOf,
+  holdForWindow,
+  insert,
+  left,
+  meet,
+  newRun,
+  settle,
+  windowHolds,
+  type Model
+} from './work-model.ts';
 import { minutes, recordingEffects } from './work-rows.ts';
 import { finish } from './work-runs-model.ts';
 
@@ -15,13 +25,6 @@ const ABOUT_EACH_RUN: ReadonlyMap<number, string> = new Map(
   Array.from({ length: 1000 }, (_, i) => [i + 1, ABOUT] as const)
 );
 
-/**
- * The plan's usage window as the loader reads it for a hand-off: past the
- * guard until it resets at minute `resetsAt`, with the office's ask 4.
- */
-export const WINDOW = { share: 0.9, resetsAt: 10, ask: 4 } as const;
-/** The guard past which hand-offs to an Odd on Claude Code wait, as the plan's rule says. */
-const GUARD = 0.85;
 /** A round of work takes this many hand-offs before the owner is asked to go on. */
 const ROUND = 8;
 const WINDOW_RESET = 'usage window has reset';
@@ -248,16 +251,9 @@ export function handOff(r: Model, e: EventOf<'handedOff'>): void {
   const id = 'id' in e.thread ? e.thread.id : open(r, e.thread.open);
   const t = r.threads.get(id)!;
   const ended = t.status !== 'open';
-  const ask = askOf(r, WINDOW.ask);
-  const held =
-    to.agent === 'claude' &&
-    +minutes(WINDOW.resetsAt) > +minutes(r.at) &&
-    WINDOW.share >= GUARD &&
-    ask?.status !== 'approved';
-  if (held) {
+  if (windowHolds(r, e.to)) {
     if (ended) t.used = 0;
-    t.status = 'open';
-    t.park = { on: 'window', at: +minutes(WINDOW.resetsAt), ask: WINDOW.ask };
+    holdForWindow(t);
     settle(r, id);
     x.handOff = 'held';
     meet('a hand-off held for the usage window');
@@ -419,7 +415,8 @@ function withdrawal(id: number, line: string): EventOf<'askDecided'> {
 /**
  * Each event's new rounds, after its model ran: work that ended and opened
  * again starts a round with no hand-off counted, and a yes to going on
- * starts the hand-off it held as the first of a new round. A hand-off's own
+ * starts the hand-off it held as the first of a new round, or, when the
+ * usage window holds it, a round with none counted yet. A hand-off's own
  * model counts its round itself.
  */
 export function newRounds(r: Model, e: WorkEvent, was: Map<number, string>): void {
@@ -430,7 +427,7 @@ export function newRounds(r: Model, e: WorkEvent, was: Map<number, string>): voi
   }
   if (e.kind !== 'askDecided' || e.decision !== 'approve') return;
   const a = askOf(r, e.id);
-  // One held for a colleague that left never went, so the new round has none.
+  // One held for a colleague that left never went, nor one the window holds, so the new round has none.
   if (a?.kind === 'hand_offs' && a.held && a.threadId !== null && a.decidedAt === r.at)
-    r.threads.get(a.threadId)!.used = left(r, a.held.to) ? 0 : 1;
+    r.threads.get(a.threadId)!.used = left(r, a.held.to) || windowHolds(r, a.held.to) ? 0 : 1;
 }

@@ -1,5 +1,6 @@
 // All work in flight in one place, and the usage window's guard on new
-// hand-offs, which only Odds on Claude Code wait for: the office's own code on
+// hand-offs and on held ones the owner says yes to, which only Odds on
+// Claude Code wait for: the office's own code on
 // every migration, in an in-memory PGlite that stands in for db.ts (pglite.ts). Run with `npm test -w @oddboro/ledger`.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -13,7 +14,7 @@ import { ownerWords } from './owner-words.ts';
 // The ledger rows a decision writes embed nothing: no Ollama answers here.
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
 const { handOff } = await import('../src/hand-offs.ts');
-const { parkThread, parkedThreads, wakeThread } = await import('../src/threads.ts');
+const { HAND_OFF_LIMIT, parkThread, parkedThreads, wakeThread } = await import('../src/threads.ts');
 const { goalsWindow } = await import('../src/goals.ts');
 const { decideAsk } = await import('../src/office.ts');
 const { WINDOW_RESET } = await import('../src/work/parking.ts');
@@ -71,6 +72,22 @@ const windowAsks = async () =>
   (await db.select().from(asks).where(eq(asks.kind, 'window'))).filter(
     (a) => a.createdAt.getTime() > Date.now() - 3_600_000
   );
+
+/** A thread Cole leads whose round took every hand-off, so the next one asked the owner to go on. */
+async function askedToGoOn(title: string): Promise<{ id: number; ask: number }> {
+  const [t] = await db
+    .insert(threads)
+    .values({ title, hubId: 'cole', holderId: 'cole', handOffsUsed: HAND_OFF_LIMIT })
+    .returning({ id: threads.id });
+  const r = await give({ id: t.id });
+  assert.ok('asked' in r, JSON.stringify(r));
+  return { id: t.id, ask: r.asked };
+}
+const handedOn = (id: number) =>
+  db
+    .select()
+    .from(followUps)
+    .where(and(eq(followUps.threadId, id), eq(followUps.kind, 'hand_off')));
 
 /** The time a held thread waits for has come, as it has for the clock at the reset. */
 const reset = (ids: number[]) =>
@@ -329,4 +346,42 @@ test('work parked on a task that the usage window then holds waits on the window
   const after = await row(t.id);
   assert.equal(after.resumeOnTask, null, 'a hold on the window replaces a park on a task');
   assert.ok(after.resumeAt, 'the window reset wakes it');
+});
+
+test('past the guard, a yes to more hand-offs starts nothing: the held hand-off waits for the window, and its lead hears to hand it on then', async () => {
+  await freshWindow(0.5);
+  const { id, ask } = await askedToGoOn('Tune the orbit');
+  await window(0.9, 2 * 3_600_000);
+  const resets = (await db.select().from(planLimits))[0].fiveHourResetsAt;
+
+  await decideAsk(ask, 'approve', null);
+  assert.equal((await handedOn(id)).length, 0, 'the held hand-off started past the guard');
+  const [decided] = await db.select().from(asks).where(eq(asks.id, ask));
+  assert.equal(decided.status, 'approved');
+  const [raised, ...more] = await windowAsks();
+  assert.equal(more.length, 0);
+  const t = await row(id);
+  assert.equal(t.heldBy, raised?.id, "held under the window's ask, as a new hand-off is");
+  assert.equal(t.resumeAt?.getTime(), resets?.getTime());
+  assert.equal(t.handOffsUsed, 0, 'the yes starts a new round');
+  const [told, ...again] = await resumes(id);
+  assert.equal(again.length, 0, 'the lead woke twice');
+  assert.equal(told?.askId, ask);
+  assert.match(told?.note ?? '', /"Tune gravity" has not gone to Ivy yet: hand it on again/);
+  assert.match(told?.note ?? '', /usage window is at 90%/);
+
+  // The owner lets hand-offs run: the lead's hand-off goes, the first of the new round.
+  await decideAsk(raised.id, 'approve', null);
+  const next = await give({ id });
+  assert.ok('id' in next, JSON.stringify(next));
+  assert.equal(next.left, HAND_OFF_LIMIT - 1);
+});
+
+test('under the guard, a yes to more hand-offs starts the held hand-off at once', async () => {
+  await freshWindow(0.84);
+  const { id, ask } = await askedToGoOn('Tune the tides');
+  await decideAsk(ask, 'approve', null);
+  assert.equal((await handedOn(id)).length, 1);
+  assert.equal((await row(id)).heldBy, null);
+  assert.equal((await windowAsks()).length, 0);
 });
