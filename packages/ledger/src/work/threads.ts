@@ -302,7 +302,7 @@ function baseOf(t: Thread): ThreadBase {
  */
 const REOPENS: readonly Thread['status'][] = ['done', 'failed'];
 
-/** An ended thread opened again for a new round of work, as `reopen` does: no park, and no hand-off counted yet. */
+/** An ended thread opened again for a new round of work: no park, and no hand-off counted yet. */
 const reopened = (t: Thread): Thread => ({
   ...baseOf(t),
   handOffsUsed: 0,
@@ -312,7 +312,7 @@ const reopened = (t: Thread): Thread => ({
 
 /**
  * An ask raised or a task given on a thread keeps it waiting until the owner
- * answers, as `keepRun` and `raisedOn` in ../threads.ts do. The thread keeps
+ * answers. The thread keeps
  * the key of the run that raised it, only when that run is its lead's, so the
  * answer cannot start the lead there while that run still goes. Finished work
  * opens again for it; a stopped one stays stopped, but for a new plan, which
@@ -352,7 +352,7 @@ export function stopThread(d: Draft, threadId: number, now: Date): void {
  * One hand-off taken on a thread, `used` the count of its round so far with
  * this one: the `hand_off` run of `to`, carrying what `sharing()` gave for it.
  * An open thread keeps its park; done or failed work opens again with none.
- * A stopped thread stays stopped, as `startHeld` leaves it. Returns the run's ref.
+ * A stopped thread stays stopped. Returns the run's ref.
  */
 export function handOn(
   d: Draft,

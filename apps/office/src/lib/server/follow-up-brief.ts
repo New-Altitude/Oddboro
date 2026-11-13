@@ -35,7 +35,7 @@ export function waitEnded(u: Unparked): string[] {
   ];
 }
 
-/** The owner's answers a run reads, one a line: a hub's pick-up on its thread (`answerThread`), and an `answered` run. */
+/** The owner's answers a run reads, one a line: a hub's pick-up on its thread (`answerLead`), and an `answered` run. */
 const answers = (note: string | null): string[] =>
   (note ?? '').split('\n').map((line) => `- ${line}`);
 

@@ -32,8 +32,7 @@ import { addRun, handBack, hasLeft, isHandOff, newRun, oweRun } from './threads.
 import { carriedOutBy } from './twins.ts';
 
 /**
- * The owner's answer, or a task's end, reaches the lead of a thread, as
- * `answerThread` does: it joins the lead's oldest `resume` there still
+ * The owner's answer, or a task's end, reaches the lead of a thread: it joins the lead's oldest `resume` there still
  * queued, a line each, so several answers landing together wake it once, or
  * it starts one. Only a queued row is joined: one an Odd's leaving ended
  * never starts, so a line joined to it would never be read. Nothing when the
@@ -91,7 +90,7 @@ export type OwnRun = { work: string | null; earlier?: true };
 
 /**
  * The task ended: every open thread parked on it picks up, with what
- * happened, as `wakeOnTask` does. `ownRun` is there when a run on the task's
+ * happened. `ownRun` is there when a run on the task's
  * own work picks up too, so each parked thread is told that run carries its
  * own part; `earlier` when that run was set going as the task ended, before
  * this wake. A stopped thread lost its park, so it wakes for nothing.

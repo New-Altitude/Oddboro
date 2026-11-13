@@ -32,6 +32,7 @@ process.env.OLLAMA_URL = 'http://127.0.0.1:9';
 const H = await import('../src/hand-offs.ts');
 const O = await import('../src/office.ts');
 const T = await import('../src/threads.ts');
+const { answerLeadNow } = await import('./answer-lead.ts');
 const B = await import('../src/lead-brief.ts');
 const P = await import('../src/task-parking.ts');
 const L = await import('../src/leaving.ts');
@@ -536,8 +537,8 @@ test("answers that come while the lead's chat holds its thread join one pick-up,
   O.reserveRun({ key: chat, staffId: 'test', kind: 'chat' });
   const h = await give('paige', 'Choose the venue', undefined, chat);
   const thread = h.threadId ?? 0;
-  await T.answerThread(thread, 'First answer.');
-  await T.answerThread(thread, 'Second answer.');
+  await answerLeadNow(thread, 'First answer.');
+  await answerLeadNow(thread, 'Second answer.');
   const [wake, ...more] = await onThread(thread, 'resume');
   assert.equal(more.length, 0, 'the lead would wake twice');
   assert.equal(await listed(wake.id), false);
@@ -548,14 +549,14 @@ test("answers that come while the lead's chat holds its thread join one pick-up,
 test('an answer joins a pick-up still to start even with no run holding it, so a pick-up listed before it misses nothing', async () => {
   const h = await give('rex', 'Order the flowers');
   const thread = h.threadId ?? 0;
-  await T.answerThread(thread, 'Roses.');
+  await answerLeadNow(thread, 'Roses.');
   const [wake] = await onThread(thread, 'resume');
   assert.equal(await listed(wake.id), true);
-  await T.answerThread(thread, 'Not red ones.');
+  await answerLeadNow(thread, 'Not red ones.');
   assert.equal((await onThread(thread, 'resume')).length, 1);
   assert.equal((await O.startFollowUp(wake.id))?.note, 'Roses.\nNot red ones.');
   // Once the pick-up started, the next answer writes one of its own.
-  await T.answerThread(thread, 'And lilies.');
+  await answerLeadNow(thread, 'And lilies.');
   assert.equal((await onThread(thread, 'resume')).length, 2);
 });
 
@@ -699,7 +700,7 @@ test('a thread keeps the key of every run that handed off on it, so each holds t
   const thread = h.threadId ?? 0;
   await give('rex', 'Test the lights', thread, second);
   assert.deepEqual((await threadOf(thread)).runs, [first, second]);
-  await T.answerThread(thread, 'Warm white.');
+  await answerLeadNow(thread, 'Warm white.');
   const [wake] = await onThread(thread, 'resume');
   O.runsGoing.delete(second);
   assert.equal(await listed(wake.id), false, 'the pick-up ran beside the first run');
@@ -1479,7 +1480,7 @@ test('a lead that leaves with a task open on its own work is woken by nothing, a
 
 test('a pick-up still to start when its lead leaves ends failed, with no report on the desk', async () => {
   const { lead, work } = await ownWork('leaves-with-pick-up');
-  await T.answerThread(work, 'Use blue.');
+  await answerLeadNow(work, 'Use blue.');
   assert.equal(await L.removeOdd(lead), undefined);
   const [pickUp] = await onThread(work, 'resume');
   assert.equal(pickUp.outcome, 'failed');

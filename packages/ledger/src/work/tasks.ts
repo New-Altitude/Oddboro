@@ -123,7 +123,7 @@ function answeredWith(rows: WorkRows, a: Ask): Ask[] {
     .sort((x, y) => x.id - y.id);
 }
 
-/** The open threads parked on a task, by id: the work its end wakes, as `parkedWork` reads it. */
+/** The open threads parked on a task, by id: the work its end wakes. */
 const parkedOn = (rows: WorkRows, taskId: number): Thread[] =>
   [...rows.threads.values()]
     .filter((t) => t.status === 'open' && t.park.on === 'task' && t.park.task === taskId)

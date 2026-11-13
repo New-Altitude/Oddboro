@@ -194,7 +194,7 @@ their change triggers; `0028_advanced_mode` adds `owner.advanced_at` and
   ask or task its hub names the thread for (`raiseAsk`, `giveTask`). The
   office gives every run a key (`RUN_KEY`) and keeps it in `runsGoing` while
   the run goes, and the thread keeps the key of its hub's runs only
-  (`threads.runs`, `keepRun`): a key holds the hub's pick-ups whoever's run it
+  (`threads.runs`, `keepRun` in `src/work/hand-offs.ts`): a key holds the hub's pick-ups whoever's run it
   is, so a colleague's would stall the lead. The tool server writes the key, in a process of its own, so it
   goes in the database; which keys still go lives in memory only, so a
   restart frees every hold and no key needs clearing. One
@@ -444,7 +444,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   no thread: `assertMayLead`, checked wherever a thread is opened, refuses it
   (`LEADS_NONE`), whatever tool or run got there; the manager is never refused.
   A finished goal thread is found as it is, so a goal never gets a second: an
-  ask or task raised on it opens it again (`raisedOn`), and so does the lead's
+  ask or task raised on it opens it again (`raisedOn` in `src/work/threads.ts`), and so does the lead's
   next hand-off, so a lookup alone, such as a hand-off the
   office refuses, changes nothing. A stopped one stays stopped: a hand-off
   there is refused, and only a new plan for the goal opens it again
@@ -468,7 +468,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   holding what the lead chose in `asks.held` (the colleague, title and
   brief), and while that ask is open no other hand-off goes. The office raised it, so it
   takes a yes or a no only (`yesOrNo` in `src/tools.ts`). A yes
-  (`startHeld`, in the transaction that claims the ask, so a stop between
+  (`start_held` in `src/work/asks.ts`, in the transaction that claims the ask, so a stop between
   them cannot lose it) starts the held hand-off as the first of a new round,
   with what it carries worked out at the yes (`sharing`), so its result
   brings the hub back; the hub hears the yes itself only when
@@ -478,7 +478,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   `resume_at` (`parkThread`; the office clock calls `wakeThread`, which starts
   a `resume` follow-up), by `resume_at`'s `after_task` (`parkOnTask`, which takes
   only a task the hub gave or one on work it is on, any other reading as no
-  task, sets `threads.resume_on_task` and clears the time; `wakeOnTask` wakes it when the
+  task, sets `threads.resume_on_task` and clears the time; `wakeParked` wakes it when the
   task is done or dropped, or taken off the desk (`withdrawTask`, as the task's Odd leaves
   the office or through its `withdraw` tool), which wakes it as a drop does, and says which,
   and when a run on the task's own work picks up too, names that work, whose lead carries its
@@ -491,11 +491,11 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   on the hub's run and a usage-window hold leave it; when that run ends failed having parked
   nothing again, the park comes back on its task or its time (`follow_ups.unparked_task`,
   `follow_ups.unparked_at`, `finishFollowUp`): had the task ended during the run, it wakes the
-  work as `wakeOnTask` would have (`endedAs` reads a withdrawal from `tasks.withdrawn`, and
+  work as `wakeParked` would have (`endedAs` reads a withdrawal from `tasks.withdrawn`, and
   `ownRunOf` names no run on stopped work, so an Odd brought back since changes neither),
   and a time that passed is left for the clock's `wakeThread`,
   which wakes it once), or by the owner answering an ask or task raised on it
-  (`asks.thread_id`, `tasks.thread_id`; `answerThread` when no run follows,
+  (`asks.thread_id`, `tasks.thread_id`; `answerLead` when no run follows,
   carrying the ask, so an approved goal plan starts the hub leading its work).
   An answer that comes while the hub's `resume` has yet to start joins it as
   one more line, so hires landing together wake the hub once, and the claim
@@ -531,7 +531,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   lists a goal's under it, and every thread for no goal still under way or
   waiting as other work.
 - New hand-offs to Odds on Claude Code wait while the plan's 5-hour usage window is nearly used up
-  (`src/usage-window.ts`). Runs report the share used and the reset time
+  (`handedOff` in `src/work/hand-offs.ts`). Runs report the share used and the reset time
   (`plan_limits`); the window's size in tokens is not known. Past
   `WINDOW_GUARD` (85%), the hand-off decider refuses each new
   hand-off to an Odd on Claude Code without counting it (one to an Odd on
@@ -541,9 +541,9 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   `plan_limits` so two hand-offs raise one. The ask is office-wide, so it is
   filed under the manager (`manager`), or under the hub that hit the guard
   when the office has none. In an office with Odds on other tools, its why
-  names the Odds on Claude Code. A yes (`answerWindow`) lets
+  names the Odds on Claude Code. A yes (`answerWindow` in `src/work/asks.ts`) lets
   hand-offs run until the reset and wakes the held threads through
-  `answerThread`; a no leaves them held. The clock's `wakeThread` wakes each at
+  `answerLead`; a no leaves them held. The clock's `wakeThread` wakes each at
   the reset with `WINDOW_RESET`, and takes an ask nobody answered off the desk
   once it holds no thread (`clockWoke` in `src/work/parking.ts`). A hub's own `resume_at` replaces a
   hold. A run already going is never stopped. The office raised the ask, so a
@@ -573,7 +573,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   (`onStories`, `threadOnKnown`), and may read the thread's folder. `tell_lead`,
   offered only with `OWNER_SAID` set and such a thread, passes the owner's
   words about one to its lead (`tellLead`). The words must be in `OWNER_SAID`;
-  the lead picks the thread up through `answerThread`, joining a `resume` that
+  the lead picks the thread up through `answerLead`, joining a `resume` that
   waits. It refuses a thread the Odd leads, one it does not work on, and a
   stopped one. The lead wakes to read the owner's words, the colleague's own
   reading, labelled as not the owner's, and the last exchange in that chat,
@@ -770,7 +770,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   dropped, and each follow-up it has yet to start fails, so a lead that
   handed it work hears at once. Once that is saved, the office stops any run
   of it (`whenOddLeaves`). Nothing wakes it after
-  (`answerThread` skips a lead that left). A follow-up on work it led ends
+  (`answerLead` skips a lead that left). A follow-up on work it led ends
   with no report, and a colleague's result waiting there is told to the
   owner by that colleague (`Unreturned`). A yes to `bring_back` calls
   `bringBack`, which turns on the jobs in `jobs_off` from now. What it had open
@@ -801,7 +801,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   first goal makes the manager's weekly review job. A `plan` ask (`propose_goal_plan`) holds
   every part of one goal's plan in `asks.plan`, and `raiseAsk` puts it on the
   goal's one thread (`goalThread`), whatever run raised it, and the thread
-  keeps that run's key when its raiser leads it (`keepRun`).
+  keeps that run's key when its raiser leads it (`raisedOn` in `src/work/threads.ts`).
   `approvePlan` takes the parts the owner ticked: Odds already here serve the
   goal in the transaction that approves the ask and get their job at once,
   and the answer names each Odd by name, never its id. Each hire becomes its own hire ask on the

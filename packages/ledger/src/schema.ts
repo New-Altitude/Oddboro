@@ -100,7 +100,7 @@ export type AccountRow = typeof accounts.$inferSelect;
  * `hand_offs` is the office's ask when a hand-off would pass a round's limit
  * (threads.ts): a yes starts another round, and a no stops the thread. `window` is the
  * office's one ask when the plan's 5-hour window passes its guard
- * (usage-window.ts): a yes lets hand-offs run until it resets, and a no holds
+ * (`handedOff` in work/hand-offs.ts): a yes lets hand-offs run until it resets, and a no holds
  * them until then. `reply` is one email reply an Odd proposes (`asks.reply`):
  * the owner edits it, then the office sends it or saves it to Gmail drafts.
  * `filter` is one Gmail filter an Odd proposes (`asks.filter`): the owner may
@@ -785,15 +785,15 @@ export const threads = pgTable('threads', {
   /** When the hub picks it back up, set by the hub. The office clock wakes it. */
   resumeAt: at('resume_at'),
   /**
-   * The `window` ask that holds this thread's hand-offs (usage-window.ts). Its
+   * The `window` ask that holds this thread's hand-offs (`handedOff` in work/hand-offs.ts). Its
    * `resumeAt` is then the window's reset, and the owner's yes wakes it sooner.
    */
   heldBy: integer().references(() => asks.id),
-  /** The task whose end wakes this thread (`wakeOnTask`). Never set alongside `resumeAt`. */
+  /** The task whose end wakes this thread (`wakeParked` in work/answers.ts). Never set alongside `resumeAt`. */
   resumeOnTask: integer().references(() => tasks.id),
   /**
    * The key of each run that put work here from outside the thread: a hand-off,
-   * held or not, or a goal's plan (`keepRun` in threads.ts).
+   * held or not, or a goal's plan (`keepRun` in work/hand-offs.ts, `raisedOn` in work/threads.ts).
    * While one of them goes (`runsGoing` in office-follow-ups.ts), the hub's pick-ups here
    * wait, so the hub runs once at a time on its thread.
    */
