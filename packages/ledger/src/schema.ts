@@ -304,6 +304,8 @@ export type GoalDraft = {
 /** What the owner wants more of. Staff serve goals; the manager plans them. */
 export const goals = pgTable('goals', {
   id: id(),
+  /** An owner-chosen project folder for grouping only; it grants no file access. */
+  projectFolder: text(),
   /** One explicit submission from the manager's chat, kept across retries. */
   requestId: uuid().unique(),
   title: text().notNull(),

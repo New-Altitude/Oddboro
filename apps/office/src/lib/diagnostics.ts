@@ -135,6 +135,7 @@ export const ROUTE_IDS = {
   '/api/gateway/[connector]': true,
   '/api/goals': true,
   '/api/goals/[id]': true,
+  '/api/goals/[id]/project': true,
   '/api/goals/[id]/staff': true,
   '/api/health': true,
   '/api/items': true,

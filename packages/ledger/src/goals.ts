@@ -246,7 +246,7 @@ async function ensureReview(m: StaffRow, tx: Tx): Promise<void> {
 /** The owner changes a goal: its words, when it is for, or where it stands. */
 export async function updateGoal(
   id: number,
-  patch: Partial<GoalDraft> & { status?: GoalStatus },
+  patch: Partial<GoalDraft> & { status?: GoalStatus; projectFolder?: string | null },
   by: { owner: true } | { staffId: string; askId?: number }
 ): Promise<GoalRow | undefined> {
   const [row] = await db

@@ -134,6 +134,10 @@ and a hire's starting values.
 hand-off or number, which ledger tests and the office's format test share.
 `test/deliveries.test.ts` holds when the owner decided each ask.
 
+Goals can carry an owner-chosen project folder (`goals.project_folder`, migration
+`0031_goal_project`). It groups the owner's view and grants no file access.
+The owner's goal update records changes to the link in the Ledger.
+
 ## Files
 
 `FILES.md` lists each file in this package and what it holds.

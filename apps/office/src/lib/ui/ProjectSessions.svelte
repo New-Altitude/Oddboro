@@ -8,6 +8,7 @@
   } from '@oddboro/ledger';
   import type { StaffProfile } from '../staff/roster.ts';
   import Pixel from './Pixel.svelte';
+  import { PROJECT_TOOLS as TOOL, PROJECT_STATUS as STATUS } from './project-words.ts';
   import { projectApi } from './project-api.ts';
   import ProjectTerminal from './ProjectTerminal.svelte';
   import { LOGOS } from './tool-logos.ts';
@@ -72,13 +73,6 @@
   let termView = $state(crypto.randomUUID());
   const selected = $derived(connections.find((s) => s.id === currentId));
   const terminalVisible = $derived(!!view?.connected && !!view.terminal);
-  const TOOL: Record<ProjectAgent, string> = { claude: 'Claude Code', codex: 'Codex' };
-  const STATUS: Record<ProjectStatus, string> = {
-    working: 'Working',
-    waiting: 'Waiting for you',
-    idle: 'Idle',
-    done: 'Done'
-  };
   /** Each request's state, as the owner reads it. */
   const STATE: Record<ProjectRequest['state'], string> = {
     proposed: 'Waiting for you',
