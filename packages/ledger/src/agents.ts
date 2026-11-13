@@ -280,7 +280,9 @@ export const COMMANDS_WHY: Record<Agent, string> = {
   // Codex's Windows sandbox gave every Odd's folder to reads (2026-11-06).
   codex: 'Not safe on Windows yet: Codex cannot keep commands in this Odd’s folders here.',
   // Grok's sandbox blocks a command's network on Linux only, so its sign-in could leave the Mac.
-  // Grok's sandbox keeps a command off the network on Linux only, and Windows has none.
+  // Grok's sandbox keeps a command off the network on Linux only, and the office
+  // turns that off there so its own tool server reaches the database
+  // (`profileToml` in grok.ts). Windows has none.
   grok: "Not with Grok yet: its sandbox can't keep commands off the internet on every system.",
   gemini: 'Not tested with Gemini yet.'
 };

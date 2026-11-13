@@ -261,6 +261,10 @@ function profileToml(name: string, p: Profile): string {
   return [
     `[profiles.${name}]`,
     'extends = "strict"',
+    // strict keeps a child process off every socket on Linux, the office's own
+    // tool server too, which then cannot reach the database (issue #161). A run
+    // has no shell, so its only children are the office's servers.
+    'restrict_network = false',
     `read_only = ${JSON.stringify(p.readOnly)}`,
     `read_write = ${JSON.stringify(p.readWrite)}`,
     `deny = ${JSON.stringify(p.deny)}`
@@ -417,10 +421,11 @@ export function grokLaunch(r: GrokRun): GrokLaunch {
     // the way to files. Grok's web tools with Browse the web on, its MCP tools
     // (search_tool, use_tool), and no image tool. Never a shell: its launch
     // refuses a run with commands (`LAUNCHES.grok` in cli.ts), since Grok's
-    // sandbox keeps a command off the network on Linux only. Grok has no "no
-    // tools": an empty list gave a 1.0.62 run every tool, its shell too, which
-    // dontAsk refused, and a refused call ended the turn before the answer
-    // (seen 2026-11-05). So every run gets todo_write, which touches no file.
+    // sandbox does not keep a command off the network (`profileToml`). Grok
+    // has no "no tools": an empty list gave a 1.0.62 run every tool, its shell
+    // too, which dontAsk refused, and a refused call ended the turn before the
+    // answer (seen 2026-11-05). So every run gets todo_write, which touches no
+    // file.
     '--tools',
     ['todo_write', ...(r.web && !r.bare ? ['web_search', 'web_fetch'] : [])].join(','),
     ...(r.effort ? [`--reasoning-effort=${r.effort}`] : []),
