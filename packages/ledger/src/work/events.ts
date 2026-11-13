@@ -24,7 +24,7 @@ import type {
 } from '../schema.ts';
 import type { TaskEnded } from '../task-parking.ts';
 import type { FollowUpKind } from './kinds.ts';
-import type { PerKindInTx } from './snapshot.ts';
+import type { LedgerLine, PerKindInTx } from './snapshot.ts';
 import type { AskBase, FollowUp, RetiredKind, TaskBase } from './state.ts';
 
 /** A follow-up kind the office still starts. */
@@ -160,7 +160,22 @@ export type WorkEvent =
       /** The threads the Odd works on and does not lead, as the entry read them: the goals it serves are not loaded. */
       worksOn: ReadonlySet<number>;
     }
-  | { kind: 'clockWoke'; threadId: number };
+  | { kind: 'clockWoke'; threadId: number }
+  | {
+      kind: 'oddRemoved';
+      staffId: string;
+      /** The Ledger line of the leaving, which names the Odd's role and its jobs, as the entry read them. */
+      line: LedgerLine;
+      /** What each run of the Odd yet to start was about, by id, read outside the transaction. */
+      about: ReadonlyMap<number, string>;
+      effects: LeaveEffects;
+    }
+  | {
+      kind: 'oddBroughtBack';
+      staffId: string;
+      /** The Ledger line of its return, as the entry worded it. */
+      line: LedgerLine;
+    };
 
 /** The event of one kind, as its decider takes it. */
 export type EventOf<K extends WorkEvent['kind']> = Extract<WorkEvent, { kind: K }>;
@@ -192,6 +207,8 @@ export type WorkResults = {
   goalStatusChanged: null;
   parked: { at: Date } | { title: string };
   clockWoke: null;
+  oddRemoved: null;
+  oddBroughtBack: null;
 };
 
 /** I/O an ask's answer does after the commit. office-decide.ts supplies it where it decides an ask. */
