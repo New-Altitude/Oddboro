@@ -10,8 +10,18 @@
   import FloorControls, { type Light } from '#lib/ui/FloorControls.svelte';
   import { music, musicEnded, startMusic } from '#lib/ui/music.svelte.ts';
   import { chatAbout } from '#lib/ui/chat-about.svelte.ts';
-  import { ACTIVITY_LABEL, type Activity, type StaffProfile } from '#lib/staff/roster.ts';
-  import { threadTag, type HeldThread } from '#lib/staff/thread-tags.ts';
+  import type { Activity, StaffProfile } from '#lib/staff/roster.ts';
+  import type { HeldThread } from '#lib/staff/thread-tags.ts';
+  import {
+    floorMode,
+    nowIn,
+    oddNow,
+    railRing,
+    readerProps,
+    runsChanged,
+    tagWords,
+    type Snapshot
+  } from '#lib/staff/odd-now.ts';
   import StaffCard from '#lib/ui/StaffCard.svelte';
   import { chatRequest, type Delivered } from '#lib/ui/chat-about.svelte.ts';
   import OddsRail, { ODDS_RAIL, ODDS_RAIL_OPEN } from '#lib/ui/OddsRail.svelte';
@@ -87,6 +97,9 @@
   let atlasCatalog: Record<string, unknown> = {};
   let actors: StaffActor[] = [];
   let tags = $state<Tag[]>([]);
+  /** Where the floor put each Odd, kept only when one changes activity, so a frame alone changes no Odd's state. */
+  let placed = $state<Record<string, Activity>>({});
+  let placedKey = '';
   let labels = $state<Label[]>([]);
   /** Who holds each spot, by spot id, so the Send tab can show a place as taken. */
   let held = $state<Record<string, { id: string; name: string }>>({});
@@ -160,20 +173,12 @@
    */
   let watching: (() => [number, number] | undefined) | undefined;
   const openSetup = () => open({ id: 'setup', kind: 'setup' });
-  let working = $state<Record<string, string>>({});
   /** Each staffer's runs going, or waiting for a slot: every `working` event brings them. */
   let inProgress = $state<Record<string, Work[]>>({});
+  /** The Odds replying to the owner in chat: every `working` event brings them. */
+  let chatting = $state<string[]>([]);
   /** Each staffer's follow-ups yet to start, read with the office. */
   let toStart = $state<Record<string, Work[]>>({});
-  /** Each staffer's work in progress: its runs, then what waits to start. */
-  const work = $derived(
-    Object.fromEntries(
-      [...new Set([...Object.keys(inProgress), ...Object.keys(toStart)])].map((id) => [
-        id,
-        [...(inProgress[id] ?? []), ...(toStart[id] ?? [])]
-      ])
-    )
-  );
   /** A request for the card to open on a tab, from the Odds rail's list. */
   let cardShow = $state<{ id: string; tab: 'work'; n: number } | undefined>();
   /** Bumps when jobs, runs, access, goals, threads or lessons change, so the card's tabs and the Goals and Lessons windows reload. */
@@ -314,36 +319,28 @@
   const clock = $derived(
     now.toLocaleTimeString('en-US', { ...PT, hour: 'numeric', minute: '2-digit' })
   );
-  // A staffer with an ask, a task or an unread message for the owner comes to their door.
-  const waiting = $derived(
-    new Set([
-      ...desk.asks.map((a) => a.staffId),
-      ...desk.tasks.map((t) => t.staffId),
-      ...Object.keys(messages)
-    ])
-  );
-  /** Each staffer's thread a colleague holds, or holds for its lead, in words. */
-  const threadTags = $derived(
-    Object.fromEntries(
-      staff.map((p) => [
-        p.id,
-        threadTag({
-          id: p.id,
-          threads,
-          working: !!working[p.id],
-          nameOf: (id) => staff.find((s) => s.id === id)?.name ?? id
-        })
-      ])
-    )
-  );
-  /** What a staffer is doing, in words: where it is headed, or what it is at. */
-  function statusOf(t: Tag): string {
-    if (t.heading) return `→ ${t.heading}`;
-    if (messages[t.id]) return 'Has a message for you';
-    if (waiting.has(t.id)) return 'Waiting on you';
-    return threadTags[t.id]?.text ?? working[t.id] ?? ACTIVITY_LABEL[t.activity];
-  }
-  const status = $derived(Object.fromEntries(tags.map((t) => [t.id, statusOf(t)])));
+  /** The office as the page holds it, which every screen's words for an Odd come from. */
+  const snapshot = $derived.by((): Snapshot => {
+    // An Odd the floor still shows after it left keeps its tag until the floor drops it.
+    const ids = [...new Set([...staff.map((p) => p.id), ...Object.keys(placed)])];
+    return {
+      ids,
+      inProgress,
+      toStart,
+      chatting,
+      desk,
+      staff,
+      messages,
+      threads,
+      // An Odd not on the floor yet reads as at home, as the card always read it.
+      activity: Object.fromEntries(ids.map((id) => [id, placed[id] ?? 'home'])),
+      nameOf: (id) => staff.find((s) => s.id === id)?.name ?? id
+    };
+  });
+  /** Every Odd's state, derived once, so the floor, the rail, the card and the chat agree. */
+  const oddsNow = $derived(oddNow(snapshot));
+  /** Each Odd on the floor, to the room it walks to, if any. */
+  const headings = $derived(Object.fromEntries(tags.map((t) => [t.id, t.heading])));
 
   // The While you were away card counts once, however many jobs it lists.
   const deskCount = $derived(
@@ -421,16 +418,13 @@
   }
 
   /**
-   * The mode the office puts a staffer in: outside the owner's door, at its
-   * job, or free. A lead waiting on a colleague stays at its job, so the end
-   * of its run moves nobody.
+   * The mode the office puts each staffer in: outside the owner's door, at
+   * its job, or free. The ticker reads it each frame, so it is worked out
+   * only when an Odd's state changes.
    */
-  const wantOf = (p: StaffProfile): Activity | undefined =>
-    waiting.has(p.id)
-      ? 'wait'
-      : working[p.id] || threadTags[p.id]?.waitsOn
-        ? jobActivity(p)
-        : undefined;
+  const floorModes = $derived(
+    Object.fromEntries(staff.map((p) => [p.id, floorMode(oddsNow[p.id], jobActivity(p))]))
+  );
 
   const taken = (except?: StaffActor) => {
     const off = new Set(switchedOff);
@@ -510,7 +504,7 @@
       else {
         // The office is opening: everyone is already somewhere, each in a
         // different spot, instead of all walking in from the lobby at once.
-        const want = wantOf(p);
+        const want = floorModes[p.id];
         forced[p.id] = want;
         const free = new Set(w.spots.map((s) => s.activity));
         if (!a.assign(want ?? pickActivity(free, 'home'), w.spots, taken(a)))
@@ -575,7 +569,7 @@
       const next = await call<{
         staff: StaffProfile[];
         desk: Desk;
-        working: Record<string, string>;
+        chatting: string[];
         inProgress: Record<string, Work[]>;
         toStart: Record<string, Work[]>;
         roomNames: Record<string, string>;
@@ -601,7 +595,7 @@
       seen = keys(next.desk);
       staff = next.staff;
       desk = next.desk;
-      working = next.working;
+      chatting = next.chatting;
       inProgress = next.inProgress;
       toStart = next.toStart;
       roomNames = next.roomNames;
@@ -732,11 +726,11 @@
       }
       if (e.type === 'working') {
         // Every tool call a staffer makes updates its work in progress; only
-        // work starting or ending reloads the card's tabs.
-        const started = JSON.stringify(e.working) !== JSON.stringify(working);
-        working = e.working;
+        // a run starting or ending reloads the card's tabs.
+        const before = oddsNow;
         inProgress = e.inProgress;
-        if (started) version++;
+        chatting = e.chatting;
+        if (runsChanged(before, oddsNow)) version++;
         return;
       }
       // Whoever handed work on, or did it, walks over to the other and back.
@@ -804,6 +798,11 @@
                 ...p
               };
             });
+          const at = tags.map((t) => `${t.id}=${t.activity}`).join('|');
+          if (at !== placedKey) {
+            placedKey = at;
+            placed = Object.fromEntries(tags.map((t) => [t.id, t.activity]));
+          }
           // A sign scales with the floor, so it sits on the same spot of the wall at
           // the same size against the room at every zoom, and never runs past the room.
           const scale = floor!.scale / SIGN_ZOOM;
@@ -837,7 +836,7 @@
           for (const a of actors) {
             const id = a.profile.id;
             if (manual[id] || a.onTrip) continue;
-            const want = wantOf(a.profile);
+            const want = floorModes[id];
             if (want !== forced[id]) {
               forced[id] = want;
               a.assign(want ?? 'work', w.spots, taken(a));
@@ -1162,8 +1161,8 @@
       </div>
     {/each}
     {#each tags as t (t.id)}
-      {@const isWaiting = waiting.has(t.id)}
-      {@const words = statusOf(t)}
+      {@const isWaiting = railRing(oddsNow[t.id])}
+      {@const words = tagWords(oddsNow[t.id], t.heading)}
       <button
         class="tag pointer-events-auto absolute flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] whitespace-nowrap"
         class:active={selected === t.id}
@@ -1445,9 +1444,8 @@
     <div class="pointer-events-none absolute inset-0 z-20" transition:fly={fromEdge(80)}>
       <OddsRail
         {staff}
-        {status}
-        {waiting}
-        inProgress={work}
+        nowOf={nowIn(oddsNow)}
+        {headings}
         selected={profile && !rightCollapsed ? selected : undefined}
         find={findAgent}
         searching={railAsked}
@@ -1471,14 +1469,10 @@
       {#key profile.id}
         <div class="h-full" in:fly={fromEdge()}>
           <StaffCard
-            {desk}
-            {staff}
-            onplan={planHires}
+            {...readerProps(snapshot, oddsNow, profile.id, planHires)}
             {profile}
             activity={selectedActivity}
             {version}
-            working={working[profile.id]}
-            work={work[profile.id] ?? []}
             show={cardShow?.id === profile.id ? cardShow : undefined}
             {places}
             manual={!!manual[profile.id]}

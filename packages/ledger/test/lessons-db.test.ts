@@ -121,6 +121,23 @@ test('an Odd holding the cap must replace a lesson to keep another', async () =>
   assert.equal(swap.status, 'live');
 });
 
+test('two Odds keeping lessons for the office at the same moment never take it past the cap', async () => {
+  for (let i = 1; i < L.LESSON_CAP; i++)
+    await kept(say('ziva', `office rule number ${i} applies`, { scope: 'everyone' }));
+  const answers = await Promise.all([
+    say('ziva', 'one office rule from ziva', { scope: 'everyone' }),
+    say('jamal', 'one office rule from jamal', { scope: 'everyone' })
+  ]);
+  const [{ open }] = await sql<{ open: number }>`
+    select count(*)::int as open from lessons
+    where staff_id is null and status in ('live', 'waiting')`;
+  assert.equal(open, L.LESSON_CAP);
+  assert.equal(
+    answers.filter((a) => 'problem' in a && a.problem.includes(`${L.LESSON_CAP} lessons`)).length,
+    1
+  );
+});
+
 test('a waiting lesson goes live when the owner then says it outright', async () => {
   const w = await kept(
     L.keepLesson('jamal', {

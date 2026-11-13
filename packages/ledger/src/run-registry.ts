@@ -30,6 +30,11 @@ export type Work = {
    */
   toStart?: true;
   askId?: number;
+  /**
+   * The follow-up row this run carries out, so whoever handed the work over
+   * can tell whether the colleague's run for it is going.
+   */
+  followUp?: number;
   about?: WorkAbout;
   /** The tool the staffer is using now, as Claude Code names it. */
   doing?: string;

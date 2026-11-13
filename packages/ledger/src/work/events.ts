@@ -8,11 +8,24 @@ import type { Level } from '../access-words.ts';
 import type { oweCatchUp } from '../missed-runs.ts';
 import type { bringBack, removeOdd } from '../leaving.ts';
 import type { grantAccess } from '../office-access.ts';
-import type { carryOutTogether } from '../office-asks.ts';
+import type { GmailFilter } from '../filter-words.ts';
+import type { carryOutTogether, Decision } from '../office-asks.ts';
 import type { Unparked } from '../office-follow-ups.ts';
-import type { AccessRequest, FileEdit, InChat, Outcome } from '../schema.ts';
+import type { AskRow } from '../office.ts';
+import type {
+  AccessRequest,
+  FileEdit,
+  FolderRequest,
+  GoalStatus,
+  HeldCall,
+  InChat,
+  Outcome,
+  ReplyDraft
+} from '../schema.ts';
+import type { TaskEnded } from '../task-parking.ts';
 import type { FollowUpKind } from './kinds.ts';
-import type { FollowUp, RetiredKind } from './state.ts';
+import type { PerKindInTx } from './snapshot.ts';
+import type { AskBase, FollowUp, RetiredKind, TaskBase } from './state.ts';
 
 /** A follow-up kind the office still starts. */
 export type LiveKind = Exclude<FollowUpKind, RetiredKind>;
@@ -38,6 +51,22 @@ export type OwedRun = {
  * picked up with this run (`Claimed.joined`): they end with it.
  */
 export type RunEnded = { outcome: Outcome; result: string; joined: number[] };
+
+/** The columns an Odd's new ask names. Every other column starts empty, as a new row's does. */
+export type NewAsk = Pick<AskBase, 'staffId' | 'kind' | 'title' | 'why' | 'ifApproved'> &
+  Partial<Omit<AskBase, 'id' | 'createdAt' | 'staffId' | 'kind' | 'title' | 'why' | 'ifApproved'>>;
+
+/** The columns a new task names, its steps built by the entry. Every other column starts empty. */
+export type NewTask = Pick<TaskBase, 'staffId' | 'title' | 'why' | 'steps'> &
+  Partial<Pick<TaskBase, 'askId' | 'handOffId' | 'threadId' | 'via' | 'ownerSaid' | 'response'>>;
+
+/** What the office did with an ask the owner approved by doing it, kept on the ask with the yes. */
+export type AskDone = {
+  reply?: ReplyDraft;
+  filter?: GmailFilter;
+  call?: HeldCall;
+  folder?: FolderRequest;
+};
 
 export type WorkEvent =
   | {
@@ -65,7 +94,67 @@ export type WorkEvent =
       /** One run a restart cut off: each is closed on its own, so one that fails leaves the rest to close. */
       id: number;
       about: string;
-    };
+    }
+  | {
+      kind: 'askRaised';
+      ask: NewAsk;
+      /** Files that go with it, inserted with the ask. */
+      attach?: string[];
+      /** The key of the run raising it, which the thread it is raised on keeps. */
+      run?: string;
+    }
+  | {
+      kind: 'askDecided';
+      id: number;
+      decision: Decision;
+      reason: string | null;
+      /** The owner answered on the ask's card in its Odd's chat: the run the answer starts replies there. */
+      inChat: boolean;
+      reportWhenDone?: boolean;
+      done?: AskDone;
+      /**
+       * The Odd that raised it left the office, or took it off the desk: the
+       * office closes it as a no, with this line as the answer that goes back.
+       */
+      withdrawn?: string;
+      /** Writes in the same transaction that only the entry knows, such as setting a goal. */
+      perKind: PerKindInTx[];
+      /** The caller's own step once the ask is approved, after the commit. */
+      carryOut?: (ask: AskRow) => Promise<void>;
+      effects: AskEffects;
+    }
+  | {
+      kind: 'taskGiven';
+      task: NewTask;
+      attach?: string[];
+      run?: string;
+      /**
+       * A connect task the office gives: an open task with a step for this
+       * tool answers it instead. With `aws`, only an AWS step counts.
+       */
+      oneOpen?: { connector: string; aws?: true };
+    }
+  | {
+      kind: 'taskEnded';
+      id: number;
+      ended: TaskEnded;
+      /** The owner's note, or the office's line when the task is withdrawn. */
+      note: string | null;
+      /** The owner answered on the task's card in its Odd's chat. */
+      inChat: boolean;
+      /** The version of the saved response the owner finished with. */
+      responseVersion?: number;
+    }
+  | {
+      kind: 'connectTasksDropped';
+      connector: string;
+      /** Only this Odd's tasks; with none, every Odd's. */
+      staffId?: string;
+    }
+  | { kind: 'goalStatusChanged'; goalId: number; status: GoalStatus };
+
+/** The event of one kind, as its decider takes it. */
+export type EventOf<K extends WorkEvent['kind']> = Extract<WorkEvent, { kind: K }>;
 
 /** A run as its claim hands it to the driver. */
 export type Claimed = {
@@ -84,6 +173,14 @@ export type WorkResults = {
   runClaimed: Claimed;
   runFinished: null;
   staleRunsClosed: null;
+  /** The open ask a repeat of a held call found, or null when the new ask went in. */
+  askRaised: { already: number } | null;
+  askDecided: null;
+  /** The open task that already answers it, or null when the new task went in. */
+  taskGiven: { already: number } | null;
+  taskEnded: null;
+  connectTasksDropped: null;
+  goalStatusChanged: null;
 };
 
 /** I/O an ask's answer does after the commit. office-decide.ts supplies it where it decides an ask. */

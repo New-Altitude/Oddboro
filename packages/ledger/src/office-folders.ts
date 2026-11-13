@@ -137,10 +137,6 @@ export const switchesOff = (
   wanted: readonly OwnSwitch[]
 ): OwnSwitch[] => wanted.filter((s) => !who[s]);
 
-/** The ledger's words for turning switches on: "Let Theo run commands and browse the web". */
-const turnedOn = (name: string, on: readonly OwnSwitch[]) =>
-  `Let ${name} ${switchesSaid(on).toLowerCase()}`;
-
 /**
  * Secret stores, by name, each with how it is found anywhere but the top of
  * the home, where the name alone is enough (`touchesSecretStore`). An empty
@@ -351,4 +347,4 @@ export function checkFolder(
   return { real: p };
 }
 
-export { changeFolder, gaveFolder, turnedOn };
+export { changeFolder, gaveFolder };

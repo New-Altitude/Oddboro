@@ -23,7 +23,11 @@ export function random(seed: number): () => number {
  * value, since `next` makes fresh events on every call.
  */
 export type Explore<S, E, R> = {
-  /** A fresh state and the test's own record of what is true, built only from events. */
+  /**
+   * A fresh state and the test's own record of what is true, built only from
+   * events. Never keep `rnd` in the record: `next` would then draw from it,
+   * and the shrink would keep events that do nothing.
+   */
   start: (rnd: () => number) => { state: S; record: R };
   /**
    * Every event valid now, values included, from the record alone: never from
