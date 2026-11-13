@@ -8,6 +8,7 @@
   import { call } from './api.ts';
   import Pixel from './Pixel.svelte';
   import ServiceActions from './ServiceActions.svelte';
+  import ServiceName from './ServiceName.svelte';
   import type { StaffProfile } from '../staff/roster.ts';
 
   type Props = { staff: StaffProfile[]; version: number; onstaff: (id: string) => void };
@@ -61,8 +62,8 @@
     <ul class="flex flex-col gap-2">
       {#each shown as s (s.id)}
         <li class="rounded-xl bg-raise p-3 text-sm">
-          <div class="flex items-baseline gap-2">
-            <span class="min-w-0 flex-1 truncate font-medium">{s.name}</span>
+          <div class="flex items-center gap-2">
+            <div class="min-w-0 flex-1"><ServiceName id={s.id} name={s.name} /></div>
             <span class="shrink-0 text-[11px] {s.ready ? 'text-moss' : 'text-ember'}"
               >{s.ready ? 'Connected' : 'Waiting on your steps'}</span
             >
@@ -101,7 +102,7 @@
           {:else}
             <p class="mt-2 text-xs text-faint">No Odd uses it now.</p>
           {/if}
-          <ServiceActions id={s.id} name={s.name} changes={s.aws && s.ready} />
+          {#if s.aws && s.ready}<ServiceActions id={s.id} />{/if}
         </li>
       {/each}
     </ul>

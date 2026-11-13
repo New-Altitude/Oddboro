@@ -54,14 +54,21 @@ const PASSED: SandboxPaths = {
   ],
   grokShut: ['/Library', '/tmp', '/var'],
   codexReads: ['/Library/Developer/CommandLineTools', '/private/var/db/xcode_select_link'],
-  opensslConf: '/System/Library/OpenSSL/openssl.cnf'
+  opensslConf: '/System/Library/OpenSSL/openssl.cnf',
+  codexSelfShut: [],
+  codexNoAgentsDoc: false
+};
+
+/** Where a system passes other than the Mac's values, measured there. */
+const MEASURED: Partial<Record<NodeJS.Platform, Partial<SandboxPaths>>> = {
+  linux: { grokShut: ['/Library'], codexSelfShut: ['.codex', '.agents'], codexNoAgentsDoc: true }
 };
 
 for (const platform of ['linux', 'win32'] as const)
   for (const key of Object.keys(PASSED) as (keyof SandboxPaths)[])
     test(`${key} on ${platform} is the value the office already passes there`, async () => {
       const paths = await onPlatform(platform, sandboxPaths);
-      assert.deepEqual(paths[key], PASSED[key]);
+      assert.deepEqual(paths[key], MEASURED[platform]?.[key] ?? PASSED[key]);
     });
 
 test('a system with no sandbox paths declared stops the run, and gets nothing else', async () => {

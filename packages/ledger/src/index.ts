@@ -20,6 +20,7 @@ export {
 } from './time.ts';
 export * from './tools.ts';
 export * from './capabilities.ts';
+export * from './standing.ts';
 export * from './read-only.ts';
 export {
   searchRegistry,

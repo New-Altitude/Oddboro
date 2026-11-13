@@ -19,8 +19,10 @@
   import { call } from './api.ts';
   import FoldersList from './FoldersList.svelte';
   import ModelPicker from './ModelPicker.svelte';
+  import IconButton from './IconButton.svelte';
   import ServiceActions from './ServiceActions.svelte';
   import { findsIn, toolGroups } from './tool-groups.ts';
+  import ServiceName from './ServiceName.svelte';
   import type { StaffProfile } from '../staff/roster.ts';
 
   type Grant = {
@@ -32,6 +34,12 @@
     heldBack: HeldBack | null;
     /** An AWS tool already connected, which can move to another role or Region. */
     changes: boolean;
+    /** Tools it uses without asking: at Draft, calls to them go straight through. */
+    standing: string[];
+    /** Tools that ask first: at Act, calls to them still wait for the owner's yes. */
+    askFirst: string[];
+    /** Every tool its runs reach, those that change something first. */
+    tools: { name: string; changes: boolean; note: string }[];
   };
   /** A Google connector: one account of Gmail or Google Drive. */
   type Google = { product: 'gmail' | 'drive'; name: string; account?: string };
@@ -161,8 +169,59 @@
     }
   }
 
+  /**
+   * One tool's exception to the Odd's level: at Draft it goes through without
+   * asking (`standing`), at Act it asks first (`askFirst`), or it follows the
+   * level again.
+   */
+  async function setException(g: Grant, list: 'standing' | 'askFirst', tool: string, on: boolean) {
+    problem = '';
+    try {
+      await call(
+        `/api/staff/${profile.id}/access`,
+        { connector: g.connector, tool, [list]: on },
+        'PATCH'
+      );
+      // The grants table's change brings the list back from the office.
+      g[list] = on ? [...g[list], tool] : g[list].filter((t) => t !== tool);
+    } catch (e) {
+      problem = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  /** The service whose revoke waits for the owner's Confirm. */
+  let confirming = $state<string>();
+  /** The service being refreshed, and what each refresh found, by service. */
+  let refreshing = $state<string>();
+  let refreshed = $state<Record<string, string>>({});
+
+  /**
+   * Ask the service for its tools now; the connectors table's change brings
+   * the list back. Refresh says what it found. Opening the actions does it
+   * too, `quiet`: it says only what changed, and a service it cannot reach
+   * keeps the list it had, said under the service, not as the tab's problem.
+   */
+  async function refresh(g: Grant, { quiet = false } = {}) {
+    if (!quiet) problem = '';
+    refreshing = g.connector;
+    try {
+      const r = await call<{ said: string; changed: boolean }>(
+        `/api/services/${encodeURIComponent(g.connector)}/tools`,
+        {}
+      );
+      if (!quiet || r.changed) refreshed[g.connector] = r.said;
+    } catch (e) {
+      const said = e instanceof Error ? e.message : String(e);
+      if (quiet) refreshed[g.connector] = said;
+      else problem = said;
+    } finally {
+      refreshing = undefined;
+    }
+  }
+
   async function revoke(g: Grant) {
     problem = '';
+    confirming = undefined;
     try {
       await call(
         `/api/staff/${profile.id}/access?connector=${encodeURIComponent(g.connector)}`,
@@ -705,37 +764,133 @@
       <ul class="flex flex-col gap-2">
         {#each shownGrants as g (g.connector)}
           <li class="rounded-xl bg-raise p-3 text-sm">
-            <div class="flex items-start gap-2">
-              <div class="min-w-0 flex-1">
-                <div class="font-medium">{g.name}</div>
-                <div class="text-xs text-muted">
-                  {GRANT_LABEL[g.level]} · {g.reach}{g.heldBack
-                    ? ` · ${HELD_BACK[g.heldBack]}`
-                    : writesWait(g.level, profile.permission)
-                      ? ' · each change waits for your yes'
-                      : ''}
+            {#if confirming === g.connector}
+              <!-- Revoking forgets a set-up service, so it takes a second click. -->
+              <p>Are you sure you want to remove {g.name} from {profile.name}?</p>
+              <div class="mt-2 flex gap-2">
+                <button
+                  class="rounded-lg bg-coral/25 px-3 py-1 text-xs text-ink hover:bg-coral/40"
+                  onclick={() => revoke(g)}>Confirm</button
+                >
+                <button
+                  class="rounded-lg px-3 py-1 text-xs text-muted hover:text-ink"
+                  onclick={() => (confirming = undefined)}>Cancel</button
+                >
+              </div>
+            {:else}
+              <div class="flex items-start gap-2">
+                <div class="min-w-0 flex-1">
+                  <ServiceName id={g.connector} name={g.name} />
+                  <div class="text-xs text-muted">
+                    {GRANT_LABEL[g.level]} · {g.reach}{g.heldBack
+                      ? ` · ${HELD_BACK[g.heldBack]}`
+                      : writesWait(g.level, profile.permission)
+                        ? ' · each change waits for your yes, unless you allow it below'
+                        : g.level === 'act' && g.askFirst.length
+                          ? ` · ${g.askFirst.length} ask first`
+                          : ''}
+                  </div>
+                </div>
+                <div class="flex items-center gap-3">
+                  <IconButton
+                    icon="refresh"
+                    word={refreshing === g.connector ? 'Refreshing…' : 'Refresh'}
+                    label="Refresh {g.name}'s tools"
+                    side="start"
+                    disabled={refreshing === g.connector}
+                    onclick={() => refresh(g)}
+                  />
+                  <IconButton
+                    icon="trash"
+                    word="Revoke"
+                    label="Revoke {g.name}"
+                    side="start"
+                    danger
+                    onclick={() => (confirming = g.connector)}
+                  />
                 </div>
               </div>
-              <button class="text-xs text-muted hover:text-coral" onclick={() => revoke(g)}
-                >Revoke</button
-              >
-            </div>
-            <div class="mt-2 flex gap-1" role="group" aria-label={`${g.name} level`}>
-              {#each levels.filter((l) => g.connector !== POSTAL_ID || l === 'read') as l (l)}
-                <button
-                  class="flex-1 rounded-lg px-2 py-1 text-xs disabled:opacity-40 {g.level === l
-                    ? 'bg-sea/25 text-ink'
-                    : 'bg-night/40 text-muted hover:text-ink'}"
-                  aria-pressed={g.level === l}
-                  disabled={!allowed(l)}
-                  title={allowed(l)
-                    ? ''
-                    : `${profile.name} needs Drafts for your yes or higher first. Change it above.`}
-                  onclick={() => relevel(g, l)}>{GRANT_LABEL[l]}</button
+              {#if refreshed[g.connector]}
+                <p class="mt-1 text-[11px] text-faint" role="status">{refreshed[g.connector]}</p>
+              {/if}
+              <div class="mt-2 flex gap-1" role="group" aria-label={`${g.name} level`}>
+                {#each levels.filter((l) => g.connector !== POSTAL_ID || l === 'read') as l (l)}
+                  <button
+                    class="flex-1 rounded-lg px-2 py-1 text-xs disabled:opacity-40 {g.level === l
+                      ? 'bg-sea/25 text-ink'
+                      : 'bg-night/40 text-muted hover:text-ink'}"
+                    aria-pressed={g.level === l}
+                    disabled={!allowed(l)}
+                    title={allowed(l)
+                      ? ''
+                      : `${profile.name} needs Drafts for your yes or higher first. Change it above.`}
+                    onclick={() => relevel(g, l)}>{GRANT_LABEL[l]}</button
+                  >
+                {/each}
+              </div>
+              {#if g.tools.length}
+                {@const asks = writesWait(g.level, profile.permission)}
+                {@const free = profile.permission === 'act' && g.level === 'act'}
+                <!-- The level is the default; each tool that changes something can be its exception:
+                     without asking at Draft, ask first at Act. -->
+                <details
+                  class="mt-2 text-xs"
+                  ontoggle={(e) => e.currentTarget.open && void refresh(g, { quiet: true })}
                 >
-              {/each}
-            </div>
-            <ServiceActions id={g.connector} name={g.name} changes={g.changes} />
+                  <summary class="cursor-pointer text-muted hover:text-ink">
+                    Actions ({g.tools.length}){asks && g.standing.length
+                      ? ` · ${g.standing.length} without asking`
+                      : free && g.askFirst.length
+                        ? ` · ${g.askFirst.length} ask first`
+                        : ''}
+                  </summary>
+                  <ul class="mt-1 flex flex-col" aria-label="{g.name} actions">
+                    {#each g.tools as t (t.name)}
+                      {@const waits = asks
+                        ? !g.standing.includes(t.name)
+                        : g.askFirst.includes(t.name)}
+                      <li class="flex items-center gap-2 py-1">
+                        <div class="min-w-0 flex-1">
+                          <div class="truncate font-mono text-[11px]">{t.name}</div>
+                          {#if t.note}
+                            <p class="line-clamp-2 text-[11px] text-faint" title={t.note}>
+                              {t.note}
+                            </p>
+                          {/if}
+                        </div>
+                        {#if !t.changes}
+                          <span class="text-faint">Only reads</span>
+                        {:else if asks || free}
+                          <div
+                            class="flex shrink-0 gap-0.5 rounded-md bg-night/40 p-0.5"
+                            role="group"
+                            aria-label="{t.name}: ask first or without asking"
+                          >
+                            {#each [true, false] as wait (wait)}
+                              <button
+                                class="rounded px-1.5 py-0.5 text-[11px] {waits === wait
+                                  ? 'bg-sea/25 text-ink'
+                                  : 'text-muted hover:text-ink'}"
+                                aria-pressed={waits === wait}
+                                onclick={() =>
+                                  waits !== wait &&
+                                  (asks
+                                    ? setException(g, 'standing', t.name, !wait)
+                                    : setException(g, 'askFirst', t.name, wait))}
+                                >{wait ? 'Ask first' : 'Without asking'}</button
+                              >
+                            {/each}
+                          </div>
+                        {:else}
+                          <span class="text-faint">Held back</span>
+                        {/if}
+                      </li>
+                    {/each}
+                  </ul>
+                </details>
+              {/if}
+              {#if g.changes}<ServiceActions id={g.connector} />{/if}
+            {/if}
           </li>
         {/each}
       </ul>

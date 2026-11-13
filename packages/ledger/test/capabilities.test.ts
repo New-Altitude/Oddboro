@@ -51,7 +51,14 @@ function grant(
     readyAt: new Date(),
     ...over
   } as ConnectorRow;
-  return { staffId: 'odd', connectorId: connector.id, level, connector } as GrantRow & {
+  return {
+    staffId: 'odd',
+    connectorId: connector.id,
+    level,
+    standing: [] as string[],
+    askFirst: [] as string[],
+    connector
+  } as GrantRow & {
     connector: ConnectorRow;
   };
 }

@@ -134,7 +134,8 @@ const SERVER_CODE = [
  * is the one way to take a path away. Each is its real path, since macOS
  * links /tmp and /var into /private, and only if it exists, since on Linux a
  * deny path that cannot be bound stops Grok from starting. /etc stays: Grok
- * refuses to start without it.
+ * refuses to start without it. On Linux, /tmp and /var stay open
+ * (`grokShut` in sandbox-paths.ts).
  */
 const shut = () => [
   ...new Set(
@@ -433,6 +434,10 @@ export function grokLaunch(r: GrokRun): GrokLaunch {
       .flatMap((p) => denyRules(EDITS, p))
       .flatMap((rule) => ['--deny', rule]),
     ...r.allowed.map(mcpRule).flatMap((rule) => ['--allow', rule]),
+    // In a sandbox that keeps the network off, Grok 1.0.77 asks before every
+    // fetch, and a headless run that cannot ask ends the turn (seen 2026-11-11).
+    // Browse the web on is the owner's yes. web_search never asks.
+    ...(r.web && !r.bare ? ['--allow', 'web_fetch'] : []),
     ...(model ? ['-m', model] : []),
     `--rules=${r.system}`,
     ...(r.resume ? ['-r', r.resume] : ['-s', r.newSession])

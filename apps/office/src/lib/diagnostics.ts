@@ -161,6 +161,7 @@ export const ROUTE_IDS = {
   '/api/rooms': true,
   '/api/services': true,
   '/api/services/[id]': true,
+  '/api/services/[id]/tools': true,
   '/api/setup': true,
   '/api/setup/address': true,
   '/api/setup/advanced': true,

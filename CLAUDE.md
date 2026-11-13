@@ -24,7 +24,9 @@ Each rule's reason is in `docs/hard-rules.md`, under the same heading.
 4. **Nothing leaves the office without the owner's yes.** No Odd sends, posts,
    schedules, accepts or deletes anything outside the office unless the owner
    approved that exact action, or gave that Odd write access to the tool
-   it acts through and the Act level to use it. Drafting is always allowed.
+   it acts through and the Act level to use it (less any tool of it they set
+   to ask first), or let it use that one tool of the service without asking.
+   Drafting is always allowed.
 5. **No commits or pushes without the owner saying so.**
 6. **Logical properties only.** `ms`, `me`, `ps`, `pe`, `start`, `end`, never
    left or right. Enforced by `scripts/check-directions.ts`.
@@ -35,9 +37,8 @@ Each rule's reason is in `docs/hard-rules.md`, under the same heading.
    JSON floor plan, so adding a room or an office never needs engine code. A
    new kind of room does, starting at `ROOM_KINDS` in
    `packages/world/src/generate.ts`.
-9. **Family data never reaches a tracked file.** People and family data
-   live in the gitignored `data/` folder. Which AI tool an Odd runs on is
-   the owner's choice per Odd. Enforced by `scripts/check-private.ts`.
+9. **Personal names and accounts stay out of tracked files.** Enforced by
+   `scripts/check-private.ts`.
 10. **Every `CLAUDE.md` is named in its nearest ancestor `CLAUDE.md`.**
     Enforced by `scripts/check-context-index.ts`.
 11. **Decisions are one file each in `docs/decisions/`, and never provisional.**
@@ -68,7 +69,7 @@ packages/
   ledger/       Postgres: Odds (the `staff` table) and their job descriptions, asks, tasks, access, jobs, and the searchable ledger.
 scripts/        The lint guards. Plain Node, no dependencies.
 docs/           Decisions, hard rules, the office design, and the backlog.
-data/           Gitignored. People and family data. Never tracked.
+data/           Gitignored. The private-words list and local-only files. Never tracked.
 docker-compose.yml  Postgres 17 with pgvector, on 127.0.0.1 only.
 .github/workflows/ci.yml       Every pull request to main, and every push to it, runs the checks, Mac, Linux and Windows.
 .github/workflows/release.yml  Every merge to main that changes the app redrafts the next release, Mac, Linux and Windows.

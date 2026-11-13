@@ -731,8 +731,14 @@ test("a Grok Odd's run on a thread reads the thread's folder and writes only its
     `read_write = ${JSON.stringify([join(folder, 'accounts', 'grok', 'office', 'tmp'), part])}`
   ]);
   // The kernel shuts what `strict` reads that no Odd needs, by its real path.
-  for (const p of [join(homedir(), 'Library'), '/Library', '/tmp', '/var'].filter(existsSync))
+  // On Linux /tmp and /var stay open: Grok cannot start with either shut (`grokShut`).
+  const linux = process.platform === 'linux';
+  const shut = [join(homedir(), 'Library'), '/Library', ...(linux ? [] : ['/tmp', '/var'])];
+  for (const p of shut.filter(existsSync))
     assert.ok(run.profile?.includes(JSON.stringify(`${realpathSync(p)}/**`)), `${p} is not shut`);
+  if (linux)
+    for (const p of ['/tmp', '/var'])
+      assert.ok(!run.profile?.includes(JSON.stringify(`${p}/**`)), `${p} is shut on Linux`);
   assert.ok(
     run.profile?.includes(JSON.stringify(`${part}/**/.grok`)),
     'a planted .grok is not denied'
@@ -889,6 +895,8 @@ test('a renewal that hangs and ignores SIGTERM is killed at 30 seconds, and the 
   const hang = join(folder, 'accounts', 'grok', 'office', 'hang.pid');
   // 0 until grok models starts; process.kill reads 0 as this whole process group.
   const pid = () => Number(readFileSync(hang, 'utf8'));
+  // Real time, not a mock clock: the renewal's limit is probe's, which is
+  // execFile's own timer, and a mock clock cannot reach that.
   await withGrokSignIn({ auth: 12 * 60_000 }, async () => {
     writeFileSync(hang, '');
     let timer: NodeJS.Timeout | undefined;

@@ -62,7 +62,8 @@ const OWNER_SAID = process.env.OWNER_SAID || undefined;
 const OWNER_FILES = ownerFiles(process.env.OWNER_FILES);
 // Each Gmail account is a connector of its own. With more than one, the Odd
 // names the one the email came to, and the reply goes out from it.
-const mailboxes = (await grantsFor(ME))
+const held = await grantsFor(ME);
+const mailboxes = held
   .filter((g) => g.connector.config.google === 'gmail')
   .map((g) => ({ id: g.connectorId, account: g.connector.config.account }));
 /** This run, as the office tools' row conditions read it. */
@@ -73,6 +74,7 @@ const RUN: ToolRun = {
     process.env.LESSON_RUN !== '1' &&
     (await advancedMode()) &&
     (await projectConnections(ME)).length > 0,
+  write: held.some((g) => g.level === 'act'),
   chat: OWNER_SAID !== undefined,
   manager: me.role === MANAGER_ROLE
 };

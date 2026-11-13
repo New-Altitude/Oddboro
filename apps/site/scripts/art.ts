@@ -11,14 +11,14 @@
 // props unlit, then the whole scene lit, with the bus and the Odds on top.
 // scene.json carries where everything is, in pixels of the crop. Every image
 // that depends on the hour is rendered twice, at night (lamps on) and at
-// midday (lamps off), and the page picks a set by theme. Portraits, walks and
-// the Open Graph card are rendered once.
+// midday (lamps off), and the page picks a set by theme. Portraits and walks
+// are rendered once.
 import { fileURLToPath } from 'node:url';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import * as prettier from 'prettier';
 import { join } from 'node:path';
 import { hexToRgba, parsePx, renderFrame, spriteMeta } from '@oddboro/sprites/px';
-import { createImage, drawImage, encodePng, scaleImage, type Image } from '@oddboro/sprites/png';
+import { createImage, drawImage, encodePng, type Image } from '@oddboro/sprites/png';
 import {
   writeReleaseArt,
   type DeskLayers,
@@ -28,6 +28,7 @@ import {
   type HallLayers,
   type Persona
 } from './release-art.ts';
+import { shareCard } from './share.ts';
 import {
   catalog,
   cropTo,
@@ -597,8 +598,8 @@ const vignettes = VIGNETTES.map((v) => {
   };
 });
 
-/** Every image the hour changes: one set per theme. Returns the lit scene. */
-function renderSet(hour: number, dir: string): Image {
+/** Every image the hour changes: one set per theme. */
+function renderSet(hour: number, dir: string): void {
   const { paint, shade, light } = lighting(hour, W, H);
   const lit = light(paint(world.draws, true), world, world.draws);
 
@@ -924,20 +925,10 @@ function renderSet(hour: number, dir: string): Image {
     dir === 'day' ? 'day' : 'night',
     join(ART, 'releases')
   );
-  return lit;
 }
 
-const nightLit = renderSet(NIGHT, '');
+renderSet(NIGHT, '');
 renderSet(DAY, 'day');
-
-// The Open Graph card: the front of the building and the street at night, at twice the size.
-const og = { w: 600, h: 315 };
-const ogAt: Rect = {
-  x: doorRect.x + doorRect.w / 2 - og.w / 2,
-  y: doorRect.y + doorRect.h + 2 * TILE - og.h,
-  ...og
-};
-write('og.png', scaleImage(cropTo(nightLit, ogAt), 2));
 
 // Where everything is, for the hero.
 const bounds = (kind: Kind) => {
@@ -1263,11 +1254,14 @@ for (const [who, skin] of [
     renderFrame(def, { ...f, rows: blinkRows(f.rows, who, skin) }, palette)
   );
 }
+// Each manager's walk, kept for the link preview below.
+const walks = new Map<string, Image>();
 {
   const staffDef = sprites.get('staff')!;
   const strip = createImage(WALK.length * staffDef.width, staffDef.height);
   WALK.forEach((f, i) => drawImage(strip, frameImage(staffDef, f, 'marshall'), i * 16, 0));
   write('walk-marshall.png', strip);
+  walks.set('marshall', strip);
 }
 for (const [id, look] of Object.entries(looks)) {
   const px = readFileSync(join(LOOKS_ROOT, 'managers', `${id}.px`), 'utf8');
@@ -1276,7 +1270,13 @@ for (const [id, look] of Object.entries(looks)) {
   const strip = createImage(WALK.length * 16, 32);
   WALK.forEach((f, i) => drawImage(strip, lookFrame(lib, look, f), i * 16, 0));
   write(`walk-${id}.png`, strip);
+  walks.set(id, strip);
 }
+
+// The link preview every page shows unless it names its own. It sits beside
+// the favicon, not in art/.
+writeFileSync(join(ROOT, 'static', 'share.png'), encodePng(shareCard(walks)));
+console.log('static/share.png 1200x630');
 
 const vFile = join(ROOT, 'src', 'lib', 'vignettes.json');
 writeFileSync(

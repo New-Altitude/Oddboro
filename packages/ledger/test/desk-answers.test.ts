@@ -89,12 +89,20 @@ async function aGoal(title: string): Promise<number> {
   return g.id;
 }
 
-/** Each grant and each Odd serving a goal, keyed by the row, as what it shows an Odd got. */
+/**
+ * Each grant, each tool an Odd uses without asking, and each Odd serving a
+ * goal, keyed by the row, as what it shows an Odd got.
+ */
 async function held(): Promise<Map<string, string>> {
   const granted = await db.select().from(grants);
   const served = await db.select().from(staffGoals);
   return new Map([
     ...granted.map((g) => [`${g.staffId} ${g.connectorId}`, `grant:${g.staffId}`] as const),
+    ...granted.flatMap((g) =>
+      g.standing.map(
+        (t) => [`${g.staffId} ${g.connectorId} ${t}`, `standing:${g.staffId}`] as const
+      )
+    ),
     ...served.map((s) => [`${s.staffId} goal ${s.goalId}`, `serves:${s.staffId}`] as const)
   ]);
 }
@@ -105,7 +113,8 @@ async function markNow(): Promise<Mark> {
 }
 /**
  * What reached an Odd since `mark`: each new follow-up as `<kind>:<odd>`, each
- * new grant as `grant:<odd>`, and each Odd newly serving a goal as `serves:<odd>`.
+ * new grant as `grant:<odd>`, each tool it newly uses without asking as
+ * `standing:<odd>`, and each Odd newly serving a goal as `serves:<odd>`.
  */
 async function reached(mark: Mark): Promise<string[]> {
   const ups = await db.select().from(followUps);
@@ -261,6 +270,16 @@ const PINNED: Record<AskKind, Record<Decision, Pin>> = {
   catch_up: {
     approve: { cell: ['catch_up'], onThread: [] },
     deny: { cell: [], onThread: [] },
+    iterate: REFUSED
+  },
+  // The yes puts the tool on Ada's grant, and the answer goes back as any ask's does.
+  standing: {
+    approve: {
+      cell: ['give_standing', 'answer_back'],
+      onThread: ['resume:ada', 'standing:ada'],
+      onNone: ['standing:ada']
+    },
+    deny: NO,
     iterate: REFUSED
   }
 };
@@ -462,6 +481,27 @@ const raise: Record<AskKind, (onThread: boolean) => Promise<Raised>> = {
     });
     return { id: ask.id };
   },
+  // Ada holds Gmail at write, and asks to use one tool of it without asking:
+  // a tool of its own, since the office refuses a second ask that covers one.
+  standing: async (on) => {
+    const threadId = on ? await thread() : undefined;
+    await db
+      .insert(grants)
+      .values({ staffId: 'ada', connectorId: 'gmail', level: 'act' })
+      .onConflictDoUpdate({
+        target: [grants.staffId, grants.connectorId],
+        set: { level: 'act' }
+      });
+    const { ask } = await raiseAsk('ada', {
+      kind: 'standing',
+      title: 'Use a tool without asking',
+      why: 'w',
+      ifApproved: 'i',
+      standing: { connector: 'gmail', tools: [`stage_${++raised}`] },
+      threadId
+    });
+    return { id: ask.id };
+  },
   // The office's own ask, as askToCatchUp raises it, for a job of Ada's.
   catch_up: async () => {
     const [j] = await db
@@ -567,7 +607,8 @@ const SILENT_OFF_A_THREAD: readonly (readonly [AskKind, Decision])[] = [
   ['remove', 'approve'],
   ['remove', 'deny'],
   ['bring_back', 'approve'],
-  ['bring_back', 'deny']
+  ['bring_back', 'deny'],
+  ['standing', 'deny']
 ];
 const namesNew1715 = (kind: AskKind, decision: Decision) =>
   effectsOf(cellOf(kind, decision)).some((e) => typeof e === 'object' && e.none === 'NEW-1715');

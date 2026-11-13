@@ -691,11 +691,45 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   connector, the tool and its exact arguments), raised by the office's gateway
   (`raiseCall`) when an Odd at Draft calls a tool that changes something
   through a write grant (`writesWait` in `access-words.ts`; a write grant
-  works from Draft, `grantWorks`). The same call still open is returned, not
-  raised twice. Only the office approves one, with `approveCall`, once it made
+  works from Draft, `grantWorks`). Its title and why are the Odd's own words: at Draft
+  the gateway adds a required `oddboro_title` and `oddboro_why` to each tool that changes
+  something, takes them out of the call, and refuses a call without them. A title the office reads from the call itself (`said`) comes first. The
+  same call still open is returned, not raised twice. The changes the run made without asking to the same service since its last held call ride along as `before`, which only the desk shows. Only the office approves one, with `approveCall`, once it made
   the call (`call.result`); `decide` refuses a plain approve. A yes starts a
   `carry_out` run, whose brief has the call and what it returned.
   `apps/office/src/lib/server/gateway.test.ts` holds it.
+- A standing yes is a list of a write grant's tools the Odd uses without
+  asking (`grants.standing`, `src/standing.ts`): at Draft the gateway passes a
+  call to one of them on instead of holding it, in any run with a place, so a
+  hand-off's too, never a lesson run. A `standing` ask carries the tools in
+  `asks.standing` (`StandingRequest`), raised by `ask_for_standing_yes`, which
+  every Odd has (`always`) and is offered only while it holds a grant at
+  write (`withWrite` in `tools.ts`). The tool refuses an Odd at Act, whose calls go through already, a service not held at write, a tool the
+  service does not list or that only reads, tools it already has, and any
+  tool the owner said no to for this Odd (`standingAsked`): a no stands.
+  `raiseAsk` refuses a second open one that covers it. It takes yes or no
+  only (`OWNER_ANSWERS`); a yes puts the tools on the grant in the
+  transaction that approves it (`give_standing`, `giveStanding`), refused and
+  left open when the grant is no longer write, and the answer goes back as
+  any ask's does. The owner gives one or takes it back on the Settings tab
+  (`setStanding`, one ledger line each), and lowering the grant to read only
+  clears it (`setGrantLevel`). The Odd's prompt and `my_access` name the
+  tools (`STANDING` in `capabilities.ts`). A carry-out run of an Odd at Draft
+  after a call the office made is told to offer one once when that call only
+  prepared a change another call made real (`follow-up-brief.ts` in the office). `test/standing.test.ts` holds it, the tool included.
+- Ask first is its mirror at Act (`grants.askFirst`, `setAskFirst`): the
+  gateway holds each call to one of those tools as at Draft. Each list is the
+  exception to its level and keeps its tools as the level moves; read only
+  ends both. A tool the service drops stays on ask first, so one that comes
+  back by that name still waits, and the tools that change something it added
+  in the same refresh ask first too, since a rename is a drop and an add
+  (`refreshTools`, one ledger line). `standingAsked` refuses a standing ask
+  for one.
+- A service's stored tools follow what it lists now (`refreshTools` in
+  `src/office-service-tools.ts`): the tool list, what Read only reaches, each
+  tool's description (`connectors.toolNotes`), and a dropped or redescribed tool off each
+  standing yes. It writes, with a ledger line per change, only when something
+  changed. `test/tool-refresh.test.ts` holds it.
 - `asks.via` and `tasks.via` name the colleague whose handed-back work a
   lead raised the item from: the office sets `VIA` on a lead's pick-up, and
   `raise_ask`, `give_owner_a_task`, `propose_reply` and `propose_filter` store it.
@@ -822,7 +856,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
     its row in `GOAL_IS_LIVE` (`src/goal-words.ts`).
   - To add an office tool, start at its row in `OFFICE_TOOLS` in
     `src/tools.ts`; a tool registered beside it goes in `RIDES_WITH`. When
-    it is offered (`withGmail`, `inChat`, `notToManager`, and `prompt` for
+    it is offered (`withGmail`, `withWrite`, `inChat`, `notToManager`, and `prompt` for
     one that only shapes the prompt and is never offered) is a field on its
     row, which `isOffered` in `src/tools.ts` reads for the tool server
     (`offered()` in `mcp-run.ts`), the Settings tab's Always on group
