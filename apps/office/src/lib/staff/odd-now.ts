@@ -235,10 +235,12 @@ export function handOffWords(h: HandOffLine, onIt: boolean): { text: string; you
   const next = h.backs.at(-1)?.pickUp.status;
   if (!next || next === 'queued' || next === 'working')
     return { text: W.takingOver(ended, h.from), yours: h.status === 'waiting' };
-  // Something on the desk outranks how the pick-up went: it still needs the owner.
-  if (next === 'waiting' || h.status === 'waiting') return { text: W.waitingOnYou, yours: true };
+  // Something of it on the desk outranks how the pick-up went: it still needs the
+  // owner. A pick-up that ended waiting does not: that outcome never changes once
+  // the run ends, and the thread's card reads the desk for what it still raised.
+  if (h.status === 'waiting') return { text: W.waitingOnYou, yours: true };
   if (next === 'failed') return { text: W.pickUpFailed(h.from), yours: false };
-  return { text: h.status === 'done' ? W.done : ended, yours: false };
+  return { text: h.status === 'done' && next === 'done' ? W.done : ended, yours: false };
 }
 
 /**

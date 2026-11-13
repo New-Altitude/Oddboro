@@ -424,17 +424,19 @@ export async function handOffsFor(staffId: string, limit = 50): Promise<HandOffL
     // Waiting while the desk holds anything of it, working while a run on it has yet
     // to end, else as its latest step ended. Rows from before a waiting result
     // stopped going back once the owner had answered (`answeredAll`) can end on
-    // one after the owner's answer: that answer stands.
+    // one after the owner's answer: that answer stands. A step that ended waiting
+    // with nothing of it on the desk went back to the lead, so it reads as done.
     const last = mine.at(-1);
     const latest =
       last?.outcome === 'waiting' ? (mine.findLast((b) => b.outcome !== 'waiting') ?? last) : last;
     const settled =
       latest && r.outcome && !open.has(r.id) && !running.has(r.id) ? latest : undefined;
-    const status: HandOffStatus = !latest
+    const ended: HandOffStatus = !latest
       ? statusOf(r)
       : open.has(r.id)
         ? 'waiting'
         : (settled?.outcome ?? 'working');
+    const status: HandOffStatus = ended === 'waiting' && !open.has(r.id) ? 'done' : ended;
     const fromId = r.handOff?.from ?? '';
     return {
       id: r.id,
