@@ -586,6 +586,30 @@ async function smokeApp(): Promise<void> {
       );
     return `${h.pages} page(s) on the live line, no errors`;
   });
+  // Required once the office reports them; builds before NEW-1694 do not.
+  const where = health ? await getJson<{ port?: number; home?: string }>('/api/health') : undefined;
+  await step(
+    'the shell and the office agree on the port and the home folder',
+    where?.port !== undefined,
+    () => {
+      const line = logText(r)
+        .split('\n')
+        .filter((l) => l.includes('opening: pid'))
+        .at(-1);
+      const shell = line?.match(/, port (\d+), home (.+?), webview /);
+      if (!shell) throw new Error(`no launch line with a port and a home: ${line ?? '(none)'}`);
+      const said = {
+        shell: { port: shell[1], home: shell[2] },
+        office: { port: String(where?.port), home: where?.home }
+      };
+      for (const [who, s] of Object.entries(said))
+        if (s.port !== String(PORT) || s.home !== r.home)
+          throw new Error(
+            `the ${who} says port ${s.port} and home ${s.home}; the run set port ${PORT} and home ${r.home}`
+          );
+      return `port ${PORT} and home ${r.home}, in the launch line and /api/health`;
+    }
+  );
   await step('a screenshot', false, () => screenshot(join(OUT, 'screen.png')));
   await step('quits with Node and both ports gone', true, async () => {
     if (stopDriven) return `${await stopDriven()}; the relaunches quit with SIGTERM`;
