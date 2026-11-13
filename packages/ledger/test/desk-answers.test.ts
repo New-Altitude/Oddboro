@@ -47,6 +47,8 @@ const {
   hire,
   officeActivity,
   raiseAsk,
+  task,
+  TaskResponseConflict,
   tickStep
 } = await import('../src/office.ts');
 const { ownerAnswers } = await import('../src/desk-answers.ts');
@@ -789,6 +791,23 @@ test('dropping a task given on no work wakes the Odd that gave it, once, with th
   assert.equal(woke.length, 1);
   assert.equal(woke[0].kind, 'answered');
   assert.match(woke[0].note ?? '', /dropped "Book the van": not now/);
+});
+
+// The office's task route shows the owner this error's words; a false would read
+// as "This task was already answered" and hide that the response is not saved.
+test('finishing a task whose response the owner has not saved rejects as a response conflict, and the task stays open', async () => {
+  const t = await giveTask('ada', {
+    title: 'Word the notice',
+    why: 'w',
+    steps: ['Read it'],
+    response: 'Draft'
+  });
+  await assert.rejects(finishTask(t.id, true, null, { responseVersion: 1 }), (e: unknown) => {
+    assert.ok(e instanceof TaskResponseConflict, String(e));
+    assert.equal(e.message, 'Review and save your response before marking this task done.');
+    return true;
+  });
+  assert.equal((await task(t.id))?.status, 'open');
 });
 
 test("only a choice step's answer counts as what the owner said", () => {
