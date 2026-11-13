@@ -69,7 +69,8 @@ const one = <T>(id: T | null | undefined): T[] => (id == null ? [] : [id]);
  * names its rows. Each reads what it needs to name them before any lock but
  * the plan's, which comes first in `LOCK_ORDER`: only a hand-off holds work
  * for the usage window, and it does so under that lock, so a read made under
- * it sees every hold.
+ * it sees every hold. A leaving locks its Odd's row before its reads, for
+ * the same reason (`oddRemoved`).
  */
 const SEEDS: {
   [K in WorkEvent['kind']]: (tx: Tx, e: EventOf<K>) => Seeds | Promise<Seeds>;
@@ -192,6 +193,11 @@ const SEEDS: {
     return { threads: [threadId, ...held], asks: one(ask), update: ['asks'] };
   },
   oddRemoved: async (tx, { staffId }) => {
+    // Its row first, before the reads below. A raise, a task or a run for it
+    // takes that row for share, so none commits between these reads and the
+    // leaving and stays open for an Odd that left. It is the only Odd the
+    // leaving writes, so every other Odd it reaches is locked for share.
+    await lockRows(tx, 'staff', [staffId], 'update');
     // Its own asks, and any other ask about it.
     const open = await tx
       .select({ id: asks.id })
@@ -211,7 +217,7 @@ const SEEDS: {
       asks: open.map((a) => a.id),
       tasks: given,
       followUps: await idsOf(tx, followUps, and(eq(followUps.staffId, staffId), queuedRows)),
-      update: ['staff', 'asks', 'tasks'],
+      update: ['asks', 'tasks'],
       ends: given
     };
   },

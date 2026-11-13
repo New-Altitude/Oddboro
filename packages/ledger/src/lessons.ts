@@ -39,7 +39,8 @@ import {
   type LessonHow,
   type LessonStatus
 } from './schema.ts';
-import { addFollowUp, type Tx } from './threads.ts';
+import type { Tx } from './threads.ts';
+import { transitionWork } from './work/apply.ts';
 import { transition } from './transition.ts';
 
 export { GUESS_DAYS, LESSON_CAP, type LessonRow } from './lesson-rules.ts';
@@ -530,7 +531,8 @@ export async function usedLesson(id: number, staffId: string): Promise<TaughtLes
  * starts, and once one under way ends, the office calls this again with the
  * version it read, so a save made meanwhile starts one more. A file on a task
  * is a form the owner filled in, not a correction, and an unchanged file says
- * nothing. Returns whether it started one.
+ * nothing, and neither does a save to a file of an Odd that left. Returns
+ * whether it started one.
  */
 export async function learnFromEdit(
   staffId: string,
@@ -561,6 +563,10 @@ export async function learnFromEdit(
       )
     );
   if (unfinished) return false;
-  await addFollowUp(db, { staffId, kind: 'edited', edit, note: null });
-  return true;
+  // The decider owes an Odd that left nothing, and puts no row then.
+  const went = await transitionWork({
+    kind: 'runQueued',
+    run: { staffId, kind: 'edited', edit, note: null }
+  });
+  return 'change' in went && went.change.put.length > 0;
 }
