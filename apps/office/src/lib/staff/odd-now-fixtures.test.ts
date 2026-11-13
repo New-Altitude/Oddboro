@@ -393,13 +393,21 @@ const first = (html: string, re: RegExp) => {
   return group === undefined ? group : plain(group);
 };
 
-test("every reader of an Odd's status shows the same state for the same fixture", async (t) => {
+/** The screens that read an Odd's state, compiled by svelte-load.ts, loaded once. */
+let screens: ReturnType<typeof loadScreens> | undefined;
+async function loadScreens() {
   // Static imports are hoisted, so the hook is in place only if the components load after it.
   register('./svelte-load.ts', import.meta.url);
-  const { render } = await import('svelte/server');
-  const { default: StaffCard } = await import('#lib/ui/StaffCard.svelte');
-  const { default: OddInfo } = await import('#lib/ui/OddInfo.svelte');
-  const { default: OddsRail } = await import('#lib/ui/OddsRail.svelte');
+  return {
+    render: (await import('svelte/server')).render,
+    StaffCard: (await import('#lib/ui/StaffCard.svelte')).default,
+    OddInfo: (await import('#lib/ui/OddInfo.svelte')).default,
+    OddsRail: (await import('#lib/ui/OddsRail.svelte')).default
+  };
+}
+
+test("every reader of an Odd's status shows the same state for the same fixture", async (t) => {
+  const { render, StaffCard, OddInfo, OddsRail } = await (screens ??= loadScreens());
   const onplan = (_hires: AskRow[]) => {};
   const none = () => {};
 
@@ -499,4 +507,36 @@ test("every reader of an Odd's status shows the same state for the same fixture"
       });
     }
   }
+});
+
+test("the rail's title says where an Odd is headed, and Arriving for one the floor has not placed or the page holds no state for", async () => {
+  const { render, OddsRail } = await (screens ??= loadScreens());
+  const snap = office();
+  const { nowOf } = readerProps(snap, oddNow(snap), 'ada', () => {});
+  // Dee has left, so the page holds no state for her.
+  const staff = [...snap.staff, { ...profileOf('ada'), id: GONE, name: 'Dee' }];
+  const titles = (headings: Record<string, string | undefined>) => {
+    const rail = markup(
+      render(OddsRail, {
+        props: { staff, nowOf, headings, onselect: () => {}, onchat: () => {} }
+      })
+    );
+    return Object.fromEntries(
+      ['Ada', 'Bo', 'Dee'].map((name) => [
+        name,
+        first(rail, new RegExp(`title="${name}, Writer: ([^"]*)"`))
+      ])
+    );
+  };
+  assert.deepEqual(titles({ ada: 'Kitchen', bo: undefined, cy: undefined, [GONE]: undefined }), {
+    Ada: '→ Kitchen',
+    Bo: 'At their desk',
+    Dee: 'Arriving'
+  });
+  // The floor has not placed Ada yet.
+  assert.deepEqual(titles({ bo: undefined, cy: undefined, [GONE]: undefined }), {
+    Ada: 'Arriving',
+    Bo: 'At their desk',
+    Dee: 'Arriving'
+  });
 });
