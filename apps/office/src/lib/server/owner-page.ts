@@ -5,6 +5,15 @@ import { CHAT_REQUEST_BYTES } from '../staff/chat-input.ts';
 // server's `handle` in hooks.server.ts) checks every request before a route
 // sees it:
 //
+// - The request must come from this computer (`fromThisComputer`, in
+//   this-computer.ts, which Vite's dev server asks first too). Through
+//   Caddy, which on a Mac and Linux listens on every address, the connection
+//   is always from 127.0.0.1, so the office reads the address Caddy forwards
+//   for (X-Forwarded-For), which Caddy writes itself. A program on this
+//   computer can write that header too; this check keeps out other machines,
+//   not other programs. Every entry counts, since a Caddy that trusts the
+//   client appends to what it sent, and an entry that is not a plain address
+//   (a port, brackets, a name, empty) counts as another computer.
 // - The Host must be one of the office's own names. A page that points a
 //   name of its own at 127.0.0.1 (DNS rebinding) counts as same-origin to the
 //   browser, so only the name it asked for gives it away.
@@ -22,6 +31,7 @@ import { CHAT_REQUEST_BYTES } from '../staff/chat-input.ts';
 import type { Handle } from '@sveltejs/kit/hooks';
 import { HOSTS } from './hosts.ts';
 import { fromRun, GATEWAY_PATH } from './gateway.ts';
+import { fromThisComputer, NOT_THIS_COMPUTER } from './this-computer.ts';
 import { fromShell } from './update.ts';
 
 /**
@@ -80,11 +90,18 @@ async function fits(request: Request, limit: number): Promise<boolean> {
 /** The server's `handle`: every request passes here before a route sees it. */
 export const guardOffice: Handle = async ({ event, resolve }) => {
   const { request } = event;
+  if (
+    !fromThisComputer({
+      forwardedFor: request.headers.get('x-forwarded-for'),
+      peer: event.getClientAddress()
+    })
+  )
+    return refuse(NOT_THIS_COMPUTER);
   if (!toThisOffice(request)) return refuse('This office answers only at its own address');
   if (
     READS.has(request.method) ||
     fromOwnerPage(request) ||
-    (event.url.pathname === '/api/update' && fromShell(request, event.getClientAddress())) ||
+    (event.url.pathname === '/api/update' && fromShell(request)) ||
     (event.url.pathname.startsWith(`${GATEWAY_PATH}/`) && fromRun(request))
   ) {
     const chat =
