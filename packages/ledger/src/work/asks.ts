@@ -40,10 +40,17 @@ import {
   LEFT_RAISES_NOTHING,
   leftBeforeStarting,
   oweRun,
+  planGoal,
   raisedOn,
   stopThread
 } from './threads.ts';
 import { asksNoMore, TWINNED } from './twins.ts';
+
+/**
+ * The name of a goal yes's own write, which sets the goal (`approveGoal`):
+ * the goal's work and its planning run point at the id it returns.
+ */
+export const GOAL_SET = 'goal';
 
 /**
  * An Odd raises an ask, as `raiseAsk` in office-asks.ts does, and a held
@@ -186,8 +193,8 @@ export function askDecided(
 
   const reason = e.reason || null;
   const { status: _, ...base } = loaded;
-  // An entry names every `done` key, the ones it did nothing with as undefined:
-  // a plain spread would erase the ask's own folder, and with it its twins.
+  // An entry may name a `done` key as undefined (`decide` in office-decide.ts
+  // names every one): a plain spread would erase the ask's own folder, and with it its twins.
   const ask = decidedAs(filled(base, done), decision, reason, now);
   // A yes or a no answers the twins too; sending one back leaves them for the new version.
   const twins =
@@ -240,12 +247,23 @@ export function askDecided(
     );
   // Settled on no work: `offWorkAnswer` carries them once every other run is put.
   const offWork: Ask[] = [];
+  // A goal yes's planning run, put before the answer goes back in the cell's order, replies under the card alone.
+  let planned = false;
   const cell = effectsOf(ask.kind, decision);
   for (const effect of cell) {
     if (typeof effect === 'object') continue;
     switch (effect) {
-      // The entry's own writes, in `perKind`: the approval, and the standing yes.
-      case 'approval_work':
+      // The entry's own writes are in `perKind`. A goal's is setting it
+      // (`GOAL_SET`), which the office's manager then plans, as `setGoal`
+      // did; with no manager, nobody plans it.
+      case 'approval_work': {
+        const lead = [...rows.staff.values()].find((o) => o.manager && !o.leftAt);
+        if (!approved || ask.kind !== 'goal' || !ask.goal || !lead) break;
+        planGoal(d, { goal: { ref: GOAL_SET }, title: ask.goal.title, lead: lead.id, chat }, now);
+        planned = true;
+        break;
+      }
+      // The entry's own write, in `perKind`: the standing yes.
       case 'give_standing':
         break;
       // A colleague that left since the hand-off was held gets none: its lead hears so (`answerHandOffs`).
@@ -318,7 +336,7 @@ export function askDecided(
         break;
       case 'answer_back':
         for (const a of [ask, ...twins])
-          if (!back(a, a.id === ask.id ? chat : undefined)) offWork.push(a);
+          if (!back(a, a.id === ask.id && !planned ? chat : undefined)) offWork.push(a);
         break;
       // A no with a reason may be a lesson: the Odd that asked reads it once. An
       // ask withdrawn because its Odd left has nobody to read it.

@@ -161,6 +161,39 @@ export function openThread(
   return { ref };
 }
 
+/**
+ * A goal set, and its lead plans it, as `setGoal` and `goalThread` in
+ * ../goals.ts did: the goal's work opens under the lead, and the lead's
+ * `goal` run goes on it. `goal` is the goal's id, or the ref of the write
+ * that sets it in this change. `chat` is the card the owner answered on: the
+ * run replies under it only when it is that chat's Odd's.
+ */
+export function planGoal(
+  d: Draft,
+  o: { goal: number | Inserted; title: string; lead: string; chat?: InChat },
+  now: Date
+): void {
+  const thread = openThread(d, { title: o.title, hubId: o.lead, goalId: o.goal }, [], now);
+  const threadId = idOf(d, thread);
+  const run = newRun(
+    {
+      staffId: o.lead,
+      kind: 'goal',
+      goalId: typeof o.goal === 'number' ? o.goal : idOf(d, o.goal),
+      threadId,
+      chatCard: chatCardOf(o.lead, o.chat) ?? null
+    },
+    now
+  );
+  // Put here rather than by `addRun`, which points only a run's thread: this one points at its goal too.
+  const points = {
+    threadId: thread.ref,
+    ...(typeof o.goal === 'object' && { goalId: o.goal.ref })
+  };
+  putAll(d, [{ table: 'followUps', ref: `run ${d.ids.size}`, insert: run, points }]);
+  settle(d, threadId, now);
+}
+
 /** The id this draft gave a row it inserted, or made up for a `perKind` effect, which its later steps read it by. */
 export function idOf(d: Draft, row: Inserted): number {
   const id = d.ids.get(row.ref);
