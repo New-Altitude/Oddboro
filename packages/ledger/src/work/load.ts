@@ -8,7 +8,7 @@ import { manager } from '../goals.ts';
 import type { StaffRow } from '../office.ts';
 import { gaveFolder, switchesOff } from '../office-folders.ts';
 import { networkNote } from '../office-staff.ts';
-import { ownerName, PLAN_ROW, WINDOW_MS } from '../office-usage.ts';
+import { ownerName, PLAN_ROW, windowBegan } from '../office-usage.ts';
 import { runsGoing } from '../run-registry.ts';
 import { asks, followUps, planLimits, staff, tasks, threads, type HandOff } from '../schema.ts';
 import { sharing } from '../sharing.ts';
@@ -243,9 +243,7 @@ async function windowNow(tx: Tx): Promise<Seeds['window']> {
     ? await tx
         .select({ id: asks.id })
         .from(asks)
-        .where(
-          and(eq(asks.kind, 'window'), gt(asks.createdAt, new Date(resets.getTime() - WINDOW_MS)))
-        )
+        .where(and(eq(asks.kind, 'window'), gt(asks.createdAt, windowBegan(resets))))
         .orderBy(desc(asks.id))
         .limit(1)
     : [];
