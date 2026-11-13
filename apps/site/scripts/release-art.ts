@@ -1698,7 +1698,7 @@ function terminal(w: number, h: number, lines: number, words: number, cursor: bo
       box(img, x, y, 2, 1, 'y');
       x += 4;
     }
-    const wordKeys = keys.replace('>', '');
+    const wordKeys = keys[0] === '>' ? keys.slice(1) : keys;
     for (let i = 0; i < n; i++) {
       box(img, x, y, lens[i], 1, wordKeys[i] ?? 'G');
       x += lens[i] + 2;
