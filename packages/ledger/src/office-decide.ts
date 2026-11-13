@@ -83,8 +83,9 @@ export async function approveAsk(
 /**
  * The owner sent a reply ask's email, or saved it to Gmail drafts, and Gmail
  * took it: keep their final version with what Gmail did (`reply.sent`), and
- * approve the ask, so the answer goes back where it came from. No run follows.
- * Returns false when the ask was no longer open.
+ * approve the ask, so the answer goes back where it came from: to its work,
+ * or, on no work, to the Odd as an `answered` run. Returns false when the ask
+ * was no longer open.
  */
 export async function approveReply(id: number, reply: ReplyDraft): Promise<boolean> {
   if (!reply.sent) throw new Error('A reply is approved only once Gmail took it');
@@ -94,8 +95,8 @@ export async function approveReply(id: number, reply: ReplyDraft): Promise<boole
 /**
  * The owner created a filter ask's Gmail filter, and Gmail took it: keep their
  * final version with what Gmail did (`filter.created`), and approve the ask,
- * so the answer goes back where it came from. No run follows. Returns false
- * when the ask was no longer open.
+ * so the answer goes back where it came from: to its work, or, on no work, to
+ * the Odd as an `answered` run. Returns false when the ask was no longer open.
  */
 export async function approveFilter(id: number, filter: GmailFilter): Promise<boolean> {
   if (!filter.created) throw new Error('A filter is approved only once Gmail made it');
