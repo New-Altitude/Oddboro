@@ -18,6 +18,16 @@ quit, keeping the computer awake and notifications (`server.rs`), opening
 links, the tray icon and closing the window (`main.rs`), and reopening after
 an update (`update.rs`).
 
+## Office strip
+
+The Office menu and the menu bar or tray's Office strip item opens `/strip` in a second window
+(`src/strip.rs`), always on top and with no native page permissions. Its Odd and
+Waiting links select the main window's existing pane through a checked
+same-origin destination and a page event. The main window stays available and
+can be hidden separately. The strip remembers its size and position in
+`strip-window.json` in the office home on close or quit; a removed display puts
+it back in the centre. It adds no service, polling, animation, or dependency.
+
 ## What the shell does
 
 1. Checks for a newer version before anything else (`update::on_launch`,

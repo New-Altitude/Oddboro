@@ -17,6 +17,13 @@ export type Outbound = {
 
 export const OUTBOUND: readonly Outbound[] = [
   {
+    file: 'apps/office/src/routes/strip/+page.svelte',
+    calls: 1,
+    to: 'The office on this computer.',
+    sends: 'A request for the same live office updates as the main window.',
+    yes: 'The owner opening the Office strip.'
+  },
+  {
     file: 'apps/office/src/lib/server/project-sessions/codex-rpc.ts',
     calls: 2,
     to: 'The local Codex App Server, through authenticated loopback or the private socket the owner chose.',
