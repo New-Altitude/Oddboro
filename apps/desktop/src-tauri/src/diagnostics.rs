@@ -749,7 +749,8 @@ mod tests {
             home: dir.clone(),
             log: log.clone(),
             version: String::new(),
-            update_token: String::new(),
+            key: std::sync::Arc::new(crate::key::Key::fresh().unwrap()),
+            updates: false,
             diagnostics_dsn: None,
         };
         let why = GaveUp::KeptStopping { code: Some(3) };

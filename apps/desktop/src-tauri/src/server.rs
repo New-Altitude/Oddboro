@@ -8,9 +8,13 @@ use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering::SeqCst};
-use std::sync::{Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, sleep};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use serde_json::Value;
+
+use crate::key::Key;
 
 /// The server's entry point, relative to the staged code.
 pub const ENTRY: &str = "apps/office/build/index.js";
@@ -53,9 +57,10 @@ pub struct Server {
     pub log: PathBuf,
     /// The app's version, passed as `ODDBORO_VERSION`.
     pub version: String,
-    /// The secret the server checks on the shell's update requests. Empty
-    /// when this build does not update itself.
-    pub update_token: String,
+    /// The app's key. Node reads it first on its stdin, every time it starts.
+    pub key: Arc<Key>,
+    /// True when this build updates itself: Node gets `ODDBORO_UPDATES=1`.
+    pub updates: bool,
     /// Where error reports go, passed as `ODDBORO_DIAGNOSTICS_DSN` so the
     /// office and the shell agree. None when this build has no address.
     pub diagnostics_dsn: Option<String>,
@@ -182,10 +187,7 @@ impl Server {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(log.try_clone()?)
-            .envs(
-                (!self.update_token.is_empty())
-                    .then_some(("ODDBORO_UPDATE_TOKEN", self.update_token.as_str())),
-            )
+            .envs(self.updates.then_some(("ODDBORO_UPDATES", "1")))
             .envs(
                 self.diagnostics_dsn
                     .as_deref()
@@ -216,8 +218,10 @@ impl Server {
         // Hold Node's stdin apart, open until Node is gone: `Child::wait`
         // closes a stdin it still holds, and the server quits when its stdin
         // closes. It is in place before the relay starts, so the first
-        // Keychain answer has somewhere to go.
+        // Keychain answer has somewhere to go. The key is the first line on
+        // it, before any answer: the office reads it before it asks anything.
         *NODE_STDIN.lock().unwrap_or_else(|e| e.into_inner()) = child.stdin.take();
+        to_node(&self.key.line());
         if let Some(out) = child.stdout.take() {
             thread::spawn(move || relay(out, log));
         }
@@ -233,6 +237,26 @@ impl Server {
             tail(&self.log, 12)
         )
     }
+}
+
+/// One request of the shell's own to the office, with the key in its header,
+/// and the answer's JSON. HTTP/1.0, so the answer comes whole, never chunked.
+pub fn call(port: u16, key: &Key, method: &str, path: &str, body: Option<&Value>) -> Option<Value> {
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).ok()?;
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+    let body = body.map(Value::to_string).unwrap_or_default();
+    let request = format!(
+        "{method} {path} HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\n{}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        key.header(),
+        body.len()
+    );
+    stream.write_all(request.as_bytes()).ok()?;
+    let mut answer = String::new();
+    stream.read_to_string(&mut answer).ok()?;
+    let (_, json) = answer.split_once("\r\n\r\n")?;
+    serde_json::from_str(json).ok()
 }
 
 /// True when anything listens on the port.
@@ -494,6 +518,9 @@ enum Route<'a> {
     /// A request for the Keychain, or anything that may hold a secret.
     /// Never the log.
     Secret,
+    /// A line with the key's mark in it. The office never writes one; if it
+    /// did, it goes nowhere.
+    Drop,
     /// The owner's Check now.
     Check,
     Notify(&'a str, &'a str),
@@ -503,6 +530,9 @@ enum Route<'a> {
 fn route(line: &str) -> Route<'_> {
     if crate::secrets::private(line) {
         return Route::Secret;
+    }
+    if line.contains(crate::key::LINE.trim_end()) {
+        return Route::Drop;
     }
     if line == crate::update::CHECK_LINE {
         return Route::Check;
@@ -531,6 +561,7 @@ fn relay(out: impl Read, mut log: File) {
                     );
                 }
             },
+            Route::Drop => {}
             Route::Check => crate::update::check_now(),
             Route::Notify(title, text) => notify(title, text),
             Route::Log => {
@@ -663,6 +694,45 @@ mod tests {
         ] {
             assert_eq!(route(line), Route::Secret, "{line}");
         }
+    }
+
+    #[test]
+    fn a_line_with_the_key_in_it_never_goes_to_the_log() {
+        for line in [
+            "oddboro:key 0123abcd",
+            "something oddboro:key 0123abcd",
+            "oddboro:key",
+        ] {
+            assert_eq!(route(line), Route::Drop, "{line}");
+        }
+    }
+
+    #[test]
+    fn the_shells_own_request_carries_the_key_in_its_header() {
+        let door = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = door.local_addr().unwrap().port();
+        let heard = thread::spawn(move || {
+            let (mut stream, _) = door.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buf = [0u8; 4096];
+            while !String::from_utf8_lossy(&request).contains("{\"path\":\"/a\"}") {
+                let n = stream.read(&mut buf).unwrap();
+                request.extend_from_slice(&buf[..n]);
+            }
+            stream
+                .write_all(
+                    b"HTTP/1.0 200 OK\r\ncontent-type: application/json\r\n\r\n{\"code\":\"c\"}",
+                )
+                .unwrap();
+            String::from_utf8(request).unwrap()
+        });
+        let key = Key::fresh().unwrap();
+        let body = serde_json::json!({ "path": "/a" });
+        let answer = call(port, &key, "POST", "/api/browser-link", Some(&body));
+        assert_eq!(answer, Some(serde_json::json!({ "code": "c" })));
+        let request = heard.join().unwrap();
+        assert!(request.starts_with("POST /api/browser-link HTTP/1.0\r\n"));
+        assert!(request.contains(&format!("\r\n{}\r\n", key.header())));
     }
 
     #[test]

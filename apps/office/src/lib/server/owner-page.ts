@@ -5,6 +5,12 @@ import { CHAT_REQUEST_BYTES } from '../staff/chat-input.ts';
 // server's `handle` in hooks.server.ts) checks every request before a route
 // sees it:
 //
+// - In the desktop app, first of all, the request must carry the app's key
+//   (app-key.ts): the window's cookie, or the shell's header where the shell
+//   calls. A sign-in callback, a run's gateway call and a link the shell made
+//   for the owner's browser pass without it. No other program on the
+//   computer has the key, so none can read the office or act in its name.
+//   An office run from source has no key and skips this rule.
 // - The request must come from this computer (`fromThisComputer`, in
 //   this-computer.ts, which Vite's dev server asks first too). Through
 //   Caddy, which on a Mac and Linux listens on every address, the connection
@@ -21,18 +27,26 @@ import { CHAT_REQUEST_BYTES } from '../staff/chat-input.ts';
 //   owner's own page (`fromOwnerPage`), in every mode. SvelteKit's own check
 //   covers form posts only, so the office checks every action itself.
 //   The other clients are the app's shell, which reports updates to
-//   /api/update with the token it gave the server (`fromShell`), and an
-//   Odd's run, which reaches its outside tools through /api/gateway with the
-//   token the office gave that run (`fromRun`).
+//   /api/update and asks for browser links at /api/browser-link with the key
+//   (`fromShell`), and an Odd's run, which reaches its outside tools through
+//   /api/gateway with the token the office gave that run (`fromRun`).
 //
 // A plain comparison of Origin with the office's own address would refuse the
 // owner's page through Caddy, which reaches the office over http while the
 // page is https, so `fromOwnerPage` compares what the browser itself says.
 import type { Handle } from '@sveltejs/kit/hooks';
+import { IN_APP } from '@oddboro/ledger';
+import {
+  fromShell,
+  fromWindow,
+  LINK_QUERY,
+  OPEN_FROM_APP,
+  takeLink,
+  WINDOW_CSP
+} from './app-key.ts';
 import { HOSTS } from './hosts.ts';
 import { fromRun, GATEWAY_PATH } from './gateway.ts';
 import { fromThisComputer, NOT_THIS_COMPUTER } from './this-computer.ts';
-import { fromShell } from './update.ts';
 
 /**
  * The names the office answers to, without a port: loopback, its addresses
@@ -67,6 +81,28 @@ export function fromOwnerPage(request: Request): boolean {
 
 const READS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
+/** Where the shell's header counts, as the key and as the owner's own page. */
+const SHELL_PATHS = new Set(['/api/update', '/api/browser-link']);
+/**
+ * Where a service's sign-in page sends the owner's browser back, which has no
+ * key. Each checks its own state, made for one sign-in and spent on use, and
+ * an unknown one finishes nothing.
+ */
+const CALLBACKS = new Set(['/account/callback', '/connect/callback']);
+
+/** In the app: true when the request carries the key, or is one of the few that come without it. */
+function carriesKey(request: Request, url: URL): boolean {
+  const path = url.pathname;
+  const get = request.method === 'GET';
+  return (
+    fromWindow(request) ||
+    (SHELL_PATHS.has(path) && fromShell(request)) ||
+    (get && CALLBACKS.has(path)) ||
+    (path.startsWith(`${GATEWAY_PATH}/`) && fromRun(request)) ||
+    (get && takeLink(url.searchParams.get(LINK_QUERY), path))
+  );
+}
+
 const refuse = (message: string) => new Response(message, { status: 403 });
 
 /** For a chunked request, count as it arrives and leave the body for the route. */
@@ -90,6 +126,7 @@ async function fits(request: Request, limit: number): Promise<boolean> {
 /** The server's `handle`: every request passes here before a route sees it. */
 export const guardOffice: Handle = async ({ event, resolve }) => {
   const { request } = event;
+  if (IN_APP && !carriesKey(request, event.url)) return refuse(OPEN_FROM_APP);
   if (
     !fromThisComputer({
       forwardedFor: request.headers.get('x-forwarded-for'),
@@ -101,7 +138,7 @@ export const guardOffice: Handle = async ({ event, resolve }) => {
   if (
     READS.has(request.method) ||
     fromOwnerPage(request) ||
-    (event.url.pathname === '/api/update' && fromShell(request)) ||
+    (SHELL_PATHS.has(event.url.pathname) && fromShell(request)) ||
     (event.url.pathname.startsWith(`${GATEWAY_PATH}/`) && fromRun(request))
   ) {
     const chat =
@@ -118,7 +155,11 @@ export const guardOffice: Handle = async ({ event, resolve }) => {
       !(await fits(request, limit))
     )
       return new Response('That request is too large', { status: 413 });
-    return resolve(event);
+    const response = await resolve(event);
+    const page = /^text\/html/.test(response.headers.get('content-type') ?? '');
+    if (IN_APP && page && !response.headers.has('content-security-policy'))
+      response.headers.set('content-security-policy', WINDOW_CSP);
+    return response;
   }
   return refuse("Only the office's own page can do that");
 };

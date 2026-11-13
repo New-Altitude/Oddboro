@@ -16,9 +16,9 @@ const port = await new Promise<number>((done) => {
     s.close(() => done(p));
   });
 });
-const TOKEN = 'shell-token-for-tests';
-// Set before the office's modules load: they read where everything is, the
-// shell's token and the app's ORIGIN as they start.
+// Set before the office's modules load: they read where everything is and
+// the app's ORIGIN as they start. No ODDBORO_APP: this is an office run from
+// source, which has no key (app-key.test.ts has the app's rules).
 Object.assign(process.env, {
   ODDBORO_HOME: folder,
   ODDBORO_DB_PORT: String(port),
@@ -27,7 +27,6 @@ Object.assign(process.env, {
   DATABASE_URL: `postgres://postgres:postgres@127.0.0.1:${port}/postgres`,
   ODDBORO_LOCAL_DB: '1',
   OLLAMA_URL: 'http://127.0.0.1:9',
-  ODDBORO_UPDATE_TOKEN: TOKEN,
   ORIGIN: 'http://office.test:4500',
   // An empty home of its own, so the office never finds the owner's own
   // tools there (a real grok in ~/.grok/bin), and no tool's maker is asked
@@ -322,35 +321,24 @@ test('a forwarded address the office cannot read counts as another computer', as
   }
 });
 
-test('the shell reports an update with its token, and nothing else reports one', async () => {
+test('outside the app nothing needs a key, and a key in a header opens nothing', async () => {
+  // Reads and the page's actions pass with no key at all.
+  for (const s of [{ method: 'GET', path: '/' }, { headers: PAGE }] as Sent[]) {
+    const r = await send(ok, s);
+    assert.deepEqual([r.status, r.ran], [200, true]);
+  }
+  // With no app there is no shell, so whatever a header says, no update report gets in.
   const report = { path: '/api/update', body: JSON.stringify({ checked: true }) };
-  const shell = await send(updateRoute.POST as Route, {
-    ...report,
-    headers: { 'x-oddboro-update-token': TOKEN, 'content-type': 'application/json' }
-  });
-  assert.deepEqual([shell.status, shell.ran], [200, true]);
-  for (const token of ['', 'wrong-token-for-tests']) {
+  for (const key of ['', 'a'.repeat(64)]) {
     const r = await send(updateRoute.POST as Route, {
       ...report,
-      headers: { 'x-oddboro-update-token': token }
+      headers: { 'x-oddboro-key': key }
     });
-    assert.deepEqual([token, r.status, r.ran], [token, 403, false]);
+    assert.deepEqual([key, r.status, r.ran], [key, 403, false]);
   }
-  // The token counts only from this computer, and only for updates.
-  const away = await send(updateRoute.POST as Route, {
-    ...report,
-    from: '192.168.1.20',
-    headers: { 'x-oddboro-update-token': TOKEN }
-  });
-  assert.deepEqual([away.status, away.ran], [403, false]);
-  const elsewhere = await send(ok, { headers: { 'x-oddboro-update-token': TOKEN } });
-  assert.deepEqual([elsewhere.status, elsewhere.ran], [403, false]);
-  // The owner's page reaches the route, which still refuses a report without the token.
-  const page = await send(updateRoute.POST as Route, {
-    ...report,
-    headers: { ...PAGE, 'x-oddboro-update-token': 'wrong-token-for-tests' }
-  });
-  assert.deepEqual([page.status, page.ran], [403, true]);
+  // The owner's page reaches the route, which refuses a report from anyone but the shell.
+  const page = await send(updateRoute.POST as Route, { ...report, headers: PAGE });
+  assert.deepEqual([page.status, page.ran, page.text], [403, true, 'Only the app reports updates']);
 });
 
 test("a run's token reaches its gateway while the run goes, and nothing else", async () => {
