@@ -75,7 +75,10 @@ office sets on that server what it needs from `.env` (`DATABASE_URL`,
 `OFFICE_TIME_ZONE`, `OFFICE_AGENT`; `access` in the office's `staff.ts`), and
 the server never depends on reading it.
 
-`npm test -w @oddboro/ledger` runs `test/` with `node --test`, and fails any
+`npm test -w @oddboro/ledger` runs `test/` with `node --test`. First
+`test/global-setup.ts` makes one database with every migration, and each file
+opens a copy (`tool-server.ts`, `pglite.ts`) instead of making and migrating
+its own; a file run on its own makes its own. It fails any
 test that runs past 15 seconds (`--test-timeout=15000`), or 45 seconds for the
 one test that sets its own limit (the three-server `propose_filter` test in
 `test/filters.test.ts`, 15 seconds per server), so a test past its timeout
