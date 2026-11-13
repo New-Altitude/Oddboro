@@ -658,7 +658,7 @@ const tellRows = (over: { ada?: Date; queued?: string } = {}): WorkRows =>
         : [run(5, 'ada', 'resume', { is: 'queued' }, { threadId: 1, note: over.queued })]
   });
 const landed: Carried = { named: 'notes.md', at: 'threads/1/rico/notes.md' };
-const notCome: Carried = { named: 'big.mov', why: 'it is over 25 MB' };
+const notCome: Carried = { named: 'big.mov', why: 'the office cannot open it' };
 const tell = (files: EventOf<'toldLead'>['files']): EventOf<'toldLead'> => ({
   kind: 'toldLead',
   staffId: 'rico',
@@ -673,32 +673,30 @@ const tell = (files: EventOf<'toldLead'>['files']): EventOf<'toldLead'> => ({
 const TOLD =
   "Rico passed you what Sam told them in chat about this work. You decide what comes of it and hand on any work it needs; Rico does nothing more with it. Sam's words: send it Friday Rico's own reading, which is not Sam's words: Sam wants it sent on Friday. Last in that chat: Sam asked about the invoices.";
 
-test("telling the lead writes today's note and copies the files with the change, and a file that cannot land still leaves the words", () => {
+test("telling the lead writes today's note from what the entry's copy gave, naming a file it could not copy as not come, and copies nothing itself", () => {
   const rows = tellRows();
-  const both = changed(decide(rows, tell({ carry: [notesFile], noted: [landed, notCome] }), NOW));
+  const both = changed(decide(rows, tell([landed, notCome]), NOW));
   assert.deepEqual(both.result, { lead: 'Ada', files: [landed, notCome] });
-  assert.deepEqual(both.outside, [
-    { kind: 'carryFiles', threadId: 1, from: 'rico', files: [notesFile] }
-  ]);
+  assert.deepEqual(both.outside, []);
   assert.deepEqual(
     queuedResumes(applyChange(rows, both), 'ada', 1).map((f) => f.note),
     [
-      `${TOLD} Sam attached a file to that message, now in this work: notes.md at threads/1/rico/notes.md. One file Sam attached did not come: big.mov, since it is over 25 MB.`
+      `${TOLD} Sam attached a file to that message, now in this work: notes.md at threads/1/rico/notes.md. One file Sam attached did not come: big.mov, since the office cannot open it.`
     ]
   );
 
-  // No file lands: nothing to copy, and the words still go.
-  const none = changed(decide(rows, tell({ carry: [], noted: [notCome] }), NOW));
+  // No file landed: the words still go.
+  const none = changed(decide(rows, tell([notCome]), NOW));
   assert.deepEqual(none.outside, []);
   assert.deepEqual(none.result, { lead: 'Ada', files: [notCome] });
   assert.deepEqual(
     queuedResumes(applyChange(rows, none), 'ada', 1).map((f) => f.note),
-    [`${TOLD} One file Sam attached did not come: big.mov, since it is over 25 MB.`]
+    [`${TOLD} One file Sam attached did not come: big.mov, since the office cannot open it.`]
   );
 
   // With no files the result names none, and a pick-up still queued takes the words as one more line.
   const queued = tellRows({ queued: 'Rico finished' });
-  const joined = changed(decide(queued, tell({ carry: [], noted: [] }), NOW));
+  const joined = changed(decide(queued, tell([]), NOW));
   assert.deepEqual(joined.result, { lead: 'Ada' });
   const after = applyChange(queued, joined);
   assert.equal(after.followUps.size, 1);
@@ -708,14 +706,14 @@ test("telling the lead writes today's note and copies the files with the change,
 test("a tell that lands after its lead left is refused, so the words are passed only where the lead's pick-up holds them", () => {
   // Told first: the pick-up holds the words, and the leaving fails it with a line naming the work.
   const rows = tellRows();
-  const told = applyChange(rows, changed(decide(rows, tell({ carry: [], noted: [] }), NOW)));
+  const told = applyChange(rows, changed(decide(rows, tell([]), NOW)));
   const [pickUp] = queuedResumes(told, 'ada', 1);
   const left = applyChange(told, changed(decide(told, removal('ada').e, minutes(11))));
   assert.equal(left.followUps.get(pickUp.id)?.run.is, 'ended');
 
   // Left first: the leaving stopped the work, so the tell is refused and no pick-up holds the words.
   const gone = applyChange(rows, changed(decide(rows, removal('ada').e, NOW)));
-  assert.deepEqual(decide(gone, tell({ carry: [], noted: [] }), minutes(11)), {
+  assert.deepEqual(decide(gone, tell([]), minutes(11)), {
     refused: 'Sam stopped work 1, so nothing more runs on it. Tell them so.'
   });
 });
@@ -731,7 +729,7 @@ test('an Odd that left hands nothing on, and a tell to a lead that left reaches 
     refused: 'You left the office, so you hand nothing on.'
   });
   // By hand: no event leaves a departed lead's work open, so these rows are the decider's own guard.
-  assert.deepEqual(decide(tellRows({ ada: T0 }), tell({ carry: [], noted: [] }), NOW), {
+  assert.deepEqual(decide(tellRows({ ada: T0 }), tell([]), NOW), {
     refused: 'Ada left the office, so work 1 has no lead to tell. Tell Sam so.'
   });
 });
@@ -744,7 +742,7 @@ test('stopped work refuses a hand-off and a tell', () => {
   assert.deepEqual(decide(stopped(handOffRows()), handOff({ id: 1 }), NOW), {
     refused: 'Work 1 has ended (stopped). Nothing more runs on it. Tell the owner so.'
   });
-  assert.deepEqual(decide(stopped(tellRows()), tell({ carry: [], noted: [] }), NOW), {
+  assert.deepEqual(decide(stopped(tellRows()), tell([]), NOW), {
     refused: 'Sam stopped work 1, so nothing more runs on it. Tell them so.'
   });
 });

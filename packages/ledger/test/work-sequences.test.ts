@@ -303,7 +303,7 @@ const RULE = {
   broughtBack: 'an Odd brought back is in the office with its jobs on again, and takes a hand-off',
   clockWake: "when parked work's time comes, its lead holds exactly one queued resume there",
   filesGo:
-    "every file a hand-off or a lead's words pass on is copied into the work in that change, or none is",
+    "every file a hand-off passes on is copied into the work in that change, or none is, and a lead's words name each attached file where its copy landed or why it did not come",
   pointed:
     'a row a change writes takes the id of a row new in that change only by pointing at its ref, never by the id the draft made up',
   model: 'every run, park, ask, task, refusal, report and poke is what the record expects'
@@ -561,12 +561,13 @@ function broken(s: State, r: Model, events: WorkEvent[]): Broken[] {
     fail(RULE.broughtBack, `the hand-off to ${e.to} was refused: ${show(d)}`);
 
   if (e.kind === 'handedOff' || e.kind === 'toldLead') {
-    const files = e.kind === 'handedOff' ? e.carry : e.files.carry;
     // A hand-off the window holds, or a goal's work opened for another lead,
     // writes but carries nothing yet, as today: its files go when it is
-    // handed on again. So only a pass that goes carries them.
+    // handed on again. So only a pass that goes carries them. A lead's words
+    // carry none: the entry copied the owner's attachments before deciding.
     const p = x.passes;
-    const want = p && files.length > 0 ? [{ ...p, files }] : [];
+    const want =
+      p && e.kind === 'handedOff' && e.carry.length > 0 ? [{ ...p, files: e.carry }] : [];
     const got = (change?.outside ?? []).flatMap((o) =>
       o.kind === 'carryFiles'
         ? [
@@ -579,6 +580,15 @@ function broken(s: State, r: Model, events: WorkEvent[]): Broken[] {
         : []
     );
     if (show(got) !== show(want)) fail(RULE.filesGo, `expected ${show(want)}, got ${show(got)}`);
+  }
+  if (e.kind === 'toldLead' && x.passes) {
+    const note = [...s.rows.followUps.values()].flatMap(newLines).join('\n');
+    for (const f of e.files) {
+      const said = 'at' in f ? `${f.named} at ${f.at}` : `${f.named}, since ${f.why}`;
+      if (!note.includes(said)) fail(RULE.filesGo, `the lead's note does not say ${said}: ${note}`);
+      if ('why' in f && note.includes(`${f.named} at `))
+        fail(RULE.filesGo, `the lead's note names ${f.named} as landed: ${note}`);
+    }
   }
 
   // The in-memory apply gives a new row the id the draft made up, so only the

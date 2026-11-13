@@ -28,7 +28,11 @@ const WINDOW_RESET = 'usage window has reset';
 
 /** A file from outside the work, carried with a hand-off or the owner's words. */
 const FILE: CarriedFile = { real: '/outside/notes.md', name: 'notes.md', named: 'notes.md' };
-const NOTED: Carried[] = [{ named: 'notes.md', at: 'notes.md' }];
+/** What the entry's copy of the owner's attachments gave: one landed, one it could not copy. */
+const NOTED: Carried[] = [
+  { named: 'notes.md', at: 'notes.md' },
+  { named: 'plan.pdf', why: 'the office cannot open it' }
+];
 
 /** The work each Odd is on and does not lead, as the entry reads it: Rico and Tess on Ada's hand-offs, Tess on Jo's stopped work. */
 const WORKS_ON: Record<string, ReadonlySet<number>> = {
@@ -77,7 +81,7 @@ export function threadEvents(r: Model): WorkEvent[] {
     reading: 'They want it sooner.',
     exchange: '',
     worksOn: WORKS_ON[staffId],
-    files: carry ? { carry: [FILE], noted: NOTED } : { carry: [], noted: [] }
+    files: carry ? NOTED : []
   });
   const words = `Owner words ${r.at}`;
   return [
@@ -315,7 +319,7 @@ export function tellLead(r: Model, e: EventOf<'toldLead'>): void {
   )
     return notTaken(r);
   x.passes = { threadId: t.id, from: e.staffId };
-  meet(e.files.carry.length > 0 ? 'words told to a lead with files' : 'words told to a lead');
+  meet(e.files.length > 0 ? 'words told to a lead with files' : 'words told to a lead');
   answerLead(r, t.id, e.words);
 }
 
