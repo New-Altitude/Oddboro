@@ -499,25 +499,11 @@ test("the clock's wake after a window hold keeps the reset note on the joined re
   );
 });
 
-test("the clock's wake takes the window's unanswered ask off the desk only once it holds no other work, and wakes nothing not due", () => {
+test("the clock's wake leaves the window's unanswered ask on the desk, for the clock to take off at the reset, and wakes nothing not due", () => {
   const rows = parkedRows(windowPark);
-  const alone = applyChange(rows, changed(decide(rows, wake, NOW)));
-  assert.deepEqual(alone.asks.get(9), {
-    ...rows.asks.get(9),
-    status: 'denied',
-    decidedAt: NOW,
-    reason: 'The window reset before an answer.'
-  });
-
-  const holdsMore = rowsOf({
-    staff: [odd('ada'), odd('mo', { manager: true })],
-    threads: [windowPark, thread(3, 'ada', { park: { on: 'window', at: NOW, ask: 9 } })],
-    asks: [ask(9, 'mo', { kind: 'window' })]
-  });
-  assert.equal(
-    applyChange(holdsMore, changed(decide(holdsMore, wake, NOW))).asks.get(9)?.status,
-    'open'
-  );
+  const woke = applyChange(rows, changed(decide(rows, wake, NOW)));
+  assert.deepEqual(woke.asks.get(9), rows.asks.get(9));
+  assert.deepEqual(woke.threads.get(1), { ...windowPark, park: { on: 'none' } });
 
   const early = decide(rows, wake, minutes(9));
   assert.deepEqual(early, { change: { put: [], outside: [], result: null }, after: [] });

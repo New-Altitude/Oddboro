@@ -1,9 +1,9 @@
 // Token usage, the owner's plan and its window, and the owner's name and welcome.
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db, sql as pg } from './db.ts';
 import { fixedError } from './errors.ts';
 import { type Db } from './threads.ts';
-import { owner, planLimits, usage, type UsageKind } from './schema.ts';
+import { asks, owner, planLimits, usage, type UsageKind } from './schema.ts';
 import { zone } from './time.ts';
 
 // Usage and the plan
@@ -53,6 +53,31 @@ export async function setPlanLimits(w: Partial<PlanWindows>): Promise<void> {
     .insert(planLimits)
     .values({ id: PLAN_ROW, fiveHour: 0, sevenDay: 0, ...w, updatedAt: new Date() })
     .onConflictDoUpdate({ target: planLimits.id, set: { ...w, updatedAt: new Date() } });
+}
+
+/** Why the office takes a window ask nobody answered off the desk at its window's reset. */
+export const WINDOW_ASK_LAPSED = 'The window reset before an answer.';
+
+/**
+ * Each open window ask, and when its window resets, for the office clock to
+ * take it off the desk then: the ask is about that window, so it leaves when
+ * the window does, whatever work it still holds. This window's ask (raised
+ * since the window began, as `windowNow` in work/load.ts reads it) is due at
+ * the reset; one from an older window is due already; with no reset reported,
+ * a window lasts `WINDOW_MS` at most.
+ */
+export async function windowAsksDue(): Promise<{ id: number; at: Date }[]> {
+  const [row] = await db.select().from(planLimits).where(eq(planLimits.id, PLAN_ROW));
+  const resets = row?.fiveHourResetsAt ?? null;
+  const open = await db
+    .select({ id: asks.id, createdAt: asks.createdAt })
+    .from(asks)
+    .where(and(eq(asks.kind, 'window'), eq(asks.status, 'open')));
+  return open.map(({ id, createdAt }) => {
+    if (!resets) return { id, at: new Date(createdAt.getTime() + WINDOW_MS) };
+    const thisWindow = createdAt > new Date(resets.getTime() - WINDOW_MS);
+    return { id, at: thisWindow ? resets : createdAt };
+  });
 }
 
 /** What the staff call the owner. "the owner" until the install sets a name. */

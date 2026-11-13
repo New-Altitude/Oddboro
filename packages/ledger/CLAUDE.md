@@ -544,8 +544,10 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   names the Odds on Claude Code. A yes (`answerWindow` in `src/work/asks.ts`) lets
   hand-offs run until the reset and wakes the held threads through
   `answerLead`; a no leaves them held. The clock's `wakeThread` wakes each at
-  the reset with `WINDOW_RESET`, and takes an ask nobody answered off the desk
-  once it holds no thread (`clockWoke` in `src/work/parking.ts`). A hub's own `resume_at` replaces a
+  the reset with `WINDOW_RESET` (`clockWoke` in `src/work/parking.ts`). At the
+  reset the clock also takes an ask nobody answered off the desk with
+  `withdrawAsk`, whatever work it still holds (`windowAsksDue` in
+  `src/office-usage.ts`). A hub's own `resume_at` replaces a
   hold. A run already going is never stopped. The office raised the ask, so a
   no starts no `denied` run, and it cannot be sent back.
 - What an Odd sees through a thread is no wider than its own access

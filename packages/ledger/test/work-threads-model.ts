@@ -166,18 +166,7 @@ export function clockWake(r: Model, e: EventOf<'clockWoke'>): void {
     return;
   }
   t.park = { on: 'none' };
-  if (p.on === 'window') {
-    meet('a usage window reset waking held work');
-    const holdsMore = [...r.threads.values()].some(
-      (o) => o.status === 'open' && o.park.on === 'window' && o.park.ask === p.ask
-    );
-    const a = askOf(r, p.ask);
-    if (!holdsMore && a?.status === 'open') {
-      a.status = 'denied';
-      a.decidedAt = r.at;
-      meet('an unanswered window ask leaving the desk at the reset');
-    }
-  }
+  if (p.on === 'window') meet('a usage window reset waking held work');
   const lead = t.hub;
   const queued = [...r.runs.values()].some(
     (f) => f.staffId === lead && f.threadId === t.id && f.kind === 'resume' && f.is === 'queued'

@@ -1004,8 +1004,7 @@ const CASES: Record<keyof typeof RULE, string[]> = {
     "a hand-off opening a goal's work its sender does not lead",
     'a hand-off taken',
     'words told to a lead',
-    'a leaving of an Odd gone already',
-    'an unanswered window ask leaving the desk at the reset'
+    'a leaving of an Odd gone already'
   ]
 };
 

@@ -181,17 +181,7 @@ const SEEDS: {
   },
   toldLead: (_, e) => ({ threads: [e.threadId], staff: [e.staffId] }),
   parked: (_, e) => ({ threads: [e.threadId], tasks: 'task' in e.on ? [e.on.task] : [] }),
-  clockWoke: async (tx, { threadId }) => {
-    await lockRows(tx, 'plan_limits', [PLAN_ROW], 'share');
-    const [t] = await tx
-      .select({ heldBy: threads.heldBy })
-      .from(threads)
-      .where(eq(threads.id, threadId));
-    const ask = t?.heldBy ?? undefined;
-    // Every thread the window's ask holds, since it leaves the desk once it holds none.
-    const held = ask === undefined ? [] : await idsOf(tx, threads, eq(threads.heldBy, ask));
-    return { threads: [threadId, ...held], asks: one(ask), update: ['asks'] };
-  },
+  clockWoke: (_, { threadId }) => ({ threads: [threadId] }),
   oddRemoved: async (tx, { staffId }) => {
     // Its row first, before the reads below. A raise, a task or a run for it
     // takes that row for share, so none commits between these reads and the

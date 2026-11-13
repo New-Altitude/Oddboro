@@ -1430,7 +1430,7 @@ test('work its lead parked until a time, and then left the office, is never woke
   assert.deepEqual(await onThread(work, 'resume'), []);
 });
 
-test("a lead that leaves takes its work out of the usage window's hold, so the window's ask leaves the desk once the other work it held wakes", async () => {
+test("a lead that leaves takes its work out of the usage window's hold, so at the reset only the other work it held wakes, and the wake leaves the ask to the clock", async () => {
   const gone = await ownWork('held-lead-leaves');
   const stays = await ownWork('held-lead-stays');
   const { ask: hold } = await O.raiseAsk(stays.lead, {
@@ -1452,7 +1452,8 @@ test("a lead that leaves takes its work out of the usage window's hold, so the w
     .where(eq(threads.id, stays.work));
   await T.wakeThread(stays.work);
   const [ask] = await db.select().from(asks).where(eq(asks.id, hold.id));
-  assert.equal(ask.status, 'denied', 'the reset took the ask off the desk');
+  assert.equal(ask.status, 'open', 'the office clock takes the ask off the desk, not the wake');
+  assert.equal((await onThread(stays.work, 'resume')).length, 1);
   assert.deepEqual(await onThread(gone.work, 'resume'), []);
 });
 

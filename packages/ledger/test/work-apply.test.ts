@@ -345,7 +345,7 @@ test('every loader locks in the one table order each row its decider reads, and 
     },
     { kind: 'parked', staffId: 'lia', threadId: 2, on: { task: 1 }, worksOn: new Set() },
     { kind: 'parked', staffId: 'lia', threadId: 2, on: { at: minutes(30) }, worksOn: new Set() },
-    // Thread 7, which the window's ask 8 holds, due: the ask leaves the desk with it.
+    // Thread 7, which the window's ask 8 holds, due: it wakes, and the ask waits for the clock's reset.
     { kind: 'clockWoke', threadId: 7 },
     leaving('cal'),
     // Ask 13 is another ask to bring Gus back, which the bring-back withdraws.
@@ -361,9 +361,8 @@ test('every loader locks in the one table order each row its decider reads, and 
     const at = `${e.kind} ${JSON.stringify(e)} locked ${locks.map((l) => `${l.table} ${l.mode} ${l.ids.join(',')}`).join('; ')}`;
     const order = locks.map((l) => LOCK_ORDER.indexOf(l.table as (typeof LOCK_ORDER)[number]));
     for (const l of locks) every.add(l.table);
-    // Only a hand-off holds work for the window, under the plan's lock, which the clock waits on.
-    if (e.kind === 'handedOff' || e.kind === 'clockWoke')
-      assert.equal(locks[0]?.table, 'plan_limits', at);
+    // Only a hand-off holds work for the window, under the plan's lock.
+    if (e.kind === 'handedOff') assert.equal(locks[0]?.table, 'plan_limits', at);
     assert.ok(!order.includes(-1), at);
     assert.deepStrictEqual(
       order,
@@ -601,7 +600,7 @@ test('a held hand-off yes to a colleague that left decides as on the whole offic
   );
 });
 
-test('the clock waking one of two threads the window ask holds keeps the ask on the desk', async () => {
+test('the clock waking one of two threads the window ask holds wakes only that one, and leaves the ask on the desk', async () => {
   await seedOffice();
   await db
     .update(threads)
@@ -616,7 +615,9 @@ test('the clock waking one of two threads the window ask holds keeps the ask on 
   const { got } = await run(e, minutes(1));
   assert.deepStrictEqual(unput(got), unput(decide(world, e, minutes(1))));
   const [a] = await db.select().from(asks).where(eq(asks.id, 8));
-  assert.equal(a.status, 'open', 'ask 8 still holds thread 2');
+  assert.equal(a.status, 'open');
+  const [other] = await db.select().from(threads).where(eq(threads.id, 2));
+  assert.equal(other.heldBy, 8, 'thread 2 is not due, so it stays held');
 });
 
 test("a goal yes loads the office's manager, whom no row names, so the manager plans the goal its own write set", async () => {

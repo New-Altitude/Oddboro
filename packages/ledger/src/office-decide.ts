@@ -315,7 +315,8 @@ function oddMoveOf(kind: AskKind): keyof typeof LEAVING_CHECK | undefined {
 
 /**
  * The Odd that raised an open ask left the office, or took it off the desk
- * with its `withdraw` tool: the office closes it as a no, and `line` goes back
+ * with its `withdraw` tool, or the usage window an ask was about reset
+ * (`windowAsksDue`): the office closes it as a no, and `line` goes back
  * where the ask came from, to a hand-off's lead or the thread's hub. Nobody
  * reads it for a lesson. False when the owner answered it first.
  */
