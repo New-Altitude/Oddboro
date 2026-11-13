@@ -11,12 +11,8 @@ import type { EventOf } from './events.ts';
 import { changeOf, draft, putAll, type Change, type WorkRows } from './snapshot.ts';
 import { freeFromWindow } from './threads.ts';
 
-/**
- * What a held thread's lead is told when the clock wakes it at the reset.
- * A copy of `WINDOW_RESET` in usage-window.ts, which loads the database,
- * until the clock's entry wakes work through this decider.
- */
-const WINDOW_RESET =
+/** What a held thread's lead is told when the clock wakes it at the reset. */
+export const WINDOW_RESET =
   'The usage window has reset, so hand-offs run again. Hand on the work the office held.';
 
 /**
@@ -67,9 +63,8 @@ export function parked(
  * ../threads.ts does: the park lifts and its lead picks the work up, joining
  * a pick-up of its there still queued, so the work wakes once. Work the
  * usage window held is told the window reset, and once the window's ask
- * holds no other work, an ask the owner never answered leaves the desk, as
- * `windowWoke` in ../usage-window.ts does: the reset settled it the way a no
- * would have. Work that is not due, or ended, wakes for nothing.
+ * holds no other work, an ask the owner never answered leaves the desk: the
+ * reset settled it the way a no would have. Work that is not due, or ended, wakes for nothing.
  */
 export function clockWoke(
   rows: WorkRows,

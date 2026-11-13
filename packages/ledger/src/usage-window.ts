@@ -9,14 +9,10 @@
 // wakes the held threads now. A no, or no answer, leaves them held, and the
 // office clock wakes them at the reset, as it wakes a thread parked with
 // resume_at. A run already going is never stopped: only a new hand-off waits.
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { db } from './db.ts';
-import { asks, threads } from './schema.ts';
-import { answerThread, type Tx } from './threads.ts';
-
-/** What a held thread's hub is told when the clock wakes it at the reset. */
-export const WINDOW_RESET =
-  'The usage window has reset, so hand-offs run again. Hand on the work the office held.';
+import { threads } from './schema.ts';
+import { answerThread } from './threads.ts';
 
 /**
  * The owner answered the window ask. A yes wakes every thread it still holds,
@@ -35,22 +31,4 @@ export async function answerWindow(
     .where(and(eq(threads.heldBy, askId), isNull(threads.endedAt)))
     .returning({ id: threads.id });
   for (const t of freed) await answerThread(t.id, answer, askId);
-}
-
-/**
- * The clock woke a thread the window held. Once it holds no other, an ask the
- * owner never answered leaves the desk, since the reset settled it the way a
- * no would have.
- */
-export async function windowWoke(tx: Tx, askId: number): Promise<void> {
-  await tx
-    .update(asks)
-    .set({ status: 'denied', reason: 'The window reset before an answer.', decidedAt: new Date() })
-    .where(
-      and(
-        eq(asks.id, askId),
-        eq(asks.status, 'open'),
-        sql`not exists (select 1 from ${threads} where ${threads.heldBy} = ${askId})`
-      )
-    );
 }

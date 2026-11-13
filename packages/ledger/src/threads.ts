@@ -20,7 +20,6 @@ import {
   inArray,
   isNotNull,
   isNull,
-  lte,
   ne,
   notInArray,
   or,
@@ -28,6 +27,7 @@ import {
   type SQL
 } from 'drizzle-orm';
 import { db } from './db.ts';
+import { fixedError } from './errors.ts';
 import { manager } from './goals.ts';
 import { home } from './home.ts';
 import {
@@ -47,8 +47,8 @@ import {
 import { flat, type DeskItem } from './desk-answers.ts';
 import { heldTools, lacking, sharing, toolNames, type Tool } from './sharing.ts';
 import { carryEach, type Carried, type CarriedFile } from './hand-offs.ts';
-import { WINDOW_RESET, windowWoke } from './usage-window.ts';
 import { THREADS_DIR, workPath } from './work-paths.ts';
+import { transitionWork } from './work/apply.ts';
 import { queuedRows } from './work/load.ts';
 
 export type ThreadRow = typeof threads.$inferSelect;
@@ -346,17 +346,23 @@ export async function answerHandOffs(
 }
 
 /**
- * The hub sets when it picks the thread back up. Undefined when it is not the
- * hub's or has ended. The hub's own time replaces a hold for the usage window
- * and a park on a task.
+ * The hub sets when it picks the thread back up, through the work core
+ * (`parked`). Undefined when it is not the hub's or has ended. The hub's own
+ * time replaces a hold for the usage window and a park on a task.
  */
 export async function parkThread(hubId: string, id: number, at: Date): Promise<Date | undefined> {
-  const [row] = await db
-    .update(threads)
-    .set({ resumeAt: at, heldBy: null, resumeOnTask: null })
-    .where(and(eq(threads.id, id), eq(threads.hubId, hubId), isNull(threads.endedAt)))
-    .returning({ at: threads.resumeAt });
-  return row?.at ?? undefined;
+  const parked = await transitionWork({
+    kind: 'parked',
+    staffId: hubId,
+    threadId: id,
+    on: { at },
+    // A park on a time reads only the work the Odd leads.
+    worksOn: new Set()
+  });
+  if ('refused' in parked) return undefined;
+  const r = parked.change.result;
+  if (!('at' in r)) throw fixedError('A park on a time came back as a park on a task.');
+  return r.at;
 }
 
 /** Threads parked until a time, for the office clock. */
@@ -369,30 +375,12 @@ export async function parkedThreads(): Promise<{ id: number; resumeAt: Date }[]>
 }
 
 /**
- * The time a thread was parked until has come: the hub picks it up. The claim
- * makes it once only. A thread the usage window held is told the window reset.
+ * The time a thread was parked until has come: the hub picks it up, through
+ * the work core (`clockWoke`), which wakes it once however many wakes come.
+ * A thread the usage window held is told the window reset.
  */
 export async function wakeThread(id: number): Promise<void> {
-  await db.transaction(async (tx) => {
-    const [was] = await tx
-      .select({ heldBy: threads.heldBy })
-      .from(threads)
-      .where(eq(threads.id, id))
-      .for('update');
-    const [due] = await tx
-      .update(threads)
-      .set({ resumeAt: null, heldBy: null })
-      .where(and(eq(threads.id, id), lte(threads.resumeAt, new Date()), isNull(threads.endedAt)))
-      .returning({ hubId: threads.hubId });
-    if (!due) return;
-    await addFollowUp(tx, {
-      staffId: due.hubId,
-      kind: 'resume',
-      threadId: id,
-      note: was?.heldBy ? WINDOW_RESET : null
-    });
-    if (was?.heldBy) await windowWoke(tx, was.heldBy);
-  });
+  await transitionWork({ kind: 'clockWoke', threadId: id });
 }
 
 /**
@@ -566,6 +554,12 @@ export const worksOn = (staffId: string) =>
       )
     )
   );
+
+/** The threads `staffId` works on (`worksOn`), as a park or tell_lead reads them before the work core decides. */
+export async function workedOn(q: Db, staffId: string): Promise<Set<number>> {
+  const rows = await q.select({ id: threads.id }).from(threads).where(worksOn(staffId));
+  return new Set(rows.map((r) => r.id));
+}
 
 /** A thread `staffId` leads or works on (`worksOn`), so reads all of its folder. */
 const onThread = (staffId: string) => or(eq(threads.hubId, staffId), worksOn(staffId));

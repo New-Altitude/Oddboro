@@ -1,57 +1,34 @@
 // Work a lead parked until a task on the owner's desk ends. The task's end is
 // the only wake: nothing looks at the clock or goes round a loop for it.
-import type { Db } from './threads.ts';
-import { and, eq, isNull, or } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { db } from './db.ts';
-import { flat, SAID_AS } from './desk-answers.ts';
-import { asks, tasks, threads } from './schema.ts';
-import { answerThread, taskThread, worksOn } from './threads.ts';
+import { flat } from './desk-answers.ts';
+import { fixedError } from './errors.ts';
+import { threads } from './schema.ts';
+import { answerThread, workedOn, type Db } from './threads.ts';
+import { transitionWork } from './work/apply.ts';
 
-/** Parks work on a task, or says why it cannot. */
+/**
+ * Parks work on a task through the work core (`parked`), or says why it
+ * cannot. The task is locked with the park, so it cannot end between the
+ * look and the park and leave the work waiting on a task already over.
+ */
 export async function parkOnTask(
   hubId: string,
   id: number,
   taskId: number
 ): Promise<{ title: string } | { problem: string }> {
-  return db.transaction(async (tx) => {
-    // Locked, so the task cannot end between this look and the park: it would
-    // wake nothing, and the work would wait on a task already over.
-    const [task] = await tx.select().from(tasks).where(eq(tasks.id, taskId)).for('update');
-    const fromAsk = task?.askId
-      ? await tx
-          .select({ id: asks.id, threadId: asks.threadId })
-          .from(asks)
-          .where(eq(asks.id, task.askId))
-      : [];
-    const on = task && taskThread(task, fromAsk);
-    // Another Odd's task on work this Odd is not on reads as no task at all, so
-    // a park gives away neither its title, its status nor the owner's note on it.
-    // Asked inside the transaction: under PGlite a query outside it would wait on it.
-    const onItsWork = async (thread: number) =>
-      (
-        await tx
-          .select({ id: threads.id })
-          .from(threads)
-          .where(and(eq(threads.id, thread), or(eq(threads.hubId, hubId), worksOn(hubId))))
-      ).length > 0;
-    const seen = !!task && (task.staffId === hubId || (on !== undefined && (await onItsWork(on))));
-    if (!task || !seen) return { problem: `There is no task ${taskId}.` };
-    if (task.status !== 'open')
-      return { problem: `Already ${SAID_AS[task.status]}: do it now, in this run.` };
-    if (on === id)
-      return {
-        problem:
-          'That task is on this work, so the answer to it already brings you back. Finish this run with "Outcome: waiting".'
-      };
-    const [parked] = await tx
-      .update(threads)
-      .set({ resumeOnTask: taskId, resumeAt: null, heldBy: null })
-      .where(and(eq(threads.id, id), eq(threads.hubId, hubId), isNull(threads.endedAt)))
-      .returning({ id: threads.id });
-    return parked
-      ? { title: flat(task.title) }
-      : { problem: `Work ${id} has ended, or is not work you lead.` };
+  const parked = await transitionWork({
+    kind: 'parked',
+    staffId: hubId,
+    threadId: id,
+    on: { task: taskId },
+    worksOn: await workedOn(db, hubId)
   });
+  if ('refused' in parked) return { problem: parked.refused };
+  const r = parked.change.result;
+  if (!('title' in r)) throw fixedError('A park on a task came back as a park on a time.');
+  return r;
 }
 
 /** The live threads parked on a task: what its end picks up. */

@@ -331,8 +331,8 @@ const heldBy = (t: Thread | undefined, askId: number): t is Thread & { status: '
 
 /**
  * The usage window's hold lifts: each named open thread `askId` holds is
- * parked on nothing. True when the ask still holds another thread, as
- * `windowWoke` asks before it takes an unanswered ask off the desk.
+ * parked on nothing. True when the ask still holds another thread, which
+ * `clockWoke` asks before it takes an unanswered ask off the desk.
  */
 export function freeFromWindow(d: Draft, askId: number, threadIds: readonly number[]): boolean {
   const held = threadIds.flatMap((id) => {
