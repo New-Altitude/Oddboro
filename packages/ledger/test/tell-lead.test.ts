@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { and, eq } from 'drizzle-orm';
-import { connectors, followUps, grants, staff, threads } from '../src/schema.ts';
+import { connectors, followUps, goals, grants, staff, staffGoals, threads } from '../src/schema.ts';
 import { db } from './pglite.ts';
 
 // Loaded once db.ts is this database, so every query they make lands here.
@@ -162,6 +162,23 @@ test('tell_lead on a thread the owner stopped is refused, and copies no file the
   assert.ok('problem' in r && r.problem.includes('stopped'), JSON.stringify(r));
   assert.equal((await resumes(stopped)).length, 0);
   assert.equal(existsSync(threadPart(stopped, 'bram')), false, 'a file was copied');
+});
+
+test("a goal's Odd never handed a piece of its work tells the lead by its own name", async () => {
+  await db.insert(staff).values(odd('zed', 'Zed'));
+  const [goal] = await db.insert(goals).values({ title: 'A warmer sim' }).returning();
+  // Zed serves the goal and is handed nothing, so only its serving puts it on the work.
+  await db.insert(staffGoals).values({ staffId: 'zed', goalId: goal.id, part: 'The colours' });
+  const r = await handOff({
+    from: 'cole',
+    to: 'bram',
+    work: { title: 'Draw the presets', brief: 'Draw two presets.' },
+    thread: { title: 'A warmer sim', goalId: goal.id }
+  });
+  assert.ok('id' in r, JSON.stringify(r));
+  assert.deepEqual(await tell('zed', r.thread), { lead: 'Cole' });
+  const [wake] = await resumes(r.thread);
+  assert.ok(wake.note?.startsWith('Zed passed you what Sam told them'), wake.note ?? '');
 });
 
 test("a colleague's chat says the work waits on the owner while an ask raised on it is open", async () => {
