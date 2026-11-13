@@ -110,6 +110,7 @@ export const QUIET_ROUTES: ReadonlySet<string> = new Set<RouteId>([
  */
 export const ROUTE_IDS = {
   '/': true,
+  '/strip': true,
   '/account/callback': true,
   '/api/account': true,
   '/api/accounts': true,

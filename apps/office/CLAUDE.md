@@ -39,6 +39,17 @@ and its child processes, the staff tool server among them, keep `security`.
 In development the office saves through `security -i` on its stdin, in
 pieces under 3,900 bytes a line, so no value is on a command line.
 
+## Office strip
+
+`/strip` is a still list for the desktop app's always-on-top window. It reads
+`/api/office` when the existing `/api/events` stream opens or reports a relevant
+change, and uses its working events directly. It has no floor or timers.
+`ui/office-status.ts` shares the floor's status words, the Odds list's waiting
+items, and the Waiting count. `OfficeStripBridge.svelte` shares visual activity
+through a same-origin BroadcastChannel only when words change and selects the
+existing pane on a native strip click. The main floor's ticker stops while its
+native window is hidden and resumes when shown. No chat draft is reloaded.
+
 ## How it works
 
 1. `src/routes/+page.server.ts` composes the office the owner moved into, or

@@ -16,6 +16,8 @@
 
   type Props = {
     profile: StaffProfile;
+    /** The Office level can cover the card without discarding its chat draft. */
+    visible?: boolean;
     desk: Desk;
     staff: StaffProfile[];
     onplan: (hires: AskRow[]) => void;
@@ -27,7 +29,7 @@
     /** Everything it is working on now. */
     work: Work[];
     /** Open the info page at In progress, e.g. from the agents list. `n` changes to ask again. */
-    show?: { tab: 'work'; n: number };
+    show?: { tab: 'work' | 'chat'; n: number };
     /** Opens something the staffer delivered, on the start side. */
     onitem: (item: Delivered) => void;
     /** Every place on the floor, for the Send tab. */
@@ -48,6 +50,7 @@
 
   let {
     profile,
+    visible = true,
     desk,
     staff,
     onplan,
@@ -85,7 +88,11 @@
     toWork++;
   }
   $effect(() => {
-    if (show) untrack(showWork);
+    if (show?.tab === 'work') untrack(showWork);
+    else if (show?.tab === 'chat') {
+      void show.n;
+      tab = 'chat';
+    }
   });
   // The id, not the profile: every office reload brings a new profile, and an
   // effect that read it would send the owner back to Chat from any tab.
@@ -355,7 +362,7 @@
         {version}
         onstart={onchatstart}
         onend={onchatend}
-        visible={tab === 'chat'}
+        visible={visible && tab === 'chat'}
         {onitem}
         {work}
         onwork={showWork}

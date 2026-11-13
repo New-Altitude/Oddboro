@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount, tick, untrack } from 'svelte';
+  import { oddStatus, waitingCount, waitingForOwner, ON_CHANGE } from '#lib/ui/office-status.ts';
+  import OfficeStripBridge from '#lib/ui/OfficeStripBridge.svelte';
   import { invalidateAll } from '$app/navigation';
   import type { Desk, GoalThread } from '@oddboro/ledger';
   import { TILE, type World } from '@oddboro/world';
@@ -10,7 +12,7 @@
   import FloorControls, { type Light } from '#lib/ui/FloorControls.svelte';
   import { music, musicEnded, startMusic } from '#lib/ui/music.svelte.ts';
   import { chatAbout } from '#lib/ui/chat-about.svelte.ts';
-  import { ACTIVITY_LABEL, type Activity, type StaffProfile } from '#lib/staff/roster.ts';
+  import { type Activity, type StaffProfile } from '#lib/staff/roster.ts';
   import { threadTag, type HeldThread } from '#lib/staff/thread-tags.ts';
   import StaffCard from '#lib/ui/StaffCard.svelte';
   import { chatRequest, type Delivered } from '#lib/ui/chat-about.svelte.ts';
@@ -50,7 +52,6 @@
   import PixelIcon from '#lib/ui/PixelIcon.svelte';
   import { call, type ApiUrl } from '#lib/ui/api.ts';
   import { setZone, zone, zoneName, zoneShort } from '@oddboro/ledger/time';
-  import { LIVE_TABLES, type LiveTable } from '@oddboro/ledger/live-tables';
 
   let { data } = $props();
   // Every time on the page is in the office's zone, which only the server knows.
@@ -175,15 +176,11 @@
     )
   );
   /** A request for the card to open on a tab, from the Odds rail's list. */
-  let cardShow = $state<{ id: string; tab: 'work'; n: number } | undefined>();
+  let cardShow = $state<{ id: string; tab: 'work' | 'chat'; n: number } | undefined>();
   /** Bumps when jobs, runs, access, goals, threads or lessons change, so the card's tabs and the Goals and Lessons windows reload. */
   let version = $state(0);
   /** Bumped on a change to the ledger's rows, so the Ledger window searches again. */
   let ledgerVersion = $state(0);
-  /** What the page does when each table changes, by the name the event carries. */
-  const ON_CHANGE = new Map<string, LiveTable['page']>(
-    Object.entries(LIVE_TABLES).map(([table, live]) => [table, live.page])
-  );
   /** Which side the pane sits on, as this viewer last docked it. The first run keeps the start. */
   let paneSide = $state<'start' | 'end'>('start');
   function flipPane() {
@@ -313,14 +310,7 @@
   const clock = $derived(
     now.toLocaleTimeString('en-US', { ...PT, hour: 'numeric', minute: '2-digit' })
   );
-  // A staffer with an ask, a task or an unread message for the owner comes to their door.
-  const waiting = $derived(
-    new Set([
-      ...desk.asks.map((a) => a.staffId),
-      ...desk.tasks.map((t) => t.staffId),
-      ...Object.keys(messages)
-    ])
-  );
+  const waiting = $derived(waitingForOwner(desk, messages));
   /** Each staffer's thread a colleague holds, or holds for its lead, in words. */
   const threadTags = $derived(
     Object.fromEntries(
@@ -337,20 +327,27 @@
   );
   /** What a staffer is doing, in words: where it is headed, or what it is at. */
   function statusOf(t: Tag): string {
-    if (t.heading) return `→ ${t.heading}`;
-    if (messages[t.id]) return 'Has a message for you';
-    if (waiting.has(t.id)) return 'Waiting on you';
-    return threadTags[t.id]?.text ?? working[t.id] ?? ACTIVITY_LABEL[t.activity];
+    return oddStatus({
+      floor: t,
+      message: messages[t.id],
+      waiting: waiting.has(t.id),
+      thread: threadTags[t.id],
+      working: working[t.id]
+    });
   }
   const status = $derived(Object.fromEntries(tags.map((t) => [t.id, statusOf(t)])));
 
-  // The While you were away card counts once, however many jobs it lists.
-  const deskCount = $derived(
-    desk.asks.length +
-      desk.tasks.length +
-      desk.reports.length +
-      desk.projectWork.length +
-      (desk.away.length ? 1 : 0)
+  const deskCount = $derived(waitingCount(desk));
+
+  // Only changed activity words cross to the strip, never coordinates or frames.
+  let floorHidden = $state(false);
+  const activities = $derived(
+    Object.fromEntries(
+      tags.map((t) => [
+        t.id,
+        { activity: t.activity, heading: floorHidden ? undefined : t.heading }
+      ])
+    )
   );
 
   /** Rooms a new hire can work in: any with a place to work, read or sort mail. */
@@ -794,6 +791,7 @@
         atlasCatalog = atlas.catalog;
         floor = await F.Floor.create(host, office.world, atlas);
         floor.setHour(shownHour);
+        if (floorHidden) floor.app.ticker.stop();
         // Dev only: lets a browser console poke at the floor.
         if (import.meta.env.DEV) (window as unknown as { floor: Floor }).floor = floor;
         start = arrival(office.world);
@@ -1133,6 +1131,26 @@
 
 <svelte:window onkeydown={onkey} bind:innerWidth />
 
+<OfficeStripBridge
+  {activities}
+  onopen={(link) => {
+    if ('desk' in link) openDesk();
+    else if (staff.some((s) => s.id === link.odd)) {
+      paneItem = undefined;
+      select(link.odd);
+      cardShow = { id: link.odd, tab: 'chat', n: (cardShow?.n ?? 0) + 1 };
+    }
+  }}
+  onvisibility={(visible) => {
+    floorHidden = !visible;
+    if (visible) {
+      floor?.app.ticker.start();
+      // A hidden native webview can suspend its live connection.
+      void refresh().catch((error) => console.error('office refresh:', error));
+    } else floor?.app.ticker.stop();
+  }}
+/>
+
 <svelte:head>
   <title
     >{firstRun ? 'Welcome' : `${deskCount ? `(${deskCount}) ` : ''}${office.name}`} · Oddboro</title
@@ -1373,8 +1391,8 @@
             onselect={select}
           />
         {/if}
-        {#if oddInFront && profile}
-          <div class="min-h-0 flex-1 border-t border-hairline">
+        {#if profile}
+          <div class="min-h-0 flex-1 border-t border-hairline" class:hidden={!oddInFront}>
             {#if paneItem}
               {#key `${paneItem.kind}-${paneItem.id}`}
                 {#if paneItem.kind === 'report' && !desk.reports.some((r) => r.id === paneItem?.id)}
@@ -1399,6 +1417,7 @@
               {#key profile.id}
                 <div class="h-full" in:fly={fromEdge()}>
                   <StaffCard
+                    visible={oddInFront}
                     {desk}
                     {staff}
                     onplan={planHires}
