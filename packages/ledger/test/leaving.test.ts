@@ -430,3 +430,18 @@ test('a leaving that cannot close all its open work leaves the Odd in the office
   assert.equal((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0].status, 'open');
   assert.deepEqual(stopped, []);
 });
+
+test('an edit the owner saves to a file of an Odd that left queues no lesson run', async () => {
+  const { learnFromEdit } = await import('../src/lessons.ts');
+  assert.equal(await L.removeOdd('rico'), undefined);
+  assert.equal(
+    await learnFromEdit('rico', { path: 'notes/plan.md', before: 'mine' }, 'theirs'),
+    false
+  );
+  assert.deepEqual(
+    (await db.select().from(followUps).where(eq(followUps.staffId, 'rico'))).filter(
+      (f) => f.outcome === null
+    ),
+    []
+  );
+});
