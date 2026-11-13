@@ -13,7 +13,14 @@ import {
   type FSWatcher
 } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { home, STAFF_SERVER, type ProjectSession, type ProjectRequest } from '@oddboro/ledger';
+import {
+  home,
+  STAFF_SERVER,
+  PROJECT_RECEIVERS,
+  type ProjectSession,
+  type ProjectRequest
+} from '@oddboro/ledger';
+import { pathToFileURL } from 'node:url';
 import { nativeCommand, nativeEnv } from './native.ts';
 import { savedClaudeSessions } from './claude-sessions.ts';
 type Active = {
@@ -97,7 +104,11 @@ export function prepareClaude(s: ProjectSession) {
       JSON.stringify(box) +
       ',' +
       JSON.stringify(s.nativeId) +
-      '); await import("./watch.mjs");\n'
+      ',' +
+      JSON.stringify(s.folder) +
+      '); await import(' +
+      JSON.stringify(pathToFileURL(join(ledger, 'src', 'project-watch' + ext)).href) +
+      ');\n'
   );
   // The monitor runs in a POSIX shell, including Git Bash on Windows.
   // Desktop installs can have a bundled Node without a node on the PATH.
@@ -122,6 +133,38 @@ export function prepareClaude(s: ProjectSession) {
     ]
   });
   return { plugin, market, box };
+}
+/** Each send checks both live receivers, with no prompt leaving before they answer. */
+export async function checkClaudeReceiver(s: ProjectSession) {
+  const box = boxOf(s),
+    key = randomUUID();
+  const replies = PROJECT_RECEIVERS.map((receiver) => join(box, key + '.' + receiver));
+  let watcher: FSWatcher | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const check = () => {
+        if (replies.every((file) => existsSync(file))) resolve();
+      };
+      watcher = watch(box, check);
+      watcher.on('error', reject);
+      timer = setTimeout(
+        () =>
+          reject(
+            new Error(
+              'Claude’s office plugin is not ready. In Details, connect the plugin and reload it in this conversation, then retry. Nothing was sent.'
+            )
+          ),
+        30_000
+      );
+      jsonFile(join(box, 'probe.json'), { key });
+      check();
+    });
+  } finally {
+    watcher?.close();
+    clearTimeout(timer);
+    for (const file of [join(box, 'probe.json'), ...replies]) rmSync(file, { force: true });
+  }
 }
 export function postClaude(s: ProjectSession, r: ProjectRequest) {
   jsonFile(join(boxOf(s), 'offer.json'), { id: r.id, prompt: r.prompt });
