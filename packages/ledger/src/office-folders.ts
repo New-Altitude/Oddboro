@@ -22,8 +22,9 @@ import { record } from './office-ledger.ts';
  * is what is stored. A folder taken back is the path as stored, unchecked, so
  * a folder deleted from the disk can still be taken back. A folder is the same one
  * when its real path is (`real`), so a level change replaces it, even one
- * stored in another case. A new folder inside or holding one the Odd already
- * has is refused (`FOLDER_REFUSED.nested`): one would carry two levels. A
+ * stored in another case. Folders may sit one inside another, but a folder
+ * only to read is refused inside or around one to change
+ * (`FOLDER_REFUSED.readInsideChange`, `nestRefused`). A
  * stored folder no run gets (`touchesSecretStore`) carries none, so the owner
  * can give a clean folder inside it. It still counts against a folder that
  * would hold it, which would put the store it was dropped for in a run. A
@@ -65,11 +66,10 @@ async function changeFolder(
   const write = access === 'write';
   if (access === null ? !had : had?.write === write) return;
   const rest = before.folders.filter((f) => !same(f));
-  if (
-    access !== null &&
-    rest.some((f) => (touchesSecretStore(f.path) ? within(real(f.path), at) : nests(at, f)))
-  )
-    return { refused: FOLDER_REFUSED.nested };
+  if (access !== null) {
+    const refused = nestRefused(rest, at, write);
+    if (refused) return { refused };
+  }
   const folders = access === null ? rest : [...rest, { path, write }];
   await q.update(staff).set({ folders }).where(eq(staff.id, id));
   return {
@@ -84,15 +84,39 @@ async function changeFolder(
 const gaveFolder = (name: string, path: string, access: FolderAccess) =>
   `Let ${name} ${access === 'write' ? 'read and change' : 'read'} ${shownFolder(path)}`;
 
-/** Whether `at` (a real path) sits inside the stored folder `f`, or holds it. */
-const nests = (at: string, f: { path: string }) =>
-  within(at, real(f.path)) || within(real(f.path), at);
+/**
+ * Why a folder at `at` (a real path), to change when `write`, may not sit
+ * beside the stored folders `others`, or nothing when it may. Folders may sit
+ * one inside another: a run reads them all and changes those to change, as it
+ * reads a work's folder and changes only its own part. The one pair refused is
+ * a folder only to read inside one to change (`FOLDER_REFUSED.readInsideChange`):
+ * every tool lets a run change all of the outer one, so the inner one could
+ * not stay read only. A stored folder no run gets (`touchesSecretStore`) still
+ * counts against a folder that would hold it, which would put its store in a
+ * run (`FOLDER_REFUSED.nested`).
+ */
+function nestRefused(
+  others: { path: string; write: boolean }[],
+  at: string,
+  write: boolean
+): string | undefined {
+  for (const f of others) {
+    const p = real(f.path);
+    if (touchesSecretStore(f.path)) {
+      if (within(p, at)) return FOLDER_REFUSED.nested;
+      continue;
+    }
+    if ((within(at, p) && f.write && !write) || (within(p, at) && write && !f.write))
+      return FOLDER_REFUSED.readInsideChange;
+  }
+  return undefined;
+}
 
 /**
  * Why an Odd may not ask for `path` (a real path from `checkFolder`) at
  * `level`, or nothing when it may: it has that folder, or one holding it,
- * at that level or above; or the owner could not give it, since it sits
- * inside or holds another folder the Odd has (`setFolder`). A stored folder
+ * at that level or above; or the owner could not give it beside the folders
+ * it has (`nestRefused`, as in `setFolder`). A stored folder
  * no run gets (`touchesSecretStore`) never covers what is asked for, so the
  * Odd is never told that a folder it does not get covers it, and a clean
  * folder inside one can be asked for. It still counts against a folder that
@@ -108,11 +132,11 @@ export function folderAskRefused(
   const covers = held.find((f) => within(at, real(f.path)) && (f.write || level === 'read'));
   if (covers)
     return `You already have ${shownFolder(covers.path)} (${covers.write ? 'read and change' : 'read only'}), which covers it.`;
-  const nested = who.folders.some(
-    (f) =>
-      real(f.path) !== at && (touchesSecretStore(f.path) ? within(real(f.path), at) : nests(at, f))
+  return nestRefused(
+    who.folders.filter((f) => real(f.path) !== at),
+    at,
+    level === 'write'
   );
-  if (nested) return FOLDER_REFUSED.nested;
 }
 
 /**
@@ -200,6 +224,7 @@ export const FOLDER_REFUSED = {
   secrets: 'That folder holds your keys or sign-ins.',
   code: "That folder holds Oddboro's own code.",
   nested: 'That folder is inside one this Odd already has, or holds one.',
+  readInsideChange: 'A folder this Odd may only read cannot sit inside one it can change.',
   /** What an Odd reads when it asks for a whole drive or system files: only the owner may give one. */
   broad: 'That folder is a whole drive or holds system files. Ask for a narrower one.',
   glob: (char: string) => `That folder's path has a character an Odd's tool can't take: ${char}`
