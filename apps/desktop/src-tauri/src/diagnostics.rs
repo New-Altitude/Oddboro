@@ -746,7 +746,10 @@ mod tests {
             .filter_map(|name| std::env::var(name).ok())
             .filter(|v| !v.is_empty())
         {
-            assert!(!holds_word(&body, &user), "the report holds the user name {user}");
+            assert!(
+                !holds_word(&body, &user),
+                "the report holds the user name {user}"
+            );
         }
         let hostname = Command::new("hostname").output().unwrap().stdout;
         let hostname = String::from_utf8_lossy(&hostname).trim().to_string();
