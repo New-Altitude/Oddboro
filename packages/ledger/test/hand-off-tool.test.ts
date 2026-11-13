@@ -1460,7 +1460,16 @@ test("resume_at after_task parks on another work's open task, and refuses one do
     (
       await db
         .insert(tasks)
-        .values({ staffId: 'tess', title, why: 'w', steps: [], threadId, status })
+        // A done task has its time, as the office ends one.
+        .values({
+          staffId: 'tess',
+          title,
+          why: 'w',
+          steps: [],
+          threadId,
+          status,
+          doneAt: status === 'done' ? new Date() : null
+        })
         .returning()
     )[0];
   const open = await task('Proof the menu', other.id);
