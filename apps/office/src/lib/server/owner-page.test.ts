@@ -238,6 +238,90 @@ test('the office answers on loopback, its addresses through Caddy and the app OR
   }
 });
 
+const AWAY = 'This office answers only its own computer';
+const LAN = '192.168.1.20';
+/** A GET, or a POST from the owner's page, with Caddy's X-Forwarded-For when given. */
+const forwarded = (method: 'GET' | 'POST', xff?: string, s: Sent = {}) =>
+  send(ok, {
+    ...s,
+    method,
+    headers: {
+      ...(method === 'POST' ? PAGE : {}),
+      ...(xff === undefined ? {} : { 'x-forwarded-for': xff }),
+      ...s.headers
+    }
+  });
+
+test('a device on the network that comes through Caddy is refused, for a page load, a read and an action alike', async () => {
+  for (const xff of [LAN, '2001:db8::20', 'fe80::1', '::ffff:192.168.1.20']) {
+    for (const [method, path] of [
+      ['GET', '/'],
+      ['GET', '/api/ledger'],
+      ['POST', '/api/goals']
+    ] as const) {
+      const r = await forwarded(method, xff, { path });
+      assert.deepEqual([xff, path, r.status, r.ran, r.text], [xff, path, 403, false, AWAY]);
+    }
+  }
+  // Who asks comes before by what name, so another name gets the same answer.
+  const named = await forwarded('GET', LAN, { headers: { host: 'rebind.evil.example:4500' } });
+  assert.deepEqual([named.status, named.text], [403, AWAY]);
+});
+
+test('a forged loopback address in front of the real one does not let a device on the network in', async () => {
+  for (const xff of ['127.0.0.1, 192.168.1.20', '::1,192.168.1.20', '192.168.1.20, 127.0.0.1']) {
+    for (const method of ['GET', 'POST'] as const) {
+      const r = await forwarded(method, xff);
+      assert.deepEqual([xff, method, r.status, r.ran], [xff, method, 403, false]);
+    }
+  }
+});
+
+test('this computer passes however its address is written', async () => {
+  for (const xff of [
+    '127.0.0.1',
+    '127.0.0.2',
+    '::1',
+    '::ffff:127.0.0.1',
+    '::FFFF:127.0.0.1',
+    '127.0.0.1, ::1'
+  ]) {
+    const r = await forwarded('GET', xff);
+    assert.deepEqual([xff, r.status, r.ran], [xff, 200, true]);
+  }
+  for (const from of ['127.0.0.1', '::1', '::ffff:127.0.0.1']) {
+    const r = await forwarded('GET', undefined, { from });
+    assert.deepEqual([from, r.status, r.ran], [from, 200, true]);
+  }
+});
+
+test('a request straight to the office from this computer, with no forwarded address, passes', async () => {
+  for (const method of ['GET', 'POST'] as const) {
+    const r = await forwarded(method);
+    assert.deepEqual([method, r.status, r.ran], [method, 200, true]);
+  }
+});
+
+test('a connection from another computer is refused even when it names no forwarded address', async () => {
+  const r = await forwarded('GET', undefined, { from: LAN });
+  assert.deepEqual([r.status, r.ran, r.text], [403, false, AWAY]);
+});
+
+test('a forwarded address the office cannot read counts as another computer', async () => {
+  for (const xff of [
+    '',
+    'localhost',
+    '127.0.0.1:4500',
+    '[::1]',
+    'unknown',
+    '127.0.0.1,',
+    '127.1'
+  ]) {
+    const r = await forwarded('GET', xff);
+    assert.deepEqual([xff, r.status, r.ran], [xff, 403, false]);
+  }
+});
+
 test('the shell reports an update with its token, and nothing else reports one', async () => {
   const report = { path: '/api/update', body: JSON.stringify({ checked: true }) };
   const shell = await send(updateRoute.POST as Route, {

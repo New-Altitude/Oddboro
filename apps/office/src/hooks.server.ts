@@ -9,8 +9,9 @@
 // the HTTP server has closed, and when the app's stdin pipe closes, which
 // happens however the app ends, Force Quit included. On a Mac it keeps its
 // secrets through the app's shell, over those same pipes (`useShellSecrets`).
-// Every route and API request passes `guardOffice` first: the office's own
-// names, and actions only from the owner's page (`#lib/server/owner-page.ts`).
+// Every route and API request passes `guardOffice` first: only from this
+// computer, at the office's own names, and actions only from the owner's page
+// (`#lib/server/owner-page.ts`).
 // Files built into the page (scripts, styles, images) are served before it.
 // Then Sentry's handle, which traces the request when the owner said yes to diagnostics.
 import { release } from 'node:os';
