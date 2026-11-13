@@ -53,8 +53,10 @@ export async function toolServer(staffId: string, env: Record<string, string>): 
   return client;
 }
 
+// All at once: one at a time, a file's 36 or 62 servers took up to 11 s of
+// this hook's 15 on GitHub's Mac runner (NEW-1874).
 after(async () => {
-  for (const c of clients) await c.close();
+  await Promise.all(clients.map((c) => c.close()));
   await sql.end();
   await stopDatabase();
   rmSync(folder, { recursive: true, force: true });
