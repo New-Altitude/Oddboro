@@ -21,7 +21,7 @@
   import { newTurnId } from '#lib/staff/chat-input.ts';
   import { call, sendFile, failure, type ApiUrl } from './api.ts';
   import ChatFiles from './ChatFiles.svelte';
-  import { advanced, openProject } from './windows.svelte.ts';
+  import { advanced, openProject, openConversation } from './windows.svelte.ts';
   import { hideChoiceLines } from '#lib/choices.ts';
   import { hasToken, tagFor, withTokens, withoutToken, type Pending } from './chat-attach.ts';
   import {
@@ -1149,6 +1149,13 @@
       <span class="text-xs text-sea">{opened.has(`${h.id}-card`) ? 'Close' : 'Open'}</span>
     </button>
     <span class="text-xs {p.yours ? 'text-ember' : 'text-muted'}">{p.text}</span>
+    {#if h.threadId}
+      <button
+        class="mt-1 block text-xs text-sea hover:text-ink"
+        onclick={() => h.threadId && openConversation({ id: h.threadId, title: h.title })}
+        >Talk about this work</button
+      >
+    {/if}
     {#if opened.has(`${h.id}-card`)}{@render story(h)}{/if}
   </div>
 {/snippet}
@@ -1264,6 +1271,10 @@
             <span class="text-xs text-sea">{opened.has(key) ? 'Close' : 'Open'}</span>
           </button>
           <span class="text-xs {p.yours ? 'text-ember' : 'text-muted'}">{p.text}</span>
+          <button
+            class="mt-1 block text-xs text-sea hover:text-ink"
+            onclick={() => openConversation(t)}>Talk about this work</button
+          >
           {#each t.waiting as w (`${w.kind}-${w.id}`)}
             <button
               class="mt-1 block text-start text-xs text-ember hover:text-ink"

@@ -44,6 +44,7 @@ export * from './update-window.ts';
 export * from './hand-offs.ts';
 export * from './hand-off-news.ts';
 export * from './threads.ts';
+export * from './work-conversations.ts';
 export * from './lead-brief.ts';
 export * from './sharing.ts';
 export { WEEKDAYS } from './time.ts';

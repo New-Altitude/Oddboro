@@ -25,6 +25,7 @@ export type LiveTable = {
 };
 
 export const LIVE_TABLES: Record<TableName, LiveTable> = {
+  work_messages: { trigger: 'all', page: ['version'] },
   project_requests: { trigger: 'all', page: ['refresh', 'version'] },
   project_sessions: { trigger: 'all', page: ['version'] },
   staff: { trigger: 'all', page: ['refresh'] },

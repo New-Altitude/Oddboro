@@ -272,6 +272,12 @@ export const OWNER_ACTIONS = {
   // The app's shell reporting an update, and the owner picking when it
   // installs: both write the `app_update` row.
   'POST /api/update': { none: NO_ROW },
+  'POST /api/work/[id]/conversation': {
+    none: 'Saves a work message and reply. Any action its run takes records itself.'
+  },
+  'DELETE /api/work/[id]/conversation': {
+    none: 'Stops the named reply, retaining its saved message and completed work.'
+  },
   // The owner's update window, in the `app_update` row.
   'PUT /api/update': { none: NO_ROW },
   // A hosted server's sign-in comes back here: its tokens go in the keychain

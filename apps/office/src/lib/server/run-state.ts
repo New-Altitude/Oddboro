@@ -40,6 +40,10 @@ export function chatRun(id: string): LiveRun | undefined {
 }
 
 export const isBusy = (id: string): boolean => !!chatRun(id);
+export const isReplying = (id: string): boolean =>
+  [...runsGoing.values()].some(
+    (r) => r.staffId === id && (r.kind === 'chat' || r.kind === 'hello')
+  );
 export const runsActive = (): boolean => runsGoing.size > 0;
 
 export function stopRuns(id: string): void {

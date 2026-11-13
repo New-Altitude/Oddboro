@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { openConversation } from './windows.svelte.ts';
   import type {
     GoalHorizon,
     GoalStatus,
@@ -19,6 +20,8 @@
   import { call } from './api.ts';
   import { ago, workLine } from './format.ts';
   import type { StaffProfile } from '../staff/roster.ts';
+  import GoalProjectFolder from './GoalProjectFolder.svelte';
+  import GoalProject from './GoalProject.svelte';
 
   // The owner's goals: what they want more of. Setting one sends the Office
   // Manager off to plan it; the plan comes back to the desk. Each goal shows who
@@ -54,6 +57,7 @@
   let addWho = $state('');
   let addPart = $state('');
   let showDone = $state(false);
+  let grouping = $state<'area' | 'project'>('area');
 
   const manager = $derived(staff.find((s) => s.role === 'Office Manager'));
   const live = $derived(goals.filter((g) => GOAL_IS_LIVE[g.status]));
@@ -66,10 +70,17 @@
       .map((area) => ({ area, list: live.filter((g) => g.area === area) }))
       .filter((a) => a.list.length)
   );
+  const byProject = $derived(
+    [...new Set(live.map((g) => g.projectFolder))].map((folder) => ({
+      folder,
+      list: live.filter((g) => g.projectFolder === folder)
+    }))
+  );
 
   async function load() {
     const r = await call<GoalsWindow>('/api/goals');
     goals = r.goals;
+    if (!goals.some((g) => g.projectFolder)) grouping = 'area';
     other = r.other;
     loaded = true;
   }
@@ -175,6 +186,21 @@
   <div class="flex-1 overflow-y-auto p-3">
     {#if problem}
       <p class="mb-3 rounded-lg bg-coral/15 px-3 py-2 text-xs text-coral" role="alert">{problem}</p>
+    {/if}
+
+    {#if goals.some((g) => g.projectFolder)}
+      <div class="mb-3 flex items-center gap-2 text-xs" role="group" aria-label="Group goals by">
+        <span class="text-muted">Group by</span>
+        {#each ['area', 'project'] as const as mode (mode)}
+          <button
+            class="rounded-lg px-3 py-1.5 {grouping === mode
+              ? 'bg-sea/20 text-sea'
+              : 'bg-raise text-muted'}"
+            aria-pressed={grouping === mode}
+            onclick={() => (grouping = mode)}>{mode === 'area' ? 'Area' : 'Project'}</button
+          >
+        {/each}
+      </div>
     {/if}
 
     {#if draft}
@@ -285,6 +311,10 @@
             <span class="mt-0.5 block text-ember">Waits on your {w.kind}: {w.title}</span>
           {/each}
         </button>
+        <button
+          class="mt-1 px-2.5 text-xs text-sea hover:text-ink"
+          onclick={() => openConversation(t)}>Talk about this work</button
+        >
       </li>
     {/snippet}
 
@@ -313,6 +343,9 @@
                   ? `${manager?.name ?? 'The office'} is planning it`
                   : 'Nobody on it yet'}
             </span>
+            {#if grouping === 'project' && latest}<span class="mt-1 block text-xs text-muted"
+                >{latest.note}</span
+              >{/if}
           </span>
           {#if latest}
             <span class="shrink-0 text-[11px] {HEALTH_TONE[latest.health]}"
@@ -323,6 +356,7 @@
 
         {#if isOpen}
           <div class="flex flex-col gap-3 border-t border-hairline px-3 py-3 text-sm">
+            <GoalProjectFolder goal={g} onchange={load} />
             {#if g.why || g.doneWhen}
               <dl class="flex flex-col gap-2">
                 {#if g.why}
@@ -474,14 +508,46 @@
       </li>
     {/snippet}
 
-    {#each byArea as group (group.area)}
-      <h3 class="mt-1 mb-1.5 text-[10px] tracking-[0.16em] text-faint uppercase">{group.area}</h3>
-      <ul class="mb-3 flex flex-col gap-1.5">
-        {#each group.list as g (g.id)}
-          {@render goalRow(g)}
-        {/each}
-      </ul>
-    {/each}
+    {#if grouping === 'project'}
+      {#each byProject as group (group.folder)}
+        {@const work = group.list.flatMap((g) => g.threads)}
+        {@const waiting = work.reduce((count, t) => count + t.waiting.length, 0)}
+        <section
+          class="mb-4 rounded-xl border border-hairline p-3"
+          aria-label={group.folder ?? 'Goals without a project folder'}
+        >
+          <h3 class="text-sm font-medium text-ink">
+            {group.folder?.split(/[\\/]/).filter(Boolean).at(-1) ?? 'No project folder'}
+          </h3>
+          {#if group.folder}<p class="mt-1 break-all text-[11px] text-faint">{group.folder}</p>{/if}
+          <p class="mt-1 mb-3 text-xs text-muted">
+            {group.list.length}
+            {group.list.length === 1 ? 'goal' : 'goals'} · {work.filter(
+              (t) => t.stage === 'under_way'
+            ).length} in progress · {waiting} waiting on you
+          </p>
+          <ul class="flex flex-col gap-1.5">
+            {#each group.list as g (g.id)}{@render goalRow(g)}{/each}
+          </ul>
+          {#if work.length}<h4 class="mt-3 mb-1 text-xs font-medium text-muted">
+              Work and decisions
+            </h4>
+            <ul class="flex flex-col gap-1">
+              {#each work as t (t.id)}{@render threadRow(t)}{/each}
+            </ul>{/if}
+          {#if group.folder}<GoalProject goal={group.list[0].id} {version} />{/if}
+        </section>
+      {/each}
+    {:else}
+      {#each byArea as group (group.area)}
+        <h3 class="mt-1 mb-1.5 text-[10px] tracking-[0.16em] text-faint uppercase">{group.area}</h3>
+        <ul class="mb-3 flex flex-col gap-1.5">
+          {#each group.list as g (g.id)}
+            {@render goalRow(g)}
+          {/each}
+        </ul>
+      {/each}
+    {/if}
 
     {#if other.length}
       <h3 class="mt-1 mb-1.5 text-[10px] tracking-[0.16em] text-faint uppercase">Other work</h3>

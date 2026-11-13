@@ -5,6 +5,7 @@
 // openings of the latest steps, since it pays for every story on every turn.
 import { and, asc, desc, eq, inArray, isNull, or, type SQL } from 'drizzle-orm';
 import { db } from './db.ts';
+import { conversationSaid } from './work-conversations.ts';
 import {
   asks,
   followUps,
@@ -103,7 +104,12 @@ async function saidOn(id: number): Promise<OwnerSaid[]> {
     .select()
     .from(tasks)
     .where(or(eq(tasks.threadId, id), askIds.length ? inArray(tasks.askId, askIds) : undefined));
+  const conversation = await conversationSaid(id);
   return [
+    ...conversation.map((c) => ({
+      at: c.createdAt,
+      said: { what: 'Work conversation', how: 'said', words: flat(c.message).slice(0, WORDS_MAX) }
+    })),
     // In JavaScript, not SQL: a null reason compares as unknown there, which
     // would drop every ask answered with no reason.
     ...threadAsks.flatMap((a) =>

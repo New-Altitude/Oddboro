@@ -135,6 +135,7 @@ export const ROUTE_IDS = {
   '/api/gateway/[connector]': true,
   '/api/goals': true,
   '/api/goals/[id]': true,
+  '/api/goals/[id]/project': true,
   '/api/goals/[id]/staff': true,
   '/api/health': true,
   '/api/items': true,
@@ -188,6 +189,7 @@ export const ROUTE_IDS = {
   '/api/switches': true,
   '/api/tasks/[id]': true,
   '/api/update': true,
+  '/api/work/[id]/conversation': true,
   '/atlas/[file]': true,
   '/connect/callback': true
 } as const satisfies Record<RouteId, true>;

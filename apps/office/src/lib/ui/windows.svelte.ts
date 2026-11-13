@@ -15,6 +15,7 @@ export type LessonsFilter = 'about' | 'all' | { staff: string };
 /** A session to open in Projects. `n` bumps on every ask, so asking again for the same session still brings it up. */
 export type ProjectAsk = { sessionId?: string; n: number };
 export type Win =
+  | { id: string; kind: 'conversation'; work: { id: number; title: string } }
   | { id: 'desk'; kind: 'desk' }
   | { id: 'goals'; kind: 'goals' }
   | { id: 'projects'; kind: 'projects'; ask: ProjectAsk }
@@ -78,6 +79,9 @@ export function openProject(sessionId?: string): void {
   if (w) w.ask = { sessionId, n: w.ask.n + 1 };
   open(w ?? { id: 'projects', kind: 'projects', ask: { sessionId, n: 1 } });
 }
+
+export const openConversation = (work: { id: number; title: string }) =>
+  open({ id: `conversation:${work.id}`, kind: 'conversation', work });
 
 /** The one Lessons window, on that filter. Already open, it switches to it. */
 export function openLessons(filter: LessonsFilter = 'about'): void {

@@ -44,6 +44,7 @@ export type LiveRun = {
   stop: AbortController;
   end: { promise: Promise<void>; resolve: () => void };
   turnId?: string;
+  conversationId?: number;
   work?: Work;
   /** A queued background run is released by the preceding run or by Stop. */
   enter?: () => void;
@@ -57,7 +58,7 @@ export type LiveRun = {
 export const runsGoing = new Map<string, LiveRun>();
 
 export function reserveRun(
-  input: Pick<LiveRun, 'staffId' | 'kind' | 'turnId' | 'work'> & { key?: string }
+  input: Pick<LiveRun, 'staffId' | 'kind' | 'turnId' | 'work' | 'conversationId'> & { key?: string }
 ): LiveRun {
   let resolve: () => void;
   const promise = new Promise<void>((done) => {

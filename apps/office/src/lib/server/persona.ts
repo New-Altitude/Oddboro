@@ -405,7 +405,7 @@ export async function installGrantedPersonas(): Promise<void> {
 export async function askPersona(
   who: StaffRow,
   message: string,
-  chat?: { ownerSaid: string }
+  chat?: { ownerSaid: string; sessionFile?: string }
 ): Promise<DoorAnswer> {
   const slug = who.package?.slug;
   const issuer = accountIssuer();

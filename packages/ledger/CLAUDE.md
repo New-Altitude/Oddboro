@@ -134,6 +134,18 @@ and a hire's starting values.
 hand-off or number, which ledger tests and the office's format test share.
 `test/deliveries.test.ts` holds when the owner decided each ask.
 
+Goals can carry an owner-chosen project folder (`goals.project_folder`, migration
+`0031_goal_project`). It groups the owner's view and grants no file access.
+The owner's goal update records changes to the link in the Ledger.
+
+Work conversations use `work_messages` (migration `0032_work_conversations`),
+one owner message and its reply per row, keyed by a unique request ID. The
+work's participant list comes from its existing file readers. The latest owner
+messages enter `threadStory` alongside desk answers; replies retain their
+author's tool access for later sharing checks. `test/work-conversations.test.ts`
+checks persistence, duplicate requests, participant boundaries, shared context,
+access after revocation, bounded replay and restart recovery.
+
 ## Files
 
 `FILES.md` lists each file in this package and what it holds.

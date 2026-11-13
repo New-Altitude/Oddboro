@@ -1,3 +1,4 @@
+import { isReplying } from '#lib/server/run-state.ts';
 // DELETE lets the Odd go from the office: the owner's Remove on its card,
 // after the page's own confirm (`removeOdd` in the ledger). It is soft: the
 // Office Manager can bring it back, with the owner's yes.
@@ -26,7 +27,6 @@ import {
   type Effort
 } from '@oddboro/ledger';
 import type { StaffPatchKey } from '@oddboro/ledger/grantable';
-import { isBusy } from '#lib/server/staff.ts';
 import type { RequestHandler } from './$types';
 
 export const PATCH: RequestHandler = async ({ params, request }) => {
@@ -50,7 +50,7 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
     const agent = offeredAgent(b.agent, currentPlatform());
     if (!agent) error(400, `Pick ${agentsOn(currentPlatform()).join(' or ')}`);
     // A chat still replying would save its session after the move, for a tool that cannot resume it.
-    if (isBusy(params.id)) error(409, 'Wait for the reply to finish, then switch.');
+    if (isReplying(params.id)) error(409, 'Wait for the reply to finish, then switch.');
     const moved = await setAgent(
       params.id,
       agent,
@@ -63,7 +63,7 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
   if (b.account !== undefined) {
     if (b.account !== null && typeof b.account !== 'string') error(400, 'Pick an account');
     // A chat still replying would save its session after the move, in the folder it left.
-    if (isBusy(params.id)) error(409, 'Wait for the reply to finish, then switch.');
+    if (isReplying(params.id)) error(409, 'Wait for the reply to finish, then switch.');
     const set = await setAccount(params.id, b.account);
     if (set) error(400, set.refused);
     return json({ ok: true });

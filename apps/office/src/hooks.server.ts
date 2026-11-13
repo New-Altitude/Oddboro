@@ -16,7 +16,7 @@
 import { release } from 'node:os';
 import { sequence, type ServerInit } from '@sveltejs/kit/hooks';
 import { handleErrorWithSentry, sentryHandle } from '@sentry/sveltekit';
-import { LOCAL, whenOddLeaves } from '@oddboro/ledger';
+import { LOCAL, whenOddLeaves, closeStaleConversations } from '@oddboro/ledger';
 import { trustSystemCertificates } from '@oddboro/ledger/certificates';
 import { startLocalDatabase } from '@oddboro/ledger/local-db';
 import { currentPlatform } from '@oddboro/ledger/platform';
@@ -53,6 +53,7 @@ export const init: ServerInit = async () => {
   await timed('secrets', useShellSecrets);
   if (LOCAL) await timed('database', startLocalDatabase);
   await timed('tables', bringUpToDate);
+  await closeStaleConversations();
   // Before the clock: a poke that came due while the app updated still lands.
   await timed('update row', loadUpdate);
   startClock();
