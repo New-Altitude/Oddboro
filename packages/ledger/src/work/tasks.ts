@@ -187,8 +187,9 @@ export function taskEnded(
   const pickedUp = parked.length ? parked.map((p) => p.title) : undefined;
   for (const effect of effects) {
     switch (effect) {
-      // No run follows a dropped task: the answer itself goes back. To a
-      // thread or a hand-off it carries no chat card, as today.
+      // A dropped task's answer goes back to its hand-off or thread, with no
+      // chat card, as today. On no work it is the `answered` run of the Odd
+      // that gave it (`offWorkAnswer`).
       case 'answer_back': {
         const answer = [said, ...parked.map((p) => pickedUpLine(p.title))].join(' ');
         const on = {
