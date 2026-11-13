@@ -251,13 +251,9 @@ export async function raisedOn(q: Db, id: number, o: { plan?: boolean } = {}): P
 /**
  * Why a hub may not name this thread for an ask or task from a run on no
  * thread, or undefined when it may: as `continue_work` is checked, it must
- * lead it, and the owner must not have stopped it.
+ * lead it, and it must not have stopped.
  */
-export async function notLed(t: {
-  hubId: string;
-  threadId: number;
-  owner: string;
-}): Promise<string | undefined> {
+export async function notLed(t: { hubId: string; threadId: number }): Promise<string | undefined> {
   const [row] = await db
     .select({ hubId: threads.hubId, status: threads.status })
     .from(threads)
@@ -265,7 +261,7 @@ export async function notLed(t: {
   if (row?.hubId !== t.hubId)
     return `Work ${t.threadId} is not work you lead. Name one your instructions list as work you lead, or null.`;
   if (row.status === 'stopped')
-    return `${t.owner} stopped work ${t.threadId}, so nothing more goes on it. Name another, or null.`;
+    return `Work ${t.threadId} has stopped, so nothing more goes on it. Name another, or null.`;
   return undefined;
 }
 

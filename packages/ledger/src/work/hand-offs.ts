@@ -304,7 +304,7 @@ export function toldLead(
       refused: `Work ${id} is not work you are on, so it is not yours to pass on. Tell ${owner} so.`
     };
   if (t.status === 'stopped')
-    return { refused: `${owner} stopped work ${id}, so nothing more runs on it. Tell them so.` };
+    return { refused: `Work ${id} has stopped, so nothing more runs on it. Tell ${owner} so.` };
   // Its lead's leaving stops the work; this is a call that landed as the lead left.
   if (lead.leftAt)
     return {

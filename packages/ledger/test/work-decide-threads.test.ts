@@ -745,7 +745,7 @@ test("a tell that lands after its lead left is refused, so the words are passed 
   // Left first: the leaving stopped the work, so the tell is refused and no pick-up holds the words.
   const gone = applyChange(rows, changed(decide(rows, removal('ada').e, NOW)));
   assert.deepEqual(decide(gone, tell([]), minutes(11)), {
-    refused: 'Sam stopped work 1, so nothing more runs on it. Tell them so.'
+    refused: 'Work 1 has stopped, so nothing more runs on it. Tell Sam so.'
   });
 });
 
@@ -774,6 +774,6 @@ test('stopped work refuses a hand-off and a tell', () => {
     refused: 'Work 1 has ended (stopped). Nothing more runs on it. Tell the owner so.'
   });
   assert.deepEqual(decide(stopped(tellRows()), tell([]), NOW), {
-    refused: 'Sam stopped work 1, so nothing more runs on it. Tell them so.'
+    refused: 'Work 1 has stopped, so nothing more runs on it. Tell Sam so.'
   });
 });
