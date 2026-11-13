@@ -9,7 +9,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { after } from 'node:test';
+import { after, afterEach, beforeEach } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
@@ -37,9 +37,28 @@ await bringUpToDate();
 const { db, sql } = await import('../src/db.ts');
 export { db, sql };
 
+/**
+ * A server started in a test is that test's, and closes when it ends, before
+ * the next test's beforeEach: node:test fails a test that runs past its time
+ * but lets its body go on, and a tool call it left running would otherwise
+ * write into the next test. A subtest's servers are its own, and its parent
+ * keeps the ones it started. One started before any test is the file's.
+ */
 const clients: Client[] = [];
+const running: Client[][] = [];
+let anyTestStarted = false;
+beforeEach(() => {
+  running.push([]);
+  anyTestStarted = true;
+});
+afterEach(async () => {
+  await Promise.all((running.pop() ?? []).map((c) => c.close()));
+});
+
 /** The tool server of the Odd `staffId`, started as the office starts it for a run with `env`. */
 export async function toolServer(staffId: string, env: Record<string, string>): Promise<Client> {
+  if (anyTestStarted && !running.length) throw new Error('a tool server started between tests');
+  const own = running.at(-1) ?? clients;
   const client = new Client({ name: 'test', version: '1.0.0' });
   await client.connect(
     new StdioClientTransport({
@@ -49,7 +68,11 @@ export async function toolServer(staffId: string, env: Record<string, string>): 
       stderr: 'ignore'
     })
   );
-  clients.push(client);
+  if (own !== clients && !running.includes(own)) {
+    await client.close();
+    throw new Error('this tool server finished starting after its test ended');
+  }
+  own.push(client);
   return client;
 }
 

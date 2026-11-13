@@ -497,7 +497,9 @@ chmodSync(join(bin, 'security'), 0o755);
 // and the names in the environment it got, in `installs`, a line each,
 // prints a line, then waits for `<name>.go` in
 // the office's folder and ends done, or with `<name>.fail` there says why and
-// fails. Neither installs anything.
+// fails. Neither installs anything. Two minutes, longer than any test may
+// run, and it gives up, so a test that died before telling it never leaves
+// it running.
 export const installers = join(folder, 'installers');
 export const installs = join(folder, 'installs.jsonl');
 mkdirSync(installers);
@@ -519,6 +521,10 @@ setInterval(() => {
   fs.rmSync(go);
   process.exit(0);
 }, 20);
+setTimeout(() => {
+  process.stderr.write('${name} error: never told to end\\n');
+  process.exit(1);
+}, 120_000);
 `
   );
   chmodSync(join(installers, name), 0o755);
