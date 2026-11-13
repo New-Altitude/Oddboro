@@ -9,7 +9,6 @@ import type { Decided } from '../transition.ts';
 import { answerLead } from './answers.ts';
 import type { EventOf } from './events.ts';
 import { changeOf, draft, putAll, type Change, type WorkRows } from './snapshot.ts';
-import { freeFromWindow } from './threads.ts';
 
 /** What a held thread's lead is told when the clock wakes it at the reset. */
 export const WINDOW_RESET =
@@ -62,9 +61,10 @@ export function parked(
  * The time a thread was parked until has come, as `wakeThread` in
  * ../threads.ts does: the park lifts and its lead picks the work up, joining
  * a pick-up of its there still queued, so the work wakes once. Work the
- * usage window held is told the window reset, and once the window's ask
- * holds no other work, an ask the owner never answered leaves the desk: the
- * reset settled it the way a no would have. Work that is not due, or ended, wakes for nothing.
+ * usage window held is told the window reset. The window's ask leaves the
+ * desk by the office clock at the reset (`windowAsksDue` in
+ * ../office-usage.ts), not here, since work it held may have stopped first.
+ * Work that is not due, or ended, wakes for nothing.
  */
 export function clockWoke(
   rows: WorkRows,
@@ -77,23 +77,7 @@ export function clockWoke(
   const park = open?.park;
   if (!open || !park || (park.on !== 'time' && park.on !== 'window') || park.at > now)
     return { change: changeOf(d, null), after: [] };
-  if (park.on === 'time') putAll(d, [{ table: 'threads', row: { ...open, park: { on: 'none' } } }]);
-  else {
-    const holdsMore = freeFromWindow(d, park.ask, [open.id]);
-    const ask = rows.asks.get(park.ask);
-    if (!holdsMore && ask?.status === 'open')
-      putAll(d, [
-        {
-          table: 'asks',
-          row: {
-            ...ask,
-            reason: 'The window reset before an answer.',
-            status: 'denied',
-            decidedAt: now
-          }
-        }
-      ]);
-  }
+  putAll(d, [{ table: 'threads', row: { ...open, park: { on: 'none' } } }]);
   answerLead(d, open.id, park.on === 'window' ? WINDOW_RESET : null, {}, now);
   return { change: changeOf(d, null), after: [] };
 }

@@ -16,7 +16,8 @@ process.env.OLLAMA_URL = 'http://127.0.0.1:9';
 const { handOff } = await import('../src/hand-offs.ts');
 const { HAND_OFF_LIMIT, parkThread, parkedThreads, wakeThread } = await import('../src/threads.ts');
 const { goalsWindow } = await import('../src/goals.ts');
-const { decideAsk } = await import('../src/office.ts');
+const { decideAsk, WINDOW_ASK_LAPSED, windowAsksDue, withdrawAsk } =
+  await import('../src/office.ts');
 const { WINDOW_RESET } = await import('../src/work/parking.ts');
 const { parkOnTask } = await import('../src/task-parking.ts');
 const { MANAGER_ROLE } = await import('../src/managers.ts');
@@ -222,7 +223,7 @@ test('a yes lets hand-offs run until the reset, and wakes only the threads the w
   assert.equal((await resumes(tailRow.id)).length, 0);
 });
 
-test('a no holds them, and the reset wakes each held thread and takes an unanswered ask off the desk', async () => {
+test('a no holds them, the reset wakes each held thread, and the clock takes an unanswered ask off the desk at the reset, not before', async () => {
   await freshWindow(0.9);
   assert.ok('problem' in (await fresh('Build a star')));
   const [ask] = await windowAsks();
@@ -243,21 +244,26 @@ test('a no holds them, and the reset wakes each held thread and takes an unanswe
   assert.equal(woke.note, WINDOW_RESET);
   assert.equal((await row(star.id)).heldBy, null);
 
-  // An ask nobody answered leaves the desk once the last thread it held wakes.
+  // An ask nobody answered is due to leave the desk at the window's reset.
   await freshWindow(0.9);
   assert.ok('problem' in (await fresh('Build a planet')));
   assert.ok('problem' in (await fresh('Build a belt', 'rex')));
   const [open] = await windowAsks();
+  const [plan] = await db.select().from(planLimits);
+  const due = async () => (await windowAsksDue()).filter((a) => a.id === open.id);
+  assert.deepEqual(await due(), [{ id: open.id, at: plan.fiveHourResetsAt }]);
   const both = (await db.select().from(threads).where(eq(threads.heldBy, open.id))).map(
     (t) => t.id
   );
+  // Waking the work it held leaves it on the desk: the clock takes it off at the reset.
   await reset(both);
-  await wakeThread(both[0]);
-  assert.equal((await windowAsks())[0].status, 'open', 'another thread is still held');
-  await wakeThread(both[1]);
+  for (const id of both) await wakeThread(id);
+  assert.equal((await windowAsks())[0].status, 'open');
+  await withdrawAsk(open.id, WINDOW_ASK_LAPSED);
   const [closed] = await windowAsks();
   assert.equal(closed.status, 'denied');
-  assert.equal(closed.reason, 'The window reset before an answer.');
+  assert.equal(closed.reason, WINDOW_ASK_LAPSED);
+  assert.deepEqual(await due(), []);
 });
 
 test('continuing a finished thread past the guard opens it again for a new round, held until the reset', async () => {

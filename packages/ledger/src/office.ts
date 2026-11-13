@@ -215,6 +215,8 @@ export {
   recordUsage,
   type PlanWindows,
   setPlanLimits,
+  WINDOW_ASK_LAPSED,
+  windowAsksDue,
   ownerName,
   welcomed,
   finishWelcome,

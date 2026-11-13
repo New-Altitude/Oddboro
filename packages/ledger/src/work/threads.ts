@@ -403,12 +403,8 @@ export function holdForWindow(
 const heldBy = (t: Thread | undefined, askId: number): t is Thread & { status: 'open' } =>
   t?.status === 'open' && t.park.on === 'window' && t.park.ask === askId;
 
-/**
- * The usage window's hold lifts: each named open thread `askId` holds is
- * parked on nothing. True when the ask still holds another thread, which
- * `clockWoke` asks before it takes an unanswered ask off the desk.
- */
-export function freeFromWindow(d: Draft, askId: number, threadIds: readonly number[]): boolean {
+/** The usage window's hold lifts: each named open thread `askId` holds is parked on nothing. */
+export function freeFromWindow(d: Draft, askId: number, threadIds: readonly number[]): void {
   const held = threadIds.flatMap((id) => {
     const t = d.rows.threads.get(id);
     return heldBy(t, askId) ? [t] : [];
@@ -417,5 +413,4 @@ export function freeFromWindow(d: Draft, askId: number, threadIds: readonly numb
     d,
     held.map((t) => ({ table: 'threads', row: { ...t, park: { on: 'none' } } }) as const)
   );
-  return [...d.rows.threads.values()].some((t) => heldBy(t, askId));
 }
