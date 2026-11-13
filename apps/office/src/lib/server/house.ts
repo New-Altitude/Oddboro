@@ -53,11 +53,11 @@ export function managerWork(pending: boolean): string {
 
 /**
  * The other Odds here, for an Odd that holds `see_office`: each by name, id
- * and role, a persona's with where its words go, and what this Odd can do
+ * and job, a persona's with where its words go, and what this Odd can do
  * about them. Nothing for an Odd alone in the office.
  */
 export function whoIsHereSection(
-  odds: { id: string; name: string; role: string; persona: boolean }[],
+  odds: { id: string; name: string; role: string; remit: string; persona: boolean }[],
   canHandOff: boolean
 ): string {
   if (!odds.length) return '';
@@ -69,12 +69,12 @@ export function whoIsHereSection(
     '',
     ...odds.map(
       (o) =>
-        `- ${o.name} (${o.id}): ${o.role}.${o.persona ? ` A persona: ${o.name}'s replies come from New Altitude, so what you give ${o.name} leaves this computer.` : ''}`
+        `- ${o.name} (${o.id}): ${o.role}. ${o.remit}${o.persona ? ` A persona: ${o.name}'s replies come from New Altitude, so what you give ${o.name} leaves this computer.` : ''}`
     ),
     '',
     canHandOff
       ? 'To give one of them work, call hand_off.'
-      : 'You cannot hand them work. When {owner} asks for something one of them should do, say so, and ask whether to do it another way, or whether {owner} will ask them in their chat.',
+      : 'You cannot hand them work. If you need a colleague, name them and say that you lack hand-off access. Do not describe their work as something only {owner} can do.',
     ''
   ].join('\n');
 }
@@ -103,6 +103,8 @@ export function house(h: {
     // Every run's reply shows in the Ledger, even one a brief says goes to a colleague, so this covers them all.
     "- {owner} reads every reply you write, in any run, even one that goes back to a colleague. In it, name a piece of work by its title, never by a number, and a file by its name alone, in code (`plan.md`); when that name could mean more than one file, or the file is a colleague's or in a folder {owner} gave you, give its full path from ~ with forward slashes, in code, which the page turns into a link by a short name. Ids and any other path are for tool calls.",
     `- {owner}'s desk is how you reach them. Anything that needs their yes goes through raise_ask${has('give_owner_a_task') ? ', and anything only they can do goes through give_owner_a_task' : ''}. Do not ask for a decision in chat when it should be an ask.`,
+    has('give_owner_a_task') &&
+      `- Before giving {owner} a task, use the answers in your notes, goals and work already shared with you, and check which colleague covers the missing work. ${has('search_ledger') ? 'Use search_ledger for relevant decisions and work. ' : ''}${has('hand_off') ? 'If a colleague can do it and you can hand off, call hand_off and finish this run; its result brings you back.' : 'If you need a colleague, explain that this run cannot hand off.'} Keep access limits: this does not let you read a colleague’s private files or pass on a tool’s contents without permission. Only ask {owner} for what still needs them, such as their decision, sign-in, secret or an action outside the office’s reach. In the task’s why, name the relevant colleague you considered and why they cannot do it. Missing hand-off access is a limit to explain, not proof that the work belongs to {owner}.`,
     // An Odd asked the owner's yes to copy a list into its own thread folder: a click spent on nothing.
     "- Never ask for a yes to do work your level already lets you do inside the office: writing your own files and notes, your part of a thread's folder, drafting, handing off. Do it, and say in your reply what you did. An ask is for what needs {owner}: anything that leaves the office, more access, money, or a choice only they can make.",
     // Two runs of one Odd each proposed the same three email replies, and the owner got each twice.

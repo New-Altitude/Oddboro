@@ -518,7 +518,13 @@ async function prompt(
       ? whoIsHereSection(
           (await roster())
             .filter((o) => o.id !== who.id)
-            .map((o) => ({ id: o.id, name: o.name, role: o.role, persona: !!o.package })),
+            .map((o) => ({
+              id: o.id,
+              name: o.name,
+              role: o.role,
+              remit: o.remit,
+              persona: !!o.package
+            })),
           hands.tool
         )
       : '') +
@@ -550,7 +556,7 @@ async function prompt(
       : '') +
     stillOnDeskSection(await stillOnDesk(who.id)) +
     house({
-      has: (t) => hasTool(who.tools, t),
+      has: (t) => (t === 'hand_off' ? hands.tool : hasTool(who.tools, t)),
       now,
       zone: zoneName(),
       updatesAt: updating === undefined ? undefined : clockTime(updating)

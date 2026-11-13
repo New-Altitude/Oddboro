@@ -84,7 +84,7 @@ if (has('search_ledger'))
   tool(
     'search_ledger',
     {
-      description: `Search the office ledger: every decision ${OWNER} made, all work done by Odds or by ${OWNER}, and reports. Search by meaning. Check it before raising an ask, so you know how ${OWNER} decided similar things.`,
+      description: `Search the office ledger: every decision ${OWNER} made, all work done by Odds or by ${OWNER}, and reports. It searches by meaning when available, otherwise by keywords. No matches does not mean the office has no record: try fewer words, or an empty query for the newest rows, before asking ${OWNER} to repeat information. Check it before raising an ask or giving the owner a task.`,
       inputSchema: {
         query: z
           .string()
@@ -248,7 +248,11 @@ if (has('give_owner_a_task'))
       description: `Give ${OWNER}, the human operator, a task: something only they can do. A question with one answer needs no steps: give just the title and why, and they type the answer where it arrives. Steps are numbered and each is one action, written so anyone can follow them without guessing: name the button, the place, the exact thing. When a step opens a page, give its full address (https://mail.google.com/...), which the owner clicks; when they type or paste something, put exactly that in \`backticks\`, which the owner copies with one click (In the From box, type \`dmarc@example.com\`). If they must choose, pass choices and the task ends with them, e.g. for 'Should this kind of email reach you?' pass ['Yes, keep sending these', 'No, filter these out']. When you need their words, pass response, never a file for them to fill in. Starting text in response is only for a task whose job is to edit that text, such as a draft list, and then the title names what to edit (Correct the client list). A question gets an empty response, or none, so they type the answer: never prefill it with other text you hold. Attach files they should only read. Never write steps to connect or reconnect a tool: ask_for_access and reconnect_access give the office's own.${raisedNote}`,
       inputSchema: {
         title: z.string().max(140),
-        why: z.string().describe('One or two sentences on why this is theirs to do.'),
+        why: z
+          .string()
+          .describe(
+            'Why only the owner can do this, after checking your notes, relevant Ledger entries and shared work. Name the relevant colleague you considered and why they cannot do it. If there is no suitable colleague, say so. Work a colleague can do goes through hand_off when you have it.'
+          ),
         steps: z
           .array(z.string())
           .max(12)
