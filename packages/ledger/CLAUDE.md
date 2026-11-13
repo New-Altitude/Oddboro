@@ -6,7 +6,8 @@ pokes (one-time chat messages an Odd sets for later), reports, connectors and gr
 windows, the names the owner gives the rooms, the owner's goals and who serves
 them, the lessons the owner teaches the Odds, the app's updates, and the ledger itself.
 Drizzle ORM over the `postgres` driver. Server only, except `./time`,
-`./tools`, `./agents`, `./access`, `./grantable`, `./goals`, `./update-window`, `./work-paths`, `./desk-answers`, `./live-tables` and `./filters`, which the page may import.
+`./tools`, `./agents`, `./access`, `./grantable`, `./goals`, `./update-window`, `./work-paths`, `./desk-answers`, `./live-tables`, `./filters` and `./lesson-rules`, which the page may import.
+`./sequences` is for tests in any package, never the page.
 
 `src/run-registry.ts` holds each live run, its stop handle and its work in
 progress. `reserveRun` and `releaseRun` own its lifetime; the office derives
