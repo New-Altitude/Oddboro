@@ -6,7 +6,7 @@ pokes (one-time chat messages an Odd sets for later), reports, connectors and gr
 windows, the names the owner gives the rooms, the owner's goals and who serves
 them, the lessons the owner teaches the Odds, the app's updates, and the ledger itself.
 Drizzle ORM over the `postgres` driver. Server only, except `./time`,
-`./tools`, `./agents`, `./access`, `./grantable`, `./goals`, `./update-window`, `./work-paths`, `./desk-answers`, `./live-tables` and `./filters`, which the page may import.
+`./tools`, `./agents`, `./access`, `./grantable`, `./goals`, `./update-window`, `./work-paths`, `./desk-answers`, `./live-tables`, `./filters` and `./system-words`, which the page may import.
 
 `src/run-registry.ts` holds each live run, its stop handle and its work in
 progress. `reserveRun` and `releaseRun` own its lifetime; the office derives
@@ -29,6 +29,16 @@ Under `node --test` (`NODE_TEST_CONTEXT`), with no `ODDBORO_HOME`, `home()` is
 a folder under the system's temp folder, made on first use and removed at
 exit, and with no `ODDBORO_DB_PORT`, `DATABASE_PORT` is 54399: a test never
 reaches the owner's real office (`test/home.test.ts`).
+Both packages' test scripts also load `test/test-defaults.ts` with `--import`,
+before any test module: each test process gets a temp `HOME` and `USERPROFILE`
+and a `PATH` of node plus the system's own folders, so no test finds the
+developer's AI tools or settings unless it stands one in. It imports only
+Node's own modules, so it cannot load a module a test means to mock.
+`test/tools-on-path.ts` lists which of some commands a process could start
+from its `PATH`, for the tests that hold that. Under test `src/secrets.ts`
+starts with a store whose every use throws, naming the stand-in to load,
+until a test stands one in (or sets `ODDBORO_SECRETS=system` to test the
+system's own store with its command stubbed).
 
 1. With no `DATABASE_URL` in `.env`, the office keeps its own Postgres:
    PGlite inside the office server, files in `~/.oddboro/db`, with
@@ -60,8 +70,8 @@ reaches the owner's real office (`test/home.test.ts`).
    `<home>/db` to `<home>/backups/pre-<version>-<time>/db`. It compares
    `ODDBORO_VERSION` with `<home>/version`, the version that last started, and
    keeps the 3 newest copies. Development (no `ODDBORO_VERSION`) never copies.
-5. `npm run reset` starts the office over: it moves `~/.oddboro/db`, the
-   Odds' homes, the threads' folders and the office's notes into `~/.oddboro/backups/<time>/`
+5. `npm run reset` starts the office over: it moves each entry `OFFICE_ENTRIES`
+   (`src/home.ts`) marks `move` into `~/.oddboro/backups/<time>/`
    and clears the office's keys from `.env`, the owner's answer about
    error reports among them, so the next visit asks again. It never
    touches `data/`.
@@ -256,8 +266,8 @@ their change triggers; `0028_advanced_mode` adds `owner.advanced_at` and
   office's `unreadable` also reads; at the home's top by name, and anywhere
   else, in the home or outside it, the same list (`STORE_MARKS`), by name, or
   for a name a project or an ordinary folder may share by what marks the real
-  store, in the folder, the folders above it and one level down, and no
-  deeper; a store under another name is not found, and a `.ssh` with only
+  store, in the folder, the folders above it and each store's own path
+  below it, and no deeper; a store under another name is not found, and a `.ssh` with only
   custom-named keys and no `known_hosts` is given below the home's top), the
   office's home or its code, and one
   whose real path holds `*`, `?`, `[` or `]`, which Codex cannot take

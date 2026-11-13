@@ -1,4 +1,5 @@
 //! What the shell hands the office server: its port, its home, and a real PATH.
+//! And the one thing it reads back from the office's home: the owner's key.
 
 use std::env;
 use std::path::PathBuf;
@@ -24,6 +25,10 @@ pub fn home() -> PathBuf {
     let var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
     env::var_os(var).map_or_else(|| PathBuf::from("/"), PathBuf::from)
 }
+
+/// The file the office keeps its owner's key in, in its folder
+/// (`OWNER_KEY_FILE` in `packages/ledger/src/owner-key.ts`).
+pub const OWNER_KEY_FILE: &str = "owner-key";
 
 /// `ODDBORO_HOME` from the shell's own environment, or `~/.oddboro`.
 pub fn office_home() -> PathBuf {

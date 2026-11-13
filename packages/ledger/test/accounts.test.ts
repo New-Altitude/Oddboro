@@ -41,7 +41,7 @@ const session = (id: string) => {
 };
 
 test("an office made before accounts keeps its Grok and Codex sign-ins: each home becomes its tool's Office account, moved whole, and their Odds start new sessions", async () => {
-  for (const tool of ['grok', 'codex']) {
+  for (const tool of ['grok', 'codex'] as const) {
     mkdirSync(home(tool), { recursive: true });
     writeFileSync(join(home(tool), 'auth.json'), `{"${tool}":true}`);
   }

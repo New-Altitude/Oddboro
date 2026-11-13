@@ -65,10 +65,10 @@ The desktop terminal check uses the same launcher as the office. On Windows, `pa
 
 On a release machine, stage the desktop with the repository's smoke test. Open both terminals in the installed application, enter and resize text and exercise a native permission prompt. Windows Claude plugin monitors require Git Bash. Test a managed machine with the plugin disabled as well as a machine where it is allowed.
 
-To run the two-provider read and resume check yourself, open the disposable office first. Pass its loopback URL and an existing disposable project folder to the script below. It creates one uniquely named fixture, asks each provider to return the value in it, verifies the original conversation IDs and removes the fixture. The native clients retain their test conversations. Open the matching Projects entry if a provider asks for permission.
+To run the two-provider read and resume check yourself, open the disposable office first. Pass its loopback URL and an existing disposable project folder to the script below. It creates one uniquely named fixture, asks each provider to return the value in it, verifies the original conversation IDs and removes the fixture. The native clients retain their test conversations. Open the matching Projects entry if a provider asks for permission. Set `ODDBORO_PORT` and `ODDBORO_HOME` to the test office's port and home, because the script sends that office's owner key and the office refuses a request without it.
 
 ```sh
-node apps/office/scripts/check-live-projects.ts http://127.0.0.1:4951 /absolute/path/to/test-project
+ODDBORO_PORT=4951 ODDBORO_HOME=/absolute/path/to/test-office-home node apps/office/scripts/check-live-projects.ts http://127.0.0.1:4951 /absolute/path/to/test-project
 ```
 
 ## Earlier native checks, November 9, 2026

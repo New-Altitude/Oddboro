@@ -2,14 +2,18 @@
 // Pass the desktop environment it needs, without the office database or run credentials.
 import { realpath, stat } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep, extname } from 'node:path';
-import { claudeCommand, npmCommand, currentPlatform } from '@oddboro/ledger/platform';
+import { claudeCommand, npmCommand, currentSystem, type System } from '@oddboro/ledger/platform';
+
+const codexPlain = (): [string, string[]] => ['codex', []];
+/** How each system starts Codex. On Windows npm installs it behind a shim. */
+const CODEX: Record<System, () => [string, string[]]> = {
+  mac: codexPlain,
+  linux: codexPlain,
+  windows: () => npmCommand('codex', ['@openai', 'codex']) ?? codexPlain()
+};
 
 export const nativeCommand = (agent: 'claude' | 'codex'): [string, string[]] =>
-  agent === 'claude'
-    ? claudeCommand()
-    : currentPlatform() === 'win32'
-      ? (npmCommand('codex', ['@openai', 'codex']) ?? ['codex', []])
-      : ['codex', []];
+  agent === 'claude' ? claudeCommand() : CODEX[currentSystem() ?? 'linux']();
 export { nativeProjectEnv as nativeEnv } from '../run-env-allow.ts';
 export async function projectFolder(path: string) {
   if (!isAbsolute(path)) throw new Error('Choose an absolute project folder.');

@@ -48,9 +48,8 @@ import {
 import { heldWordsFor, upstream } from './access.ts';
 import type { McpServer } from './launch.ts';
 import { ODD_META } from './google/http.ts';
+import { GATEWAY_PATH } from '@oddboro/ledger/owner-key';
 import { postalTools, postalArguments } from './postal.ts';
-
-export const GATEWAY_PATH = '/api/gateway';
 
 /**
  * One outside tool a run holds, its connection made on first use and kept for

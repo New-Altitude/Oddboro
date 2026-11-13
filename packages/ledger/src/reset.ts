@@ -1,8 +1,8 @@
 // Start the office over, as if this Mac had never had one, so the next visit
-// is a new owner's first. Nothing is deleted: the office's own database, the
-// staff's homes, the threads' folders and the office's notes move into a
-// dated folder under ~/.oddboro/backups, and .env is copied there before its
-// office settings are cleared. A database .env named stays as it was, just no longer used.
+// is a new owner's first. Nothing is deleted: each entry of the office's
+// folder that OFFICE_ENTRIES (home.ts) marks 'move' goes into a dated folder
+// under ~/.oddboro/backups, and .env is copied there before its office
+// settings are cleared. A database .env named stays as it was, just no longer used.
 // The files in data/ stay where they are. Asks for the word "reset"
 // before it moves anything.
 //
@@ -11,13 +11,13 @@ import { copyFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { ENV_FILE, readEnv, writeEnv } from './env.ts';
-import { home } from './home.ts';
+import { home, OFFICE_ENTRIES } from './home.ts';
 import { stopServiceSync } from './platform.ts';
 
 const HOME = home();
-// Thread folders go with the database that numbers them, so a new office
-// never reuses an id over an old thread's files.
-const MOVED = ['db', 'staff', 'threads', 'office'].filter((d) => existsSync(join(HOME, d)));
+const MOVED = Object.entries(OFFICE_ENTRIES)
+  .filter(([name, entry]) => entry.reset === 'move' && existsSync(join(HOME, name)))
+  .map(([name]) => name);
 const CLEARED = [
   'DATABASE_URL',
   'POSTGRES_PASSWORD',

@@ -23,6 +23,7 @@ import {
 import { connect } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { provesOffice } from '../../../packages/ledger/src/office-proof.ts';
 
 export const WIN = process.platform === 'win32';
 export const MAC = process.platform === 'darwin';
@@ -30,6 +31,8 @@ export const LINUX = process.platform === 'linux';
 export const PORT = 4590;
 export const DB_PORT = 54590;
 export const BASE = `http://127.0.0.1:${PORT}`;
+/** The office's entry in the staged server, the file the app runs (`ENTRY` in server.rs). */
+export const OFFICE_ENTRY = 'apps/office/start.js';
 // A release build installs any newer version before its server starts. An
 // update address that refuses at once keeps a run on the build it tests.
 const NO_UPDATES = 'https://127.0.0.1:9/latest.json';
@@ -83,26 +86,77 @@ export async function until<T>(
   throw new Error(`no ${what} within ${secs} s`);
 }
 
-export async function getJson<T>(path: string, secs = 20): Promise<T> {
-  const r = await fetch(BASE + path, { signal: AbortSignal.timeout(secs * 1000) });
-  if (!r.ok) throw new Error(`GET ${path}: ${r.status}`);
-  return (await r.json()) as T;
+// The office answers only its owner's key, as a cookie named by its port. Like
+// the app's shell, this script writes out the key file's name and the
+// cookie's name itself, since it imports only Node's own modules and the
+// prover, which does too;
+// apps/office/src/lib/server/desktop-names.test.ts holds them to the office's.
+const OWNER_KEY_FILE = 'owner-key';
+const OWNER_COOKIE = `oddboro-owner-${PORT}`;
+
+/** Each run's key that the office at the run's port proved it holds. */
+const proven = new WeakMap<Run, string>();
+
+/**
+ * The owner's key from the run's home, once the office at `base` proved, in
+ * this run, that it holds it. Anything else on the port would otherwise get
+ * the key. Undefined when the home has no key file: an app older than the key
+ * never makes one and is asked without it, and a newer office makes the file
+ * before it answers. Rejects when what answers is not that office.
+ */
+export async function provenKey(r: Run, base: string): Promise<string | undefined> {
+  const file = join(r.home, OWNER_KEY_FILE);
+  const key = existsSync(file) ? readFileSync(file, 'utf8').trim() : '';
+  if (!key) return undefined;
+  if (proven.get(r) === key) return key;
+  if (!(await provesOffice(base, key, 'direct')))
+    throw new Error(`what answers at ${base} is not the office whose key is in ${r.home}`);
+  proven.set(r, key);
+  return key;
+}
+
+/**
+ * Every request to the office this run started, with its owner's key once
+ * the office proved it holds it (`provenKey`), and with none for an app older
+ * than the key. The error names the home, never the key. `withKey` false
+ * sends none, for the checks that the office refuses a request without it.
+ */
+export async function officeFetch(
+  r: Run,
+  path: string,
+  init: { method?: string; headers?: Record<string, string>; body?: string } = {},
+  secs = 20,
+  withKey = true
+): Promise<Response> {
+  const key = withKey ? await provenKey(r, BASE) : undefined;
+  return fetch(BASE + path, {
+    ...init,
+    headers: key ? { ...init.headers, cookie: `${OWNER_COOKIE}=${key}` } : init.headers,
+    signal: AbortSignal.timeout(secs * 1000)
+  });
+}
+
+export async function getJson<T>(r: Run, path: string, secs = 20): Promise<T> {
+  const res = await officeFetch(r, path, {}, secs);
+  if (!res.ok) throw new Error(`GET ${path}: ${res.status}`);
+  return (await res.json()) as T;
 }
 
 export async function send(
+  r: Run,
   method: string,
   path: string,
   headers: Record<string, string>,
   body?: unknown,
   secs = 20
 ): Promise<{ status: number; text: string }> {
-  const r = await fetch(BASE + path, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(secs * 1000)
-  });
-  return { status: r.status, text: (await r.text()).slice(0, 200) };
+  const res = await officeFetch(
+    r,
+    path,
+    { method, headers, body: body === undefined ? undefined : JSON.stringify(body) },
+    secs
+  );
+  return { status: res.status, text: (await res.text()).slice(0, 200) };
 }
 
 /** What the office's own page sends with a write. WebKit before macOS 13.3 sends no Sec-Fetch-Site. */
@@ -169,16 +223,18 @@ export function shellPids(): number[] {
 }
 
 function officeNodes(): number[] {
+  // In the Windows pattern each `/` becomes a dot, which matches the
+  // command line's backslash.
   if (WIN)
     return ps(
-      `@(Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -match 'office.build.index\\.js' }).ProcessId -join ' '`
+      `@(Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -match '${OFFICE_ENTRY.replaceAll('/', '.')}' }).ProcessId -join ' '`
     )
       .split(/\s+/)
       .filter(Boolean)
       .map(Number);
   return sh('ps', ['-eo', 'pid=,args='])
     .out.split('\n')
-    .filter((l) => l.includes('apps/office/build/index.js'))
+    .filter((l) => l.includes(OFFICE_ENTRY))
     .map((l) => Number(l.trim().split(/\s+/)[0]));
 }
 
@@ -401,7 +457,8 @@ export async function ready(app: ChildProcess, r: Run, secs = 120): Promise<numb
   const started = Date.now();
   let lookForDialog = 30_000;
   while (Date.now() - started < secs * 1000) {
-    const answered = await fetch(`${BASE}/api/update`, { signal: AbortSignal.timeout(2000) }).then(
+    // Not up yet, or not proven to be the office, rejects or is refused.
+    const answered = await officeFetch(r, '/api/update', {}, 2).then(
       (res) => res.ok,
       () => false
     );

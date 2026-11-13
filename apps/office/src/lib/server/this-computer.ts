@@ -1,6 +1,6 @@
 // Whether a request comes from this computer, the office's first rule (why it
 // reads X-Forwarded-For is in owner-page.ts). Two doors ask it: `guardOffice`
-// for every route, and under `vite dev` the `onlyThisComputer` plugin in
+// for every route, and under `vite dev` the `ownerOnly` plugin in
 // vite.config.ts, which runs before Vite's own routes and its live-reload
 // websocket. The config loads this file, so it imports only `node:net`.
 import { isIPv4 } from 'node:net';

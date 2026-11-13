@@ -7,6 +7,7 @@
 
 mod diagnostics;
 mod env;
+mod proof;
 mod secrets;
 mod server;
 mod update;
@@ -33,6 +34,10 @@ const LOADING: &str = "loading";
 /// is broken.
 const NO_NODE: &str = "Oddboro cannot find its copy of Node. Reinstall Oddboro.";
 const NO_SERVER: &str = "Oddboro cannot find the office server. Reinstall Oddboro.";
+/// The query parameter that hands the office its owner's key. The office
+/// answers with a cookie and the same address without it, so the page keeps
+/// the key and the address bar drops it.
+const OWNER_PARAM: &str = "oddboro-key";
 
 /// Why the shell quit, as its exit code, so a script can tell without the
 /// dialog the owner saw. The dialog's words go to the log too (`alert`).
@@ -134,9 +139,18 @@ fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
             "Oddboro {version} ({target}) opening: pid {pid}, {opens}, home {home}, webview {webview}"
         ),
     );
+    // That server gets the key only once it proves it is the office, so it
+    // must be on this computer's loopback.
     if let Some(url) = server_url {
         match Url::parse(&url) {
-            Ok(url) => open_main(app, &url),
+            Ok(url) => match proof::proven_key(&env::office_home(), &url) {
+                Some(key) => open_main(app, &url, &key),
+                None => fail(
+                    app,
+                    exit::BAD_URL,
+                    "ODDBORO_SERVER_URL did not prove it is this office. It must be an http address on 127.0.0.1, [::1] or a name for them, where the office of ODDBORO_HOME answers.",
+                ),
+            },
             Err(e) => fail(
                 app,
                 exit::BAD_URL,
@@ -200,7 +214,7 @@ fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
         log: server.log.clone(),
         show: show_updating,
     });
-    if let Err(why) = server.supervise(|| open_main(app, &url)) {
+    if let Err(why) = server.supervise(&url, |key| open_main(app, &url, key)) {
         if let Some(d) = diagnostics {
             d.gave_up(&why);
         }
@@ -298,21 +312,34 @@ fn loading(app: &AppHandle, updating: &str) {
         .build();
 }
 
-/// Opens the office in the main window, or reloads it after a restart.
-fn open_main(app: &AppHandle, url: &Url) {
+/// Opens the office in the main window, or reloads it after a restart, with
+/// `key`, which the office at `url` has just proven it holds
+/// (`proof::proven_key`).
+fn open_main(app: &AppHandle, url: &Url, key: &str) {
+    let opening = with_owner_key(url, key);
     if let Some(window) = app.get_webview_window(MAIN) {
-        let _ = window.navigate(url.clone());
+        let _ = window.navigate(opening);
         return;
     }
     let home = url.clone();
-    let built = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::External(url.clone()))
+    let new_window_home = url.clone();
+    let built = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::External(opening))
         .title("Oddboro")
         .inner_size(1280.0, 820.0)
         .min_inner_size(960.0, 600.0)
         .center()
         .on_navigation(move |to| stay_or_open(&home, to))
-        .on_new_window(|to, _| {
-            open_in_browser(&to);
+        .on_new_window(move |to, _| {
+            // The default browser lacks this window's cookie, so an office
+            // address carries the key, proven as each window opens: the
+            // office may have stopped since the window opened, and something
+            // else taken its port. The proof is a request, so it runs off the
+            // window's thread.
+            let home = new_window_home.clone();
+            thread::spawn(move || {
+                let key = || proof::proven_key(&env::office_home(), &home);
+                open_in_browser(&browser_url(&home, &to, key));
+            });
             NewWindowResponse::Deny
         })
         // The window's side of a start, for the log: the page itself says it
@@ -321,7 +348,7 @@ fn open_main(app: &AppHandle, url: &Url) {
             if matches!(payload.event(), PageLoadEvent::Finished) {
                 server::note(
                     &env::log_file(),
-                    &format!("office page loaded: {}", payload.url()),
+                    &format!("office page loaded: {}", without_owner_key(payload.url())),
                 );
             }
         })
@@ -348,6 +375,48 @@ fn stay_or_open(home: &Url, to: &Url) -> bool {
             false
         }
         _ => true,
+    }
+}
+
+/// `url` with the owner's key added, and the rest of its query kept.
+fn with_owner_key(url: &Url, key: &str) -> Url {
+    let mut keyed = url.clone();
+    keyed.query_pairs_mut().append_pair(OWNER_PARAM, key);
+    keyed
+}
+
+/// `url` with the owner's key taken out, and the rest of it kept. The log
+/// sits outside the office's folder, and a page the office refuses keeps the
+/// key in its address.
+fn without_owner_key(url: &Url) -> Url {
+    let pairs: Vec<_> = url.query_pairs().collect();
+    let kept: Vec<_> = pairs
+        .iter()
+        .filter(|(name, _)| name != OWNER_PARAM)
+        .collect();
+    // Writing the pairs back can change how they are escaped, so an address
+    // without the key stays exactly as it came.
+    if kept.len() == pairs.len() {
+        return url.clone();
+    }
+    let mut plain = url.clone();
+    plain.set_query(None);
+    if !kept.is_empty() {
+        plain.query_pairs_mut().extend_pairs(kept);
+    }
+    plain
+}
+
+/// What a new window opens in the default browser: an address on the
+/// office's own origin carries the key `proven_key` gives, and any other site
+/// never sees it, nor is the office asked for a proof.
+fn browser_url(home: &Url, to: &Url, proven_key: impl FnOnce() -> Option<String>) -> Url {
+    if to.origin() != home.origin() {
+        return to.clone();
+    }
+    match proven_key() {
+        Some(key) => with_owner_key(to, &key),
+        None => to.clone(),
     }
 }
 
@@ -500,7 +569,67 @@ fn opening(server_url: Option<&str>, port: u16) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::opening;
+    use super::*;
+
+    fn url(text: &str) -> Url {
+        Url::parse(text).expect("a test URL parses")
+    }
+
+    #[test]
+    fn the_office_opens_with_its_key_and_another_site_never_gets_it() {
+        let home = url("http://127.0.0.1:4500");
+        assert_eq!(
+            with_owner_key(&home, "k").as_str(),
+            "http://127.0.0.1:4500/?oddboro-key=k"
+        );
+        assert_eq!(
+            browser_url(
+                &home,
+                &url("http://127.0.0.1:4500/files/a?download=1#top"),
+                || Some("k".to_string())
+            )
+            .as_str(),
+            "http://127.0.0.1:4500/files/a?download=1&oddboro-key=k#top"
+        );
+        for elsewhere in [
+            "https://example.com/files/a?download=1",
+            "http://127.0.0.1:4501/",
+            "http://localhost:4500/",
+            "https://127.0.0.1:4500/",
+            "mailto:owner@example.com",
+        ] {
+            let to = url(elsewhere);
+            let asked = || panic!("{elsewhere} asked the office for a proof");
+            assert_eq!(browser_url(&home, &to, asked), to, "{elsewhere}");
+        }
+        let office = url("http://127.0.0.1:4500/files/a");
+        // An office that did not prove itself gets the address alone.
+        assert_eq!(browser_url(&home, &office, || None), office);
+    }
+
+    #[test]
+    fn a_logged_address_loses_the_key_and_keeps_everything_else() {
+        assert_eq!(
+            without_owner_key(&url(
+                "http://127.0.0.1:4500/files/a?download=1&oddboro-key=k&view=list#top"
+            ))
+            .as_str(),
+            "http://127.0.0.1:4500/files/a?download=1&view=list#top"
+        );
+        assert_eq!(
+            without_owner_key(&url("http://127.0.0.1:4500/?oddboro-key=k")).as_str(),
+            "http://127.0.0.1:4500/"
+        );
+        let home = url("http://127.0.0.1:4500/files/a?download=1#top");
+        assert_eq!(without_owner_key(&with_owner_key(&home, "k")), home);
+        for plain in [
+            "http://127.0.0.1:4500/",
+            "http://127.0.0.1:4500/files/a?download=1#top",
+            "http://127.0.0.1:4500/?q=a%20b",
+        ] {
+            assert_eq!(without_owner_key(&url(plain)).as_str(), plain, "{plain}");
+        }
+    }
 
     #[test]
     fn the_launch_line_names_what_the_shell_opens() {

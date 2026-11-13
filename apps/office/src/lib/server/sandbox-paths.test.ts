@@ -54,12 +54,14 @@ const PASSED: SandboxPaths = {
   ],
   grokShut: ['/Library', '/tmp', '/var'],
   codexReads: ['/Library/Developer/CommandLineTools', '/private/var/db/xcode_select_link'],
-  opensslConf: '/System/Library/OpenSSL/openssl.cnf'
+  opensslConf: '/System/Library/OpenSSL/openssl.cnf',
+  codexSelfShut: [],
+  codexNoAgentsDoc: false
 };
 
 /** Where a system passes other than the Mac's values, measured there. */
 const MEASURED: Partial<Record<NodeJS.Platform, Partial<SandboxPaths>>> = {
-  linux: { grokShut: ['/Library'] }
+  linux: { grokShut: ['/Library'], codexSelfShut: ['.codex', '.agents'], codexNoAgentsDoc: true }
 };
 
 for (const platform of ['linux', 'win32'] as const)

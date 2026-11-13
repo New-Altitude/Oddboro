@@ -1,10 +1,11 @@
 //! The office server: Node running the SvelteKit build. The shell starts it,
-//! waits for it to answer, restarts it when it dies, and stops it on quit.
+//! waits until it proves it is the office (`proof.rs`), restarts it when it
+//! dies, and stops it on quit.
 
 use std::collections::VecDeque;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
-use std::net::{SocketAddr, TcpStream};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering::SeqCst};
@@ -12,8 +13,12 @@ use std::sync::{Condvar, Mutex};
 use std::thread::{self, sleep};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use tauri::Url;
+
+use crate::proof;
+
 /// The server's entry point, relative to the staged code.
-pub const ENTRY: &str = "apps/office/build/index.js";
+pub const ENTRY: &str = "apps/office/start.js";
 
 const READY_TIMEOUT: Duration = Duration::from_secs(90);
 const STOP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -96,8 +101,10 @@ impl GaveUp {
     }
 }
 
+#[derive(Debug, PartialEq)]
 enum Ready {
-    Answered,
+    /// The office proved itself at its address, and this is its key.
+    Proven(String),
     Exited(ExitStatus),
     TimedOut,
 }
@@ -107,10 +114,10 @@ impl Server {
         format!("http://127.0.0.1:{}", self.port)
     }
 
-    /// Runs Node until the shell quits. Calls `on_ready` each time the server
-    /// answers, the first time and after every restart. Returns why when it
-    /// gives up.
-    pub fn supervise(&self, on_ready: impl Fn()) -> Result<(), GaveUp> {
+    /// Runs Node until the shell quits. Calls `on_ready` with the owner's key
+    /// each time the office at `url` proves it holds that key, the first time
+    /// and after every restart. Returns why when it gives up.
+    pub fn supervise(&self, url: &Url, on_ready: impl Fn(&str)) -> Result<(), GaveUp> {
         let mut restarts: VecDeque<Instant> = VecDeque::new();
         loop {
             let mut child = {
@@ -122,9 +129,10 @@ impl Server {
             };
             note(&self.log, &format!("started node, pid {}", child.id()));
 
-            let status = match wait_ready(&mut child, self.port) {
-                Ready::Answered => {
-                    on_ready();
+            let deadline = Instant::now() + READY_TIMEOUT;
+            let status = match wait_ready(&mut child, &self.home, url, deadline) {
+                Ready::Proven(key) => {
+                    on_ready(&key);
                     child.wait()
                 }
                 Ready::Exited(status) => Ok(status),
@@ -235,10 +243,18 @@ impl Server {
     }
 }
 
-/// True when anything listens on the port.
+/// True when anything listens on the port at either loopback address. The
+/// office holds both, so a program on [::1] alone stops it as surely as one on
+/// 127.0.0.1.
 pub fn port_taken(port: u16) -> bool {
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_ok()
+    [
+        IpAddr::from([127, 0, 0, 1]),
+        IpAddr::from(Ipv6Addr::LOCALHOST),
+    ]
+    .into_iter()
+    .any(|ip| {
+        TcpStream::connect_timeout(&SocketAddr::new(ip, port), Duration::from_millis(500)).is_ok()
+    })
 }
 
 /// Asks the shell to quit: Node is asked to go, gets up to 10 seconds, and is
@@ -303,33 +319,20 @@ pub fn on_quit_signal(quit: impl FnOnce() + Send + 'static) {
 #[cfg(windows)]
 pub fn on_quit_signal(_quit: impl FnOnce() + Send + 'static) {}
 
-fn wait_ready(child: &mut Child, port: u16) -> Ready {
-    let deadline = Instant::now() + READY_TIMEOUT;
+/// Waits until the office at `url` proves it holds the key in `home`. Any
+/// reply at all is not enough: a program that took the port while Node was
+/// starting would answer too, and the window opens with the key.
+fn wait_ready(child: &mut Child, home: &Path, url: &Url, deadline: Instant) -> Ready {
     while Instant::now() < deadline {
         if let Ok(Some(status)) = child.try_wait() {
             return Ready::Exited(status);
         }
-        if answers_http(port) {
-            return Ready::Answered;
+        if let Some(key) = proof::proven_key(home, url) {
+            return Ready::Proven(key);
         }
         sleep(Duration::from_millis(500));
     }
     Ready::TimedOut
-}
-
-/// True when `GET /` gets any HTTP response at all.
-fn answers_http(port: u16) -> bool {
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(500)) else {
-        return false;
-    };
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
-    let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
-    let request = format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
-    let mut head = [0u8; 5];
-    stream.write_all(request.as_bytes()).is_ok()
-        && stream.read_exact(&mut head).is_ok()
-        && &head == b"HTTP/"
 }
 
 /// Asked to go, up to 10 seconds, then killed, for a child this thread owns.
@@ -673,6 +676,53 @@ mod tests {
             Route::Notify("Rowan", "The report is ready")
         );
         assert_eq!(route("listening on 127.0.0.1:4500"), Route::Log);
+    }
+
+    #[test]
+    fn a_port_held_on_ipv6_loopback_alone_is_taken() {
+        let Ok(held) = std::net::TcpListener::bind((Ipv6Addr::LOCALHOST, 0)) else {
+            // A system with no IPv6 loopback: the office runs on 127.0.0.1 alone there.
+            return;
+        };
+        let port = held.local_addr().unwrap().port();
+        assert!(port_taken(port));
+        drop(held);
+        assert!(!port_taken(port));
+    }
+
+    /// A child that runs until killed, standing in for Node. Unix only: the
+    /// readiness loop is the same on Windows, and `sleep` is not.
+    #[cfg(unix)]
+    fn idle_child() -> Child {
+        Command::new("sleep").arg("30").spawn().unwrap()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_squatter_that_answers_the_port_never_opens_the_window_with_the_key() {
+        use crate::proof::stand_in::{home, listen, office, saw_no_key, KEY};
+        let home = home("ready", Some(KEY));
+        let v4 = IpAddr::from([127, 0, 0, 1]);
+        let (port, seen) = listen(v4, 0, |_| "HTTP/1.1 200 OK\r\n\r\nhello".into()).unwrap();
+        let url = Url::parse(&format!("http://127.0.0.1:{port}")).unwrap();
+        let mut child = idle_child();
+        let deadline = Instant::now() + Duration::from_millis(1500);
+        let ready = wait_ready(&mut child, &home, &url, deadline);
+        let _ = child.kill();
+        let _ = child.wait();
+        // The shell then gives up as for an office that never answered.
+        assert_eq!(ready, Ready::TimedOut);
+        assert!(!seen.lock().unwrap().is_empty(), "the squatter was asked");
+        saw_no_key(&seen);
+
+        let (port, _) = listen(v4, 0, office).unwrap();
+        let url = Url::parse(&format!("http://127.0.0.1:{port}")).unwrap();
+        let mut child = idle_child();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let ready = wait_ready(&mut child, &home, &url, deadline);
+        let _ = child.kill();
+        let _ = child.wait();
+        assert_eq!(ready, Ready::Proven(KEY.to_string()));
     }
 
     #[test]

@@ -7,7 +7,14 @@ import { rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { PAGE, recorder, sender, tempOffice, type Route } from './diagnostics-harness.ts';
+// `page` below is the root page's module, so the harness's goes by another name.
+import {
+  page as ownerPage,
+  recorder,
+  sender,
+  tempOffice,
+  type Route
+} from './diagnostics-harness.ts';
 
 const door = await recorder();
 const { folder } = tempOffice('diagnostics-unset');
@@ -54,7 +61,7 @@ test('a build with no address sends nothing and never asks the owner', async () 
   const relayed = await sender(hooks.handle)({
     route: '/api/diagnostics/envelope',
     method: 'POST',
-    headers: { ...PAGE, 'content-type': 'application/x-sentry-envelope' },
+    headers: { ...(await ownerPage()), 'content-type': 'application/x-sentry-envelope' },
     body: `${header}\n${JSON.stringify({ type: 'event' })}\n${event}\n`,
     // Typed for its own route's event, which is the one the harness builds.
     resolve: relayRoute.POST as Route

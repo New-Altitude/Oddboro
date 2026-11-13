@@ -2,7 +2,6 @@
 // the database and the optional helpers. `npm run setup` walks the owner
 // through these, and the office's Setup window shows them again. Nothing here
 // imports db.ts, so it runs before there is a database to connect to.
-import { execFile } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { release } from 'node:os';
 import postgres from 'postgres';
@@ -12,9 +11,12 @@ import {
   WINDOWS,
   claudeCommand,
   currentPlatform,
+  currentSystem,
+  probe,
   serviceInstalled
 } from './platform.ts';
 import { secretStore } from './secrets.ts';
+import { computerWord } from './system-words.ts';
 
 export type Check = {
   id: string;
@@ -27,12 +29,23 @@ export type Check = {
   fix?: string;
 };
 
-const run = (cmd: string, args: string[], timeout = 8000) =>
-  new Promise<{ ok: boolean; out: string }>((done) =>
-    execFile(cmd, args, { timeout }, (err, stdout, stderr) =>
-      done({ ok: !err, out: `${stdout}${stderr}`.trim() })
-    )
-  );
+/** Whether a command ran cleanly, and all it printed. */
+async function run(cmd: string, args: string[], timeout = 8000) {
+  const r = await probe(cmd, args, { timeout });
+  switch (r.status) {
+    case 'ok':
+      return { ok: true, out: `${r.out}${r.err}`.trim() };
+    case 'failed':
+      return { ok: false, out: `${r.out}${r.err}`.trim() };
+    case 'missing':
+    case 'timeout':
+      return { ok: false, out: '' };
+    default: {
+      const missed: never = r;
+      throw new Error(`${cmd} came back as ${JSON.stringify(missed)}`);
+    }
+  }
+}
 
 /**
  * The system the office runs on. It keeps its id "mac" because the setup card
@@ -212,7 +225,7 @@ export async function checkDocker(): Promise<Check> {
       name: 'Docker',
       state: 'optional',
       found: 'Not installed',
-      fix: 'Only needed to run Postgres on this Mac. Install Docker Desktop, or use hosted Postgres.'
+      fix: `Only needed to run Postgres on this ${computerWord(currentSystem())}. Install Docker Desktop, or use hosted Postgres.`
     };
   const info = await run('docker', ['info', '--format', '{{.ServerVersion}}']);
   return info.ok
@@ -222,7 +235,7 @@ export async function checkDocker(): Promise<Check> {
         name: 'Docker',
         state: 'optional',
         found: 'Installed, not running',
-        fix: 'Open Docker Desktop. Only needed to run Postgres on this Mac.'
+        fix: `Open Docker Desktop. Only needed to run Postgres on this ${computerWord(currentSystem())}.`
       };
 }
 
@@ -302,7 +315,7 @@ export async function checkDatabase(url: string): Promise<DatabaseReport> {
       `Could not connect to ${where.host}: ${lastError}`,
       /password|auth/i.test(lastError)
         ? 'Check the user and password in the connection string.'
-        : 'Check the host and port, and that the database accepts connections from this Mac.'
+        : `Check the host and port, and that the database accepts connections from this ${computerWord(currentSystem())}.`
     );
 
   const checks: Check[] = [];

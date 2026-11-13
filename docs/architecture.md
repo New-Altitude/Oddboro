@@ -41,9 +41,12 @@ Before writing a helper, use the one that already does the job.
 | ------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------ |
 | Write a ledger row (a decision, a hire, a run)          | `record()`                                            | `packages/ledger/src/office-ledger.ts`                 |
 | Find the office's folders, code and ports               | `home()`, `CODE`, `OFFICE_PORT`, `DATABASE_PORT`      | `packages/ledger/src/home.ts`                          |
+| Name a folder in the office's home, and what reset does | `OFFICE_ENTRIES`                                      | `packages/ledger/src/home.ts`                          |
 | Tell the office's time                                  | `zone()`                                              | `packages/ledger/src/time.ts`                          |
 | Read or write `.env`                                    | `readEnv()`, `writeEnv()`                             | `packages/ledger/src/env.ts`                           |
 | Read which system this is                               | `currentPlatform()`                                   | `packages/ledger/src/platform.ts`                      |
+| Run a one-shot command and read how it went             | `probe()`                                             | `packages/ledger/src/platform.ts`                      |
+| Say "Mac" or "computer" in what the office says         | `computerWord()`                                      | `packages/ledger/src/system-words.ts`                  |
 | Start Claude Code, or reach Windows                     | `claudeCommand()`, `powershell()`                     | `packages/ledger/src/platform.ts`                      |
 | Know an AI tool's name and systems                      | `AGENT_NAMES`, `AGENT_PLATFORMS`                      | `packages/ledger/src/agents.ts`                        |
 | Know whether a run gets a shell                         | `commandsHow()`, `runsCommands()`                     | `packages/ledger/src/agents.ts`                        |
@@ -58,7 +61,7 @@ Before writing a helper, use the one that already does the job.
 | Run as the office, not as an Odd                        | `runAsOffice()`                                       | `apps/office/src/lib/server/office-run.ts`             |
 | Give the page an Odd                                    | `toProfile()`                                         | `apps/office/src/lib/server/profile.ts`                |
 | Reach an outside tool's server, for the owner or a run  | `upstream()`, through the run's gateway               | `apps/office/src/lib/server/access.ts`                 |
-| Refuse a request from anywhere but the page             | `guardOffice`                                         | `apps/office/src/lib/server/owner-page.ts`             |
+| Refuse another computer, or a request without the key   | `guardOffice`                                         | `apps/office/src/lib/server/owner-page.ts`             |
 | Call the office from the page                           | `call()`, `stream()`, `follow()`                      | `apps/office/src/lib/ui/api.ts`                        |
 | Fail a lint guard                                       | `report()`                                            | `scripts/lib/files.ts`                                 |
 | Test against a database, the tool server, or the office | `pglite.ts`, `tool-server.ts`, `office-under-test.ts` | `packages/ledger/test/`, `apps/office/src/lib/server/` |

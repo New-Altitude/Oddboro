@@ -152,10 +152,20 @@ const turnedOn = (name: string, on: readonly OwnSwitch[]) =>
  * none of, so that system folder stays a warning. `.ssh` and `.aws` leave out
  * `config` on purpose, since a project may well hold one.
  *
+ * Linux keeps its browsers' and keyrings' secrets in folders of their own:
+ * Firefox's profiles in `.mozilla`, the desktop's keyrings in
+ * `.local/share/keyrings`, Chrome's certificate store in `.pki`, and the
+ * profiles of a browser installed by snap or Flatpak under `snap` and
+ * `.var/app`. A key may be a path under the home, written with `/`: the deny
+ * lists join the whole key to the home, and a folder is a store by its own
+ * name, the key's last segment. Only the keyrings are listed under `.local`,
+ * not `.local` itself, because `~/.local/bin` holds tools a run must reach. A
+ * folder that holds a store is still refused, so `~/.local` is.
+ *
  * Where the check stops (`inOrHoldsStore`): the folder, the folders above it
- * and one level down. A store deeper than that, or under another name, is not
- * found, and a `.ssh` with only custom-named keys and no `known_hosts` is given
- * anywhere but the top of the home.
+ * and each key's path below it. A store deeper than that, or under another
+ * name, is not found, and a `.ssh` with only custom-named keys and no
+ * `known_hosts` is given anywhere but the top of the home.
  */
 export const STORE_MARKS: Record<string, string[]> = {
   '.ssh': [
@@ -180,7 +190,12 @@ export const STORE_MARKS: Record<string, string[]> = {
   '.codex': ['auth.json', 'sessions'],
   '.gemini': ['oauth_creds.json', 'google_accounts.json'],
   '.docker': ['config.json'],
-  '.kube': ['config']
+  '.kube': ['config'],
+  '.mozilla': ['firefox'],
+  '.local/share/keyrings': ['login.keyring', 'user.keystore'],
+  '.pki': ['nssdb'],
+  snap: ['firefox', 'chromium'],
+  '.var/app': ['org.mozilla.firefox', 'com.google.Chrome', 'org.chromium.Chromium']
 };
 
 /**
@@ -212,18 +227,23 @@ export const FOLDER_REFUSED = {
 export const FOLDER_WARNING =
   "This folder is a whole drive or holds system files, so an Odd could reach everything inside it. We don't recommend giving it.";
 
-/** Whether `p` is a secret store by `STORE_MARKS`. */
+/**
+ * Whether `p` is a secret store by `STORE_MARKS`. By its own folder's name, a
+ * key's last segment, so `keyrings` anywhere is `.local/share/keyrings`.
+ */
 function marksStore(p: string): boolean {
   const name = basename(p).toLowerCase();
-  const marks = Object.entries(STORE_MARKS).find(([store]) => store.toLowerCase() === name)?.[1];
+  const marks = Object.entries(STORE_MARKS).find(
+    ([store]) => basename(store).toLowerCase() === name
+  )?.[1];
   return !!marks && existsSync(p) && (!marks.length || marks.some((m) => existsSync(join(p, m))));
 }
 
 /**
  * Whether `p` is in a secret store or holds one directly (`STORE_MARKS`).
- * Folders deeper than one level down are not looked at, so giving one is
- * never a walk of a whole drive, and a store renamed to another folder name
- * cannot be found at all.
+ * Below `p` only each key's own path is looked at, so giving one is never a
+ * walk of a whole drive, and a store renamed to another folder name cannot be
+ * found at all.
  */
 function inOrHoldsStore(p: string): boolean {
   for (let at = p; dirname(at) !== at; at = dirname(at)) if (marksStore(at)) return true;

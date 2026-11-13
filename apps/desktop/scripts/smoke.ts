@@ -52,13 +52,17 @@ import {
   logText,
   MAC,
   makeRun,
+  OFFICE_ENTRY,
+  officeFetch,
   type Page,
   pageHeaders,
   plist,
   PORT,
+  provenKey,
   ps,
   quit,
   ready,
+  type Run,
   run,
   screenshot,
   send,
@@ -138,31 +142,62 @@ function expectStatus(r: { status: number; text: string }, status: number): stri
 }
 
 /** The office's version: /api/health on a build that has it, /api/update before. */
-async function runningVersion(): Promise<{ version: string; health: boolean }> {
-  const health = await fetch(`${BASE}/api/health`).then(
-    (r) => (r.ok ? r.json() : undefined),
+async function runningVersion(r: Run): Promise<{ version: string; health: boolean }> {
+  const health = await officeFetch(r, '/api/health').then(
+    (res) => (res.ok ? res.json() : undefined),
     () => undefined
   );
   if (health) return { version: (health as { version: string }).version, health: true };
-  return { version: (await getJson<{ current: string }>('/api/update')).current, health: false };
+  return {
+    version: (await getJson<{ current: string }>(r, '/api/update')).current,
+    health: false
+  };
 }
 
 /** The checks every start of the office gets, the staged server's included. */
-async function officeChecks(expect: { version?: string; claude: boolean }): Promise<boolean> {
+async function officeChecks(
+  r: Run,
+  expect: { version?: string; claude: boolean }
+): Promise<boolean> {
   const found = await step('says the version it is', true, async () => {
-    const r = await runningVersion();
-    if (expect.version && r.version !== expect.version)
-      throw new Error(`${r.version}, not ${expect.version}`);
-    return r;
+    const running = await runningVersion(r);
+    if (expect.version && running.version !== expect.version)
+      throw new Error(`${running.version}, not ${expect.version}`);
+    return running;
   });
   await step('refuses a write with no Origin', true, async () =>
-    expectStatus(await send('DELETE', '/api/pokes/999999', {}), 403)
+    expectStatus(await send(r, 'DELETE', '/api/pokes/999999', {}), 403)
   );
   await step('takes a write shaped as the page sends it, with Sec-Fetch-Site', true, async () =>
-    expectStatus(await send('DELETE', '/api/pokes/999999', pageHeaders(true)), 404)
+    expectStatus(await send(r, 'DELETE', '/api/pokes/999999', pageHeaders(true)), 404)
   );
   await step('takes it with Origin only, as older WebKit sends it', true, async () =>
-    expectStatus(await send('DELETE', '/api/pokes/999999', pageHeaders(false)), 404)
+    expectStatus(await send(r, 'DELETE', '/api/pokes/999999', pageHeaders(false)), 404)
+  );
+  // NEW-1673: the page's own headers are not enough without the owner's key.
+  const keyed = !!(await provenKey(r, BASE).catch(() => undefined));
+  const bare = async (headers: Record<string, string>) => {
+    const res = await officeFetch(r, '/api/pokes/999999', { method: 'DELETE', headers }, 20, false);
+    return { status: res.status, text: (await res.text()).slice(0, 200) };
+  };
+  await step('refuses a page-shaped write without the owner key', keyed, async () =>
+    expectStatus(await bare(pageHeaders(true)), 403)
+  );
+  await step('refuses a page-shaped write with a wrong key', keyed, async () =>
+    expectStatus(
+      await bare({ ...pageHeaders(true), cookie: `oddboro-owner-${PORT}=not-the-key` }),
+      403
+    )
+  );
+  await step("refuses another site's write, even with the key", keyed, async () =>
+    expectStatus(
+      await send(r, 'DELETE', '/api/pokes/999999', {
+        origin: 'http://evil.example',
+        'sec-fetch-site': 'cross-site',
+        'content-type': 'application/json'
+      }),
+      403
+    )
   );
   // The checks start programs (claude --version and others): 35 s on the arm64 Windows runner.
   await step(
@@ -170,6 +205,7 @@ async function officeChecks(expect: { version?: string; claude: boolean }): Prom
     true,
     async () => {
       const { checks } = await getJson<{ checks: { id: string; state: string; found: string }[] }>(
+        r,
         '/api/setup',
         90
       );
@@ -186,6 +222,7 @@ async function officeChecks(expect: { version?: string; claude: boolean }): Prom
   await step('onboards with a ready-made manager', true, async () =>
     expectStatus(
       await send(
+        r,
         'POST',
         '/api/onboarding',
         pageHeaders(true),
@@ -311,38 +348,35 @@ async function smokeStage(): Promise<void> {
   const node = existsSync(binaries)
     ? readdirSync(binaries).find((n) => n.startsWith('node-'))
     : undefined;
-  if (!existsSync(join(stage, 'apps', 'office', 'build', 'index.js')) || !node)
+  const entry = join(stage, OFFICE_ENTRY);
+  if (!existsSync(entry) || !node)
     throw new Error('No staged server: run node apps/desktop/scripts/stage.ts first');
   const r = makeRun(OUT);
   currentRun = r;
   const start = (): ChildProcess => {
     appendFileSync(r.log, `--- start at ${new Date().toISOString()}\n`);
-    const server = spawn(
-      join(binaries, node),
-      [join(stage, 'apps', 'office', 'build', 'index.js')],
-      {
-        cwd: join(stage, 'apps', 'office'),
-        env: {
-          ...process.env,
-          ...r.env,
-          PORT: String(PORT),
-          HOST: '127.0.0.1',
-          ORIGIN: BASE,
-          ODDBORO_CODE: stage,
-          // No secret store: never the owner's Keychain or keyring.
-          ODDBORO_SECRETS: 'office',
-          // As in the app: the server quits when asked, and a versioned first
-          // start in an empty home makes its folder and records the version.
-          ODDBORO_APP: '1',
-          ODDBORO_VERSION: '0.0.0-smoke',
-          // So Sentry starts in the staged server. The home is new, so the owner
-          // has not said yes and nothing is sent; port 9 would take nothing anyway.
-          ODDBORO_DIAGNOSTICS_DSN: 'http://oddboro@127.0.0.1:9/oddboro/0'
-        },
-        // A held stdin, as the app gives it: the server quits when it closes.
-        stdio: ['pipe', 'pipe', 'pipe']
-      }
-    );
+    const server = spawn(join(binaries, node), [entry], {
+      cwd: join(stage, 'apps', 'office'),
+      env: {
+        ...process.env,
+        ...r.env,
+        PORT: String(PORT),
+        HOST: '127.0.0.1',
+        ORIGIN: BASE,
+        ODDBORO_CODE: stage,
+        // No secret store: never the owner's Keychain or keyring.
+        ODDBORO_SECRETS: 'office',
+        // As in the app: the server quits when asked, and a versioned first
+        // start in an empty home makes its folder and records the version.
+        ODDBORO_APP: '1',
+        ODDBORO_VERSION: '0.0.0-smoke',
+        // So Sentry starts in the staged server. The home is new, so the owner
+        // has not said yes and nothing is sent; port 9 would take nothing anyway.
+        ODDBORO_DIAGNOSTICS_DSN: 'http://oddboro@127.0.0.1:9/oddboro/0'
+      },
+      // A held stdin, as the app gives it: the server quits when it closes.
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
     server.stdout?.on('data', (d) => appendFileSync(r.log, d));
     server.stderr?.on('data', (d) => appendFileSync(r.log, d));
     return server;
@@ -355,9 +389,9 @@ async function smokeStage(): Promise<void> {
           throw new Error(
             `it exited ${server.exitCode}: ${readFileSync(r.log, 'utf8').slice(-800)}`
           );
-        return (await fetch(`${BASE}/api/update`, { signal: AbortSignal.timeout(2000) })).ok
-          ? true
-          : undefined;
+        // Not up yet, or not proven to be the office, rejects or is refused,
+        // and `until` reads that as not up yet.
+        return (await officeFetch(r, '/api/update', {}, 2)).ok ? true : undefined;
       },
       90
     );
@@ -382,9 +416,10 @@ async function smokeStage(): Promise<void> {
     await stop(server).catch(() => undefined);
     return;
   }
-  const health = await officeChecks({ version: '0.0.0-smoke', claude: false });
+  const health = await officeChecks(r, { version: '0.0.0-smoke', claude: false });
   await step('serves its health, with every startup step', health, async () => {
     const h = await getJson<{ steps: Record<string, number>; readyMs: number | null }>(
+      r,
       '/api/health'
     );
     if (!h.readyMs || !h.steps.tables) throw new Error(JSON.stringify(h));
@@ -392,11 +427,14 @@ async function smokeStage(): Promise<void> {
   });
   await step("takes the page's report for the log, and nobody else's", health, async () => {
     expectStatus(
-      await send('POST', '/api/client-log', pageHeaders(true), { kind: 'error', message: 'smoke' }),
+      await send(r, 'POST', '/api/client-log', pageHeaders(true), {
+        kind: 'error',
+        message: 'smoke'
+      }),
       200
     );
     expectStatus(
-      await send('POST', '/api/client-log', {}, { kind: 'error', message: 'smoke' }),
+      await send(r, 'POST', '/api/client-log', {}, { kind: 'error', message: 'smoke' }),
       403
     );
     await sleep(500);
@@ -408,7 +446,7 @@ async function smokeStage(): Promise<void> {
   server = start();
   await step('starts again with its data', true, async () => {
     await answered(server);
-    const setup = await getJson<{ welcomed?: boolean }>('/api/setup', 90);
+    const setup = await getJson<{ welcomed?: boolean }>(r, '/api/setup', 90);
     if (!setup.welcomed) throw new Error('it forgot the onboarding');
     return 'still onboarded';
   });
@@ -560,7 +598,7 @@ async function smokeApp(): Promise<void> {
       if (status !== 404) throw new Error(`got ${status}`);
       return status;
     });
-  const health = await officeChecks({ version: args.version, claude });
+  const health = await officeChecks(r, { version: args.version, claude });
   await step('the log has the window loading the page, and the page booting', health, async () => {
     const text = await until(
       'both lines',
@@ -576,7 +614,7 @@ async function smokeApp(): Promise<void> {
       .join(' / ');
   });
   await step('no errors in the page', health, async () => {
-    const h = await getJson<{ pageErrors: number; pages: number }>('/api/health');
+    const h = await getJson<{ pageErrors: number; pages: number }>(r, '/api/health');
     if (h.pageErrors)
       throw new Error(
         `${h.pageErrors} page error(s): ${logText(r)
@@ -599,7 +637,7 @@ async function smokeApp(): Promise<void> {
       const again = launch(exe, r);
       times.push(await ready(again, r));
       if (i === 1) {
-        const setup = await getJson<{ welcomed?: boolean }>('/api/setup', 90);
+        const setup = await getJson<{ welcomed?: boolean }>(r, '/api/setup', 90);
         if (!setup.welcomed) throw new Error('it forgot the onboarding');
       }
       await quit(again, r);

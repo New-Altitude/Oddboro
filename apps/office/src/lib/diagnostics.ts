@@ -146,6 +146,7 @@ export const ROUTE_IDS = {
   '/api/looks/parts': true,
   '/api/me/parts': true,
   '/api/office': true,
+  '/api/office-proof': true,
   '/api/office/design': true,
   '/api/office/layouts': true,
   '/api/office/layouts/[id]': true,

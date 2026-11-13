@@ -5,7 +5,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { rmSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { after, test } from 'node:test';
 import { recorder, tempOffice } from './diagnostics-harness.ts';
 
@@ -17,7 +16,8 @@ after(() => {
   rmSync(folder, { recursive: true, force: true });
 });
 
-const file = (p: string) => fileURLToPath(new URL(p, import.meta.url));
+// File: URLs, since the ESM loader, and so `--import`, takes no Windows drive path.
+const file = (p: string) => new URL(p, import.meta.url).href;
 const TIMERS = file('./diagnostics-idle-timers.ts');
 
 // One traced request and one error, 7 s on the office's clock for the SDK's
@@ -26,11 +26,12 @@ const TIMERS = file('./diagnostics-idle-timers.ts');
 const office = `
 const { pass, timers } = await import(${JSON.stringify(TIMERS)});
 await import(${JSON.stringify(file('../../instrumentation.server.ts'))});
-const { sender, throwing, traceHeader } = await import(${JSON.stringify(file('./diagnostics-harness.ts'))});
+const { page, sender, throwing, traceHeader } = await import(${JSON.stringify(file('./diagnostics-harness.ts'))});
 const hooks = await import(${JSON.stringify(file('../../hooks.server.ts'))});
 const send = sender(hooks.handle);
-await send({ route: '/api/ledger', headers: { 'sentry-trace': traceHeader() } });
-await send({ route: '/api/goals', resolve: throwing(() => new Error('T13 idle')) });
+const owner = await page();
+await send({ route: '/api/ledger', headers: { ...owner, 'sentry-trace': traceHeader() } });
+await send({ route: '/api/goals', headers: owner, resolve: throwing(() => new Error('T13 idle')) });
 await pass(7000);
 const before = timers().timeouts;
 await pass(15000);

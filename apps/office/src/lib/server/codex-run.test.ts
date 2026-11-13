@@ -72,7 +72,7 @@ const INSTRUCTIONS = [
 /**
  * Each instruction file in `w` shut, at the top and below, the path and
  * everything under it. On Linux Codex mounts the exact `.codex` and `.agents`
- * itself, so the office leaves those two paths to it (`SELF_SHUT` in codex.ts).
+ * itself, so the office leaves those two paths to it (`codexSelfShut` in sandbox-paths.ts).
  */
 const shut = (w: string, platform: NodeJS.Platform = 'darwin') =>
   Object.fromEntries(

@@ -17,7 +17,7 @@ import {
   ENVELOPE_PATH,
   items,
   ofType,
-  PAGE,
+  page,
   recorder,
   sender,
   tempOffice,
@@ -57,6 +57,8 @@ after(() => {
 });
 
 const send = sender(hooks.handle);
+/** What the owner's page sends, its key's cookie with it: only a request with the key reaches a route. */
+const PAGE = await page();
 
 const answer = (a: string) =>
   send({
@@ -71,10 +73,9 @@ const atDoor = (from = 0) => door.got.slice(from).filter((g) => g.url.startsWith
 const flush = () => Sentry.flush(5000);
 
 test('nothing leaves until the owner says yes, and an error arrives once they do', async () => {
-  const sampled = { 'sentry-trace': traceHeader() };
   await send({
     route: '/api/goals',
-    headers: sampled,
+    headers: { ...PAGE, 'sentry-trace': traceHeader() },
     resolve: throwing(() => fixedError('T1 before an answer'))
   });
   await flush();
@@ -83,7 +84,7 @@ test('nothing leaves until the owner says yes, and an error arrives once they do
   assert.equal((await answer('{"answer":"no"}')).status, 200);
   await send({
     route: '/api/goals',
-    headers: { 'sentry-trace': traceHeader() },
+    headers: { ...PAGE, 'sentry-trace': traceHeader() },
     resolve: throwing(() => fixedError('T1 after no'))
   });
   await flush();
@@ -92,7 +93,7 @@ test('nothing leaves until the owner says yes, and an error arrives once they do
   assert.equal((await answer('{"answer":"yes"}')).status, 200);
   await send({
     route: '/api/goals',
-    headers: { 'sentry-trace': traceHeader() },
+    headers: { ...PAGE, 'sentry-trace': traceHeader() },
     resolve: throwing(() => fixedError('T1 fixed message'))
   });
   await flush();
@@ -111,7 +112,13 @@ test('a report carries no IP, cookie, header, body, query string, hostname, user
     route: '/api/goals',
     method: 'POST',
     path: `/api/goals?code=${QUERY}`,
-    headers: { ...PAGE, cookie: `c=${COOKIE}`, 'x-custom': HEADER, 'sentry-trace': traceHeader() },
+    headers: {
+      ...PAGE,
+      // The test's own cookie joins the owner's: the page sends both.
+      cookie: `${PAGE.cookie}; c=${COOKIE}`,
+      'x-custom': HEADER,
+      'sentry-trace': traceHeader()
+    },
     body: BODY,
     resolve: throwing(() => new Error(`T2 failed in ${homedir()}`))
   });
@@ -124,7 +131,8 @@ test('a report carries no IP, cookie, header, body, query string, hostname, user
   });
   for (const g of got) {
     const bytes = g.url + g.body;
-    for (const mark of [COOKIE, HEADER, BODY, QUERY, userInfo().username, homedir()])
+    const key = PAGE.cookie.split('=')[1];
+    for (const mark of [COOKIE, key, HEADER, BODY, QUERY, userInfo().username, homedir()])
       assert.ok(!bytes.includes(mark), mark);
     // The system's own name and version are kept; a computer named after its
     // system (`cachyos`) shows there, and nowhere else.
@@ -146,6 +154,7 @@ test('turning reports off stops them at once, and on again starts them, with no 
     const from = door.got.length;
     await send({
       route: '/api/goals',
+      headers: PAGE,
       resolve: throwing(() => fixedError(`phase ${phase}`))
     });
     await flush();
@@ -187,13 +196,13 @@ const relay = (headers: Record<string, string>, resolve?: Route) =>
 test("a page report reaches the door through the office only after yes, under the office's own key", async () => {
   await answer('{"answer":"no"}');
   let from = door.got.length;
-  assert.equal((await relay({ 'sec-fetch-site': 'same-origin' })).status, 200);
+  assert.equal((await relay(PAGE)).status, 200);
   await flush();
   assert.equal(door.got.length - from, 0);
 
   await answer('{"answer":"yes"}');
   from = door.got.length;
-  assert.equal((await relay({ 'sec-fetch-site': 'same-origin' })).status, 200);
+  assert.equal((await relay(PAGE)).status, 200);
   await flush();
   const got = atDoor(from);
   assert.equal(got.length, 1);
@@ -206,7 +215,7 @@ test("a page report reaches the door through the office only after yes, under th
 test("every span container the door gets tells Sentry never to infer the owner's address", async () => {
   await answer('{"answer":"yes"}');
   const from = door.got.length;
-  await send({ route: '/api/ledger', headers: { 'sentry-trace': traceHeader() } });
+  await send({ route: '/api/ledger', headers: { ...PAGE, 'sentry-trace': traceHeader() } });
   const trace = randomBytes(16).toString('hex');
   const pageSpans = [
     { sent_at: new Date().toISOString(), trace: { trace_id: trace, public_key: 'page' } },
@@ -269,7 +278,7 @@ test('a request the guard refuses never reaches the relay or Sentry', async () =
   await flush();
   assert.equal(door.got.length - from, 0);
   // The same request from the page goes through.
-  assert.equal((await relay({ 'sec-fetch-site': 'same-origin' }, spy)).status, 200);
+  assert.equal((await relay(PAGE, spy)).status, 200);
 });
 
 test('the server never adds trace headers to a request it makes to another site', async () => {
@@ -277,7 +286,7 @@ test('the server never adds trace headers to a request it makes to another site'
   const from = door.got.length;
   await send({
     route: '/api/connectors',
-    headers: { 'sentry-trace': traceHeader() },
+    headers: { ...PAGE, 'sentry-trace': traceHeader() },
     resolve: async () => {
       await fetch(`http://127.0.0.1:${thirdParty.port}/elsewhere`);
       return new Response('ok');
@@ -310,9 +319,9 @@ test('event streams, terminal input, shell updates and the relay are never trace
   ];
   for (const id of quiet) {
     assert.ok(existsSync(join(routes, id, '+server.ts')), id);
-    await send({ route: id, headers: { 'sentry-trace': traceHeader() } });
+    await send({ route: id, headers: { ...PAGE, 'sentry-trace': traceHeader() } });
   }
-  await send({ route: '/api/ledger', headers: { 'sentry-trace': traceHeader() } });
+  await send({ route: '/api/ledger', headers: { ...PAGE, 'sentry-trace': traceHeader() } });
   await flush();
   await until(() => ofType(atDoor(from), 'span').length > 0);
   type Span = { name: string; attributes: Record<string, { value: unknown }> };
@@ -335,9 +344,8 @@ test('the page sends no span for each file it fetches, and keeps its own spans',
 
 test('an unhandled rejection still ends the server', async () => {
   const from = door.got.length;
-  const instrumentation = fileURLToPath(
-    new URL('../../instrumentation.server.ts', import.meta.url)
-  );
+  // A file: URL, since the ESM loader takes no Windows drive path.
+  const instrumentation = new URL('../../instrumentation.server.ts', import.meta.url).href;
   // Not spawnSync: the door runs in this process and must answer the child.
   const code = await new Promise<number | null>((done) => {
     const child = execFile(
@@ -378,7 +386,7 @@ async function heavyTrace(oversize?: number): Promise<{ got: Got[]; spans: SentS
   await send({
     route: '/api/staff/[id]',
     path: '/api/staff/paige',
-    headers: { 'sentry-trace': traceHeader() },
+    headers: { ...PAGE, 'sentry-trace': traceHeader() },
     resolve: () => {
       for (let i = 0; i < 999; i++) {
         const even = i % 2 === 0;

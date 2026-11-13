@@ -42,8 +42,8 @@ first: each call to it waits on the desk as at Draft, so a high-risk tool
 keeps needing a yes however far the owner trusts the Odd (decided
 2026-11-11). Revoking the grant or lowering the level ends it at
 the next run. A yes counts only from the
-owner's own page: the office refuses an action any other site sends it
-(decided 2026-11-04).
+owner's own page, which carries the owner's key: the office refuses a request
+without the key, and an action any other site sends it (decided 2026-11-11).
 
 ## 5. No commits or pushes without the owner saying so.
 

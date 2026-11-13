@@ -2,7 +2,7 @@
 
 The floor the owner watches, and the desk they work from. SvelteKit 3 with Svelte 5
 runes, PixiJS for the pixel-art floor, Tailwind for the page around it, and
-Postgres through `@oddboro/ledger`. Port 4500 on 127.0.0.1, or `ODDBORO_PORT`.
+Postgres through `@oddboro/ledger`. Port 4500 on 127.0.0.1 and [::1], or `ODDBORO_PORT`.
 
 `npm test` builds the sprites first when `packages/sprites/dist/meta.json` is
 missing, as on a fresh clone: hiring reads it.
@@ -631,7 +631,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    read or Can read and change, anywhere on the computer; `checkFolder`
    refuses the home folder and one that holds or sits in a secret store (at the
    home's top by name, anywhere else by what it holds, in the folder, the folders
-   above it and one level down), the office's
+   above it and each store's own marker path below it), the office's
    home or Oddboro's code, comparing real paths as the disk spells
    them (`realpathSync.native`), and one whose real path holds `*`, `?`, `[`
    or `]`, which Codex cannot take ("That folder's path has a character an
@@ -717,7 +717,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    from `commandsOnline`: with it on, Codex's commands reached the office's own
    API and database on this Mac). On Linux Codex itself mounts `.codex` and
    `.agents` read only at the top of each write folder, so those two exact paths
-   are left to it (`SELF_SHUT`), and no run reads an `AGENTS.md`
+   are left to it (`codexSelfShut` in `SANDBOX_PATHS`), and no run reads an `AGENTS.md`
    (`project_doc_max_bytes`), since a shut one failed the run's start. The office carries its files
    (`FILES_VIA_OFFICE`), so with Run commands off it has no shell. On Windows
    it never has one: Codex's own sandbox opened every Odd's folder to reads,
@@ -818,7 +818,9 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    `~/.aws`, `~/.gnupg`, `~/.config`, `~/Library`, `~/AppData`,
    `~/.claude.json`, `~/.google_workspace_mcp` (where
    that MCP server keeps its sign-ins for other apps on the Mac), `~/.grok`,
-   `~/.codex`, `~/.gemini`, `~/.docker` and `~/.kube`, everything
+   `~/.codex`, `~/.gemini`, `~/.docker` and `~/.kube`, and on Linux the browsers' and keyrings' folders
+   `~/.mozilla`, `~/.local/share/keyrings`, `~/.pki`, `~/snap` and `~/.var/app`,
+   everything
    in `~/.oddboro` besides `staff/` and `data/` (and `threads/<id>/` for a
    run on that thread), every other
    Odd's folder, and everything in `~/.claude` besides this run's sessions.
@@ -1445,7 +1447,7 @@ welcomed, the page loads the sample's empty lot (`currentOffice({ lot: true })`,
 the start panel, titled "{name}'s Lot" until the office stands on it. The
 command center's buttons and tabs appear there once the first run is over, so
 the owner meets the panel first. The cards: Your computer (`MacCard`, the checks
-from `/api/setup`, and Notifications: a test of the Mac's (`notifyMac` in `src/lib/server/notify.ts`, which macOS shows as Oddboro's in the app and as Script Editor's from the repo) with the way to System Settings if it does not show, and, outside the app, the browser's for the Desk; the owner moves on with Next), their name, Your AI (`AiCard`, item 18: a tile per tool, the picked one the office's tool, and its panel below: Claude Code's installs it through `/api/setup/claude` and is `ClaudeCard`, a Claude plan tab with the account Claude Code is signed in to, from `claude auth status`, and Sign in with Claude or Switch account, or an API key tab, with a model picker in both. On Claude Code, Sonnet cannot draw looks or design offices: `canDraw()` in `claude.ts` refuses them, and the later cards offer only the ready-made managers and Main Street; the model,
+from `/api/setup`, and Notifications: a test of the computer's (`notifyMac` in `src/lib/server/notify.ts`, which macOS shows as Oddboro's in the app and as Script Editor's from the repo) with that system's own steps if it does not show (`notify-help.ts`, shown by `NotifyHelp.svelte`: System Settings on a Mac, Settings on Windows, and on Linux a check that notifications are on and that the desktop has a notification service), and, outside the app, the browser's for the Desk; the owner moves on with Next), their name, Your AI (`AiCard`, item 18: a tile per tool, the picked one the office's tool, and its panel below: Claude Code's installs it through `/api/setup/claude` and is `ClaudeCard`, a Claude plan tab with the account Claude Code is signed in to, from `claude auth status`, and Sign in with Claude or Switch account, or an API key tab, with a model picker in both. On Claude Code, Sonnet cannot draw looks or design offices: `canDraw()` in `claude.ts` refuses them, and the later cards offer only the ready-made managers and Main Street; the model,
 or an API key kept in the keychain; `src/lib/server/claude.ts` passes both to
 every run. Next waits until the picked tool is signed in), the Office Manager (`ManagerCard`: four ready-made ones from
 `GET /api/onboarding`, or one described and drawn by `/api/looks` while the
@@ -1489,16 +1491,35 @@ falling back to `oddboro.localhost` where a network's DNS drops that answer.
 The desktop app (`ODDBORO_APP`) skips all of this: it opens the office in its own
 window, onboarding shows no address step, and it never touches Caddy.
 
-Caddy takes ports 80 and 443 and hands everything to the office on 4500
+Caddy takes ports 80 and 443 and hands everything to the office on its own port
+(`OFFICE_PORT`: 4500, or `ODDBORO_PORT`)
 (`src/lib/server/address.ts`, the Address row on the first card). With nothing on
 port 80 the office runs its own Caddy as `com.oddboro.caddy`, downloading it
 from Caddy's releases (checked against the published checksum) if the Mac has
 none. With the owner's Caddy on port 80 it adds two routes and a certificate
 policy through Caddy's admin API (127.0.0.1:2019, with an explicit origin, which
 that API wants), touches none of their files, and adds them again when the
-office starts and when a page loads (`keepAddress`). With anything else on port
-80 it stays at `:4500`; on Windows that is often http.sys, Windows' own web
-server. On Windows the office's own Caddy listens on 127.0.0.1 and [::1]
+office starts and when a page loads (`keepAddress`). Whether an address is
+this office is proven, never assumed, and the key never goes to it first:
+the office asks `/api/office-proof` there with a fresh nonce and checks the
+answer against its key. Caddy, the office's own or the owner's, sets a header
+holding a hash of the key on every request it hands the office, so an answer
+through Caddy differs from one straight from the office's port, and a program
+on port 80 that hands only the proof to the office fails. The office holds
+[::1] on its port as well as 127.0.0.1 (`holdIpv6Loopback` in the ledger, from
+`start.js` in a build and `ipv6Loopback` in `vite.config.ts` in dev), since
+`oddboro.localhost` reaches ::1 first and a program there could hand only the
+proof on. Something else on [::1] stops the office as on 127.0.0.1; a system
+with no IPv6 loopback runs it on 127.0.0.1 alone. The Caddyfile holds
+that hash, so the office writes it readable by the owner alone, and as it
+starts it rewrites it and restarts its Caddy when a new key changed it; in the
+owner's Caddy it replaces a route whose header is stale. With anything else on port
+80 it stays at the office's own port; on Windows that is often http.sys, Windows' own web
+server. Port 80 is looked at with `ss` on Linux, `lsof` on a Mac and
+PowerShell on Windows, each through `probe`. A look that fails, times out or
+finds its command missing gives `unchecked`, never free, since reading it as
+free would offer a Caddy that cannot start: the address then stays at the
+office's own port and the card says it could not look. On Windows the office's own Caddy listens on 127.0.0.1 and [::1]
 only (`ownCaddyfile`), so the firewall never asks. On a Mac it listens on
 every address, since a process the owner runs can bind a port under 1024
 only there (127.0.0.1 and ::1 were refused, measured), so other machines on
@@ -1510,19 +1531,22 @@ with the owner's password in the macOS dialog (Make it secure; Windows asks in
 its own dialog and adds it to the owner's list, with no admin), because a
 browser shows notifications only on a secure page. Firefox keeps its own trusted
 list, and the card says so to Firefox users. `npm run setup` opens the secure
-address when it answers and is trusted.
+address when it is trusted and the office proves itself there through Caddy.
 
 ## Who the office answers
 
-Other pages open in the owner's browser can send requests to the office too,
-so `guardOffice` (`src/lib/server/owner-page.ts`, the first step of the
-server's `handle` in `hooks.server.ts`, before Sentry's) checks every route
-and API request before the route sees it, in every mode. Files built into the
-page (scripts, styles, images) are served before the check. SvelteKit's own
-check stays on as well, for form posts and any action with no content type.
-In a release, whose port moves, the adapter takes the office's origin to be
-https, so that check refuses the owner's own http page. So the page's `call()`
-(`src/lib/ui/api.ts`) sends every action as JSON, body or not.
+Any program on the computer, and any page open in the owner's browser, can
+send requests to the office with whatever headers it likes. So the office
+answers only a request from this computer that carries the owner's key, but
+for a few exact routes that prove themselves another way. `guardOffice`
+(`src/lib/server/owner-page.ts`, the first step of the server's `handle` in
+`hooks.server.ts`, before Sentry's) checks every route and API request before
+the route sees it, in every mode. Files built into the page (scripts, styles,
+images) are served before the check. SvelteKit's own check stays on as well,
+for form posts and any action with no content type. In a release, whose port
+moves, the adapter takes the office's origin to be https, so that check
+refuses the owner's own http page. So the page's `call()` (`src/lib/ui/api.ts`)
+sends every action as JSON, body or not.
 
 1. The request must come from this computer (`fromThisComputer`): the
    connection's address and every address in X-Forwarded-For are loopback
@@ -1535,29 +1559,71 @@ https, so that check refuses the owner's own http page. So the page's `call()`
    rule is not for that. The built server serves the files built into the
    page before it. Under `vite dev`, which setup and the login service run,
    the same rule (`src/lib/server/this-computer.ts`) runs first in
-   `onlyThisComputer` (rule 6), so Vite's own routes and its live-reload
+   `ownerOnly` (rule 6), so Vite's own routes and its live-reload
    websocket refuse another machine too.
 2. The Host must be one of the office's names, whatever the port: 127.0.0.1,
    [::1], localhost, the addresses through Caddy (`HOSTS` in
    `src/lib/server/hosts.ts`) and the app's `ORIGIN`. A site that points its
    own name at 127.0.0.1 looks same-origin to the browser, so only the name
    gives it away. A route asked by any other name gets 403.
-3. Anything but GET, HEAD and OPTIONS must come from the owner's page
-   (`fromOwnerPage`): Sec-Fetch-Site says same-origin, or, with none, the
-   Origin names the Host asked, whatever the scheme, since through Caddy the
-   page is https and the office http. With neither, 403.
-4. The one other client is the app's shell, which reports updates to
-   `/api/update` with the token it passed the server (`fromShell` in
-   `src/lib/server/update.ts`).
-5. `/account/callback` and `/connect/callback` arrive as GETs from the
-   owner's browser, sent back by the service's sign-in page, so they pass
-   rule 3 with no Origin.
-6. Vite's dev server answers before the handle. `onlyThisComputer` in
-   `vite.config.ts`, the first plugin, asks rule 1 before Vite's routes and
-   its websocket: another machine gets 403, and its websocket is closed.
-   Vite also has its own route, `/__open-in-editor`, that opens a file in an
-   editor. `noEditorLaunch` refuses it with 403, always, this computer
-   included: nothing in the office uses it.
+3. The key is one file, `owner-key`, in the office's folder
+   (`@oddboro/ledger/owner-key`). The office makes it as it starts
+   (`init` in `hooks.server.ts`, and `ownerOnly` in dev). A key file that
+   holds no key stops the start with one line, saying to move it aside, and
+   no stack (`ownerKeyAtStart`). The owner's page
+   holds it as the cookie `oddboro-owner-<port>`, named by the office's port
+   since a browser scopes cookies by host, not port. A page gets the cookie by
+   opening any page once with `?oddboro-key=<key>`: the guard answers 303 to
+   the same address without it, setting the cookie. The app's shell
+   opens its window with it, and a new window on the office's own origin opens
+   in the browser with it. `npm run setup` opens the page with it, and its own
+   checks, and the office's own requests to itself, send the cookie, and so
+   does every request of the release smoke (`officeFetch` in
+   `apps/desktop/scripts/driver.ts`). A wrong key in the address is refused
+   like none. No caller sends the key to an address before the office proves,
+   in that run, that it answers there (rule 4's `/api/office-proof`):
+   setup proves each address it may open (`setupAddress` in
+   `packages/ledger/src/setup-address.ts`), the smoke proves its office once
+   a run, and the office's own look at its address sends no key at all.
+4. A request without the key, a read included, reaches only an exact exception
+   route (`EXCEPTION_ROUTES`, judged by `isExceptionPath` on the text the server
+   routes on; SvelteKit decodes that text before it routes, and no exception
+   route or route parameter matches a `%`, so the guard and the router read
+   it the same), each with its own proof, and only from this computer
+   (rule 1). `/api/update`
+   takes the shell's token (`fromShell` in `src/lib/server/update.ts`).
+   `/api/gateway/<id>` takes a run's token (`fromRun` in `gateway.ts`).
+   `/account/callback` and `/connect/callback` take GET or HEAD, sent back by
+   the service's sign-in page, proved by the sign-in's own state.
+   `/api/office-proof` takes GET or HEAD with a fresh nonce and answers a hash
+   of the key, the nonce and the listener it came through, and nothing else.
+   It is how a caller proves an address is this office before it sends the
+   key there (`provesOffice` in `@oddboro/ledger/office-proof`). Anything else
+   gets 403: a short line for an `/api/` path, a page saying how to open the
+   office for any other.
+5. With the key, anything but GET, HEAD and OPTIONS must also come from the
+   owner's page (`fromOwnerPage`), the second factor: a page on another
+   localhost port is same-site, so it carries the cookie too. Sec-Fetch-Site
+   says same-origin, or, with none, the Origin names the Host asked, whatever
+   the scheme, since through Caddy the page is https and the office http.
+   With neither, 403.
+6. In dev, Vite answers many requests before `handle` does: its files,
+   modules, `/@fs` and live-reload websocket. `ownerOnly` in `vite.config.ts`
+   is the first plugin, and applies rules 1 and 4 to them from the same
+   modules: another machine gets 403, and a websocket upgrade that is not
+   from this computer or has no key is closed.
+7. Vite's dev server has its own route, `/__open-in-editor`, that opens a file
+   in an editor and runs before the handle. `noEditorLaunch` in
+   `vite.config.ts` refuses it with 403, always, this computer included:
+   nothing in the office uses it.
+
+The key does not keep out every program on this computer. A program running
+as the owner can read it, as it can read the database beside it. And a
+browser scopes cookies by host, not by port. So once the browser holds the key
+for a name, it sends the key to whatever already holds, or later holds, port
+80 at that name, and any page can start that visit. https with a Secure cookie
+is the full fix, and a tracked follow-up. `npm run reset` moves the key aside,
+so the next start makes a new one.
 
 ## Diagnostics
 

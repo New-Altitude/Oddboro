@@ -10,7 +10,9 @@
 // happens however the app ends, Force Quit included. On a Mac it keeps its
 // secrets through the app's shell, over those same pipes (`useShellSecrets`).
 // Every route and API request passes `guardOffice` first: only from this
-// computer, at the office's own names, and actions only from the owner's page
+// computer, at the office's own names, then the owner's key (only an exact
+// exception route, with its own proof, takes a request without it), and
+// actions only from the owner's page
 // (`#lib/server/owner-page.ts`).
 // Files built into the page (scripts, styles, images) are served before it.
 // Then Sentry's handle, which traces the request when the owner said yes to diagnostics.
@@ -26,6 +28,7 @@ import { bringUpToDate } from '@oddboro/ledger/upgrade';
 import { keepAddress } from '#lib/server/address.ts';
 import { startFollowUps } from '#lib/server/follow-ups.ts';
 import { markReady, timed } from '#lib/server/health.ts';
+import { ownerKeyAtStart } from '#lib/server/owner-key-start.ts';
 import { stopRuns } from '#lib/server/staff.ts';
 import { startClock } from '#lib/server/jobs.ts';
 import { guardOffice } from '#lib/server/owner-page.ts';
@@ -47,6 +50,12 @@ if (process.env.ODDBORO_APP) {
 }
 
 export const init: ServerInit = async () => {
+  // First, so the owner's key exists before anything can ask for it. The app's
+  // shell waits for any answer from the office, then reads the key's file
+  // once, and in the app nothing else makes the file. In a release Kit runs
+  // this before the server listens. A key file it cannot use stops the start
+  // with one sentence saying what to do.
+  ownerKeyAtStart();
   console.log(
     `office: ${VERSION || 'development'} on ${currentPlatform()} ${release()} ${process.arch}, Node ${process.version}`
   );

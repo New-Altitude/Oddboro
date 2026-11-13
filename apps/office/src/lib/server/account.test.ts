@@ -19,24 +19,6 @@ const reads = { count: 0 };
 let storeAnswer: { ok: true } | { ok: false; problem: string } = { ok: true };
 /** When set, every write throws it, as a locked keyring's does. */
 let writeFails: Error | undefined;
-// The real module's other exports too, such as `useShellSecrets`, which the
-// office's server hooks import.
-const realSecrets = await import('@oddboro/ledger/secrets');
-mock.module('@oddboro/ledger/secrets', {
-  namedExports: {
-    ...realSecrets,
-    getSecret: (connector: string, name: string) => {
-      reads.count++;
-      return store.get(`${connector}:${name}`);
-    },
-    setSecret: (connector: string, name: string, value: string) => {
-      if (writeFails) throw writeFails;
-      store.set(`${connector}:${name}`, value);
-    },
-    deleteSecret: (connector: string, name: string) => store.delete(`${connector}:${name}`),
-    secretStore: () => storeAnswer
-  }
-});
 
 // Everything the office prints, for the check that no secret reaches a log.
 const printed: string[] = [];
@@ -72,6 +54,25 @@ Object.assign(process.env, {
   OLLAMA_URL: 'http://127.0.0.1:9',
   ODDBORO_ACCOUNT_SITE: `${fake.origin}/`
 });
+// The real module's other exports too, such as `useShellSecrets`, which the
+// office's server hooks import. Loaded after the settings above: secrets.ts
+// loads home.ts, which reads where the office is and its ports as it loads.
+const realSecrets = await import('@oddboro/ledger/secrets');
+mock.module('@oddboro/ledger/secrets', {
+  namedExports: {
+    ...realSecrets,
+    getSecret: (connector: string, name: string) => {
+      reads.count++;
+      return store.get(`${connector}:${name}`);
+    },
+    setSecret: (connector: string, name: string, value: string) => {
+      if (writeFails) throw writeFails;
+      store.set(`${connector}:${name}`, value);
+    },
+    deleteSecret: (connector: string, name: string) => store.delete(`${connector}:${name}`),
+    secretStore: () => storeAnswer
+  }
+});
 const { startLocalDatabase } = await import('@oddboro/ledger/local-db');
 const stopDatabase = await startLocalDatabase();
 const { bringUpToDate } = await import('@oddboro/ledger/upgrade');
@@ -83,7 +84,8 @@ const route = await import('../../routes/api/account/+server.ts');
 const callback = await import('../../routes/account/callback/+page.server.ts');
 const page = await import('../../routes/+page.server.ts');
 const hooks = await import('../../hooks.server.ts');
-const { PAGE, sender } = await import('./diagnostics-harness.ts');
+// `page` here is the root page's module, so the harness's goes by another name.
+const { page: ownerPage, sender } = await import('./diagnostics-harness.ts');
 const send = sender(hooks.handle);
 
 // The database keeps timers for its open connections from the first page
@@ -115,7 +117,7 @@ async function account(
   const r = await send({
     route: '/api/account',
     method,
-    headers: method === 'GET' ? {} : PAGE,
+    headers: await ownerPage(),
     resolve: async (e) => {
       try {
         const res = await (route[method] as Handler)(e);

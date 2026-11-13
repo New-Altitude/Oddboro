@@ -136,9 +136,6 @@ const FIRST_CONFIG = `# Oddboro's Codex home. Odds never read the owner's ~/.cod
   .map(([k, v]) => `${k} = ${toml(v)}`)
   .join('\n')}\n`;
 
-/** What Codex shuts itself at the top of each write folder on Linux (`filesystem`). */
-const SELF_SHUT = ['.codex', '.agents'];
-
 /** The one permission profile each run defines and uses. */
 const PROFILE = 'odd';
 
@@ -250,13 +247,12 @@ function developerReads(): string[] {
  * `codex sandbox` on 0.167.0). A deny on that exact path asks bubblewrap for
  * a file there too, and every run then failed at its start ("Can't create
  * file at <w>/.agents: Is a directory"). So Linux leaves out those two exact
- * paths (`SELF_SHUT`); the deny on what is under them stays.
+ * paths (`codexSelfShut` in sandbox-paths.ts); the deny on what is under them stays.
  */
 function filesystem(r: CodexRun, temp: string): Record<string, string> {
   const dev = devReads();
-  const selfShut = new Set(
-    currentPlatform() === 'linux' ? r.writes.flatMap((w) => SELF_SHUT.map((n) => `${w}/${n}`)) : []
-  );
+  const own = sandboxPaths().codexSelfShut;
+  const selfShut = new Set(r.writes.flatMap((w) => own.map((n) => `${w}/${n}`)));
   return {
     ':root': 'deny',
     ':minimal': 'read',
@@ -480,7 +476,7 @@ export function codexLaunch(r: CodexRun): CodexLaunch {
           // the deny's placeholder and failed ("failed to load AGENTS.md
           // instructions: Permission denied", 0.167.0). The run's instructions
           // come in `developer_instructions`, never in a file.
-          ...(currentPlatform() === 'linux' ? set('project_doc_max_bytes', 0) : [])
+          ...(sandboxPaths().codexNoAgentsDoc ? set('project_doc_max_bytes', 0) : [])
         ]),
     ...set('mcp_servers', mcpServers(r.servers, r.allowed)),
     ...(r.effort ? set('model_reasoning_effort', r.effort) : []),

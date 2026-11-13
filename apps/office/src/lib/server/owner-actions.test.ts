@@ -4,10 +4,9 @@
 // driver tries, and some in at least one. Of the rows that write none, only
 // those in CHANGES are driven.
 import assert from 'node:assert/strict';
-import { mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { join, relative } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { PATCH_KEY, STAFF_PATCH_KEYS } from '@oddboro/ledger/grantable';
 import { FLOORS, GROUNDS, WALLS, type OfficeSpec } from '@oddboro/world';
@@ -27,20 +26,11 @@ import {
 } from './office-under-test.ts';
 import { fakeNewAltitude, PAT } from './fake-new-altitude.ts';
 import { OWNER_ACTIONS, TASK_OPS, type OwnerAction, type Recording } from './owner-actions.ts';
+import { ROUTES, routeIds } from './route-ids.ts';
 
-const ROUTES = fileURLToPath(new URL('../../routes', import.meta.url));
 const ACTIONS = ['POST', 'PUT', 'PATCH', 'DELETE'];
 const STAFF = '/api/staff/[id]';
 const TASK = '/api/tasks/[id]';
-
-/** Each route under src/routes with this file (`+server.ts` or `+page.server.ts`), by its route id. */
-function routeIds(file: string, dir = ROUTES): string[] {
-  return readdirSync(dir).flatMap((name) => {
-    const path = join(dir, name);
-    if (statSync(path).isDirectory()) return routeIds(file, path);
-    return name === file ? [`/${relative(ROUTES, dir).split('\\').join('/')}`] : [];
-  });
-}
 
 /**
  * Every action the owner's page can take, as OWNER_ACTIONS keys them. A GET

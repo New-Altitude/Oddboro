@@ -9,21 +9,20 @@
 //   npm run setup                  check, start and open the office
 //   npm run setup -- --check       check everything, change nothing
 //   npm run setup -- --env <file>  check against a different .env, to try one out
-import { execFile, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { checkDatabase, checkMachine, type Check } from './checks.ts';
 import { OFFICE_LOG, openUrl, restartService, serviceInstalled } from './platform.ts';
 import { ENV_FILE, readEnv } from './env.ts';
-import { OFFICE_PORT, OFFICE_URL } from './home.ts';
+import { OFFICE_URL } from './home.ts';
+import { OWNER_PARAM } from './owner-key.ts';
+import { setupAddress } from './setup-address.ts';
 
 const REPO = fileURLToPath(new URL('../../../', import.meta.url));
 const args = process.argv.slice(2);
 const CHECK_ONLY = args.includes('--check');
 const ENV = args.includes('--env') ? args[args.indexOf('--env') + 1] : ENV_FILE;
 const OFFICE = OFFICE_URL;
-// Through Caddy, when the office set its address up; the port otherwise. The
-// first name needs public DNS to point it here; the second always reaches this computer.
-const NAMES = ['local.oddboro.com', 'oddboro.localhost'];
 
 const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
@@ -45,10 +44,6 @@ const npm = (npmArgs: string[]) => {
       .on('close', (code) => done(code === 0))
   );
 };
-const quiet = (cmd: string, cmdArgs: string[]) =>
-  new Promise<string>((done) =>
-    execFile(cmd, cmdArgs, { cwd: REPO }, (_e, stdout) => done(stdout.trim()))
-  );
 
 // ---------------------------------------------------------------------------
 
@@ -100,46 +95,18 @@ else if (!(await npm(['run', 'service:install', '-w', 'apps/office']))) {
   process.exit(1);
 }
 
-// The first start brings the tables up to date, so it can take a little while.
-let up = false;
-for (let i = 0; i < 120 && !up; i++) {
-  up = await fetch(OFFICE).then(
-    (r) => r.ok,
-    () => false
-  );
-  if (!up) await new Promise((r) => setTimeout(r, 1000));
-}
-if (!up) {
+// The office answers only its owner's key, so setup sends it, and opens the
+// browser with it, only where the office proved this run that it holds it.
+const found = await setupAddress();
+if (!found) {
   console.log(
     `${MARK.missing} The office did not answer at ${OFFICE}. Its log is in ${OFFICE_LOG}.`
   );
   process.exit(1);
 }
-
-const probe = (url: string) =>
-  fetch(`${url}/api/setup/address?probe=1`, { signal: AbortSignal.timeout(3000) })
-    .then((r) => r.json() as Promise<{ office?: boolean }>)
-    .then((r) => r.office === true)
-    .catch(() => false);
-let opened = `http://${NAMES[1]}:${OFFICE_PORT}`;
-// HTTPS first, once the office's certificate is trusted here (the first card sets that up).
-// The office itself answers whether it is: it knows where its Caddy keeps the certificate.
-const secure = await fetch(`${OFFICE}/api/setup/address`, { signal: AbortSignal.timeout(5000) })
-  .then((r) => r.json() as Promise<{ secure?: boolean }>)
-  .then((r) => r.secure === true)
-  .catch(() => false);
-for (const name of secure ? [] : NAMES) {
-  if (await probe(`http://${name}`)) {
-    opened = `http://${name}`;
-    break;
-  }
-  if (await probe(`http://${name}:${OFFICE_PORT}`)) {
-    opened = `http://${name}:${OFFICE_PORT}`;
-    break;
-  }
-}
-if (secure) opened = `https://${NAMES[0]}`;
-await openUrl(opened);
+// The page takes its key from the address once and keeps it as a cookie. Only
+// the browser gets the key: the line below prints the address without it.
+await openUrl(`${found.address}/?${OWNER_PARAM}=${found.key}`);
 console.log(
-  `\n${MARK.ok} ${bold('Ready.')} The office is open in your browser. Close this window whenever you like.\n  ${dim(opened)}\n`
+  `\n${MARK.ok} ${bold('Ready.')} The office is open in your browser. Close this window whenever you like.\n  ${dim(found.address)}\n`
 );

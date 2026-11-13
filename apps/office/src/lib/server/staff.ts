@@ -133,6 +133,8 @@ import {
   type UsageKind
 } from '@oddboro/ledger';
 import { flat } from '@oddboro/ledger/desk-answers';
+import { currentSystem } from '@oddboro/ledger/platform';
+import { computerWord } from '@oddboro/ledger/system-words';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -375,7 +377,7 @@ async function whoFor(who: StaffRow, dir: string): Promise<string> {
     '',
     '## Who you work for',
     '',
-    '- {owner}. This office is theirs, and runs on their Mac.',
+    `- {owner}. This office is theirs, and runs on their ${computerWord(currentSystem())}.`,
     existsSync(join(dir, 'notes', 'intake.md')) &&
       "- {owner}'s own answers from when you were hired are in notes/intake.md. Read them before your first piece of work, and again whenever you are unsure what they want.",
     serving.length

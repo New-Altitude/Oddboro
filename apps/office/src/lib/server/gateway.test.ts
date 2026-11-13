@@ -8,7 +8,6 @@
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { createServer, type Server as HttpServer } from 'node:http';
-import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { mock, test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -23,8 +22,8 @@ const KEY = 'the-notes-key-for-tests-01';
 // The stand-in tool server, on the SDK the office itself uses. `search` says
 // whether the office gave it its key, so the test sees the key reach the
 // server and never the run.
-const sdk = (path: string) =>
-  createRequire(import.meta.url).resolve(`@modelcontextprotocol/sdk/${path}`);
+// A file: URL, since the ESM loader takes no Windows drive path.
+const sdk = (path: string) => import.meta.resolve(`@modelcontextprotocol/sdk/${path}`);
 const fixture = join(folder, 'notes-server.mjs');
 writeFileSync(
   fixture,

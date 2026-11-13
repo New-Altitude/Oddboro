@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { rmSync, writeFileSync } from 'node:fs';
 import { after, test } from 'node:test';
-import { recorder, sender, tempOffice, throwing, until } from './diagnostics-harness.ts';
+import { page, recorder, sender, tempOffice, throwing, until } from './diagnostics-harness.ts';
 
 const door = await recorder();
 // `tempOffice` deletes the address from the environment, so only the file names it.
@@ -35,6 +35,7 @@ test("a report to the owner's own Sentry needs no sign-in and carries no token",
   const from = door.got.length;
   await sender(hooks.handle)({
     route: '/api/goals',
+    headers: await page(),
     resolve: throwing(() => new Error('own address, signed out'))
   });
   await Sentry.flush(5000);
@@ -46,6 +47,7 @@ test("a report to the owner's own Sentry needs no sign-in and carries no token",
 test('with its own address in the settings file, a source build sends straight there', async () => {
   await sender(hooks.handle)({
     route: '/api/goals',
+    headers: await page(),
     resolve: throwing(() => new Error('T10 own address'))
   });
   await Sentry.flush(5000);

@@ -12,7 +12,7 @@ import { fakeNewAltitude, MEMBER } from './fake-new-altitude.ts';
 import {
   ENVELOPE_PATH,
   ofType,
-  PAGE,
+  page,
   recorder,
   sender,
   tempOffice,
@@ -65,7 +65,7 @@ test('a sign-in leaves no token, code, state or email in any error or trace repo
   const yes = await send({
     route: '/api/diagnostics',
     method: 'PUT',
-    headers: { ...PAGE, 'content-type': 'application/json' },
+    headers: { ...(await page()), 'content-type': 'application/json' },
     body: '{"answer":"yes"}',
     resolve: answerRoute.PUT as Route
   });
@@ -76,7 +76,7 @@ test('a sign-in leaves no token, code, state or email in any error or trace repo
   await send({
     route: '/api/account',
     method: 'POST',
-    headers: { ...PAGE, 'sentry-trace': traceHeader() },
+    headers: { ...(await page()), 'sentry-trace': traceHeader() },
     resolve: async (e) => {
       const res = await (accountRoute.POST as Route)(e as RequestEvent);
       url = ((await res.clone().json()) as { url: string }).url;

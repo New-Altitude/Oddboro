@@ -1,5 +1,5 @@
 // The system's own paths each tool's sandbox names, per system. Only the
-// Mac's are measured, and Grok's shut list on Linux. Linux and Windows carry
+// Mac's are measured, and on Linux Grok's shut list and Codex's two. Linux and Windows carry
 // the Mac's other values because those are what the office passes there; they are not measured, and some are Mac
 // paths that mean nothing there. Correcting them is its own change, measured
 // on that system. A run on a system with no entry stops at `sandboxPaths()`.
@@ -18,6 +18,10 @@ export type SandboxPaths = {
   codexReads: readonly string[];
   /** The OpenSSL config node reads as it starts: read by Codex's profile. */
   opensslConf: string;
+  /** What Codex itself mounts read only at the top of each write folder, so its profile leaves those exact paths out (`filesystem` in codex.ts). */
+  codexSelfShut: readonly string[];
+  /** Whether a Codex run reads no AGENTS.md (`project_doc_max_bytes`), since its sandbox shuts the file and the read fails the run. */
+  codexNoAgentsDoc: boolean;
 };
 
 const MAC: SandboxPaths = {
@@ -43,7 +47,9 @@ const MAC: SandboxPaths = {
   // owner switched it elsewhere; /var is itself a link.
   codexReads: ['/Library/Developer/CommandLineTools', '/private/var/db/xcode_select_link'],
   // Fits node from nodejs.org and from nvm (measured on node 24.22.2).
-  opensslConf: '/System/Library/OpenSSL/openssl.cnf'
+  opensslConf: '/System/Library/OpenSSL/openssl.cnf',
+  codexSelfShut: [],
+  codexNoAgentsDoc: false
 };
 
 export const SANDBOX_PATHS: Partial<Record<NodeJS.Platform, SandboxPaths>> = {
@@ -52,7 +58,14 @@ export const SANDBOX_PATHS: Partial<Record<NodeJS.Platform, SandboxPaths>> = {
   // matches over 4096 files, which /var/** does on any real machine, and an
   // exact-path deny of /tmp or /var stops it starting. So Grok's profile
   // leaves both open on Linux, and the office's file tools are the wall there.
-  linux: { ...MAC, grokShut: ['/Library'] },
+  // Codex 0.167.0 on Linux mounts `.codex` and `.agents` itself, and reads
+  // AGENTS.md through its sandbox (codex.ts says what failed without these).
+  linux: {
+    ...MAC,
+    grokShut: ['/Library'],
+    codexSelfShut: ['.codex', '.agents'],
+    codexNoAgentsDoc: true
+  },
   win32: MAC
 };
 

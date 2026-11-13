@@ -1,5 +1,3 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { join, dirname } from 'node:path';
 import {
   cpSync,
@@ -14,6 +12,9 @@ import {
 } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { home, STAFF_SERVER, type ProjectSession, type ProjectRequest } from '@oddboro/ledger';
+import { AGENT_NAMES } from '@oddboro/ledger/agents';
+import { currentSystem, probe } from '@oddboro/ledger/platform';
+import { computerWord } from '@oddboro/ledger/system-words';
 import { nativeCommand, nativeEnv } from './native.ts';
 import { savedClaudeSessions } from './claude-sessions.ts';
 type Active = {
@@ -25,20 +26,68 @@ type Active = {
   status?: string;
   waitingFor?: string;
 };
-export async function claudeProjects(folder: string) {
+/**
+ * What the owner reads when Claude Code cannot list a project's conversations.
+ * The project-sessions route shows a thrown message as it is, so a raw error
+ * from starting the command (its path, ENOENT) never reaches the owner.
+ * `missing` names the system as it is when the listing fails, not as this file
+ * loaded, since a test fakes the system after that.
+ */
+export const CLAUDE_LIST_FAILED = {
+  missing: () => `${AGENT_NAMES.claude} is not installed on this ${computerWord(currentSystem())}.`,
+  failed: `${AGENT_NAMES.claude} could not list this project's conversations. Try again.`
+};
+
+/**
+ * The sessions `claude agents --json` printed, or undefined when it printed
+ * anything but a list. Entries that are not objects are left out.
+ */
+function agentList(out: string): Active[] | undefined {
+  let list: unknown;
+  try {
+    list = JSON.parse(out);
+  } catch {
+    // The caller tells the owner the listing failed; the parser's own words
+    // would show them a raw SyntaxError.
+    return undefined;
+  }
+  if (!Array.isArray(list)) return undefined;
+  return list.filter((a): a is Active => typeof a === 'object' && a !== null);
+}
+
+/** The Claude Code sessions running in `folder`, from `claude agents --json`. */
+async function claudeAgents(folder: string): Promise<Active[]> {
   const [exe, prefix] = nativeCommand('claude');
+  const r = await probe(exe, [...prefix, 'agents', '--json', '--cwd', folder], {
+    env: nativeEnv(),
+    cwd: folder,
+    timeout: 10000,
+    maxBuffer: 4_000_000
+  });
+  switch (r.status) {
+    case 'ok': {
+      const list = agentList(r.out);
+      if (!list) throw new Error(CLAUDE_LIST_FAILED.failed);
+      return list;
+    }
+    case 'missing':
+      throw new Error(CLAUDE_LIST_FAILED.missing());
+    case 'failed':
+    case 'timeout':
+      throw new Error(CLAUDE_LIST_FAILED.failed);
+    default: {
+      const missed: never = r;
+      throw new Error(`claude agents came back as ${JSON.stringify(missed)}`);
+    }
+  }
+}
+
+export async function claudeProjects(folder: string) {
   const [history, processes] = await Promise.all([
     savedClaudeSessions(folder),
-    promisify(execFile)(exe, [...prefix, 'agents', '--json', '--cwd', folder], {
-      env: nativeEnv(),
-      cwd: folder,
-      timeout: 10000,
-      maxBuffer: 4_000_000
-    })
+    claudeAgents(folder)
   ]);
-  const active = (JSON.parse(processes.stdout) as Active[]).filter(
-    (a) => a.cwd === folder && a.sessionId
-  );
+  const active = processes.filter((a) => a.cwd === folder && a.sessionId);
   const rows = new Map(
     history
       .filter((h) => !h.cwd || h.cwd === folder)
