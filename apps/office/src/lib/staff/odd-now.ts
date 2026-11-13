@@ -180,11 +180,6 @@ export function jobRunning(n: OddNow, job: string): boolean {
   return n.runs.some((w) => w.label === job);
 }
 
-/** The run going for a follow-up. Undefined for an Odd the page does not hold, such as one who has left. */
-export function runFor(n: OddNow | undefined, followUp: number): Work | undefined {
-  return n?.runs.find((w) => w.followUp === followUp);
-}
-
 /** The work list: runs going, then queued runs, then follow-ups yet to start. */
 export function workItems(n: OddNow): Work[] {
   return [...n.runs, ...n.queued];
@@ -201,39 +196,62 @@ export function railRing(n: OddNow): boolean {
 }
 
 /**
+ * Every word a hand-off line can say, `to` being the colleague and `from` the
+ * Odd that handed it on. One home, so a change of wording is one edit.
+ */
+export const HAND_OFF_WORDS = {
+  // Back on it: the owner answered what an earlier step put on the desk.
+  backOnIt: (to: string) => `${to} is back on it`,
+  onIt: (to: string) => `${to} is on it`,
+  // An earlier step came back, so the colleague has started; its next run has not begun.
+  gettingBackToIt: (to: string) => `${to} is getting back to it`,
+  notStarted: (to: string) => `${to} has not started yet`,
+  answered: 'You answered',
+  ended: {
+    done: (to: string) => `${to} finished`,
+    failed: (to: string) => `${to} could not finish`,
+    waiting: (to: string) => `${to} is waiting on you`
+  },
+  takingOver: (ended: string, from: string) => `${ended} · ${from} is taking it from here`,
+  waitingOnYou: 'Waiting on you',
+  pickUpFailed: (from: string) => `${from} could not pick it up`,
+  done: 'Done'
+} as const;
+
+/**
  * Where a hand-off stands, in words, and whether the owner has to act. The
- * colleague is on it only while its run for the hand-off goes, which the live
- * state says; the row's status is as of the chat's last load.
+ * colleague is on it only while a run serving the hand-off goes, which the
+ * live state says; the row's status is as of the chat's last load.
  */
 export function handOffWords(h: HandOffLine, onIt: boolean): { text: string; yours: boolean } {
-  if (h.status === 'queued' || h.status === 'working')
-    return onIt
-      ? // Back on it: the owner answered what an earlier step put on the desk.
-        { text: `${h.to} is ${h.backs.length ? 'back on it' : 'on it'}`, yours: false }
-      : { text: `${h.to} has not started yet`, yours: false };
+  const W = HAND_OFF_WORDS;
+  if (h.status === 'queued' || h.status === 'working') {
+    const back = h.backs.length > 0;
+    if (onIt) return { text: back ? W.backOnIt(h.to) : W.onIt(h.to), yours: false };
+    return { text: back ? W.gettingBackToIt(h.to) : W.notStarted(h.to), yours: false };
+  }
   // A denial or a dropped task is the owner's answer, not the colleague failing.
-  const ended = h.answered
-    ? 'You answered'
-    : {
-        done: `${h.to} finished`,
-        failed: `${h.to} could not finish`,
-        waiting: `${h.to} is waiting on you`
-      }[h.status];
+  const ended = h.answered ? W.answered : W.ended[h.status](h.to);
   const next = h.backs.at(-1)?.pickUp.status;
   if (!next || next === 'queued' || next === 'working')
-    return { text: `${ended} · ${h.from} is taking it from here`, yours: h.status === 'waiting' };
+    return { text: W.takingOver(ended, h.from), yours: h.status === 'waiting' };
   // Something on the desk outranks how the pick-up went: it still needs the owner.
-  if (next === 'waiting' || h.status === 'waiting') return { text: 'Waiting on you', yours: true };
-  if (next === 'failed') return { text: `${h.from} could not pick it up`, yours: false };
-  return { text: h.status === 'done' ? 'Done' : ended, yours: false };
+  if (next === 'waiting' || h.status === 'waiting') return { text: W.waitingOnYou, yours: true };
+  if (next === 'failed') return { text: W.pickUpFailed(h.from), yours: false };
+  return { text: h.status === 'done' ? W.done : ended, yours: false };
 }
 
-/** A hand-off line in the chat, read from its colleague's state: on it while its run for it goes. */
+/**
+ * A hand-off line in the chat, read from its colleague's state: on it while a
+ * run serving the hand-off goes, its own or the carry-out of the owner's yes
+ * to what it asked. A colleague who has left has no state, so it is on nothing.
+ */
 export function handOffProgress(
   h: HandOffLine,
   nowOf: ReaderProps['nowOf']
 ): { text: string; yours: boolean } {
-  return handOffWords(h, !!runFor(nowOf(h.toId), h.id));
+  const onIt = nowOf(h.toId)?.runs.some((w) => w.handOffId === h.id) ?? false;
+  return handOffWords(h, onIt);
 }
 
 /** What the page passes each screen that shows an Odd's state. */

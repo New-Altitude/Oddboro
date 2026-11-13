@@ -31,10 +31,11 @@ export type Work = {
   toStart?: true;
   askId?: number;
   /**
-   * The follow-up row this run carries out, so whoever handed the work over
-   * can tell whether the colleague's run for it is going.
+   * The hand-off this run serves (`servesHandOff`): its own row's id, or the
+   * one whose ask or task the owner answered. Whoever handed the work over
+   * reads the colleague as on it while such a run goes, a carry-out included.
    */
-  followUp?: number;
+  handOffId?: number;
   about?: WorkAbout;
   /** The tool the staffer is using now, as Claude Code names it. */
   doing?: string;
