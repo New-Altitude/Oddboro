@@ -713,9 +713,10 @@ mod tests {
 
     #[test]
     fn each_line_from_node_gets_the_time_and_a_bad_byte_ends_nothing() {
-        let path =
-            std::env::temp_dir().join(format!("oddboro-stamped-{}.log", std::process::id()));
-        stamped(&b"office: ready\n\xff not utf-8\r\nthe last line"[..], File::create(&path).unwrap());
+        let name = format!("oddboro-stamped-{}.log", std::process::id());
+        let path = std::env::temp_dir().join(name);
+        let input = b"office: ready\n\xff not utf-8\r\nthe last line";
+        stamped(&input[..], File::create(&path).unwrap());
         let text = fs::read_to_string(&path).unwrap();
         let _ = fs::remove_file(&path);
         let lines: Vec<&str> = text.lines().collect();
