@@ -124,7 +124,7 @@ export const LAUNCHES: Record<Agent, (r: ClaudeRun) => Promise<Launch | { refuse
         effort: r.effort,
         model: r.model
       }),
-      // Grok takes its message as an argument and reads no input.
+      // Grok reads its message from a file (--prompt-file), never from input.
       stdin: ''
     };
   },

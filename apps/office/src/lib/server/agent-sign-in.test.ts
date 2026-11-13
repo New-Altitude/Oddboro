@@ -814,10 +814,7 @@ test("a Grok installed from the page only into xAI's install folder is offered, 
     try {
       const run = await chatOf('gus');
       assert.ok(existsSync(join(GROK_HOME, 'models-args.json')), 'the renewal did not run');
-      assert.ok(
-        run.args.some((a) => a.startsWith('--single=')),
-        run.args.join(' ')
-      );
+      assert.ok(run.args.includes('--prompt-file'), run.args.join(' '));
     } finally {
       for (const f of ['auth.json', 'renewed.json', 'models.log', 'models-args.json'])
         rmSync(join(GROK_HOME, f), { force: true });
@@ -910,8 +907,13 @@ test("an office run on Codex or Grok goes through the tool's own sandboxed launc
       prompt: { type: string; data?: string; mimeType?: string; text?: string }[];
       env?: unknown;
     };
-    // With a picture, the message goes as content blocks and never as --single.
-    assert.ok(!g.args.some((a) => a.startsWith('--single=')));
+    // With a picture, the message goes as content blocks, in a .json file and never on the command line.
+    const file = g.args[g.args.indexOf('--prompt-file') + 1];
+    assert.ok(file.endsWith('.prompt.json'), file);
+    assert.ok(
+      !g.args.some((a) => a.includes(picture.data)),
+      'the picture went on the command line'
+    );
     // No file tool, never Grok's whole set, so it answers from the message, at the effort asked.
     // Grok has no "no tools", so todo_write, which touches no file, stands in.
     assert.equal(g.args[g.args.indexOf('--tools') + 1], 'todo_write');

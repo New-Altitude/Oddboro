@@ -4,8 +4,11 @@
   import Footer from '#lib/components/Footer.svelte';
   import { onMount } from 'svelte';
   import { startTheme } from '#lib/theme.svelte.ts';
+  import { startAnalytics } from '#lib/analytics.svelte.ts';
+  import ConsentBanner from '#lib/components/ConsentBanner.svelte';
   let { children } = $props();
   onMount(startTheme);
+  onMount(startAnalytics);
 </script>
 
 <a
@@ -19,3 +22,4 @@
   {@render children()}
 </main>
 <Footer />
+<ConsentBanner />

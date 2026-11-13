@@ -112,7 +112,7 @@ test('words added after the result of a Claude Code chat still end with Claude C
   const claude = await addAtStep('sam');
   assert.equal(claude.added, true);
   assert.equal(gaveOf(claude.text).message.trimEnd().split('\n').at(-1), 'Hello.');
-  // Grok reads its message once (`--single`), so its chat takes nothing more.
+  // Grok reads its message once, from its prompt file, so its chat takes nothing more.
   const grok = await addAtStep('gus');
   assert.equal(grok.added, false, grok.text);
   assert.equal(

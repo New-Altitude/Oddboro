@@ -149,6 +149,8 @@ const CARGO = join(TAURI, 'Cargo.toml');
 const LOCK = join(TAURI, 'Cargo.lock');
 const BUNDLE = join(RELEASE, 'bundle', 'macos');
 const APP = join(BUNDLE, 'Oddboro.app');
+// The .dmg's window: its picture and Finder's layout (scripts/installer.ts).
+const INSTALLER = join(DESKTOP, 'installer');
 
 /** Run a command. An env value of undefined takes that variable out. */
 const run = (cmd: string, argv: string[], env: Record<string, string | undefined> = {}) => {
@@ -412,15 +414,18 @@ function buildMac(version: string): void {
   tauri(['signer', 'sign', '--app-version', version, join(OUT, archive)]);
   writeLatest(version, archive);
 
-  // 5. The .dmg: the stapled app beside a link to Applications, signed,
+  // 5. The .dmg: the stapled app beside a link to Applications, on the grass
+  //    lot with an arrow between them (scripts/installer.ts draws it), signed,
   //    notarized and stapled. The site's Download button links to
   //    Oddboro.dmg, so each release carries that name too.
   const dmg = join(OUT, `Oddboro_${version}_aarch64.dmg`);
   const volume = join(OUT, 'dmg');
-  mkdirSync(volume);
+  mkdirSync(join(volume, '.background'), { recursive: true });
   // ditto keeps the signature and the stapled ticket intact.
   run('ditto', [APP, join(volume, 'Oddboro.app')]);
   symlinkSync('/Applications', join(volume, 'Applications'));
+  copyFileSync(join(INSTALLER, 'background.tiff'), join(volume, '.background', 'background.tiff'));
+  copyFileSync(join(INSTALLER, 'DS_Store'), join(volume, '.DS_Store'));
   run('hdiutil', [
     'create',
     '-volname',

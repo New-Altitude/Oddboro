@@ -46,7 +46,7 @@ signedIn('new-altitude-account', 'profile personas', 'seed', {
 signedIn('new-altitude-persona-pat', 'stream', 'door');
 // After the office under test is set up, as its own imports are.
 const { installPersona, startPersonaGrant } = await import('./persona.ts');
-const { draft, RUN_ENDED, runJob } = await import('./staff.ts');
+const { draft, RUN_ENDED, runJob, stopReply } = await import('./staff.ts');
 const { QUIET_LINE } = await import('#lib/persona.ts');
 await L.setOwnerName('Ada');
 await installPersona('pat');
@@ -95,7 +95,8 @@ async function talk(message: string) {
     if (e.type !== 'reply') events.push(e);
   });
   const added = history(pat.id).slice(kept);
-  return { events, reply: added.find((m) => m.from === 'staff')?.text };
+  const staff = added.find((m) => m.from === 'staff');
+  return { events, reply: staff?.text, failed: staff?.failed };
 }
 const REPORT_HEAD = 'What your hands in the office found and did:';
 /** The stand-in's report is the JSON of what its run was given. */
@@ -212,6 +213,57 @@ test("a hand-off to a persona Odd gives the persona the colleague's brief and re
   assert.equal(lastTurn().priorTurns, undefined);
 });
 
+test('a follow-up whose persona does not answer fails, so the work it carries out stays open', async () => {
+  const h = await L.handOff({
+    from: 'lead',
+    to: pat.id,
+    work: { title: 'Price the fair stalls', brief: "Find last year's stall price in the notes." },
+    thread: { title: 'The fair stalls' }
+  });
+  assert.ok('id' in h, JSON.stringify(h));
+  const f = await L.startFollowUp(h.id);
+  assert.ok(f);
+  fake.door = body('refused_budget');
+  const r = await followThrough(f);
+  fake.door = { ...ANSWERED };
+  assert.equal(r.outcome, 'failed', r.text);
+  assert.ok(r.text.startsWith("Pat has reached New Altitude's limit for now."), r.text);
+  assert.ok(r.text.includes(REPORT_START), r.text.slice(0, 200));
+  // The hands' "Outcome: done" does not survive a persona that did not judge the work.
+  assert.ok(!/Outcome:/.test(r.text.slice(-40)), r.text.slice(-40));
+});
+
+test("Stop during the persona's turn cancels the call to its door", async () => {
+  const signals: AbortSignal[] = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = (input, init) => {
+    if (String(input).endsWith('/pat/stream') && init?.signal) signals.push(init.signal);
+    return real(input, init);
+  };
+  try {
+    const held = fake.hold('/pat/stream');
+    let runId = '';
+    const events: { type: string; text?: string }[] = [];
+    const chatting = chat(pat.id, 'Is the stall price right?', (e) => {
+      if (e.type === 'reply') runId = e.runId;
+      else events.push(e);
+    });
+    const release = await held;
+    assert.equal(signals.length, 1);
+    assert.equal(signals[0].aborted, false);
+    assert.ok(await stopReply(pat.id, runId));
+    await chatting;
+    assert.equal(signals[0].aborted, true);
+    assert.deepEqual(events.at(-1), {
+      type: 'done',
+      text: 'You stopped this reply. Completed work and saved files remain.'
+    });
+    release();
+  } finally {
+    globalThis.fetch = real;
+  }
+});
+
 test("a run that reads the owner's no or edit for a lesson stays with its hands and never reaches New Altitude", async () => {
   const turns = doorTurns().length;
   const no = await L.raiseAsk(pat.id, { title: 'Post the fair poster', why: 'w', ifApproved: 'i' });
@@ -245,7 +297,7 @@ test('an over-long report is cut so the message stays within 4,000 characters', 
   assert.equal(r.text, SAID);
 });
 
-test('every other door answer returns the report with a note, and a budget wait reads in whole minutes or hours, rounded up', async () => {
+test('every other door answer fails the chat with the report under a note and no sign-in card, and a budget wait reads in whole minutes or hours, rounded up', async () => {
   const budget = (seconds: number, line: string): [string, () => void, string] => [
     `refused_budget after ${seconds} seconds`,
     () =>
@@ -290,11 +342,14 @@ test('every other door answer returns the report with a note, and a budget wait 
   ];
   for (const [name, set, line] of cases) {
     set();
-    const { reply } = await talk(`About ${name}?`);
+    const { events, reply, failed } = await talk(`About ${name}?`);
     fake.door = { ...ANSWERED };
     fake.refused.clear();
     fake.down.clear();
     assert.ok(reply, `${name}: the chat kept no reply`);
+    assert.equal(failed, true, name);
+    // The persona's door failed, not the hands' sign-in, so the page shows no sign-in card.
+    assert.deepEqual(events.at(-1), { type: 'error', message: reply }, name);
     assert.ok(reply.split('\n')[0].includes(line), `${name}: ${reply.slice(0, 120)}`);
     assert.ok(reply.includes("Here is what Pat's hands found.\n\n" + REPORT_START), name);
     assert.equal((await L.personaOdd('pat'))?.package?.quiet, undefined, name);
