@@ -4,7 +4,7 @@
 // imports this before it loads any of the office's modules, since they read
 // where everything is as they start. The database stops when the file ends, so
 // the suite exits.
-import { mkdtempSync, rmSync } from 'node:fs';
+import { cpSync, mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -30,6 +30,10 @@ const place = {
   OLLAMA_URL: 'http://127.0.0.1:9'
 };
 Object.assign(process.env, place);
+// The run's migrated database when global-setup.ts made one: local-db.ts then
+// opens it instead of making one, and bringUpToDate() finds nothing to apply.
+const made = process.env.ODDBORO_TEST_DATABASE;
+if (made) cpSync(made, join(folder, 'db'), { recursive: true });
 const { startLocalDatabase } = await import('../src/local-db.ts');
 const stopDatabase = await startLocalDatabase();
 const { bringUpToDate } = await import('../src/upgrade.ts');
@@ -53,8 +57,10 @@ export async function toolServer(staffId: string, env: Record<string, string>): 
   return client;
 }
 
+// All at once: one at a time, a file's 36 or 62 servers took up to 11 s of
+// this hook's 15 on GitHub's Mac runner (NEW-1874).
 after(async () => {
-  for (const c of clients) await c.close();
+  await Promise.all(clients.map((c) => c.close()));
   await sql.end();
   await stopDatabase();
   rmSync(folder, { recursive: true, force: true });

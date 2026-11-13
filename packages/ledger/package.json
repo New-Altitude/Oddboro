@@ -34,7 +34,7 @@
     "migrate": "node --env-file-if-exists=../../.env src/migrate.ts",
     "check-types": "tsc -p tsconfig.json",
     "lint": "prettier --check . --ignore-path ../../.prettierignore",
-    "test": "node --test --test-timeout=15000 --experimental-test-module-mocks \"test/*.test.ts\""
+    "test": "node --test --test-global-setup=test/global-setup.ts --test-timeout=15000 --experimental-test-module-mocks \"test/*.test.ts\""
   },
   "devDependencies": {
     "drizzle-kit": "^0.31.11"
