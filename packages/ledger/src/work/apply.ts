@@ -188,7 +188,7 @@ function liveColumns(f: FollowUp): Omit<ReturnType<typeof followUpRow>, 'id' | '
 }
 
 /** A run's kind the office no longer starts: a row of one has always ended. */
-export const isRetired = (kind: FollowUp['kind']): kind is RetiredKind =>
+const isRetired = (kind: FollowUp['kind']): kind is RetiredKind =>
   RETIRED_KINDS.some((r) => r === kind);
 
 /** A row's id fields set from the refs `points` names. Each field is a column. */

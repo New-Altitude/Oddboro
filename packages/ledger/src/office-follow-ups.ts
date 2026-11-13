@@ -17,7 +17,6 @@ import {
 } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { db } from './db.ts';
-import { fixedError } from './errors.ts';
 import type { Db } from './threads.ts';
 import {
   pokes,
@@ -34,7 +33,7 @@ import { ofWorkingOdd } from './office-staff.ts';
 import { record } from './office-ledger.ts';
 import { ask } from './office-asks.ts';
 import { task } from './office-tasks.ts';
-import { isRetired, transitionWork } from './work/apply.ts';
+import { transitionWork } from './work/apply.ts';
 import type { LiveKind } from './work/events.ts';
 import { queuedRows } from './work/load.ts';
 import { CUT_OFF_RESULT, OUTCOME_TITLE } from './work/runs.ts';
@@ -205,10 +204,7 @@ export async function startFollowUp(
   const decided = await transitionWork({ kind: 'runClaimed', id });
   if (!('change' in decided)) return undefined;
   const { run, unparked } = decided.change.result;
-  const { kind, ...row } = followUpRow(run);
-  // The claim took a queued run, and a run of a kind the office no longer starts never is.
-  if (isRetired(kind)) throw fixedError('A run of a kind the office no longer starts was claimed.');
-  return { ...row, kind, ...(unparked && { unparked }) };
+  return { ...followUpRow(run), kind: run.kind, ...(unparked && { unparked }) };
 }
 
 /**

@@ -25,6 +25,7 @@ import type {
 } from '../schema.ts';
 import type { TaskEnded } from '../task-parking.ts';
 import type { FollowUpKind } from './kinds.ts';
+import type { LiveRun } from './runs.ts';
 import type { Inserted, LedgerLine, PerKindInTx } from './snapshot.ts';
 import type { AskBase, FollowUp, RetiredKind, TaskBase } from './state.ts';
 
@@ -230,7 +231,7 @@ export type EventOf<K extends WorkEvent['kind']> = Extract<WorkEvent, { kind: K 
 
 /** A run as its claim hands it to the driver. */
 export type Claimed = {
-  run: FollowUp;
+  run: LiveRun;
   /** The wait the claim lifted, for the run's brief: the task's title, or the time. */
   unparked?: Unparked;
   /** The lead's other results on this work still waiting, which this one run picks up and ends with. */
