@@ -247,6 +247,12 @@ export type ReaderProps = {
   onplan: (hires: AskRow[]) => void;
 };
 
+/** Any Odd's state by id, from a map of every Odd's; undefined for one the map does not hold. */
+export const nowIn =
+  (all: Record<string, OddNow>) =>
+  (id: string): OddNow | undefined =>
+    Object.hasOwn(all, id) ? all[id] : undefined;
+
 /** The props for one Odd's screens, from the page's map of every Odd's state. */
 export function readerProps(
   s: Snapshot,
@@ -256,7 +262,7 @@ export function readerProps(
 ): ReaderProps {
   return {
     now: all[id],
-    nowOf: (other) => (Object.hasOwn(all, other) ? all[other] : undefined),
+    nowOf: nowIn(all),
     desk: s.desk,
     staff: s.staff,
     onplan
