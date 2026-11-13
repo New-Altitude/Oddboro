@@ -4,8 +4,11 @@
 // so the lock tests here prove which rows are locked and in what order, not
 // that a second transaction waits. Run with `npm test -w @oddboro/ledger`.
 import assert from 'node:assert/strict';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { mock, test } from 'node:test';
-import { eq, sql, type SQL } from 'drizzle-orm';
+import { desc, eq, sql, type SQL } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import type { Level } from '../src/access-words.ts';
 import type { Decision } from '../src/office-asks.ts';
@@ -16,6 +19,7 @@ import {
   goals,
   jobs,
   owner,
+  planLimits,
   pokes,
   reports,
   staff,
@@ -28,7 +32,7 @@ import { random } from '../src/sequences.ts';
 import type { Tx } from '../src/threads.ts';
 import type { After, Decided } from '../src/transition.ts';
 import { decide } from '../src/work/decide.ts';
-import type { AskEffects, EventOf, WorkEvent } from '../src/work/events.ts';
+import type { AskEffects, EventOf, WorkEvent, WorkResults } from '../src/work/events.ts';
 import {
   applyChange,
   type Change,
@@ -44,11 +48,13 @@ import { db } from './pglite.ts';
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
 const { LOCK_ORDER, transition } = await import('../src/transition.ts');
 const { loadWork, queuedRows } = await import('../src/work/load.ts');
-const { applyWork } = await import('../src/work/apply.ts');
+const { applyWork, realIds } = await import('../src/work/apply.ts');
+const { threadPart } = await import('../src/threads.ts');
 // The office's own handle, which is PGlite's here, so a transaction has the type the core takes.
 const { db: officeDb } = await import('../src/db.ts');
 const { networkNote } = await import('../src/office-staff.ts');
 const { gaveFolder } = await import('../src/office-folders.ts');
+const { MANAGER_ROLE } = await import('../src/managers.ts');
 
 /** Sequences per run; `WORK_APPLY_SEEDS` runs more. Sized so the file stays well under 5 seconds. */
 const SEEDS = Number(process.env.WORK_APPLY_SEEDS ?? 2);
@@ -79,7 +85,7 @@ const handOff = (from: string, more: Partial<HandOff> = {}): HandOff => ({
  */
 async function seedOffice(): Promise<void> {
   await db.execute(
-    sql`truncate staff, threads, follow_ups, asks, tasks, reports, pokes, goals, attachments, jobs, ledger, owner restart identity cascade`
+    sql`truncate staff, threads, follow_ups, asks, tasks, reports, pokes, goals, attachments, jobs, ledger, owner, plan_limits restart identity cascade`
   );
   await db.insert(owner).values({ name: OWNER });
   await db.insert(staff).values(
@@ -713,6 +719,15 @@ const TABLES = {
   followUps: 'follow_ups'
 } as const;
 
+const WRITES_HERE = new Set<WorkEvent['kind']>([
+  'handedOff',
+  'toldLead',
+  'parked',
+  'clockWoke',
+  'oddRemoved',
+  'oddBroughtBack'
+]);
+
 test('every loader locks in the one table order each row its decider reads, and for update each it writes', async () => {
   await seedOffice();
   const events: WorkEvent[] = [
@@ -762,14 +777,66 @@ test('every loader locks in the one table order each row its decider reads, and 
     { kind: 'taskEnded', id: 3, ended: 'done', note: null, inChat: false },
     { kind: 'taskEnded', id: 4, ended: 'withdrawn', note: 'Gone.', inChat: false },
     { kind: 'connectTasksDropped', connector: 'drive' },
-    { kind: 'goalStatusChanged', goalId: 1, status: 'met' }
+    { kind: 'goalStatusChanged', goalId: 1, status: 'met' },
+    {
+      kind: 'handedOff',
+      from: 'lia',
+      to: 'cal',
+      work: { title: 'Check it', brief: 'Check.' },
+      thread: { id: 2 },
+      carry: []
+    },
+    {
+      kind: 'toldLead',
+      staffId: 'cal',
+      threadId: 4,
+      said: 'Send it on Friday.',
+      words: 'on Friday',
+      reading: 'It waits for Friday.',
+      exchange: '',
+      worksOn: new Set([4]),
+      files: []
+    },
+    { kind: 'parked', staffId: 'lia', threadId: 2, on: { task: 1 }, worksOn: new Set() },
+    { kind: 'parked', staffId: 'lia', threadId: 2, on: { at: minutes(30) }, worksOn: new Set() },
+    // Thread 7, which the window's ask 8 holds, due: the ask leaves the desk with it.
+    { kind: 'clockWoke', threadId: 7 },
+    {
+      kind: 'oddRemoved',
+      staffId: 'cal',
+      line: { kind: 'hire', actor: 'owner', title: 'Let Cal go', body: 'Cal left.' },
+      about: new Map(),
+      effects: { stopRuns: () => {} }
+    },
+    {
+      kind: 'oddBroughtBack',
+      staffId: 'gus',
+      line: { kind: 'hire', actor: 'owner', title: 'Brought Gus back', body: 'Gus is back.' }
+    }
   ];
+  await db
+    .update(threads)
+    .set({ resumeAt: minutes(-1) })
+    .where(eq(threads.id, 7));
+  // 13: another ask to bring Gus back, which the bring-back withdraws.
+  await db.insert(asks).values({
+    staffId: 'lia',
+    kind: 'bring_back',
+    odd: 'gus',
+    title: 'Bring Gus back?',
+    why: 'w',
+    ifApproved: 'i',
+    createdAt: T0
+  });
   const every = new Set<string>();
   for (const e of events) {
     const { rows, locks } = await loadLocked(e);
     const at = `${e.kind} ${JSON.stringify(e)} locked ${locks.map((l) => `${l.table} ${l.mode} ${l.ids.join(',')}`).join('; ')}`;
     const order = locks.map((l) => LOCK_ORDER.indexOf(l.table as (typeof LOCK_ORDER)[number]));
     for (const l of locks) every.add(l.table);
+    // Only a hand-off holds work for the window, under the plan's lock, which the clock waits on.
+    if (e.kind === 'handedOff' || e.kind === 'clockWoke')
+      assert.equal(locks[0]?.table, 'plan_limits', at);
     assert.ok(!order.includes(-1), at);
     assert.deepStrictEqual(
       order,
@@ -784,21 +851,25 @@ test('every loader locks in the one table order each row its decider reads, and 
         assert.ok(held.has(String(id)), `${table} ${id} was read unlocked: ${at}`);
     }
     const decided = decide(rows, e, minutes(1));
+    // Each of these writes here, so its update locks are checked against real writes.
+    if (WRITES_HERE.has(e.kind))
+      assert.ok('change' in decided && decided.change.put.length, `writes nothing: ${at}`);
     const written = 'change' in decided ? decided.change.put.filter((p) => 'row' in p) : [];
     for (const p of written as Extract<Put, { row: unknown }>[])
       assert.ok(
         locked(TABLES[p.table], 'update').has(String(p.row.id)),
         `${p.table} ${p.row.id} was written without its update lock: ${at}`
       );
+    // The Odd a leaving or a bring-back writes.
+    for (const o of 'change' in decided ? decided.change.outside : [])
+      if (o.kind === 'leave' || o.kind === 'comeBack')
+        assert.ok(locked('staff', 'update').has(o.staffId), `staff ${o.staffId}: ${at}`);
     // The Odd a switch yes changes with the claim.
     const turned = rows.prepared.switches?.before.id;
     if (turned) assert.ok(locked('staff', 'update').has(turned), `staff ${turned}: ${at}`);
   }
-  // Each table a decider reads was locked, so no lock was left out or went unchecked.
-  assert.deepStrictEqual(
-    [...every].sort(),
-    LOCK_ORDER.filter((t) => t !== 'plan_limits').toSorted()
-  );
+  // Each table a decider reads was locked, the plan's row by a hand-off and the clock among them.
+  assert.deepStrictEqual([...every].sort(), LOCK_ORDER.toSorted());
 });
 
 test('a task that work parks on while it ends refuses the end, so the parked work is never left waiting', async () => {
@@ -881,4 +952,124 @@ test('an answer runs its effects after its commit, never while it is decided', a
     'carryOutTogether 3 4'
   ]);
   calls.length = 0;
+});
+
+/** The usage window past its guard, resetting long after ask 8 was raised, so no ask of this window is on the desk yet. */
+async function windowPastGuard(): Promise<Date> {
+  const resetsAt = minutes(400);
+  await db.insert(planLimits).values({ fiveHour: 0.9, fiveHourResetsAt: resetsAt, sevenDay: 0.1 });
+  return resetsAt;
+}
+
+/** A hand-off from Lia, on work it leads or on new work it opens. */
+const handOffOf = (
+  thread: EventOf<'handedOff'>['thread'],
+  more: Partial<EventOf<'handedOff'>> = {}
+): EventOf<'handedOff'> => ({
+  kind: 'handedOff',
+  from: 'lia',
+  to: 'cal',
+  work: { title: 'Check it', brief: 'Check.' },
+  thread,
+  carry: [],
+  ...more
+});
+
+test('the usage window ask goes under the earliest hired manager, whatever their names', async () => {
+  await seedOffice();
+  const manager = { role: MANAGER_ROLE, variant: 'v', portrait: 'p', remit: 'r', desk: 'd' };
+  // Zed was hired first, and sorts after Amy by name.
+  await db.insert(staff).values([
+    { ...manager, id: 'zed', name: 'Zed', hiredAt: minutes(-100) },
+    { ...manager, id: 'amy', name: 'Amy', hiredAt: minutes(-10) }
+  ]);
+  await windowPastGuard();
+  const { got } = await run(handOffOf({ id: 2 }), minutes(1));
+  assert.ok('change' in got, 'the hand-off is held, and its change commits');
+  const [asked] = await db.select().from(asks).orderBy(desc(asks.id)).limit(1);
+  assert.deepStrictEqual(
+    { kind: asked.kind, staffId: asked.staffId },
+    { kind: 'window', staffId: 'zed' }
+  );
+});
+
+/**
+ * Moves each serial past the ids a decider guesses for new rows, the next
+ * after the highest it loaded, so a guessed id written anywhere shows. Each
+ * table starts at its own hundred, so an id taken from the wrong table shows too.
+ */
+async function idsOffset(): Promise<void> {
+  for (const [table, last] of [
+    ['threads', 100],
+    ['asks', 200],
+    ['follow_ups', 300]
+  ] as const)
+    await db.execute(sql`select setval(pg_get_serial_sequence(${table}, 'id'), ${last})`);
+}
+
+/** A file outside the office for a hand-off to carry. */
+function fileToCarry(): { real: string; name: string; named: string } {
+  const real = join(mkdtempSync(join(tmpdir(), 'oddboro-carry-')), 'notes.md');
+  writeFileSync(real, 'Notes.');
+  return { real, name: 'notes.md', named: 'notes.md' };
+}
+
+test('a hand-off the usage window holds on work already open points the work at the new window ask', async () => {
+  await seedOffice();
+  await idsOffset();
+  const resetsAt = await windowPastGuard();
+  const { got } = await run(handOffOf({ id: 2 }), minutes(1));
+  assert.ok('change' in got, 'the hand-off is held, and its change commits');
+  const [asked] = await db.select().from(asks).orderBy(desc(asks.id)).limit(1);
+  assert.ok(asked.kind === 'window' && asked.id > 200, `ask ${asked.id} is the new window ask`);
+  const [t] = await db.select().from(threads).where(eq(threads.id, 2));
+  assert.deepStrictEqual(
+    { heldBy: t.heldBy, resumeAt: t.resumeAt },
+    { heldBy: asked.id, resumeAt: resetsAt }
+  );
+});
+
+test('a hand-off that opens new work copies its files into that work by its real number', async () => {
+  await seedOffice();
+  await idsOffset();
+  const file = fileToCarry();
+  const { got } = await run(
+    handOffOf({ open: { title: 'New work', hubId: 'lia' } }, { carry: [file] }),
+    minutes(1)
+  );
+  assert.ok('change' in got);
+  const [made] = await db.select().from(threads).orderBy(desc(threads.id)).limit(1);
+  assert.ok(made.id > 100, `work ${made.id} is the new work`);
+  assert.ok(existsSync(join(threadPart(made.id, 'lia'), file.name)), 'the file is in the new work');
+});
+
+test("a taken hand-off's result names the real run and work, never the decider's guesses", async () => {
+  await seedOffice();
+  await idsOffset();
+  const { got } = await run(handOffOf({ open: { title: 'New work', hubId: 'lia' } }), minutes(1));
+  assert.ok('change' in got);
+  const result = got.change.result as WorkResults['handedOff'];
+  assert.ok('id' in result, 'the hand-off was taken');
+  const real = realIds(got.change);
+  const [run1] = await db.select().from(followUps).orderBy(desc(followUps.id)).limit(1);
+  assert.deepStrictEqual(
+    { id: real(result.id), thread: real(result.thread), kind: run1.kind },
+    { id: run1.id, thread: run1.threadId, kind: 'hand_off' }
+  );
+  assert.ok(run1.id > 300 && (run1.threadId ?? 0) > 100, 'both are new rows past the offset');
+});
+
+test('a hand-off whose files cannot be carried writes no row, and its caller gets the reason', async () => {
+  await seedOffice();
+  const before = await readRows();
+  const gone = {
+    real: join(tmpdir(), 'oddboro-no-such-file.md'),
+    name: 'notes.md',
+    named: 'notes.md'
+  };
+  await assert.rejects(run(handOffOf({ id: 2 }, { carry: [gone] }), minutes(1)), {
+    message:
+      'The office cannot open notes.md to copy it. Make it readable, or leave it out, and call hand_off again.'
+  });
+  assert.deepStrictEqual(await readRows(), before);
 });
