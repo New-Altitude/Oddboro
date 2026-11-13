@@ -1,12 +1,14 @@
 // The database refuses a state no work change may leave (the CHECK
 // constraints in schema.ts). One test drives a production write through the
-// work core and reads the row it left; the other writes each refused state by
-// hand. Both run every migration, in an in-memory PGlite that stands in for
+// work core and reads the row it left; one writes each refused state by
+// hand; one reads that each check leaves the rows an office already holds
+// unchecked. All run every migration, in an in-memory PGlite that stands in for
 // db.ts (pglite.ts). Run with `npm test -w @oddboro/ledger`.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { eq } from 'drizzle-orm';
-import { asks, followUps, staff, threads } from '../src/schema.ts';
+import { getTableConfig } from 'drizzle-orm/pg-core';
+import { asks, followUps, staff, tasks, threads } from '../src/schema.ts';
 import { db, sql } from './pglite.ts';
 
 const { giveTask } = await import('../src/office.ts');
@@ -89,4 +91,19 @@ test('the database refuses each state no work change writes', async () => {
   ];
   for (const [check, write] of broken)
     await assert.rejects(write, (err: Error) => err.message.includes(`"${check}"`), check);
+});
+
+test('each check skips the rows an office already holds, so a row an older version wrote never stops the upgrade', async () => {
+  // NOT VALID is a hand edit to the migration, which drizzle cannot write, so
+  // generating the migration again would drop it with every other test green.
+  const names = [asks, followUps, tasks, threads]
+    .flatMap((t) => getTableConfig(t).checks.map((c) => c.name))
+    .sort();
+  assert.ok(names.length > 0, 'the work tables declare no check');
+  const rows = await sql<{ conname: string; convalidated: boolean }>`
+    select conname, convalidated from pg_constraint where contype = 'c' order by conname`;
+  assert.deepEqual(
+    rows.filter((r) => names.includes(r.conname)),
+    names.map((conname) => ({ conname, convalidated: false }))
+  );
 });
