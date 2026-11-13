@@ -97,7 +97,7 @@ function nth(name: string, n: number): string {
  * before, and any other refuses the hand-off. With `nextFree`, a different
  * file there instead sends this one to the next free name (`nth`).
  */
-function carryFiles(
+export function carryFiles(
   thread: number,
   from: string,
   carry: CarriedFile[],
