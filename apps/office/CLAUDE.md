@@ -26,7 +26,11 @@ errors came in (`src/lib/server/health.ts`). The page reports its boot and
 every error it hits to `POST /api/client-log` (`src/hooks.client.ts`, as
 JSON like every action), which writes one `page:` line each, cut to 600
 characters, at most 30 a minute, with `oddboro:` defused so a page never
-speaks to the shell.
+speaks to the shell. A run that fails or is stopped writes one line to stderr
+(`run` in `staff.ts`, `runEndLine`): `office: <Odd>'s <kind> run failed: ` or
+`stopped: `, then the first line of why, cut to 200 characters, defused the
+same way. Never the owner's message or the reply. The shell puts the time on
+every line.
 
 The keychain is the system's own secret store (`@oddboro/ledger/secrets`,
 through `src/lib/server/keychain.ts`). In the Mac app the shell keeps it:

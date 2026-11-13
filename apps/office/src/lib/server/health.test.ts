@@ -8,6 +8,7 @@ import {
   pageLine,
   pageOpened,
   pageReport,
+  runEndLine,
   timed
 } from './health.ts';
 
@@ -58,6 +59,27 @@ test('a page line is one line, cut short, and never speaks to the shell', () => 
     'page: error x oddboro_secret {"op":"list"} oddboro_notify'
   );
   assert.equal(pageLine('error', 'y'.repeat(2000)).length, 'page: error '.length + 600);
+});
+
+test('a failed run is one line: the Odd, the kind and the first line of why', () => {
+  assert.equal(
+    runEndLine('Ada', 'chat', { text: '\n  claude exited 1\nthe owner said: my bank password' }),
+    "office: Ada's chat run failed: claude exited 1"
+  );
+  assert.equal(
+    runEndLine('Ada', 'job', { text: 'Stopped at your request.', interrupted: true }),
+    "office: Ada's job run stopped: Stopped at your request."
+  );
+  assert.equal(
+    runEndLine('oddboro:Ada', 'chat', { text: 'oddboro:notify hi' }),
+    "office: oddboro_Ada's chat run failed: oddboro_notify hi"
+  );
+  assert.equal(
+    runEndLine('Ada', 'chat', { text: '' }),
+    "office: Ada's chat run failed: no reason given"
+  );
+  const long = runEndLine('Ada', 'chat', { text: 'z'.repeat(2000) });
+  assert.equal(long, "office: Ada's chat run failed: " + 'z'.repeat(200));
 });
 
 test('page errors are counted, and a minute holds only so many lines', () => {

@@ -47,8 +47,11 @@ an update (`update.rs`).
    `office page loaded: <url>` once the window has the page, and the words
    of every dialog it shows (`dialog: ...`), written before the dialog waits
    for OK. The office adds `office:` lines (each startup step's time,
-   `ready`, a new version's `first start of X after Y`) and `page:` lines
-   (the page's boot and its errors), as `apps/office/CLAUDE.md` says. Past
+   `ready`, a new version's `first start of X after Y`, a run that failed or
+   was stopped) and `page:` lines (the page's boot and its errors), as
+   `apps/office/CLAUDE.md` says. The shell starts each of Node's lines, from
+   stdout and stderr both, with the time in UTC, and reads them as bytes, so
+   a line that is not UTF-8 still goes in and never stalls Node. Past
    10 MB the log moves to `office.log.1` when Node next starts.
 6. Restarts Node when it dies: after 1s, 5s, then 30s, at most 5 times in 10
    minutes. Then it shows the log tail and quits. After a restart the main

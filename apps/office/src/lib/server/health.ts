@@ -44,11 +44,30 @@ export function pageClosed(): void {
  * never say it.
  */
 export function pageLine(kind: string, text: string): string {
-  const clean = text
+  return `page: ${kind} ${defused(text).slice(0, PAGE_LINE_MAX)}`;
+}
+
+const defused = (text: string) =>
+  text
     .replace(/\s+/g, ' ')
     .replace(/oddboro:/gi, 'oddboro_')
     .trim();
-  return `page: ${kind} ${clean.slice(0, PAGE_LINE_MAX)}`;
+
+const RUN_ERROR_MAX = 200;
+
+/**
+ * The log's line for a run that failed or was stopped: the Odd, the kind of
+ * run, and only the first line of what went wrong, cut short. Never the
+ * owner's message or the Odd's reply.
+ */
+export function runEndLine(
+  odd: string,
+  kind: string,
+  r: { text: string; interrupted?: true }
+): string {
+  const first = r.text.split('\n').find((l) => l.trim()) ?? '';
+  const why = defused(first).slice(0, RUN_ERROR_MAX) || 'no reason given';
+  return `office: ${defused(odd)}'s ${kind} run ${r.interrupted ? 'stopped' : 'failed'}: ${why}`;
 }
 
 /** A page's report: counted if an error, logged unless this minute's lines are spent. */
