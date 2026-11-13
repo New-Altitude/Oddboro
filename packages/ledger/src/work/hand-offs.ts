@@ -90,12 +90,8 @@ export function handedOff(
 
   // From here the sender leads the work.
   const after: After[] = [];
-  const hold = windowHold(rows, to, now);
   // A new window ask goes in before the work it holds, which points at it.
-  const held = hold && {
-    ...hold,
-    by: hold.ask ?? raise(d, windowAsk(rows, e.from, hold.share, hold.at), 'window', after, now)
-  };
+  const held = windowHolds(d, { to, lead: e.from }, after, now);
   const thread =
     'id' in e.thread ? e.thread.id : openThread(d, e.thread.open, e.run ? [e.run] : [], now);
   const threadId = typeof thread === 'number' ? thread : idOf(d, thread);
@@ -166,6 +162,28 @@ function windowHold(
     return undefined;
   if (w.ask?.status === 'approved') return undefined;
   return { resetsAt: w.resetsAt, at: clockTime(w.resetsAt, now), share: w.share, ask: w.ask?.id };
+}
+
+/**
+ * Whether a hand-off from `lead` to `to` waits for the usage window
+ * (`windowHold`), and the ask it waits under: this window's, or one raised
+ * now into this change, its after-steps into `after`. Every start of a
+ * hand-off asks this: a new one (`handedOff`) and a held one the owner said
+ * yes to (`start_held` in ./asks.ts).
+ */
+export function windowHolds(
+  d: Draft,
+  h: { to: Odd; lead: string },
+  after: After[],
+  now: Date
+): { resetsAt: Date; at: string; share: number; by: number | Inserted } | undefined {
+  const hold = windowHold(d.rows, h.to, now);
+  if (!hold) return undefined;
+  const { ask, ...rest } = hold;
+  return {
+    ...rest,
+    by: ask ?? raise(d, windowAsk(d.rows, h.lead, hold.share, hold.at), 'window', after, now)
+  };
 }
 
 /**

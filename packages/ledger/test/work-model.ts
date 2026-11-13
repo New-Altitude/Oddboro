@@ -9,6 +9,7 @@ import type { LiveKind } from '../src/work/events.ts';
 import { OUTCOME_TITLE } from '../src/work/runs.ts';
 import type { WorkRows } from '../src/work/snapshot.ts';
 import type { FollowUp } from '../src/work/state.ts';
+import { minutes } from './work-rows.ts';
 
 // The test's own record of the office, from the events alone.
 
@@ -268,6 +269,34 @@ export const titleOf = (r: Model, kind: LiveKind, outcome: Outcome, about: strin
   `${OUTCOME_TITLE[kind][outcome].replace('{owner}', r.owner)}: ${about}`;
 
 export const left = (r: Model, id: string) => !!r.odds.get(id)?.left;
+
+/**
+ * The plan's usage window as the loader reads it for a hand-off, new or held:
+ * past the guard until it resets at minute `resetsAt`, with the office's ask 4.
+ */
+export const WINDOW = { share: 0.9, resetsAt: 10, ask: 4 } as const;
+/** The guard past which hand-offs to an Odd on Claude Code wait, as the plan's rule says. */
+const GUARD = 0.85;
+
+/**
+ * Whether a hand-off to `to` waits for the usage window now: to an Odd on
+ * Claude Code, past the guard, before the reset, and with no yes to the
+ * window's ask. A new hand-off and a held one the owner says yes to both ask.
+ */
+export function windowHolds(r: Model, to: string): boolean {
+  return (
+    r.odds.get(to)?.agent === 'claude' &&
+    +minutes(WINDOW.resetsAt) > +minutes(r.at) &&
+    WINDOW.share >= GUARD &&
+    askOf(r, WINDOW.ask)?.status !== 'approved'
+  );
+}
+
+/** Work the usage window holds: open, and parked until the reset under the window's ask. */
+export function holdForWindow(t: ThreadRec): void {
+  t.status = 'open';
+  t.park = { on: 'window', at: +minutes(WINDOW.resetsAt), ask: WINDOW.ask };
+}
 export const askOf = (r: Model, id: number | null) =>
   id === null ? undefined : r.asks.find((a) => a.id === id);
 

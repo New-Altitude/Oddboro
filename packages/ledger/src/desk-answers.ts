@@ -73,7 +73,8 @@ export const askReplaced = (a: { status: AskStatus; reason: string | null }): bo
  * - `turn_on`: the switches the ask names turned on with the yes
  *   (`changeOwnTools`), and the work that waited on them starts, once for each
  *   place a result goes back to.
- * - `start_held`: the hand-off the ask held starts, as the ask is claimed.
+ * - `start_held`: the hand-off the ask held starts, as the ask is claimed,
+ *   unless the usage window holds it as it would a new one.
  * - `answer_window`: the usage window's answer (`answerWindow`).
  * - `answer_hand_offs`: the yes or no to more hand-offs goes to the thread's hub
  *   (`answerHandOffs`).

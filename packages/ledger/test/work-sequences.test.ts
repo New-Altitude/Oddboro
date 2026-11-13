@@ -13,6 +13,7 @@ import { ASK_KINDS, type Outcome } from '../src/schema.ts';
 import { explore, type Explore } from '../src/sequences.ts';
 import type { TaskEnded } from '../src/task-parking.ts';
 import type { Decided } from '../src/transition.ts';
+import { effectsOf } from '../src/work/answers.ts';
 import { decide } from '../src/work/decide.ts';
 import type {
   Claimed,
@@ -55,6 +56,7 @@ import {
   recordOf,
   show,
   titleOf,
+  WINDOW,
   type AskRec,
   type Delivery,
   type Heard,
@@ -84,8 +86,7 @@ import {
   removeOdd,
   stopped,
   tellLead,
-  threadEvents,
-  WINDOW
+  threadEvents
 } from './work-threads-model.ts';
 
 // How many seeds the test runs; set WORK_SEQUENCES_SEEDS for a longer run.
@@ -723,18 +724,31 @@ function preparedFor(rows: WorkRows, id: number): Prepared {
   return {};
 }
 
-/** What the loader reads beside the rows for this event. */
-function loadedFor(rows: WorkRows, e: WorkEvent): WorkRows {
-  if (e.kind === 'askDecided') return { ...rows, prepared: preparedFor(rows, e.id) };
-  if (e.kind !== 'handedOff') return rows;
+/** The usage window as the loader reads it under the plan's lock, with its ask. */
+function windowOf(rows: WorkRows): WorkRows['window'] {
   const ask = rows.asks.get(WINDOW.ask);
   return {
+    share: WINDOW.share,
+    resetsAt: minutes(WINDOW.resetsAt),
+    ask: ask ? { id: ask.id, status: ask.status } : null
+  };
+}
+
+/** What the loader reads beside the rows for this event: the window only for a hand-off, new or held. */
+function loadedFor(rows: WorkRows, e: WorkEvent): WorkRows {
+  if (e.kind === 'askDecided') {
+    const a = rows.asks.get(e.id);
+    const startsHeld = !!a && effectsOf(a.kind, e.decision).includes('start_held');
+    return {
+      ...rows,
+      window: startsHeld ? windowOf(rows) : null,
+      prepared: preparedFor(rows, e.id)
+    };
+  }
+  if (e.kind !== 'handedOff') return rows;
+  return {
     ...rows,
-    window: {
-      share: WINDOW.share,
-      resetsAt: minutes(WINDOW.resetsAt),
-      ask: ask ? { id: ask.id, status: ask.status } : null
-    },
+    window: windowOf(rows),
     prepared: { sharing: { from: e.from, title: e.work.title, brief: e.work.brief } }
   };
 }
@@ -1004,6 +1018,7 @@ const CASES: Record<keyof typeof RULE, string[]> = {
     "a hand-off opening a goal's work its sender does not lead",
     'a hand-off taken',
     'words told to a lead',
+    'a yes to a hand-off the usage window holds',
     'a leaving of an Odd gone already',
     'an unanswered window ask leaving the desk at the reset'
   ]

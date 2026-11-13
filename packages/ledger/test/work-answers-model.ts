@@ -9,12 +9,14 @@ import { SERVES_NO_THREAD } from '../src/work/kinds.ts';
 import { TWINNED } from '../src/work/twins.ts';
 import {
   askOf,
+  holdForWindow,
   insert,
   left,
   meet,
   newRun,
   settle,
   show,
+  windowHolds,
   type AskRec,
   type Chat,
   type Model
@@ -539,7 +541,7 @@ function hearAsk(
     const key = k.handOffId ? `hand-off ${k.handOffId}` : `thread ${k.threadId}`;
     groups.set(key, [...(groups.get(key) ?? []), k]);
   }
-  const handsOn = !!a.held && !left(r, a.held.to);
+  const handsOn = !!a.held && !left(r, a.held.to) && !windowHolds(r, a.held.to);
   const excepted = KINDS[a.kind].unheard?.({ yes: o.yes, reason: o.reason, handsOn }) ?? false;
   const starts = steps.some((s) => s === 'carryOut' || s === 'carryOuts' || s === 'rework');
   for (const group of groups.values()) {
@@ -584,11 +586,17 @@ function hearAsk(
 /**
  * A held hand-off starts as the first of a new round; done or failed work
  * opens again for it. One for a colleague that left since never goes (R10):
- * its lead hears so (`answerHandOffs`).
+ * its lead hears so (`answerHandOffs`). One the usage window holds waits for
+ * it, as a new hand-off does, and its lead hears so too.
  */
 function handOn(r: Model, threadId: number, held: NonNullable<AskRec['held']>): void {
   if (left(r, held.to)) return;
   const t = r.threads.get(threadId)!;
+  if (windowHolds(r, held.to)) {
+    holdForWindow(t);
+    meet('a yes to a hand-off the usage window holds');
+    return;
+  }
   if (t.status === 'done' || t.status === 'failed') {
     t.status = 'open';
     t.park = { on: 'none' };
@@ -606,7 +614,8 @@ function handOn(r: Model, threadId: number, held: NonNullable<AskRec['held']>): 
 
 /**
  * A no stops the work and tells its lead; a yes tells the lead only when the
- * owner wrote something, or when its held hand-off's colleague left since.
+ * owner wrote something, when its held hand-off's colleague left since, or
+ * when the usage window holds that hand-off.
  */
 function answerHandOffs(
   r: Model,
@@ -620,7 +629,7 @@ function answerHandOffs(
     meet('a no to more hand-offs stops the work');
   } else if (a.held && left(r, a.held.to)) {
     meet('a yes to a hand-off held for a colleague that left');
-  } else if (a.held && !o.reason) return;
+  } else if (a.held && !o.reason && !windowHolds(r, a.held.to)) return;
   answerLead(r, t.id, o.marker, { askId: a.id });
 }
 
