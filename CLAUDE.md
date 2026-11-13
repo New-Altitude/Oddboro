@@ -72,6 +72,7 @@ docs/           Decisions, hard rules, the office design, and the backlog.
 data/           Gitignored. The private-words list and local-only files. Never tracked.
 docker-compose.yml  Postgres 17 with pgvector, on 127.0.0.1 only.
 .github/workflows/ci.yml       Every pull request to main, and every push to it, runs the checks, Mac, Linux and Windows.
+.github/workflows/app-smoke.yml  Every pull request that changes the app, and main nightly, installs it and smoke-tests it.
 .github/workflows/release.yml  Every merge to main that changes the app redrafts the next release, Mac, Linux and Windows.
 .github/workflows/codeql.yml   Code scanning, for only the languages a change touches.
 ```
