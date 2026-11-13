@@ -60,7 +60,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    reading. Where it stands is real state: an open ask or task from it puts
    it outside the owner's door (`wait`), a running job puts it to work in its room,
    and so does a thread of its own a colleague holds (its tag reads "Waiting on
-   <colleague>"; `wantOf` in the page), and otherwise it wanders between work and breaks. A free Odd's own
+   <colleague>"; `floorMode` in `src/lib/staff/odd-now.ts`), and otherwise it wanders between work and breaks. A free Odd's own
    clock starts when it arrives, for a random stay that depends on the
    activity (`STAY` in the page), so Odds never all get up at once. An
    Odd on a job stays at it until the job ends. While an Odd walks, its
@@ -471,7 +471,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    it in the Odd's own `attachments/` (`src/lib/server/chat-files.ts`)
    under `<date>-<time>-<4 random hex>-<name>`, never over another file,
    then the message names them by tag and kept name. The run's message
-   ends with each tag's full path (`attachedBrief` in `staff.ts`), and the
+   ends with each tag's full path (`attachedBrief` in `chat-run.ts`), and the
    run opens them with its own file tools; Codex, whose `view_image` is
    off, gets the pictures as `--image`. `chat.jsonl` keeps them on the
    owner's line (`files`), and the chat shows them from
@@ -535,7 +535,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    install. `src/lib/server/staff.ts` runs `claude -p` on the owner's login for chats,
    job runs, follow-ups and drafts, or `grok -p` for an Odd that runs on Grok,
    `codex exec` for one on Codex, or `gemini` for one on Gemini (`staff.agent`;
-   each but Claude Code gets ready through `LAUNCHES` in `src/lib/server/cli.ts`). The owner picks it in the hire
+   each gets ready through `LAUNCHES` in `src/lib/server/cli.ts`). The owner picks it in the hire
    window's Model step, stored with the hire before its hello runs, and on the
    Settings tab's Model tab (`AccessTab.svelte`), which both show
    `ModelPicker.svelte`; both list the tools `/api/agents` finds on PATH
@@ -1157,8 +1157,8 @@ pieces under 3,900 bytes a line, so no value is on a command line.
     untick it; a proposal can say either way. "Draft it" drafts the job
     description. Both run as the office (`src/lib/server/office-run.ts`),
     never as an Odd, so a new office can hire its first. An office run goes
-    to the office's tool (`officeAgent()`): on Grok or Codex through that
-    tool's own launch (`LAUNCHES` in `cli.ts`) and sandbox, in a folder of
+    to the office's tool (`officeAgent()`) through its launch (`LAUNCHES` in
+    `cli.ts`): on Grok or Codex with that tool's own sandbox, in a folder of
     its own under `<home>/office/runs` that reads nothing else, has no MCP,
     web or network, and goes when the run ends, pictures and all. A hire with
     no tool picked starts on the office's tool. Opened from a

@@ -21,7 +21,8 @@ an app; `ledger` imports `world` and `sprites`, and `world` imports `sprites`.
 - `apps/office`. The office server and its page: the floor (`src/lib/floor/`),
   the panels (`src/lib/ui/`), the routes (`src/routes/api/`, one folder per
   thing), and running Odds (`src/lib/server/`: `staff.ts` runs one, `cli.ts`
-  starts the tools other than Claude Code, `sandbox.ts` walls commands).
+  gets each AI tool's launch ready (`LAUNCHES`), `drive.ts` runs it and reads
+  its stream, `sandbox.ts` walls commands).
 - `packages/world`. Rooms and offices as JSON (`rooms/`, `plans/`), an
   owner's office built from a spec (`src/generate.ts`), and `composeWorld`.
 - `packages/sprites`. The art as `.px` text, the palette, the compiler.
@@ -52,6 +53,11 @@ Before writing a helper, use the one that already does the job.
 | Register an office tool                                 | `tool()`                                                              | `packages/ledger/src/mcp-run.ts`                       |
 | Check a folder before an Odd gets it                    | `checkFolder()`                                                       | `packages/ledger/src/office-folders.ts`                |
 | Put a follow-up on a thread                             | `transitionWork()` with `runQueued`, whose `oweRun()` runs `settle()` | `packages/ledger/src/work/threads.ts`                  |
+| Change a system that keeps state                        | `transition()`                                                        | `packages/ledger/src/transition.ts`                    |
+| Decide what an event does to the office's work          | `decide()`, through `transitionWork()`                                | `packages/ledger/src/work/decide.ts`                   |
+| Test a system with random event sequences               | `explore()`                                                           | `packages/ledger/src/sequences.ts`                     |
+| Run an AI tool and read its stream                      | `drive()`                                                             | `apps/office/src/lib/server/drive.ts`                  |
+| Say what an Odd is doing, on any screen                 | `oddNow()`                                                            | `apps/office/src/lib/staff/odd-now.ts`                 |
 | Tell the page something changed                         | a table's trigger, or `emit()`                                        | `apps/office/src/lib/server/events.ts`                 |
 | Tell every run how the office works                     | `house()`                                                             | `apps/office/src/lib/server/house.ts`                  |
 | Run as the office, not as an Odd                        | `runAsOffice()`                                                       | `apps/office/src/lib/server/office-run.ts`             |
@@ -62,6 +68,33 @@ Before writing a helper, use the one that already does the job.
 | Fail a lint guard                                       | `report()`                                                            | `scripts/lib/files.ts`                                 |
 | Test against a database, the tool server, or the office | `pglite.ts`, `tool-server.ts`, `office-under-test.ts`                 | `packages/ledger/test/`, `apps/office/src/lib/server/` |
 
+## A system that keeps state
+
+Something the office keeps that changes as things happen, such as its work
+or the lessons, decides each change in one pure function and writes it in one
+transaction, as the 2026-11-11 `[arch]` decision in `docs/decisions/` says. A
+new one takes the same four parts:
+
+1. **Its states.** One union per stored thing, a parser that reads a row into
+   a state its type allows and refuses a row whose columns disagree, and a
+   serializer that writes every column back. The work's are in
+   `packages/ledger/src/work/state.ts`. A check in a migration holds each
+   rule for every new write, as `0030_work_checks` does.
+2. **Its events and deciders.** What can happen, as plain data, each with one
+   pure decider: no database, no clock. The work's are `WorkEvent` and
+   `DECIDERS`; the lessons' are `LessonCommand` and `decideLesson` in
+   `packages/ledger/src/lesson-rules.ts`. `test/pure-modules.test.ts` checks
+   that they load no database.
+3. **Its rules in a sequence test.** A test drives random events through the
+   system with `explore()`, keeps its own record of what is true, and says
+   each rule as an equality against that record.
+   `packages/ledger/test/work-sequences.test.ts` and
+   `lesson-sequences.test.ts` are the examples.
+4. **The shell.** `transition()` loads and locks the rows, asks the decider,
+   and writes the change, with ledger lines after the commit. The work's
+   entry is `transitionWork()`. A system with no row to lock takes a lock of
+   its own, as the lessons do per scope (`lockScopes` in `lessons.ts`).
+
 ## Adding a new kind
 
 Each entry says where to start, then what fails when a place is missed. Where
@@ -70,8 +103,8 @@ nothing fails, it says so: name that place in the pull request.
 Planned work starts where a "Later" line says, not here: the "Later" sections
 of `packages/ledger/CLAUDE.md`, `apps/office/src/lib/server/CLAUDE.md`,
 `apps/desktop/CLAUDE.md`, `scripts/CLAUDE.md` and `docs/CLAUDE.md` say what
-comes first for a run timeline (one row per run), Stop for a run, Claude
-Code's launch, a new office tool or AI tool, a release smoke test, splitting a
+comes first for a run timeline (one row per run), Stop for a run, a new
+office tool or AI tool, a release smoke test, splitting a
 big file, the size guard and a long guide file. The page pass is the last line
 of "Rules for this app" in `apps/office/CLAUDE.md`. Whoever does a "Later" item
 deletes its line, and whoever finds this page wrong fixes it in the same
@@ -83,10 +116,15 @@ change.
   kind the owner answers on its own card (a reply, a filter, a folder, a call)
   gives `approve` a `by`, the line a bare yes gets, and its route approves it;
   a plain yes (a `switch` ask) names its effects directly.
-- **A follow-up kind.** Start at `FOLLOW_UP_KINDS` in `schema.ts`. Check-types
-  fails at every `Record<FollowUpKind, ...>`, `AT_DRAFT` and
-  `SERVES_NO_THREAD` in `hand-offs.ts` among them, and at the switch in
+- **A follow-up kind.** Start at `FOLLOW_UP_KINDS` in
+  `packages/ledger/src/work/kinds.ts`. Check-types fails at every
+  `Record<FollowUpKind, ...>`, `AT_DRAFT` and `SERVES_NO_THREAD` beside it
+  among them, and at the switch in
   `apps/office/src/lib/server/follow-up-brief.ts`.
+- **A work event.** Start at `WorkEvent` in
+  `packages/ledger/src/work/events.ts`. Check-types fails at `WorkResults`
+  beside it and at `DECIDERS` in `work/decide.ts` until the event has its
+  decider.
 - **A desk item.** Start at `DESK_ITEMS` in `desk-answers.ts`. Check-types
   fails at `OWNER_ANSWERS`, `Item` in `DeskDrawer.svelte`, `replyBrief` and
   `openDelivered`.

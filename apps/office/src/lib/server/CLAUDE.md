@@ -66,12 +66,7 @@ jobs; it never owns a second process registry.
 Each line says what to do when its trigger comes.
 
 - Building NEW-1651 or NEW-1654, whichever comes first: give each run one
-  row of its own, with `runs.jobId` optional, usage pointing at the run, and
-  one reader per tool of that tool's stream.
-- Building NEW-1657 (Claude Code's commands on Linux): first make one run
-  plan every tool's launch reads, and move Claude Code's launch out of
-  `staff.ts` into a file of its own beside `codex.ts`, `grok.ts` and
-  `gemini.ts`.
+  row of its own, with `runs.jobId` optional and usage pointing at the run.
 - Before any change to what Odds are told (`house.ts`, a run's brief, or the
   lines in the ledger's `capabilities.ts`): add snapshot tests of each kind of
   run's prompt, so the change shows as a diff in review.
