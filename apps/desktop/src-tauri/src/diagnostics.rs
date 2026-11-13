@@ -684,8 +684,8 @@ mod tests {
         let frame = "core::panicking::panic_fmt at /rustc/abc/library/core/src/panicking.rs";
         assert!(!holds_word(frame, "nic"));
         assert!(!holds_word(frame, "pan"));
-        assert!(holds_word("/Users/nic/code", "nic"));
-        assert!(holds_word("C:\\\\Users\\\\nic\\\\code", "nic"));
+        assert!(holds_word("/srv/nic/code", "nic"));
+        assert!(holds_word("D:\\\\work\\\\nic\\\\code", "nic"));
         assert!(holds_word("nic", "nic"));
     }
 
