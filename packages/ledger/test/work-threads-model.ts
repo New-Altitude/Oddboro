@@ -180,7 +180,7 @@ export function clockWake(r: Model, e: EventOf<'clockWoke'>): void {
   settle(r, t.id);
 }
 
-/** True when the work is stopped or its lead left: it takes no new hand-off and no words (R4). */
+/** True when the work is stopped or its lead left: it takes no new hand-off and no words (nothing new reaches stopped work). */
 function stoppedWork(r: Model, threadId: number): boolean {
   const t = r.threads.get(threadId);
   return !!t && (t.status === 'stopped' || left(r, t.hub));
