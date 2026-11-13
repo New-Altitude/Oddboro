@@ -1264,3 +1264,43 @@ test('a hand-off whose files cannot be carried writes no row, and its caller get
   });
   assert.deepStrictEqual(await readRows(), before);
 });
+
+test('a held hand-off yes to a colleague that left decides as on the whole office, and starts no run for it', async () => {
+  // Thread 8 has no run, so the yes reaches Rae only through the colleague its ask holds.
+  await seedOffice();
+  await db
+    .update(staff)
+    .set({ leftAt: minutes(-5) })
+    .where(eq(staff.id, 'rae'));
+  const world = await readWorld();
+  const rae = world.staff.get('rae');
+  assert.ok(rae);
+  world.staff.set('rae', { ...rae, leftAt: minutes(-5) });
+  const e = answer(7, 'approve');
+  const { got, loaded } = await run(e, minutes(1));
+  const expected = decide({ ...world, prepared: loaded.prepared }, e, minutes(1));
+  assert.deepStrictEqual(unput(got), unput(expected));
+  assert.ok('change' in got && 'change' in expected);
+  assert.deepStrictEqual(
+    applyChange(world, got.change).followUps,
+    applyChange(world, expected.change).followUps
+  );
+});
+
+test('the clock waking one of two threads the window ask holds keeps the ask on the desk', async () => {
+  await seedOffice();
+  await db
+    .update(threads)
+    .set({ resumeAt: minutes(-1) })
+    .where(eq(threads.id, 7));
+  await db
+    .update(threads)
+    .set({ resumeAt: minutes(30), heldBy: 8 })
+    .where(eq(threads.id, 2));
+  const world = await readWorld();
+  const e: WorkEvent = { kind: 'clockWoke', threadId: 7 };
+  const { got } = await run(e, minutes(1));
+  assert.deepStrictEqual(unput(got), unput(decide(world, e, minutes(1))));
+  const [a] = await db.select().from(asks).where(eq(asks.id, 8));
+  assert.equal(a.status, 'open', 'ask 8 still holds thread 2');
+});
