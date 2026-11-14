@@ -1,9 +1,15 @@
-import { findService } from './service-identity.mjs';
-
-const [home, port, version] = process.argv.slice(2);
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { openSession, verifyService } from './service-identity.mjs';
 try {
-  if (!(await findService(home, Number(port), version))) process.exitCode = 1;
+  const [home, port, version] = process.argv.slice(2);
+  const session = await openSession(
+    readFileSync(0, 'utf8'),
+    JSON.parse(readFileSync(join(home, 'service.json'), 'utf8'))
+  );
+  if (session.port !== Number(port) || session.version !== version) throw Error();
+  await verifyService(session);
+  process.stdout.write(session.key);
 } catch {
-  // An office that is still starting or no longer listening cannot be attached yet.
   process.exitCode = 1;
 }

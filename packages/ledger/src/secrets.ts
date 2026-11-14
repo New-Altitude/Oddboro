@@ -28,6 +28,7 @@ const SERVICE = 'oddboro';
 /** One system's secret store. `get` and `remove` throw when there is no such secret. */
 type Store = {
   set(account: string, value: string): void;
+  setConfirmed?(account: string, value: string): Promise<void>;
   get(account: string): string;
   remove(account: string): void;
   /** Throws when the store cannot be reached. */
@@ -299,6 +300,11 @@ function shellStore(ask: (ask: Ask) => Promise<Answer>, secrets: Map<string, str
       secrets.set(account, value);
       send({ op: 'set', account, value });
     },
+    async setConfirmed(account, value) {
+      const answer = await ask({ op: 'set', account, value });
+      if (!answer.ok) throw fixedError('The Keychain could not save this office pairing.');
+      secrets.set(account, value);
+    },
     get(account) {
       const value = secrets.get(account);
       if (value === undefined) throw new Error(`No secret named ${account}`);
@@ -377,6 +383,13 @@ export async function useShellSecrets(
 export function setSecret(connector: string, name: string, value: string): void {
   if (!store) throw fixedError('This system has no secret store the office can use yet.');
   store.set(`${connector}:${name}`, value);
+}
+
+/** Pairing must be durable before its owner receives the only copy of the code. */
+export async function savePairing(slot: string, value: string): Promise<void> {
+  if (!store) throw fixedError('The credential store is unavailable.');
+  if (store.setConfirmed) await store.setConfirmed('owner-pairing:' + slot, value);
+  else store.set('owner-pairing:' + slot, value);
 }
 
 export function getSecret(connector: string, name: string): string | undefined {

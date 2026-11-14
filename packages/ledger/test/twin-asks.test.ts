@@ -4,13 +4,14 @@
 // back where it came from, and one run per place does the work. Run with `npm test -w @oddboro/ledger`.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { asks, followUps, staff, tasks } from '../src/schema.ts';
 import { db } from './pglite.ts';
 
 // The ledger rows a decision writes embed nothing: no Ollama answers here.
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
-const { decideAsk, desk, finishTask, raiseAsk, standsFor } = await import('../src/office.ts');
+const { answeredWith, decideAsk, desk, finishTask, raiseAsk, standsFor } =
+  await import('../src/office.ts');
 
 await db.insert(staff).values({
   id: 'paige',
@@ -20,6 +21,9 @@ await db.insert(staff).values({
   variant: 'a',
   portrait: 'a',
   permission: 'act',
+  // Run commands is on already, so a yes to a switch ask never needs this
+  // system's tool to follow it.
+  commands: true,
   desk: 'You are Paige.'
 });
 
@@ -101,4 +105,86 @@ test('sending one back leaves its twin waiting', async () => {
   await decideAsk(first.id, 'iterate', 'Say which calendar.');
   assert.equal((await row(twin.id)).status, 'open');
   assert.ok((await shown()).includes(twin.id), 'with the first sent back, the twin shows');
+});
+
+// An ask for some switches or office tools, a smaller one inside it, and one
+// that shares nothing with the smaller, for each kind.
+const LISTS = {
+  office_tool: {
+    big: ['office_report', 'list_goals'],
+    small: ['office_report'],
+    apart: ['list_goals']
+  },
+  switch: { big: ['commands', 'web'], small: ['web'], apart: ['commands'] }
+} as const;
+type ListKind = keyof typeof LISTS;
+const listAsk = (kind: ListKind, list: readonly string[], handOffId?: number) =>
+  raiseAsk('paige', {
+    kind,
+    title: `Turn on ${list.join(' and ')}`,
+    why: 'w',
+    ifApproved: 'i',
+    ...(kind === 'switch'
+      ? { switches: list as ('commands' | 'web')[] }
+      : { officeTools: list as ('office_report' | 'list_goals')[] }),
+    handOffId
+  }).then((r) => r.ask);
+const withIds = async (id: number) => (await answeredWith((await row(id))!)).map((a) => a.id);
+
+test('for switches and office tools, a yes answers each open ask for no more, and asks answered together each stand for the other', async () => {
+  for (const kind of Object.keys(LISTS) as ListKind[]) {
+    const { big, small, apart } = LISTS[kind];
+    // Each state starts with no open ask of the kind and no run started.
+    const fresh = async () => {
+      await db.delete(followUps);
+      await db
+        .update(asks)
+        .set({ status: 'denied' })
+        .where(and(eq(asks.kind, kind), eq(asks.status, 'open')));
+    };
+
+    // The owner answers the larger ask, with the hand-off on either one.
+    for (const onBig of [true, false]) {
+      await fresh();
+      const larger = await listAsk(kind, big, onBig ? 41 : undefined);
+      const smaller = await listAsk(kind, small, onBig ? undefined : 41);
+      await decideAsk(larger.id, 'approve', null);
+      assert.equal((await row(smaller.id)).status, 'approved', kind);
+      assert.deepEqual(await withIds(larger.id), [smaller.id], `${kind}: from the larger`);
+      assert.deepEqual(await withIds(smaller.id), [larger.id], `${kind}: from the smaller`);
+      const [carrying, other] = onBig ? [larger, smaller] : [smaller, larger];
+      assert.deepEqual(await carryOuts(), [carrying.id], `${kind}: the hand-off's ask carries out`);
+      assert.deepEqual(
+        (await standsFor((await row(carrying.id))!)).map((a) => a.id),
+        [other.id],
+        `${kind}: the carrying run stands for the other, hand-off on the ${onBig ? 'larger' : 'smaller'}`
+      );
+    }
+
+    // The owner answers the smaller ask: the larger stays open.
+    await fresh();
+    const smaller = await listAsk(kind, small);
+    const larger = await listAsk(kind, big, 41);
+    await decideAsk(smaller.id, 'approve', null);
+    assert.equal((await row(larger.id)).status, 'open', kind);
+    assert.deepEqual(await withIds(smaller.id), [], kind);
+
+    // Equal sets: both answered, each named from the other.
+    await fresh();
+    const one = await listAsk(kind, big);
+    const equal = await listAsk(kind, big, 41);
+    await decideAsk(one.id, 'approve', null);
+    assert.equal((await row(equal.id)).status, 'approved', kind);
+    assert.deepEqual(await withIds(one.id), [equal.id], kind);
+    assert.deepEqual(await withIds(equal.id), [one.id], kind);
+
+    // Sets that share nothing: the other stays open, and neither names the other.
+    await fresh();
+    const answered = await listAsk(kind, small);
+    const elsewhere = await listAsk(kind, apart, 41);
+    await decideAsk(answered.id, 'approve', null);
+    assert.equal((await row(elsewhere.id)).status, 'open', kind);
+    assert.deepEqual(await withIds(answered.id), [], kind);
+    assert.deepEqual(await withIds(elsewhere.id), [], kind);
+  }
 });

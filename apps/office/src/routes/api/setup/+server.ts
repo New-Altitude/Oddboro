@@ -21,6 +21,7 @@ import {
   zoneName
 } from '@oddboro/ledger';
 import { checkDatabase, checkMachine, type Check } from '@oddboro/ledger/checks';
+import { logSetup } from '#lib/server/health.ts';
 import { CAN_NOTIFY } from '#lib/server/notify.ts';
 import type { RequestHandler } from './$types';
 
@@ -68,13 +69,15 @@ export const GET: RequestHandler = async () => {
             )
           : done('')
   );
+  const checks = [...machine.filter((c) => c.id !== 'docker'), ...database.checks];
+  logSetup(checks);
   return json({
     app: IN_APP,
     system: SYSTEM,
     /** Whether the office can show its own notifications here. */
     notify: CAN_NOTIFY,
     suggested: full.split(' ')[0] ?? '',
-    checks: [...machine.filter((c) => c.id !== 'docker'), ...database.checks],
+    checks,
     owner: name === 'the owner' ? '' : name,
     zone: zone(),
     zoneName: zoneName(),

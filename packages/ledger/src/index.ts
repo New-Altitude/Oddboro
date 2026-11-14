@@ -9,6 +9,7 @@ export * from './agents.ts';
 export * from './accounts.ts';
 export * from './first-questions.ts';
 export * from './access-words.ts';
+export { ACT_CHECK_NEEDED } from './act-check.ts';
 export {
   clockTime,
   describe as describeSchedule,
