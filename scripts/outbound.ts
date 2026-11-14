@@ -223,6 +223,14 @@ export const OUTBOUND: readonly Outbound[] = [
     yes: 'The owner running setup; nothing leaves this computer.'
   },
   {
+    file: 'apps/desktop/src-tauri/src/service_update.rs',
+    calls: 1,
+    to: 'The configured HTTPS release manifest and its signed platform download.',
+    sends:
+      'GET requests for the manifest and new release, with the Oddboro updater user agent. No office records or credentials.',
+    yes: 'Installing the packaged app enables signed updates in the office update window, including without an open desktop.'
+  },
+  {
     file: 'apps/desktop/src-tauri/src/update.rs',
     calls: 1,
     to: "The desktop app's update feed on GitHub (tauri.conf.json's updater endpoints).",
