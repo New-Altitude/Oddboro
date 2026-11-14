@@ -43,7 +43,9 @@ export const handleError = handleErrorWithSentry();
 trustSystemCertificates();
 
 if (process.env.ODDBORO_APP) {
-  process.on('sveltekit:shutdown', () => process.exit(0));
+  process.on('sveltekit:shutdown', () =>
+    process.exit(process.env.ODDBORO_STOP_REQUESTED === '1' ? 75 : 0)
+  );
   process.stdin.on('close', () => process.exit(0)).resume();
 }
 

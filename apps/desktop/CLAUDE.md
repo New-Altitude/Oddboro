@@ -18,6 +18,12 @@ quit, keeping the computer awake and notifications (`server.rs`), opening
 links, the tray icon and closing the window (`main.rs`), and reopening after
 an update (`update.rs`).
 
+## Run without a window
+
+The desktop now starts or attaches to the same independently supervised service as the CLI. Quitting the desktop disconnects the window; **Stop office** or the CLI stops the server. The service owns scheduled signed updates, including when no client is attached. See [Workspace and the command line](../../docs/workspace-and-cli.md).
+
+Run the installed executable with `--headless` to start the bundled office in the foreground. It starts before the display or tray initializes. The same executable supervises Node and handles the Mac Keychain. The health probe reads `/api/health` so startup does not render the office. Stop the foreground office with Ctrl-C on Unix.
+
 ## What the shell does
 
 1. Checks for a newer version before anything else (`update::on_launch`,
@@ -25,8 +31,10 @@ an update (`update.rs`).
    Oddboro to X.Y.Z", and the shell downloads it, checks its signature,
    installs it and opens the new version. Offline or any error, it logs the
    problem and starts as it is. See "Updates" below.
-2. Checks the port. If anything answers on it, shows "another office is
-   already running" and quits. It never attaches to that office.
+2. Attaches to an existing headless office only after checking its version and
+   a fresh challenge against this office home's private service record. A
+   listener that cannot prove its identity is refused. The headless and
+   graphical launchers lock the same office directory before starting Node.
 3. Reads the owner's login-shell PATH once (`$SHELL -l -i -c`, so
    `~/.zshrc` and the Node managers it sets up run, then `$SHELL -l -c` if
    that fails; 5 second timeout each; `/bin/zsh` on a Mac and `/bin/sh` on
@@ -240,7 +248,8 @@ Every update is required. `src-tauri/src/update.rs` runs them with
 - `src-tauri/src/env.rs`. Port, home, log path and the login-shell PATH.
 - `src-tauri/src/secrets.rs`. The office's secrets in the Mac's Keychain, and
   the line protocol it asks with.
-- `src-tauri/src/update.rs`. Checking, downloading and installing updates,
+- `src-tauri/src/service_update.rs`. The background supervisor checks the signed release version and bytes, stages the new installation, waits for the office update window, and reopens without a display.
+- `src-tauri/src/update.rs`. Desktop launch updates,
   and asking the server when.
 - `src-tauri/tauri.conf.json`. The app, with no sidecar or resources, so
   `cargo check` and `cargo clippy` work before anything is staged.

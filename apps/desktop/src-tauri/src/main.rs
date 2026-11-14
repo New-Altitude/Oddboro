@@ -7,8 +7,10 @@
 
 mod diagnostics;
 mod env;
+mod headless;
 mod secrets;
 mod server;
+mod service_update;
 mod update;
 
 use std::path::PathBuf;
@@ -52,6 +54,36 @@ fn main() {
     if let Some(d) = &diagnostics {
         Arc::clone(d).watch_panics();
     }
+    let context = tauri::generate_context!();
+    if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--headless")) {
+        if let Err(message) = headless::run(context.package_info(), diagnostics.as_deref()) {
+            server::note(&env::log_file(), &message);
+            eprintln!("{message}");
+            std::process::exit(exit::SERVER_FAILED);
+        }
+        return;
+    }
+    if let Some(command) = std::env::args_os().nth(1) {
+        // Finder and Smoke may pass system arguments to the graphical app.
+        if !command.to_string_lossy().starts_with('-') || command == "--help" {
+            let status = node_binary()
+                .zip(server_code(context.package_info()))
+                .and_then(|(node, code)| {
+                    let executable = std::env::current_exe().ok()?;
+                    #[cfg(target_os = "linux")]
+                    let executable = std::env::var_os("APPIMAGE")
+                        .map(PathBuf::from)
+                        .unwrap_or(executable);
+                    Command::new(node)
+                        .arg(code.join("apps/office/scripts/office-cli.mjs"))
+                        .args(std::env::args_os().skip(1))
+                        .env("ODDBORO_EXECUTABLE", executable)
+                        .status()
+                        .ok()
+                });
+            std::process::exit(status.and_then(|s| s.code()).unwrap_or(1));
+        }
+    }
     let builder = tauri::Builder::default();
     // Linux and Windows have no Dock to bring a hidden window back, so
     // opening Oddboro again shows the one that runs. It goes first, before
@@ -93,7 +125,7 @@ fn main() {
                 }
             }
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("Oddboro could not start");
 
     app.run(|app, event| match event {
@@ -146,66 +178,47 @@ fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
         return;
     }
 
-    // A newer version installs before the server starts, so an update never
-    // swaps the server out from under a running office.
-    if update::on_launch(app, &env::log_file(), show_updating) {
-        return;
-    }
-
-    if server::port_taken(port) {
-        alert(
-            app,
-            &format!(
-                "Another office is already running on port {port}. Oddboro will quit rather than share it.\n\nQuit the other office, then open Oddboro again."
-            ),
-        );
-        app.exit(exit::PORT_TAKEN);
-        return;
-    }
     let Some(node) = node_binary() else {
         return broken_install(app, diagnostics, exit::NO_NODE, NO_NODE);
     };
-    let Some(code) = server_code(app) else {
+    let Some(code) = server_code(app.package_info()) else {
         return broken_install(app, diagnostics, exit::NO_SERVER, NO_SERVER);
     };
 
-    show_loading(app);
-    let update_token = if update::ENABLED {
-        update::token()
-    } else {
-        String::new()
-    };
-    let server = Server {
-        node,
-        code,
-        port,
-        path: env::login_path(),
-        home: env::office_home(),
-        log: env::log_file(),
-        version: app.package_info().version.to_string(),
-        update_token: update_token.clone(),
-        diagnostics_dsn: diagnostics.map(|d| d.dsn().to_string()),
-    };
-    let Ok(url) = Url::parse(&server.url()) else {
-        return fail(
-            app,
-            exit::BAD_URL,
-            "Oddboro built a bad URL for its server.",
-        );
-    };
-    update::watch(update::Watch {
-        app: app.clone(),
-        port,
-        token: update_token,
-        log: server.log.clone(),
-        show: show_updating,
-    });
-    if let Err(why) = server.supervise(|| open_main(app, &url)) {
-        if let Some(d) = diagnostics {
-            d.gave_up(&why);
-        }
-        fail(app, exit::SERVER_FAILED, &why.message(&server.log_tail()));
+    let version = version.to_string();
+    let present = server::port_taken(port);
+    if present && !headless::recognized(&node, &code, port, &version) {
+        return fail(app, exit::PORT_TAKEN, "Another office or version is using this port. Check its status before opening this version.");
     }
+    // An update before a fresh start can safely replace the app. An attached
+    // client defers to the running office's update window.
+    if !present && update::on_launch(app, &env::log_file(), show_updating) {
+        return;
+    }
+    show_loading(app);
+    if !present {
+        if let Err(e) = headless::spawn_service() {
+            return fail(
+                app,
+                exit::SERVER_FAILED,
+                &format!("Could not start the office: {e}"),
+            );
+        }
+    }
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(90);
+    while std::time::Instant::now() < until {
+        if server::port_taken(port) && headless::recognized(&node, &code, port, &version) {
+            let url = Url::parse(&format!("http://127.0.0.1:{port}")).expect("loopback URL");
+            open_main(app, &url);
+            return;
+        }
+        thread::sleep(std::time::Duration::from_millis(300));
+    }
+    fail(
+        app,
+        exit::SERVER_FAILED,
+        "The office did not become ready. Check the office log.",
+    );
 }
 
 /// A release that lacks a part of itself: reported, since a broken release
@@ -220,6 +233,27 @@ fn broken_install(
         d.failed(text);
     }
     fail(app, code, text);
+}
+
+fn office_server(
+    node: PathBuf,
+    code: PathBuf,
+    port: u16,
+    version: String,
+    update_token: String,
+    diagnostics: Option<&Diagnostics>,
+) -> Server {
+    Server {
+        node,
+        code,
+        port,
+        path: env::login_path(),
+        home: env::office_home(),
+        log: env::log_file(),
+        version,
+        update_token,
+        diagnostics_dsn: diagnostics.map(|d| d.dsn().to_string()),
+    }
 }
 
 /// Node sits beside the shell: in `Contents/MacOS` on a Mac, in `usr/bin`
@@ -240,8 +274,8 @@ fn node_binary() -> Option<PathBuf> {
 
 /// The staged server sits in the bundle's resources, `server/`. A debug build
 /// without the bundle falls back to `apps/desktop/stage`.
-fn server_code(app: &AppHandle) -> Option<PathBuf> {
-    if let Ok(resources) = app.path().resource_dir() {
+fn server_code(package: &tauri::PackageInfo) -> Option<PathBuf> {
+    if let Ok(resources) = tauri::utils::platform::resource_dir(package, &Default::default()) {
         let bundled = resources.join("server");
         if bundled.join(server::ENTRY).is_file() {
             return Some(bundled);
@@ -434,8 +468,9 @@ fn tray(app: &AppHandle) -> tauri::Result<()> {
     let login =
         CheckMenuItem::with_id(app, "login", "Open at login", true, at_login, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Oddboro", true, None::<&str>)?;
+    let stop = MenuItem::with_id(app, "stop-office", "Stop office", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&open, &login, &separator, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &login, &separator, &stop, &quit])?;
     TrayIconBuilder::with_id("oddboro")
         .icon(Image::from_bytes(TRAY_ICON)?)
         .icon_as_template(true)
@@ -445,6 +480,16 @@ fn tray(app: &AppHandle) -> tauri::Result<()> {
             "open" => show(app),
             "login" => toggle_open_at_login(app, &login),
             "quit" => app.exit(0),
+            "stop-office" => {
+                let handle = app.clone();
+                thread::spawn(move || {
+                    if headless::stop_service(handle.package_info()) {
+                        handle.exit(0)
+                    } else {
+                        alert(&handle, "Could not stop this office. Check its status.")
+                    }
+                });
+            }
             _ => {}
         })
         .build(app)?;

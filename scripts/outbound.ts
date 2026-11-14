@@ -113,6 +113,13 @@ export const OUTBOUND: readonly Outbound[] = [
     yes: 'The owner opening the office; nothing leaves this computer.'
   },
   {
+    file: 'apps/office/src/routes/workspace/+page.svelte',
+    calls: 1,
+    to: 'The office on this computer: its live line of changes.',
+    sends: 'A request to hear changes to work in this office.',
+    yes: 'The owner opened Workspace.'
+  },
+  {
     file: 'apps/office/src/routes/+page.svelte',
     calls: 1,
     to: 'The office, on this computer: its live line of changes.',
@@ -214,6 +221,14 @@ export const OUTBOUND: readonly Outbound[] = [
     to: 'The office, on this computer.',
     sends: 'Requests asking whether the office is up and how it can be reached.',
     yes: 'The owner running setup; nothing leaves this computer.'
+  },
+  {
+    file: 'apps/desktop/src-tauri/src/service_update.rs',
+    calls: 1,
+    to: 'The configured HTTPS release manifest and its signed platform download.',
+    sends:
+      'GET requests for the manifest and new release, with the Oddboro updater user agent. No office records or credentials.',
+    yes: 'Installing the packaged app enables signed updates in the office update window, including without an open desktop.'
   },
   {
     file: 'apps/desktop/src-tauri/src/update.rs',

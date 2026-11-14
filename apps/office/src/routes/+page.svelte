@@ -1113,6 +1113,12 @@
 </svelte:head>
 
 <main class="fixed inset-0 overflow-clip">
+  <a
+    href="/workspace"
+    data-sveltekit-reload
+    class="glass fixed end-3 bottom-3 z-30 rounded-lg px-3 py-1.5 text-xs font-medium text-ink"
+    >Workspace</a
+  >
   <div
     bind:this={host}
     class="absolute inset-0 transition-opacity duration-700"

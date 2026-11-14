@@ -13,7 +13,7 @@ use std::thread::{self, sleep};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// The server's entry point, relative to the staged code.
-pub const ENTRY: &str = "apps/office/build/index.js";
+pub const ENTRY: &str = "apps/office/scripts/service-entry.mjs";
 
 const READY_TIMEOUT: Duration = Duration::from_secs(90);
 const STOP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -138,6 +138,11 @@ impl Server {
             if QUITTING.load(SeqCst) {
                 return Ok(());
             }
+            if std::env::var_os("ODDBORO_SERVICE_MODE").is_some()
+                && status.as_ref().is_ok_and(|s| s.code() == Some(75))
+            {
+                return Ok(());
+            }
             let code = status.as_ref().ok().and_then(ExitStatus::code);
             let status = status.map_or_else(|e| e.to_string(), |s| s.to_string());
             note(&self.log, &format!("node stopped: {status}"));
@@ -207,7 +212,10 @@ impl Server {
         // The office keeps its secrets through this shell (`secrets.rs`), over
         // the two pipes above. Mac only.
         #[cfg(target_os = "macos")]
-        command.env("ODDBORO_SECRETS", "shell");
+        if !(cfg!(debug_assertions) && std::env::var("ODDBORO_SECRETS").as_deref() == Ok("office"))
+        {
+            command.env("ODDBORO_SECRETS", "shell");
+        }
         // Node is a console program. Without this, Windows opens a console
         // window for it, and for every program it starts.
         #[cfg(windows)]
@@ -317,7 +325,7 @@ fn wait_ready(child: &mut Child, port: u16) -> Ready {
     Ready::TimedOut
 }
 
-/// True when `GET /` gets any HTTP response at all.
+/// Use the health route so a readiness probe never loads a floor or starts the welcome.
 fn answers_http(port: u16) -> bool {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(500)) else {
@@ -325,11 +333,12 @@ fn answers_http(port: u16) -> bool {
     };
     let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
-    let request = format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
-    let mut head = [0u8; 5];
+    let request =
+        format!("GET /api/health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+    let mut head = [0u8; 12];
     stream.write_all(request.as_bytes()).is_ok()
         && stream.read_exact(&mut head).is_ok()
-        && &head == b"HTTP/"
+        && (&head == b"HTTP/1.1 200" || &head == b"HTTP/1.0 200")
 }
 
 /// Asked to go, up to 10 seconds, then killed, for a child this thread owns.

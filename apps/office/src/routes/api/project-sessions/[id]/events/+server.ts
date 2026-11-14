@@ -6,8 +6,9 @@ import { advancedMode } from '@oddboro/ledger';
 import { fromOwnerPage } from '#lib/server/owner-page.ts';
 import { ADVANCED_OFF, projectController } from '#lib/server/project-sessions/controller.ts';
 import type { RequestHandler } from './$types';
-export const GET: RequestHandler = async ({ request, params, url }) => {
-  if (!fromOwnerPage(request)) error(403, 'Open the session in your office.');
+export const GET: RequestHandler = async ({ request, params, url, locals }) => {
+  if (!locals?.ownerCommand && !fromOwnerPage(request))
+    error(403, 'Open the session in your office.');
   if (!(await advancedMode())) error(403, ADVANCED_OFF);
   const c = projectController(),
     id = params.id;

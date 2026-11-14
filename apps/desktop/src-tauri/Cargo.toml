@@ -30,12 +30,19 @@ rustls = { version = "=0.23.46", default-features = false, features = ["ring"] }
 # The crate sentry already sends with, named so a report to New Altitude can
 # carry the sign-in's token as a header. No features of its own: it builds
 # with sentry's `rustls-no-provider` above.
-reqwest = { version = "=0.13.5", default-features = false }
+reqwest = { version = "=0.13.5", default-features = false, features = ["blocking"] }
+# Also used by the signed desktop updater; no second signing identity.
+base64 = "=0.23.1"
+minisign-verify = "=0.3.0"
+semver = "=1.0.28"
+tempfile = "=3.27.0"
 
 [target.'cfg(unix)'.dependencies]
 libc = "=0.2.191"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+flate2 = "=1.1.10"
+tar = "=0.4.46"
 mac-notification-sys = "=0.6.15"
 security-framework = "=3.7.0"
 
