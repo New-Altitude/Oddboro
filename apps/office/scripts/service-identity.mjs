@@ -25,6 +25,7 @@ export function newPairing() {
     }
   };
 }
+/** @param {Buffer} point @param {string} [scalar] */
 function encryptionKey(point, scalar) {
   if (point.length !== 65 || point[0] !== 4) throw Error('Invalid owner key.');
   const jwk = {
@@ -37,6 +38,8 @@ function encryptionKey(point, scalar) {
     ? createPrivateKey({ key: { ...jwk, d: scalar }, format: 'jwk' })
     : createPublicKey({ key: jwk, format: 'jwk' });
 }
+/** @typedef {{key:string, port:number, version:string}} Session */
+/** @param {ReturnType<typeof newPairing>['registration']} registration @param {Session} session */
 export async function sealSession(registration, session) {
   const recipient = encryptionKey(Buffer.from(registration.owner, 'base64url'));
   const box = await new CompactEncrypt(Buffer.from(JSON.stringify(session)))
@@ -49,6 +52,7 @@ export async function sealSession(registration, session) {
   );
   return { box, signature: signature.toString('base64url') };
 }
+/** @param {string} credential @param {{box:string,signature:string}} record @returns {Promise<Session>} */
 export async function openSession(credential, record) {
   const [format, scalar, signer, extra] = credential.trim().split('.');
   if (format !== 'ob1' || !scalar || !signer || extra !== undefined)
@@ -86,6 +90,7 @@ export async function openSession(credential, record) {
 }
 export const nonce = () => randomBytes(32).toString('hex');
 
+/** @param {Pick<Session,'key'|'port'>} session */
 export async function verifyService({ port, key }) {
   const challenge = nonce();
   const response = await fetch(
