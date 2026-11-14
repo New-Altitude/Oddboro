@@ -19,6 +19,7 @@ import {
   grants,
   jobs,
   ledger,
+  owner,
   staff,
   staffGoals,
   tasks,
@@ -30,6 +31,9 @@ import { db } from './pglite.ts';
 import { TEMP_IN_APPDATA } from './store-states.ts';
 
 process.env.OLLAMA_URL = 'http://127.0.0.1:9';
+// The owner passed the Act check (act-check.test.ts), so a level ask's yes to
+// Act goes through. No name, so the owner is still "the owner".
+await db.insert(owner).values({ name: '', actCheckAt: new Date() });
 // A home of the test's own, so a folder ask's folder can be given.
 const HOME = realpathSync(mkdtempSync(join(tmpdir(), 'desk-answers-')));
 process.env.HOME = HOME;
@@ -212,6 +216,18 @@ const PINNED: Record<AskKind, Record<Decision, Pin>> = {
     deny: NO,
     iterate: REWORK
   },
+  // The level went to Ada with the yes, so the work that waited on it starts.
+  level: {
+    approve: { cell: ['grant_setting'], onThread: ['carry_out:ada'], onNone: ['carry_out:ada'] },
+    deny: NO,
+    iterate: REWORK
+  },
+  // The office tools went to Ada with the yes, so the work that waited on them starts.
+  office_tool: {
+    approve: { cell: ['grant_setting'], onThread: ['carry_out:ada'], onNone: ['carry_out:ada'] },
+    deny: NO,
+    iterate: REWORK
+  },
   // The office made the call with the yes, so the Odd carries on with what it returned.
   call: {
     approve: {
@@ -390,6 +406,34 @@ const raise: Record<AskKind, (onThread: boolean) => Promise<Raised>> = {
       why: 'w',
       ifApproved: 'i',
       switches: ['web'],
+      threadId
+    });
+    return { id: ask.id };
+  },
+  // A yes raises Ada, so each ask starts with her at Draft.
+  level: async (on) => {
+    const threadId = on ? await thread() : undefined;
+    await db.update(staff).set({ permission: 'draft' }).where(eq(staff.id, 'ada'));
+    const { ask } = await raiseAsk('ada', {
+      kind: 'level',
+      title: 'Raise Ada from Draft to Act',
+      why: 'w',
+      ifApproved: 'i',
+      level: 'act',
+      threadId
+    });
+    return { id: ask.id };
+  },
+  // A yes turns the tool on, so each ask starts with Ada holding none.
+  office_tool: async (on) => {
+    const threadId = on ? await thread() : undefined;
+    await db.update(staff).set({ tools: [] }).where(eq(staff.id, 'ada'));
+    const { ask } = await raiseAsk('ada', {
+      kind: 'office_tool',
+      title: 'Turn on Office report',
+      why: 'w',
+      ifApproved: 'i',
+      officeTools: ['office_report'],
       threadId
     });
     return { id: ask.id };
@@ -603,6 +647,8 @@ const SILENT_OFF_A_THREAD: readonly (readonly [AskKind, Decision])[] = [
   ['filter', 'deny'],
   ['folder', 'deny'],
   ['switch', 'deny'],
+  ['level', 'deny'],
+  ['office_tool', 'deny'],
   ['call', 'deny'],
   ['remove', 'approve'],
   ['remove', 'deny'],

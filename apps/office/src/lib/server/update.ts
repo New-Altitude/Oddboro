@@ -4,7 +4,6 @@
 // file decides: at the start of the owner's window, or now when they press
 // Install now, and only once the Odds are held and no run is active. When
 // the rules are in `@oddboro/ledger/update-window`.
-import { timingSafeEqual } from 'node:crypto';
 import {
   holding,
   markDown,
@@ -24,9 +23,8 @@ import { runsActive } from './staff.ts';
 
 /** The app's version, which the shell passes. Unset in development. */
 export const VERSION = process.env.ODDBORO_VERSION ?? '';
-const TOKEN = process.env.ODDBORO_UPDATE_TOKEN ?? '';
-/** True when a shell that installs updates started this server. */
-export const MANAGED = TOKEN.length > 0;
+/** True when a shell that installs updates started this server: a release build of the app. */
+export const MANAGED = process.env.ODDBORO_UPDATES === '1';
 
 /** The last check the shell reported, kept only while this server runs. */
 export type Checked = { at: string; result: 'none' | 'ready' | 'failed'; problem?: string };
@@ -57,14 +55,6 @@ export function installsAt(): Date | undefined {
 /** When the app last went down for an update and came back, for a poke's grace. */
 export function downtime(): { from: Date | null; to: Date | null } {
   return { from: row()?.downAt ?? null, to: row()?.upAt ?? null };
-}
-
-/** True when this request comes from the shell, with the token it passed in. `guardOffice` has already refused anything not from this computer. */
-export function fromShell(request: Request): boolean {
-  if (!MANAGED) return false;
-  const sent = Buffer.from(request.headers.get('x-oddboro-update-token') ?? '');
-  const want = Buffer.from(TOKEN);
-  return sent.length === want.length && timingSafeEqual(sent, want);
 }
 
 /** The shell has a version ready. It installs in the owner's next window, unless they already said now. */

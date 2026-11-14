@@ -6,7 +6,8 @@ import { db } from './db.ts';
 import { fixedError } from './errors.ts';
 import { chatSession } from './home.ts';
 import { type Db } from './threads.ts';
-import { staff, parts } from './schema.ts';
+import { owner, staff, parts } from './schema.ts';
+import { ACT_CHECK_NEEDED, wrongAnswers } from './act-check.ts';
 import {
   AGENT_NAMES,
   commandsHow,
@@ -24,7 +25,7 @@ import {
 import { MANAGER_ROLE } from './managers.ts';
 import { currentPlatform } from './platform.ts';
 import { levelAtMost, type Level } from './access-words.ts';
-import { isGrantable, OFFICE_TOOLS, ON_BY_DEFAULT } from './tools.ts';
+import { isGrantable, OFFICE_TOOLS, officeToolsSaid, ON_BY_DEFAULT } from './tools.ts';
 import { HIRE_DEFAULTS } from './grantable.ts';
 import { lookSignature, type DrawnPart, type LookSpec } from '@oddboro/sprites/look';
 import type { PersonaLink } from './personas.ts';
@@ -67,17 +68,75 @@ export async function formerStaff(): Promise<StaffRow[]> {
   return db.select().from(staff).where(isNotNull(staff.leftAt)).orderBy(desc(staff.leftAt));
 }
 
-/** Only the owner moves a staffer's level. Grants above the new level wait until it rises again. */
+/**
+ * Something tried to put an Odd at Act before the owner passed the Act check
+ * (act-check.ts). The routes answer it with 409 and its message, and the page
+ * shows the check.
+ */
+export class ActCheckNeeded extends Error {
+  constructor() {
+    super(ACT_CHECK_NEEDED);
+  }
+}
+
+/** Whether the owner passed the Act check. Once passed, it stays passed. */
+export async function actCheckPassed(q: Db = db): Promise<boolean> {
+  const [row] = await q.select({ at: owner.actCheckAt }).from(owner).where(eq(owner.id, 'owner'));
+  return !!row?.at;
+}
+
+/** Refuses putting an Odd at Act until the owner passed the Act check. */
+async function needActCheck(q: Db, permission: Level): Promise<void> {
+  if (permission === 'act' && !(await actCheckPassed(q))) throw new ActCheckNeeded();
+}
+
+/**
+ * The owner's answers to the Act check, checked here, not on the page. All
+ * right: the pass is kept with its time, once, with one ledger line. Any
+ * wrong: nothing changes, and the positions of the wrong ones come back.
+ */
+export async function passActCheck(answers: unknown): Promise<{ wrong: number[] }> {
+  const wrong = wrongAnswers(answers);
+  if (!wrong) throw fixedError('Answer each of the three with true or false');
+  if (wrong.length) return { wrong };
+  const [first] = await db
+    .update(owner)
+    .set({ actCheckAt: new Date() })
+    .where(and(eq(owner.id, 'owner'), isNull(owner.actCheckAt)))
+    .returning({ id: owner.id });
+  if (first) await record({ kind: 'decision', actor: 'owner', title: 'Passed the Act check' });
+  else if (!(await actCheckPassed())) throw fixedError('Finish the welcome first.');
+  return { wrong };
+}
+
+/**
+ * Only the owner moves a staffer's level. Grants above the new level wait
+ * until it rises again. Act waits for the Act check (`ActCheckNeeded`).
+ */
 export async function setPermission(id: string, permission: Level): Promise<void> {
-  const before = await staffer(id);
+  const done = await changeLevel(db, id, permission);
+  if (done) await record({ kind: 'access', actor: 'owner', title: done.title });
+}
+
+/**
+ * The change `setPermission` makes, in `q`, with the ledger title it is
+ * written under. Nothing when the Odd is gone or already at that level. A
+ * move up to Act throws `ActCheckNeeded` until the owner passed the Act check,
+ * so the Settings tab and a level ask's yes both wait for it.
+ */
+async function changeLevel(
+  q: Db,
+  id: string,
+  permission: Level
+): Promise<{ title: string } | undefined> {
+  const before = await staffer(id, q);
   if (!before || before.permission === permission) return;
-  await db.update(staff).set({ permission }).where(eq(staff.id, id));
+  await needActCheck(q, permission);
+  await q.update(staff).set({ permission }).where(eq(staff.id, id));
   const up = !levelAtMost(permission, before.permission);
-  await record({
-    kind: 'access',
-    actor: 'owner',
+  return {
     title: `${up ? 'Raised' : 'Lowered'} ${before.name} from ${before.permission} to ${permission}`
-  });
+  };
 }
 
 /**
@@ -204,18 +263,37 @@ export async function setAgent(
 
 /** Only the owner grants or removes an office tool. Takes effect on the staffer's next run. */
 export async function setTool(id: string, tool: string, on: boolean): Promise<void> {
-  const found = OFFICE_TOOLS.find((t) => t.id === tool);
-  if (!found || !isGrantable(tool)) throw new Error(`${tool} is not an office tool you grant`);
-  const before = await staffer(id);
-  if (!before || before.tools.includes(tool) === on) return;
-  const tools = on ? [...before.tools, tool] : before.tools.filter((t) => t !== tool);
-  await db.update(staff).set({ tools }).where(eq(staff.id, id));
-  await record({
-    kind: 'access',
-    actor: 'owner',
-    title: on ? `Gave ${before.name} ${found.name}` : `Took ${found.name} from ${before.name}`,
-    body: found.does
-  });
+  const done = await changeTools(db, id, [tool], on);
+  if (done) await record({ kind: 'access', actor: 'owner', ...done });
+}
+
+/**
+ * The change `setTool` makes, for one or more office tools, in `q`, with the
+ * ledger title and body it is written under. Refused when any of them is not
+ * one the owner grants. Tools already so are left; nothing when the Odd is
+ * gone or every tool is already so.
+ */
+async function changeTools(
+  q: Db,
+  id: string,
+  tools: readonly string[],
+  on: boolean
+): Promise<{ title: string; body: string } | undefined> {
+  if (!tools.every(isGrantable)) throw fixedError('That is not an office tool you grant');
+  const before = await staffer(id, q);
+  if (!before) return;
+  const changing = OFFICE_TOOLS.filter(
+    (t) => tools.includes(t.id) && before.tools.includes(t.id) !== on
+  );
+  if (!changing.length) return;
+  const ids: string[] = changing.map((t) => t.id);
+  const after = on ? [...before.tools, ...ids] : before.tools.filter((t) => !ids.includes(t));
+  await q.update(staff).set({ tools: after }).where(eq(staff.id, id));
+  const said = officeToolsSaid(ids);
+  return {
+    title: on ? `Gave ${before.name} ${said}` : `Took ${said} from ${before.name}`,
+    body: changing.map((t) => t.does).join(' ')
+  };
 }
 
 /**
@@ -393,7 +471,9 @@ export async function setLook(
   await record({ kind: 'work', actor: 'owner', title: `Redrew ${who.name}'s look` });
 }
 
+/** Hire an Odd. A hire at Act waits for the Act check (`ActCheckNeeded`). */
 export async function hire(h: Hire): Promise<StaffRow> {
+  await needActCheck(db, h.permission ?? HIRE_DEFAULTS.staff.permission);
   const base =
     h.name
       .toLowerCase()
@@ -430,4 +510,4 @@ export async function hire(h: Hire): Promise<StaffRow> {
   return row;
 }
 
-export { ofWorkingOdd, networkNote };
+export { ofWorkingOdd, networkNote, changeLevel, changeTools };

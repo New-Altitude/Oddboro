@@ -10,6 +10,7 @@
     "./agents": "./src/agents.ts",
     "./first-questions": "./src/first-questions.ts",
     "./access": "./src/access-words.ts",
+    "./act-check": "./src/act-check.ts",
     "./grantable": "./src/grantable.ts",
     "./goals": "./src/goal-words.ts",
     "./checks": "./src/checks.ts",
@@ -48,6 +49,7 @@
     "@oddboro/sprites": "*",
     "@oddboro/world": "*",
     "drizzle-orm": "^0.45.4",
+    "jose": "6.2.14",
     "postgres": "^3.4.9",
     "zod": "^4.6.7"
   },
