@@ -93,6 +93,10 @@ export const OWNER_ACTIONS = {
   'POST /api/asks/[id]/filter': { records: 'decision' },
   'POST /api/asks/[id]/folder': { records: 'decision' },
   'POST /api/asks/[id]/reply': { records: 'decision' },
+  'POST /api/browser-link': {
+    notAnAction:
+      "Makes a one-time link for the owner's browser, kept in memory for a minute; no record changes."
+  },
   'PUT /api/files': { records: 'work' },
   'POST /api/files/open': {
     notAnAction: 'Opens a page the Odd built in the browser; it changes nothing.'

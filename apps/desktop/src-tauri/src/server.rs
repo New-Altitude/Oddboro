@@ -8,9 +8,13 @@ use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering::SeqCst};
-use std::sync::{Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, sleep};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use serde_json::Value;
+
+use crate::key::Key;
 
 /// The server's entry point, relative to the staged code.
 pub const ENTRY: &str = "apps/office/build/index.js";
@@ -53,9 +57,8 @@ pub struct Server {
     pub log: PathBuf,
     /// The app's version, passed as `ODDBORO_VERSION`.
     pub version: String,
-    /// The secret the server checks on the shell's update requests. Empty
-    /// when this build does not update itself.
-    pub update_token: String,
+    /// True when this build updates itself: Node gets `ODDBORO_UPDATES=1`.
+    pub updates: bool,
     /// Where error reports go, passed as `ODDBORO_DIAGNOSTICS_DSN` so the
     /// office and the shell agree. None when this build has no address.
     pub diagnostics_dsn: Option<String>,
@@ -107,13 +110,14 @@ impl Server {
         format!("http://127.0.0.1:{}", self.port)
     }
 
-    /// Runs Node until the shell quits. Calls `on_ready` each time the server
-    /// answers, the first time and after every restart. Returns why when it
-    /// gives up.
+    /// Runs Node until the shell quits. Every start of Node gets a fresh key.
+    /// Calls `on_ready` each time the server on the port proves it holds that
+    /// key, the first time and after every restart. Returns why when it gives
+    /// up.
     pub fn supervise(&self, on_ready: impl Fn()) -> Result<(), GaveUp> {
         let mut restarts: VecDeque<Instant> = VecDeque::new();
         loop {
-            let mut child = {
+            let (mut child, key) = {
                 let _guard = GONE.0.lock().unwrap_or_else(|e| e.into_inner());
                 if QUITTING.load(SeqCst) {
                     return Ok(());
@@ -122,7 +126,7 @@ impl Server {
             };
             note(&self.log, &format!("started node, pid {}", child.id()));
 
-            let status = match wait_ready(&mut child, self.port) {
+            let status = match wait_ready(&mut child, self.port, &key, &self.log) {
                 Ready::Answered => {
                     on_ready();
                     child.wait()
@@ -153,7 +157,10 @@ impl Server {
         }
     }
 
-    fn spawn(&self) -> io::Result<Child> {
+    /// Starts Node with a fresh key, which is from now on the current one.
+    fn spawn(&self) -> io::Result<(Child, Arc<Key>)> {
+        let key = crate::key::renew()
+            .ok_or_else(|| io::Error::other("the system gave no randomness for the app's key"))?;
         let log = open_log(&self.log)?;
         let port = self.port.to_string();
         let mut command = Command::new(&self.node);
@@ -182,10 +189,7 @@ impl Server {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(log.try_clone()?)
-            .envs(
-                (!self.update_token.is_empty())
-                    .then_some(("ODDBORO_UPDATE_TOKEN", self.update_token.as_str())),
-            )
+            .envs(self.updates.then_some(("ODDBORO_UPDATES", "1")))
             .envs(
                 self.diagnostics_dsn
                     .as_deref()
@@ -216,14 +220,16 @@ impl Server {
         // Hold Node's stdin apart, open until Node is gone: `Child::wait`
         // closes a stdin it still holds, and the server quits when its stdin
         // closes. It is in place before the relay starts, so the first
-        // Keychain answer has somewhere to go.
+        // Keychain answer has somewhere to go. The key is the first line on
+        // it, before any answer: the office reads it before it asks anything.
         *NODE_STDIN.lock().unwrap_or_else(|e| e.into_inner()) = child.stdin.take();
+        to_node(&key.line());
         if let Some(out) = child.stdout.take() {
             thread::spawn(move || relay(out, log));
         }
         NODE_PID.store(child.id() as i32, SeqCst);
         keep_awake(child.id());
-        Ok(child)
+        Ok((child, key))
     }
 
     pub fn log_tail(&self) -> String {
@@ -233,6 +239,26 @@ impl Server {
             tail(&self.log, 12)
         )
     }
+}
+
+/// One request of the shell's own to the office, with the key in its header,
+/// and the answer's JSON. HTTP/1.0, so the answer comes whole, never chunked.
+pub fn call(port: u16, key: &Key, method: &str, path: &str, body: Option<&Value>) -> Option<Value> {
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).ok()?;
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+    let body = body.map(Value::to_string).unwrap_or_default();
+    let request = format!(
+        "{method} {path} HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\n{}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        key.header(),
+        body.len()
+    );
+    stream.write_all(request.as_bytes()).ok()?;
+    let mut answer = String::new();
+    stream.read_to_string(&mut answer).ok()?;
+    let (_, json) = answer.split_once("\r\n\r\n")?;
+    serde_json::from_str(json).ok()
 }
 
 /// True when anything listens on the port.
@@ -303,33 +329,78 @@ pub fn on_quit_signal(quit: impl FnOnce() + Send + 'static) {
 #[cfg(windows)]
 pub fn on_quit_signal(_quit: impl FnOnce() + Send + 'static) {}
 
-fn wait_ready(child: &mut Child, port: u16) -> Ready {
+/// Waits up to 90 seconds for the server on the port to prove it holds
+/// `key`. Any other answer is not the office this shell started: another
+/// program may have taken the port. It never counts, and the log says so once.
+fn wait_ready(child: &mut Child, port: u16, key: &Key, log: &Path) -> Ready {
     let deadline = Instant::now() + READY_TIMEOUT;
+    let mut warned = false;
     while Instant::now() < deadline {
         if let Ok(Some(status)) = child.try_wait() {
             return Ready::Exited(status);
         }
-        if answers_http(port) {
-            return Ready::Answered;
+        match prove(port, key) {
+            Proof::Proven => return Ready::Answered,
+            Proof::Failed if !warned => {
+                warned = true;
+                note(
+                    log,
+                    &format!("something answered on port {port} without proving it holds the app's key, so the window will not open it; another program may have the port"),
+                );
+            }
+            Proof::Failed | Proof::Silent => {}
         }
         sleep(Duration::from_millis(500));
     }
     Ready::TimedOut
 }
 
-/// True when `GET /` gets any HTTP response at all.
-fn answers_http(port: u16) -> bool {
+/// What the server on the port said when asked to prove it holds the key.
+#[derive(Debug, PartialEq)]
+enum Proof {
+    /// It answered HMAC-SHA256 of the key, the label and a fresh nonce.
+    Proven,
+    /// It answered, but not with the proof.
+    Failed,
+    /// Nothing listens, or nothing answered yet.
+    Silent,
+}
+
+/// Asks `GET /api/proof?nonce=<fresh nonce>` and checks the answer
+/// (`Key::proves`). The office answers it without the key, since the shell
+/// sends none until the server has proved itself.
+fn prove(port: u16, key: &Key) -> Proof {
+    let Some(nonce) = crate::key::nonce() else {
+        return Proof::Silent;
+    };
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(500)) else {
-        return false;
+        return Proof::Silent;
     };
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
-    let request = format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
-    let mut head = [0u8; 5];
-    stream.write_all(request.as_bytes()).is_ok()
-        && stream.read_exact(&mut head).is_ok()
-        && &head == b"HTTP/"
+    let request =
+        format!("GET /api/proof?nonce={nonce} HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\n\r\n");
+    if stream.write_all(request.as_bytes()).is_err() {
+        return Proof::Silent;
+    }
+    let mut answer = Vec::new();
+    let _ = stream.take(64 * 1024).read_to_end(&mut answer);
+    if answer.is_empty() {
+        return Proof::Silent;
+    }
+    let answer = String::from_utf8_lossy(&answer);
+    let (head, body) = answer.split_once("\r\n\r\n").unwrap_or((&answer, ""));
+    let ok = head
+        .lines()
+        .next()
+        .and_then(|l| l.split_whitespace().nth(1))
+        == Some("200");
+    if ok && key.proves(&nonce, body) {
+        Proof::Proven
+    } else {
+        Proof::Failed
+    }
 }
 
 /// Asked to go, up to 10 seconds, then killed, for a child this thread owns.
@@ -494,6 +565,9 @@ enum Route<'a> {
     /// A request for the Keychain, or anything that may hold a secret.
     /// Never the log.
     Secret,
+    /// A line with the key's mark in it. The office never writes one; if it
+    /// did, it goes nowhere.
+    Drop,
     /// The owner's Check now.
     Check,
     Notify(&'a str, &'a str),
@@ -503,6 +577,9 @@ enum Route<'a> {
 fn route(line: &str) -> Route<'_> {
     if crate::secrets::private(line) {
         return Route::Secret;
+    }
+    if line.contains(crate::key::LINE.trim_end()) {
+        return Route::Drop;
     }
     if line == crate::update::CHECK_LINE {
         return Route::Check;
@@ -531,6 +608,7 @@ fn relay(out: impl Read, mut log: File) {
                     );
                 }
             },
+            Route::Drop => {}
             Route::Check => crate::update::check_now(),
             Route::Notify(title, text) => notify(title, text),
             Route::Log => {
@@ -663,6 +741,100 @@ mod tests {
         ] {
             assert_eq!(route(line), Route::Secret, "{line}");
         }
+    }
+
+    #[test]
+    fn a_line_with_the_key_in_it_never_goes_to_the_log() {
+        for line in [
+            "oddboro:key 0123abcd",
+            "something oddboro:key 0123abcd",
+            "oddboro:key",
+        ] {
+            assert_eq!(route(line), Route::Drop, "{line}");
+        }
+    }
+
+    #[test]
+    fn the_shells_own_request_carries_the_key_in_its_header() {
+        let door = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = door.local_addr().unwrap().port();
+        let heard = thread::spawn(move || {
+            let (mut stream, _) = door.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buf = [0u8; 4096];
+            while !String::from_utf8_lossy(&request).contains("{\"path\":\"/a\"}") {
+                let n = stream.read(&mut buf).unwrap();
+                request.extend_from_slice(&buf[..n]);
+            }
+            stream
+                .write_all(
+                    b"HTTP/1.0 200 OK\r\ncontent-type: application/json\r\n\r\n{\"code\":\"c\"}",
+                )
+                .unwrap();
+            String::from_utf8(request).unwrap()
+        });
+        let key = crate::key::fresh().unwrap();
+        let body = serde_json::json!({ "path": "/a" });
+        let answer = call(port, &key, "POST", "/api/browser-link", Some(&body));
+        assert_eq!(answer, Some(serde_json::json!({ "code": "c" })));
+        let request = heard.join().unwrap();
+        assert!(request.starts_with("POST /api/browser-link HTTP/1.0\r\n"));
+        assert!(request.contains(&format!("\r\n{}\r\n", key.header())));
+    }
+
+    /// A stand-in on a free port that answers one request with `reply(nonce)`.
+    fn stand_in(reply: impl FnOnce(&str) -> String + Send + 'static) -> u16 {
+        let door = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = door.local_addr().unwrap().port();
+        thread::spawn(move || {
+            let (mut stream, _) = door.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buf = [0u8; 1024];
+            while !request.ends_with(b"\r\n\r\n") {
+                let n = stream.read(&mut buf).unwrap();
+                request.extend_from_slice(&buf[..n]);
+            }
+            let request = String::from_utf8(request).unwrap();
+            let nonce = request
+                .split_once("nonce=")
+                .map_or("", |(_, rest)| &rest[..64]);
+            let _ = stream.write_all(reply(nonce).as_bytes());
+        });
+        port
+    }
+
+    fn ok(body: &str) -> String {
+        format!("HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\n\r\n{body}")
+    }
+
+    #[test]
+    fn only_a_server_with_the_current_key_counts_as_ready() {
+        let key = Arc::new(crate::key::fresh().unwrap());
+        let theirs = Arc::new(crate::key::fresh().unwrap());
+        let mine = Arc::clone(&key);
+        let port = stand_in(move |n| ok(&crate::key::tests::answer(&mine, n)));
+        assert_eq!(prove(port, &key), Proof::Proven);
+        // Another key's proof, a page, a refusal, a malformed proof, or the key itself.
+        let other = Arc::clone(&theirs);
+        let port = stand_in(move |n| ok(&crate::key::tests::answer(&other, n)));
+        assert_eq!(prove(port, &key), Proof::Failed);
+        let port = stand_in(|_| ok("<!doctype html><title>Oddboro</title>"));
+        assert_eq!(prove(port, &key), Proof::Failed);
+        let port = stand_in(|_| "HTTP/1.1 403 Forbidden\r\n\r\nno".to_string());
+        assert_eq!(prove(port, &key), Proof::Failed);
+        let port = stand_in(|n| ok(&n.replace('a', "b")));
+        assert_eq!(prove(port, &key), Proof::Failed);
+        let mine = Arc::clone(&key);
+        let port = stand_in(move |n| {
+            let right = crate::key::tests::answer(&mine, n);
+            format!("HTTP/1.1 500 Oops\r\n\r\n{right}")
+        });
+        assert_eq!(prove(port, &key), Proof::Failed);
+        // Nothing on the port at all.
+        let free = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = free.local_addr().unwrap().port();
+        drop(free);
+        assert_eq!(prove(port, &key), Proof::Silent);
     }
 
     #[test]

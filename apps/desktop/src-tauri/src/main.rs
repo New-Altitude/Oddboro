@@ -7,6 +7,7 @@
 
 mod diagnostics;
 mod env;
+mod key;
 mod secrets;
 mod server;
 mod update;
@@ -15,16 +16,20 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::thread;
+use std::time::{Duration, Instant};
 
 use tauri::image::Image;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::webview::{NewWindowResponse, PageLoadEvent};
-use tauri::{AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{
+    AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
+};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 use diagnostics::Diagnostics;
+use key::Key;
 use server::Server;
 
 const MAIN: &str = "main";
@@ -136,7 +141,8 @@ fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
     );
     if let Some(url) = server_url {
         match Url::parse(&url) {
-            Ok(url) => open_main(app, &url),
+            // A server the shell did not start has no key to give it.
+            Ok(url) => open_main(app, &url, None),
             Err(e) => fail(
                 app,
                 exit::BAD_URL,
@@ -170,11 +176,6 @@ fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
     };
 
     show_loading(app);
-    let update_token = if update::ENABLED {
-        update::token()
-    } else {
-        String::new()
-    };
     let server = Server {
         node,
         code,
@@ -183,7 +184,7 @@ fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
         home: env::office_home(),
         log: env::log_file(),
         version: app.package_info().version.to_string(),
-        update_token: update_token.clone(),
+        updates: update::ENABLED,
         diagnostics_dsn: diagnostics.map(|d| d.dsn().to_string()),
     };
     let Ok(url) = Url::parse(&server.url()) else {
@@ -196,11 +197,11 @@ fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
     update::watch(update::Watch {
         app: app.clone(),
         port,
-        token: update_token,
         log: server.log.clone(),
         show: show_updating,
     });
-    if let Err(why) = server.supervise(|| open_main(app, &url)) {
+    // Each start of Node has its own key, which it has just proved it holds.
+    if let Err(why) = server.supervise(|| open_main(app, &url, key::current().as_ref())) {
         if let Some(d) = diagnostics {
             d.gave_up(&why);
         }
@@ -298,27 +299,42 @@ fn loading(app: &AppHandle, updating: &str) {
         .build();
 }
 
-/// Opens the office in the main window, or reloads it after a restart.
-fn open_main(app: &AppHandle, url: &Url) {
+/// Opens the office in the main window, or reloads it after a restart. With
+/// the app's key the window opens on a blank page, so it asks the office for
+/// nothing until its cookie is in place (`open_with_key`). Off the main thread.
+fn open_main(app: &AppHandle, url: &Url, key: Option<&Arc<Key>>) {
     if let Some(window) = app.get_webview_window(MAIN) {
-        let _ = window.navigate(url.clone());
+        match key {
+            Some(key) => open_with_key(&window, key, url),
+            None => {
+                let _ = window.navigate(url.clone());
+            }
+        }
         return;
     }
+    let first = match key {
+        Some(_) => Url::parse("about:blank").unwrap_or_else(|_| url.clone()),
+        None => url.clone(),
+    };
     let home = url.clone();
-    let built = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::External(url.clone()))
+    let office = url.clone();
+    let keyed = key.is_some();
+    let built = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::External(first))
         .title("Oddboro")
         .inner_size(1280.0, 820.0)
         .min_inner_size(960.0, 600.0)
         .center()
         .on_navigation(move |to| stay_or_open(&home, to))
-        .on_new_window(|to, _| {
-            open_in_browser(&to);
+        .on_new_window(move |to, _| {
+            open_new_window(&office, keyed, &to);
             NewWindowResponse::Deny
         })
         // The window's side of a start, for the log: the page itself says it
         // booted once its script runs (`apps/office/src/hooks.client.ts`).
         .on_page_load(|_, payload| {
-            if matches!(payload.event(), PageLoadEvent::Finished) {
+            if matches!(payload.event(), PageLoadEvent::Finished)
+                && payload.url().scheme() != "about"
+            {
                 server::note(
                     &env::log_file(),
                     &format!("office page loaded: {}", payload.url()),
@@ -329,13 +345,74 @@ fn open_main(app: &AppHandle, url: &Url) {
     if let Some(loading) = app.get_webview_window(LOADING) {
         let _ = loading.close();
     }
-    if let Err(e) = built {
-        fail(
+    match (built, key) {
+        (Ok(window), Some(key)) => open_with_key(&window, key, url),
+        (Ok(_), None) => {}
+        (Err(e), _) => fail(
             app,
             exit::NO_WINDOW,
             &format!("Oddboro could not open its window: {e}"),
-        );
+        ),
     }
+}
+
+/// Gives the window the key's cookie, then opens the office in it. The webview
+/// stores a cookie on its own time, so the shell waits until the webview
+/// reads it back, up to 5 seconds, before it opens the office. It reads the
+/// whole jar: wry's `cookies_for_url` matches no IP address host.
+fn open_with_key(window: &WebviewWindow, key: &Key, url: &Url) {
+    let cookie = key.cookie(url);
+    let _ = window.set_cookie(cookie.clone());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let held = || {
+        window.cookies().is_ok_and(|all| {
+            all.iter()
+                .any(|c| c.name() == cookie.name() && c.value() == cookie.value())
+        })
+    };
+    while !held() {
+        if Instant::now() > deadline {
+            server::note(
+                &env::log_file(),
+                "the window did not take the key's cookie within 5 seconds",
+            );
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    let _ = window.navigate(url.clone());
+}
+
+/// A link the page opens in a new window (`target="_blank"`, `window.open`)
+/// goes to the default browser. The browser has no key, so an address of the
+/// office's own, such as a file attached in a chat, goes there as a link the
+/// office makes for that one path, which works once within a minute. On its
+/// own thread: it asks the office first, with the key of the Node that runs
+/// now. `keyed` is false for a server the shell did not start.
+fn open_new_window(office: &Url, keyed: bool, to: &Url) {
+    if !keyed || to.origin() != office.origin() {
+        return open_in_browser(to);
+    }
+    let (office, to) = (office.clone(), to.clone());
+    thread::spawn(move || match browser_link(&office, &to) {
+        Some(link) => open_in_browser(&link),
+        None => server::note(
+            &env::log_file(),
+            "the office made no link for the browser, so nothing opened",
+        ),
+    });
+}
+
+/// `to` with the office's one-time code for its path added.
+fn browser_link(office: &Url, to: &Url) -> Option<Url> {
+    let port = office.port_or_known_default()?;
+    let body = serde_json::json!({ "path": to.path() });
+    let key = key::current()?;
+    let answer = server::call(port, &key, "POST", "/api/browser-link", Some(&body))?;
+    let code = answer["code"].as_str()?;
+    let mut link = to.clone();
+    link.query_pairs_mut().append_pair(key::LINK_QUERY, code);
+    Some(link)
 }
 
 /// The office's own origin stays in the window. Links anywhere else open in

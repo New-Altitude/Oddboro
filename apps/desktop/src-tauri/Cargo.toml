@@ -27,6 +27,9 @@ sentry = { version = "=0.49.5", default-features = false, features = [
   "rustls-no-provider",
 ] }
 rustls = { version = "=0.23.46", default-features = false, features = ["ring"] }
+# HMAC-SHA256 for the office's proof that it holds the app's key (src/key.rs).
+# The same ring rustls already builds; no default features.
+ring = { version = "=0.17.14", default-features = false }
 # The crate sentry already sends with, named so a report to New Altitude can
 # carry the sign-in's token as a header. No features of its own: it builds
 # with sentry's `rustls-no-provider` above.

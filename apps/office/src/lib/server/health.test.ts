@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   health,
+  logSetup,
   markReady,
   PAGE_LINES_PER_MINUTE,
   pageClosed,
@@ -72,4 +73,31 @@ test('page errors are counted, and a minute holds only so many lines', () => {
   const next = quietly(() => pageReport('boot', '/ in a webview', minute + 60_000));
   assert.deepEqual(next.result, { logged: true });
   assert.deepEqual(next.lines, ['page: boot / in a webview']);
+});
+
+test('in the app each setup check logs its id and ok or fail, and nothing it found', () => {
+  const checks = [
+    {
+      id: 'claude',
+      name: 'Claude Code',
+      state: 'ok',
+      found: '2.1.0, signed in as owner@example.com'
+    },
+    { id: 'uv', name: 'uv', state: 'optional', found: 'uvx 0.12.23, an old version' },
+    { id: 'node', name: 'Node', state: 'missing', found: 'Not found', fix: 'Install it' },
+    { id: 'odd id\n/x', name: 'x', state: 'ok', found: '' }
+  ];
+  const { lines } = quietly(() => logSetup(checks, true));
+  assert.deepEqual(lines, [
+    'office: setup claude ok',
+    'office: setup uv fail',
+    'office: setup node fail',
+    'office: setup oddidx ok'
+  ]);
+  for (const line of lines) assert.match(line, /^office: setup [a-z0-9-]+ (ok|fail)$/);
+});
+
+test('outside the app no setup check is logged', () => {
+  const { lines } = quietly(() => logSetup([{ id: 'claude', state: 'ok' }], false));
+  assert.deepEqual(lines, []);
 });

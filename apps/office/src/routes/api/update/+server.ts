@@ -1,16 +1,17 @@
 // The app's updates. The shell (apps/desktop) POSTs `{ version, notes }` when
 // it has a new version downloaded and checked, `{ checked: true }` when it
 // found none, or `{ failed }` when it could not look, and GETs every 30
-// seconds until `install` is true. Only the shell may do those: from this Mac,
-// with the token it passed the server. The Setup window GETs the same answer
-// and POSTs `{ action }`: `check`, `install-now` or `install-tonight`. PUT
-// sets the owner's window, `{ start, end }` as HH:MM in office time.
+// seconds until `install` is true. Only the shell may do those: from this
+// computer, with the app's key in its header (`fromShell`). The Setup window
+// GETs the same answer and POSTs `{ action }`: `check`, `install-now` or
+// `install-tonight`. PUT sets the owner's window, `{ start, end }` as HH:MM
+// in office time.
 import { error, json } from '@sveltejs/kit';
 import { isClock } from '@oddboro/ledger';
+import { fromShell } from '#lib/server/app-key.ts';
 import {
   askShellToCheck,
   checked,
-  fromShell,
   installWhen,
   ready,
   setWindow,
