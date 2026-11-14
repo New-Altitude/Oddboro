@@ -296,6 +296,7 @@
         {:else if tab === 'panel' && current}
           {#if current.kind === 'desk'}<h1>Desk</h1>
             <DeskDrawer
+              selectChat={false}
               desk={office.desk}
               staff={office.staff}
               {focus}

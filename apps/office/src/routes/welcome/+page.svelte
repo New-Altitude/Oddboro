@@ -6,7 +6,9 @@
     <p class="mb-6">Both views open the same conversations and work. You can switch at any time.</p>
     <form method="GET" action="/" data-sveltekit-reload>
       <input type="hidden" name="view" value="office" />
-      <button aria-label="Office" class="mb-3 block w-full rounded border border-line p-4 text-start"
+      <button
+        aria-label="Office"
+        class="mb-3 block w-full rounded border border-line p-4 text-start"
         ><strong>Office</strong><span class="block text-sm"
           >Walk around the office and meet your Odds.</span
         ></button
