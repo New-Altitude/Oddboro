@@ -7,6 +7,7 @@
 
 mod diagnostics;
 mod env;
+mod headless;
 mod secrets;
 mod server;
 mod update;
@@ -52,6 +53,15 @@ fn main() {
     if let Some(d) = &diagnostics {
         Arc::clone(d).watch_panics();
     }
+    let context = tauri::generate_context!();
+    if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--headless")) {
+        if let Err(message) = headless::run(context.package_info(), diagnostics.as_deref()) {
+            server::note(&env::log_file(), &message);
+            eprintln!("{message}");
+            std::process::exit(exit::SERVER_FAILED);
+        }
+        return;
+    }
     let builder = tauri::Builder::default();
     // Linux and Windows have no Dock to bring a hidden window back, so
     // opening Oddboro again shows the one that runs. It goes first, before
@@ -93,7 +103,7 @@ fn main() {
                 }
             }
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("Oddboro could not start");
 
     app.run(|app, event| match event {
@@ -165,7 +175,7 @@ fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
     let Some(node) = node_binary() else {
         return broken_install(app, diagnostics, exit::NO_NODE, NO_NODE);
     };
-    let Some(code) = server_code(app) else {
+    let Some(code) = server_code(app.package_info()) else {
         return broken_install(app, diagnostics, exit::NO_SERVER, NO_SERVER);
     };
 
@@ -175,17 +185,14 @@ fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
     } else {
         String::new()
     };
-    let server = Server {
+    let server = office_server(
         node,
         code,
         port,
-        path: env::login_path(),
-        home: env::office_home(),
-        log: env::log_file(),
-        version: app.package_info().version.to_string(),
-        update_token: update_token.clone(),
-        diagnostics_dsn: diagnostics.map(|d| d.dsn().to_string()),
-    };
+        version.to_string(),
+        update_token.clone(),
+        diagnostics,
+    );
     let Ok(url) = Url::parse(&server.url()) else {
         return fail(
             app,
@@ -222,6 +229,27 @@ fn broken_install(
     fail(app, code, text);
 }
 
+fn office_server(
+    node: PathBuf,
+    code: PathBuf,
+    port: u16,
+    version: String,
+    update_token: String,
+    diagnostics: Option<&Diagnostics>,
+) -> Server {
+    Server {
+        node,
+        code,
+        port,
+        path: env::login_path(),
+        home: env::office_home(),
+        log: env::log_file(),
+        version,
+        update_token,
+        diagnostics_dsn: diagnostics.map(|d| d.dsn().to_string()),
+    }
+}
+
 /// Node sits beside the shell: in `Contents/MacOS` on a Mac, in `usr/bin`
 /// inside the AppImage, in the install folder on Windows. A debug build
 /// without the bundle falls back to the copy the stage script leaves in
@@ -240,8 +268,8 @@ fn node_binary() -> Option<PathBuf> {
 
 /// The staged server sits in the bundle's resources, `server/`. A debug build
 /// without the bundle falls back to `apps/desktop/stage`.
-fn server_code(app: &AppHandle) -> Option<PathBuf> {
-    if let Ok(resources) = app.path().resource_dir() {
+fn server_code(package: &tauri::PackageInfo) -> Option<PathBuf> {
+    if let Ok(resources) = tauri::utils::platform::resource_dir(package, &Default::default()) {
         let bundled = resources.join("server");
         if bundled.join(server::ENTRY).is_file() {
             return Some(bundled);
