@@ -3,7 +3,7 @@
 `@oddboro/ledger`. The office's records in Postgres: the owner's name, the Odds (the
 `staff` table), asks, tasks for the owner, the files an Odd attaches to them,
 pokes (one-time chat messages an Odd sets for later), reports, connectors and grants, jobs and runs, token usage and the owner's plan
-windows, the names the owner gives the rooms, the owner's goals and who serves
+windows, the names the owner gives the rooms and the wings they put them in, each Odd's home room and seat, the owner's goals and who serves
 them, the lessons the owner teaches the Odds, the app's updates, and the ledger itself.
 Drizzle ORM over the `postgres` driver. Server only, except `./time`,
 `./tools`, `./agents`, `./access`, `./grantable`, `./goals`, `./update-window`, `./work-paths`, `./desk-answers`, `./live-tables` and `./filters`, which the page may import.

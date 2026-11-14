@@ -8,7 +8,17 @@ import type { Agent, Effort, GrantedFolder } from '@oddboro/ledger/agents';
 import type { LookSpec } from '@oddboro/sprites/look';
 
 export type Activity =
-  'work' | 'intake' | 'read' | 'wait' | 'play' | 'rest' | 'eat' | 'exercise' | 'talk' | 'home';
+  | 'work'
+  | 'intake'
+  | 'read'
+  | 'wait'
+  | 'play'
+  | 'rest'
+  | 'eat'
+  | 'exercise'
+  | 'talk'
+  | 'meet'
+  | 'home';
 
 /** The most characters an Odd's name, role and remit take, however it joins: hired or added from New Altitude. */
 export const LIMITS = { name: 40, role: 60, remit: 200 } as const;
@@ -58,6 +68,8 @@ export type StaffProfile = {
   remit: string;
   /** The room template this staffer works in when it has a choice. */
   room: string;
+  /** Its home seat in that room, a floor spot id. Absent: any free seat there. */
+  seat?: string;
   /** Guesses waiting for the owner's Keep on its Lessons tab. */
   guesses: number;
   /** A generated look: where its frames and portrait load from. Absent for hand-drawn art. */
@@ -84,5 +96,6 @@ export const ACTIVITY_LABEL: Record<Activity, string> = {
   eat: 'At lunch',
   exercise: 'In the gym',
   talk: 'Talking with you',
+  meet: 'In a meeting',
   home: 'Gone home'
 };

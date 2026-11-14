@@ -356,7 +356,17 @@ export function destination(
       desks: kinds ? kinds[t] === 'workspace' : t.startsWith('workspace')
     };
   }
-  return { id, key: id === null ? SAMPLE : `office-${id}`, name, rooms, seats: seatsIn(world) };
+  const spots = world.spots
+    .filter((s) => ['work', 'intake', 'read'].includes(s.activity))
+    .map((s) => s.id);
+  return {
+    id,
+    key: id === null ? SAMPLE : `office-${id}`,
+    name,
+    rooms,
+    seats: seatsIn(world),
+    spots
+  };
 }
 
 /** Build a spec into an office, or say what is wrong with it. */

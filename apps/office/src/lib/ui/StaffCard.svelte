@@ -12,6 +12,7 @@
   import type { Work } from '../staff/work.ts';
   import { ACTIVITY_LABEL, type Activity, type StaffProfile } from '../staff/roster.ts';
   import type { Place, PlaceGroup } from '../staff/places.ts';
+  import type { HomeRoom } from '../staff/home.ts';
 
   type Props = {
     profile: StaffProfile;
@@ -37,6 +38,8 @@
     sentTo: string | undefined;
     /** Who holds each spot on the floor, by spot id. */
     held: Record<string, { id: string; name: string }>;
+    /** Every room an Odd can live in, with its seats. */
+    homes: HomeRoom[];
     onsend: (place: Place) => void;
     onschedule: () => void;
     onchatstart: () => void;
@@ -59,6 +62,7 @@
     manual,
     sentTo,
     held,
+    homes,
     onsend,
     onschedule,
     onchatstart,
@@ -277,6 +281,7 @@
         {working}
         {work}
         focus={toWork}
+        {homes}
         onsend={() => (tab = 'send')}
       />
     {:else if tab === 'send'}

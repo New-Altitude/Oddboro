@@ -355,3 +355,51 @@ test('an Odd that leaves the floor, or the office, takes its icon with it', () =
   b.destroy();
   assert.equal(other.destroyed, true);
 });
+
+/** Three desks in one room, `office#0`, for an Odd with a home seat there. */
+const inOffice = (d: PlacedSpot): PlacedSpot => ({ ...d, room: 'office#0' });
+
+test('an Odd goes to work at its own home seat, not the nearest desk', () => {
+  const floor = floorOf();
+  const profile = {
+    id: 'rowan',
+    name: 'Rowan',
+    sprite: 'odd',
+    variant: 'a',
+    room: 'office',
+    seat: paige.id
+  } as StaffProfile;
+  // Rowan starts beside Ada's desk, the nearest; its own seat is across the room.
+  const a = new StaffActor(floor, profile, ada.approach!);
+  const desks = [ada, paige, third].map(inOffice);
+  assert.ok(a.assign('work', desks, new Set()));
+  assert.equal(a.destination?.id, paige.id);
+});
+
+test('an Odd whose home seat is taken works at the nearest free desk in its room', () => {
+  const floor = floorOf();
+  const profile = {
+    id: 'rowan',
+    name: 'Rowan',
+    sprite: 'odd',
+    variant: 'a',
+    room: 'office',
+    seat: paige.id
+  } as StaffProfile;
+  const a = new StaffActor(floor, profile, ada.approach!);
+  const desks = [ada, paige, third].map(inOffice);
+  assert.ok(a.assign('work', desks, new Set([paige.id])));
+  assert.equal(a.destination?.id, ada.id);
+});
+
+test('a meeting keeps an Odd to the room it was given', () => {
+  const floor = floorOf();
+  const profile = { id: 'rowan', name: 'Rowan', sprite: 'odd', variant: 'a', room: 'x' };
+  const a = new StaffActor(floor, profile as StaffProfile, ada.approach!);
+  const seat = (d: PlacedSpot, room: string): PlacedSpot => ({ ...d, activity: 'meet', room });
+  // The nearest meeting seat is in another room; this meeting is in `far#0`.
+  const spots = [seat(ada, 'near#0'), seat(paige, 'far#0')];
+  assert.ok(a.assign('meet', spots, new Set(), 'far#0'));
+  assert.equal(a.destination?.id, paige.id);
+  assert.equal(a.assign('meet', spots, new Set([paige.id]), 'far#0'), false);
+});

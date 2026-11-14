@@ -120,6 +120,7 @@ Activities the office understands:
 | `eat`      | Scheduled downtime               | lunch tables                       |
 | `exercise` | Maintenance and self-checks      | the gym                            |
 | `talk`     | In a chat with the owner         | the owner's office                 |
+| `meet`     | Working with colleagues          | meeting room tables                |
 
 ### Conventions the rooms rely on
 

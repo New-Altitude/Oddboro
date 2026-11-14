@@ -33,10 +33,17 @@
   import { call } from './api.ts';
   import { wins } from './windows.svelte.ts';
   import type { StaffProfile } from '../staff/roster.ts';
+  import type { HomeRoom, Suggestion } from '../staff/home.ts';
 
   type Props = {
-    /** Rooms on the floor a staffer can work in: template id and name. */
-    rooms: { id: string; name: string }[];
+    /** Rooms on the floor a staffer can live in, each with its seats. */
+    rooms: HomeRoom[];
+    /** A home for a hire with this role, with why, by the plain rules: shown while the office thinks. */
+    suggest: (hire: { role: string; remit?: string }) => Suggestion | undefined;
+    /** True on Main Street, the sample, which a new room turns into the owner's own office. */
+    onSample: boolean;
+    /** Called just before a room is added, so the page keeps this window open through the move. */
+    onaddroom: () => void;
     /** A hire a staffer proposed. Hiring from it approves that ask. */
     from?: { askId: number; staff: string; proposal: HireProposal };
     /** The window this hire is open in. */
@@ -45,7 +52,7 @@
     /** A persona hired here joined, through its own sign-in: the window closes. */
     ondone: () => void;
   };
-  let { rooms, from, id, onhired, ondone }: Props = $props();
+  let { rooms, suggest, onSample, onaddroom, from, id, onhired, ondone }: Props = $props();
 
   // Hire opens on a choice: make an Odd, or hire a persona New Altitude offers
   // the owner's account. A proposal skips the choice: it opens on the builder,
@@ -128,6 +135,87 @@
   let look = $state<Drawn | undefined>();
   let appearance = $state('');
   let room = $state('');
+  /** Its home seat in that room; empty for any free one. */
+  let seat = $state('');
+  /** The home suggested, shown with its why: the office's once it answers, the rules' until then. */
+  let homeTip = $state<Suggestion & { by?: 'office' | 'rules' }>();
+  /** True while the office works out where the hire should live. */
+  let asking = $state(false);
+  /** Why the office's own pick is missing, when the rules' stands. */
+  let tipNote = $state('');
+  const seats = $derived(rooms.find((r) => r.id === room)?.seats ?? []);
+  const seatName = $derived(seats.find((s) => s.id === seat)?.label);
+  /** Pick a room: its first free seat comes with it. */
+  function pickRoom(id: string) {
+    room = id;
+    seat = rooms.find((r) => r.id === id)?.seats.find((s) => !s.owner)?.id ?? '';
+  }
+  // Reaching Where with no room picked yet, the plain rules suggest one at
+  // once, and the office is asked for a better one from the role. Its answer
+  // replaces the rules' only while the owner has not picked another.
+  $effect(() => {
+    if (step !== 1 || room) return;
+    const hire = untrack(() => ({ name, role, remit }));
+    const s = untrack(() => suggest(hire));
+    if (!s) return;
+    homeTip = { ...s, by: 'rules' };
+    room = s.room;
+    seat = s.seat ?? '';
+    asking = true;
+    call<{ homes: (Suggestion & { by: 'office' | 'rules' })[]; note?: string }>('/api/homes', {
+      hire
+    })
+      .then(({ homes, note }) => {
+        tipNote = note ?? '';
+        const a = homes[0];
+        if (!a) return;
+        if (room === s.room && seat === (s.seat ?? '')) {
+          room = a.room;
+          seat = a.seat ?? '';
+        }
+        homeTip = a;
+      })
+      .catch(() => {})
+      .finally(() => (asking = false));
+  });
+
+  /** The new-workspace form on the Where step. */
+  let adding = $state(false);
+  let wsName = $state('');
+  let wsDesks = $state(4);
+  /** Where it stands: an end of the building and a row, or wherever the office puts it. */
+  let wsSide = $state<'' | 'west' | 'east'>('');
+  let wsRow = $state<'' | 'back' | 'front'>('');
+  let wsBusy = $state(false);
+  let wsProblem = $state('');
+  /** The room just added, picked once the floor reloads with it. */
+  let waitingFor = $state<string>();
+  $effect(() => {
+    if (waitingFor && rooms.some((r) => r.id === waitingFor)) {
+      pickRoom(waitingFor);
+      waitingFor = undefined;
+    }
+  });
+  async function addWorkspace() {
+    wsBusy = true;
+    wsProblem = '';
+    onaddroom();
+    try {
+      const r = await call<{ room?: string }>('/api/rooms', {
+        name: wsName,
+        seats: wsDesks,
+        ...(wsSide ? { side: wsSide } : {}),
+        ...(wsRow ? { row: wsRow } : {})
+      });
+      waitingFor = r.room;
+      adding = false;
+      wsName = '';
+    } catch (e) {
+      wsProblem = e instanceof Error ? e.message : String(e);
+    } finally {
+      wsBusy = false;
+    }
+  }
   let brief = $state('');
   let remit = $state('');
   let desk = $state('');
@@ -183,9 +271,9 @@
     role = p.role;
     remit = p.remit;
     permission = p.permission;
-    room =
-      rooms.find((r) => r.id === p.room || r.name.toLowerCase() === p.room?.toLowerCase())?.id ??
-      '';
+    pickRoom(
+      rooms.find((r) => r.id === p.room || r.name.toLowerCase() === p.room?.toLowerCase())?.id ?? ''
+    );
     tools = p.tools;
     appearance = p.appearance ?? '';
     if (p.job) {
@@ -262,6 +350,7 @@
         portraitPx: look?.portraitPx,
         newParts: look?.newParts,
         room,
+        seat: seat || null,
         permission,
         agent,
         account: pickedAccount,
@@ -529,17 +618,133 @@
           onbusy={(b) => (wins.busy[id] = b)}
         />
       {:else if step === 1}
-        <div class="text-xs text-muted">The room {name || 'they'} works in.</div>
+        <div class="text-xs text-muted">
+          Where {name || 'they'} lives: a room, and a seat of their own.
+        </div>
+        {#if homeTip}
+          {@const at = rooms.find((r) => r.id === homeTip?.room)}
+          <div class="rounded-xl bg-raise px-3 py-2 text-xs">
+            <div class="flex items-center justify-between gap-2">
+              <span class="font-medium text-ink"
+                >{homeTip.by === 'office' ? 'The office suggests' : 'Suggested'}: {at?.name}{homeTip.seat
+                  ? `, ${at?.seats.find((s) => s.id === homeTip?.seat)?.label}`
+                  : ''}</span
+              >
+              {#if room !== homeTip.room || seat !== (homeTip.seat ?? '')}
+                <button
+                  class="text-sea hover:underline"
+                  onclick={() => {
+                    room = homeTip!.room;
+                    seat = homeTip!.seat ?? '';
+                  }}>Use this</button
+                >
+              {/if}
+            </div>
+            <div class="mt-0.5 text-muted">{homeTip.why}</div>
+            {#if asking}
+              <div class="mt-0.5 text-faint">Asking the office for a better fit…</div>
+            {:else if tipNote}
+              <div class="mt-0.5 text-faint">{tipNote}</div>
+            {/if}
+          </div>
+        {/if}
         <div class="grid grid-cols-2 gap-2">
           {#each rooms as r (r.id)}
             <button
               class="rounded-xl px-3 py-2 text-start {room === r.id
                 ? 'bg-sea/25 ring-1 ring-sea'
                 : 'bg-raise'}"
-              onclick={() => (room = r.id)}>{r.name}</button
+              onclick={() => pickRoom(r.id)}
+              >{r.name}{#if r.wing}<span class="block text-[11px] text-muted">{r.wing} wing</span
+                >{/if}</button
             >
           {/each}
+          {#if !adding}
+            <button
+              class="rounded-xl border border-dashed border-hairline px-3 py-2 text-start text-muted enabled:hover:text-ink disabled:opacity-50"
+              disabled={!!waitingFor}
+              onclick={() => (adding = true)}
+              >{waitingFor ? 'Adding the workspace…' : '+ New workspace'}</button
+            >
+          {/if}
         </div>
+        {#if adding}
+          <div class="flex flex-col gap-2 rounded-xl bg-raise p-3 text-xs">
+            <label class="flex flex-col gap-1">
+              <span class="text-muted">Name the workspace</span>
+              <input
+                class="rounded-lg bg-night/40 px-2.5 py-1.5 text-ink"
+                maxlength="24"
+                placeholder="Product team"
+                bind:value={wsName}
+              />
+            </label>
+            <label class="flex items-center gap-2">
+              <span class="text-muted">Desks</span>
+              <input
+                class="w-16 rounded-lg bg-night/40 px-2.5 py-1.5 text-ink"
+                type="number"
+                min="1"
+                max="12"
+                bind:value={wsDesks}
+              />
+            </label>
+            <div class="flex gap-2">
+              <label class="flex flex-1 flex-col gap-1">
+                <span class="text-muted">Which end</span>
+                <select class="rounded-lg bg-night/40 px-2 py-1.5 text-ink" bind:value={wsSide}>
+                  <option value="">Wherever it fits</option>
+                  <option value="west">West end</option>
+                  <option value="east">East end</option>
+                </select>
+              </label>
+              <label class="flex flex-1 flex-col gap-1">
+                <span class="text-muted">Which row</span>
+                <select class="rounded-lg bg-night/40 px-2 py-1.5 text-ink" bind:value={wsRow}>
+                  <option value="">Either</option>
+                  <option value="back">Back row</option>
+                  <option value="front">Front row, by the street</option>
+                </select>
+              </label>
+            </div>
+            <p class="text-faint">
+              {onSample
+                ? 'Main Street becomes your own office: the same rooms and names, plus this one, laid out by the office. Every Odd keeps its room and seat.'
+                : 'The office adds it to your floor at once. Every other room and seat stays put.'}
+            </p>
+            {#if wsProblem}<p class="text-ember">{wsProblem}</p>{/if}
+            <div class="flex justify-end gap-2">
+              <button class="px-3 py-1.5 text-muted" onclick={() => (adding = false)}>Cancel</button
+              >
+              <button
+                class="rounded-lg bg-sea/25 px-3 py-1.5 font-medium text-ink disabled:opacity-50"
+                disabled={wsBusy || !wsName.trim()}
+                onclick={addWorkspace}>{wsBusy ? 'Adding…' : 'Add workspace'}</button
+              >
+            </div>
+          </div>
+        {/if}
+        {#if seats.length}
+          <div class="text-xs text-muted">Their seat</div>
+          <div class="flex flex-wrap gap-1.5">
+            {#each seats as s (s.id)}
+              <button
+                class="rounded-lg px-2.5 py-1 text-xs disabled:opacity-50 {seat === s.id
+                  ? 'bg-sea/25 ring-1 ring-sea'
+                  : 'bg-raise'}"
+                disabled={!!s.owner}
+                title={s.owner ? `${s.owner.name}'s seat` : undefined}
+                onclick={() => (seat = s.id)}>{s.label}{s.owner ? ` · ${s.owner.name}` : ''}</button
+              >
+            {/each}
+            <button
+              class="rounded-lg px-2.5 py-1 text-xs {seat === ''
+                ? 'bg-sea/25 ring-1 ring-sea'
+                : 'bg-raise'}"
+              onclick={() => (seat = '')}>Any free seat</button
+            >
+          </div>
+        {/if}
       {:else if step === 2}
         <label class="flex flex-col gap-1">
           <span class="text-xs text-muted">What is the job, in a sentence?</span>
@@ -625,7 +830,7 @@
           </div>
           <div>
             <dt class="text-xs text-muted">Where</dt>
-            <dd>{rooms.find((r) => r.id === room)?.name}</dd>
+            <dd>{rooms.find((r) => r.id === room)?.name}{seatName ? `, ${seatName}` : ''}</dd>
           </div>
           <div>
             <dt class="text-xs text-muted">For</dt>

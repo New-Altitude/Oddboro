@@ -14,7 +14,7 @@ export type Place = {
 
 export type PlaceGroup = { room: string; places: Place[] };
 
-const ROOM_PREFIX = /^(break|kitchen|library|gym|lobby|mail|owner|street)-/;
+const ROOM_PREFIX = /^(break|kitchen|library|gym|lobby|mail|meeting|owner|street)-/;
 
 /** "library-armchair" reads as "Armchair", "mail-sort-table" as "Sort table". */
 export function propLabel(sprite: string): string {

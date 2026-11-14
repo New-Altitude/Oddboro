@@ -24,6 +24,7 @@ const row = (o: Partial<StaffRow> = {}): StaffRow => ({
   variant: 'a',
   portrait: 'a',
   room: 'workspace',
+  seat: null,
   permission: 'draft',
   agent: 'claude',
   account: null,

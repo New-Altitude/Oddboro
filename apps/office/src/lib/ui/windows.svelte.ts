@@ -17,6 +17,7 @@ export type ProjectAsk = { sessionId?: string; n: number };
 export type Win =
   | { id: 'desk'; kind: 'desk' }
   | { id: 'goals'; kind: 'goals' }
+  | { id: 'homes'; kind: 'homes' }
   | { id: 'projects'; kind: 'projects'; ask: ProjectAsk }
   | { id: 'lessons'; kind: 'lessons'; filter: LessonsFilter }
   | { id: 'ledger'; kind: 'ledger' }

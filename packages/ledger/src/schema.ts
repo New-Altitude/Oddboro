@@ -42,6 +42,11 @@ export const staff = pgTable('staff', {
   portrait: text().notNull(),
   /** The room template it works in. */
   room: text().notNull().default('workspace'),
+  /**
+   * Its home seat in that room: the floor's spot id, like `workspace#0/desk#2/seat`.
+   * Null lets it take any free seat there. A move to another layout clears it.
+   */
+  seat: text(),
   permission: text().$type<Level>().notNull().default(HIRE_DEFAULTS.staff.permission),
   /** The coding tool its runs go through. The owner picks it at hire and on the Settings tab. */
   agent: text().$type<Agent>().notNull().default('claude'),
@@ -1110,6 +1115,23 @@ export const roomNames = pgTable(
     office: text().notNull(),
     room: text().notNull(),
     name: text().notNull(),
+    updatedAt: at('updated_at').notNull().defaultNow()
+  },
+  (t) => [primaryKey({ columns: [t.office, t.room] })]
+);
+
+/**
+ * The wing each room belongs to, by the owner's own name for it: a part of
+ * their life, like Work or School. A room without a row is in no wing, a
+ * common space every Odd uses. `room` is the composed room's id, like
+ * `workspace#1`, as in `room_names`.
+ */
+export const roomWings = pgTable(
+  'room_wings',
+  {
+    office: text().notNull(),
+    room: text().notNull(),
+    wing: text().notNull(),
     updatedAt: at('updated_at').notNull().defaultNow()
   },
   (t) => [primaryKey({ columns: [t.office, t.room] })]

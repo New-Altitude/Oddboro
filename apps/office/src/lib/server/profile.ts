@@ -55,6 +55,7 @@ export function toProfile(r: StaffRow, guesses = 0): StaffProfile {
     reach,
     remit: r.remit,
     room: r.room,
+    ...(r.seat ? { seat: r.seat } : {}),
     guesses,
     look:
       r.look && r.portraitPx

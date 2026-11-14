@@ -42,7 +42,8 @@ const facingAlong = (dx: number, dy: number): Facing =>
   Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : dy > 0 ? 'down' : 'up';
 
 export class StaffActor {
-  readonly profile: StaffProfile;
+  /** The Odd as the office last told the page: its home changes with it. */
+  profile: StaffProfile;
   readonly sprite: Sprite;
   private shadow = new Graphics().ellipse(0, 0, 5, 1.6).fill({ color: 0x000000, alpha: 0.28 });
   activity: Activity = 'home';
@@ -147,8 +148,9 @@ export class StaffActor {
   /**
    * Send the staffer somewhere that fits the activity. Returns false if no spot
    * fits, and then any trip under way goes on: only a move that happens ends it.
+   * `within` keeps it to one room, as a meeting does.
    */
-  assign(activity: Activity, spots: PlacedSpot[], taken: Set<string>): boolean {
+  assign(activity: Activity, spots: PlacedSpot[], taken: Set<string>, within?: string): boolean {
     this.activity = activity;
     this.since = Date.now();
     const exit = spots.find((s) => s.activity === 'home');
@@ -160,13 +162,24 @@ export class StaffActor {
     this.sprite.visible = true;
     this.shadow.visible = true;
     this.floor.invalidate();
-    let options = spots.filter((s) => s.activity === activity && !taken.has(s.id));
-    // Work happens in the staffer's own room when that room has a spot for it.
+    let options = spots.filter(
+      (s) => s.activity === activity && !taken.has(s.id) && (!within || s.room === within)
+    );
+    // Work happens at the staffer's home seat when it is free, else in its own
+    // room when that room has a spot for it.
     const home = this.profile.room;
     const inRoom = (s: PlacedSpot) => s.room.startsWith(`${home}#`);
     if (WORK.includes(activity) && options.some(inRoom)) options = options.filter(inRoom);
     if (!options.length) return false;
     const w = this.floor.world;
+    const seat = WORK.includes(activity) && options.find((s) => s.id === this.profile.seat);
+    const toSeat = seat && findPath(w.walkable, w.width, this.tile, seat.tile, this.rules(seat));
+    if (seat && toSeat) {
+      this.endTrips();
+      this.spot = seat;
+      this.path = toSeat.slice(1);
+      return true;
+    }
     let best: { spot: PlacedSpot; path: [number, number][] } | undefined;
     for (const spot of options) {
       const path = findPath(w.walkable, w.width, this.tile, spot.tile, this.rules(spot));

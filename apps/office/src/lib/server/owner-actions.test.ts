@@ -330,6 +330,8 @@ const TRY: Record<Recording, (send: Send) => Promise<void>> = {
     await send({ params: { id: String(row.id) }, body: { text: 'Write shorter.' } });
   },
   'POST /api/office/move-in': (send) => send({ body: { spec, description: 'A test office.' } }),
+  // Right after that move-in, so there is a described office to add to.
+  'POST /api/rooms': (send) => send({ body: { name: 'Studio', seats: 2 } }),
   'PUT /api/office/design': (send) => {
     // A finished drawing, where the design job keeps it: on the office's global.
     (globalThis as { designJob?: unknown }).designJob = {
@@ -379,6 +381,8 @@ const TRY: Record<Recording, (send: Send) => Promise<void>> = {
     newAltitude.odds[0] = { ...PAT, odd: { ...(PAT.odd as object), version: 2 } };
     await send({});
   },
+  'PUT /api/rooms/wing': async (send) =>
+    send({ body: { room: (await currentOffice()).world.rooms[0].id, wing: 'Work' } }),
   'PUT /api/rooms': async (send) =>
     send({ body: { room: (await currentOffice()).world.rooms[0].id, name: 'The den' } }),
   'POST /api/staff': async (send) => {
@@ -466,6 +470,21 @@ const TRY: Record<Recording, (send: Send) => Promise<void>> = {
       params: { id: 'sam' },
       body: { text: 'You are Sam, who tests.', was: (await L.staffer('sam'))!.desk }
     }),
+  // Sam moves to the last seat on the floor, by the homes route.
+  'PUT /api/homes': async (send) => {
+    const office = await currentOffice();
+    const seat = office.world.spots.filter((s) => s.activity === 'work').at(-1)!;
+    await send({ body: { homes: [{ id: 'sam', room: seat.room.split('#')[0], seat: seat.id }] } });
+  },
+  // Sam moves to the first room with a seat, at its first seat.
+  'PUT /api/staff/[id]/home': async (send) => {
+    const office = await currentOffice();
+    const seat = office.world.spots.find((s) => s.activity === 'work')!;
+    await send({
+      params: { id: 'sam' },
+      body: { room: seat.room.split('#')[0], seat: seat.id }
+    });
+  },
   'PUT /api/staff/[id]/look': (send) => {
     const l = look();
     return send({ params: { id: 'sam' }, body: { look: l.look, portraitPx: l.portraitPx } });

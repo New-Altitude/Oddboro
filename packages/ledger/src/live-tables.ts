@@ -75,6 +75,7 @@ export const LIVE_TABLES: Record<TableName, LiveTable> = {
     page: []
   },
   room_names: { trigger: 'all', page: ['refresh'] },
+  room_wings: { trigger: 'all', page: ['refresh'] },
   switched_off: { trigger: 'all', page: ['refresh'] },
   // The Setup window's updates section listens for it itself.
   app_update: { trigger: 'all', page: [] }
