@@ -203,6 +203,11 @@ try {
       );
     }
   }
+  const notes = join(office, 'staff', manager, 'notes');
+  mkdirSync(notes, { recursive: true });
+  writeFileSync(join(notes, 'review.md'), 'The completed review.');
+  const delivered = await cli('file', manager, 'notes/review.md');
+  assert.equal(delivered.content, 'The completed review.');
   const fixture = async (code, ...args) =>
     JSON.parse(
       (

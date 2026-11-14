@@ -18,7 +18,7 @@ start | status | stop | login on|off|status | open workspace | open office
 setup OWNER TIME_ZONE MANAGER [PROVIDER]   managers: status --json
 tools | sign-in PROVIDER | hire NAME ROLE REMIT
 odds | inbox | assign ODD MESSAGE [--turn UUID] | chat ODD | follow ODD
-steer ODD RUN MESSAGE | stop-run ODD RUN | report ID
+steer ODD RUN MESSAGE | stop-run ODD RUN | report ID | file ODD PATH
 inspect ID | approve ID | decline ID [REASON]
 advanced on|off | projects | project ACTION JSON | terminal SESSION
 request METHOD /api/PATH [JSON]   access a specific office operation`;
@@ -296,6 +296,14 @@ async function run() {
         command === 'steer' ? 'PATCH' : 'DELETE'
       )
     );
+  if (command === 'file') {
+    const query = new URLSearchParams({
+      staff: required(0, 'an Odd ID'),
+      path: required(1, 'a file path')
+    });
+    const saved = await json('/api/files?' + query);
+    return out(raw ? saved : saved.content);
+  }
   if (command === 'report')
     return out(await json('/api/reports/' + encodeURIComponent(required(0, 'a report ID'))));
   if (['inspect', 'approve', 'decline'].includes(command)) {
