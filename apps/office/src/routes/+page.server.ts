@@ -1,4 +1,5 @@
 import {
+  actCheckPassed,
   advancedMode,
   desk,
   goalThreads,
@@ -47,6 +48,8 @@ export const load: PageServerLoad = async () => {
     welcomed: !first,
     /** Whether the owner turned on Advanced mode, which shows Projects. */
     advanced: await advancedMode(),
+    /** Whether the owner passed the Act check, so the page asks it before a first raise to Act. */
+    actChecked: await actCheckPassed(),
     diagnostics: diagnosticsState(),
     account: accountStatus()
   };

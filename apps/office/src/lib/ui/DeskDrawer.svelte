@@ -20,6 +20,7 @@
   import FolderAsk from './FolderAsk.svelte';
   import FolderWarning from './FolderWarning.svelte';
   import { call } from './api.ts';
+  import { withActCheck } from './act-check.svelte.ts';
   import { AWS_GUIDES, siteLink } from '../site.ts';
   import { ago, when } from './format.ts';
   import { openFile, openProject, wins } from './windows.svelte.ts';
@@ -33,6 +34,7 @@
   import { LEVEL_LABEL, type FolderAccess } from '@oddboro/ledger/access';
   import type { StaffProfile } from '../staff/roster.ts';
   import { chatAnswer, stepText, stepsToGo } from './task-steps.ts';
+  import { yesSaid } from './yes-said.ts';
 
   type Props = {
     desk: Desk;
@@ -201,12 +203,17 @@
   const decide = (a: AskRow, decision: 'approve' | 'deny' | 'iterate') =>
     act(async () => {
       const picks = a.plan?.items.map((_, i) => i).filter((i) => !skip[i]);
-      const r = await call<{ hires?: AskRow[]; task?: TaskRow | null }>(`/api/asks/${a.id}`, {
-        decision,
-        reason,
-        report: reportWhenDone,
-        picks
-      });
+      const send = () =>
+        call<{ hires?: AskRow[]; task?: TaskRow | null }>(`/api/asks/${a.id}`, {
+          decision,
+          reason,
+          report: reportWhenDone,
+          picks
+        });
+      // Raise to Act waits for the owner's Act check, the first time only.
+      const raisesToAct = decision === 'approve' && a.kind === 'level' && a.level === 'act';
+      const r = raisesToAct ? await withActCheck(send) : await send();
+      if (!r) return;
       if (r.hires?.length) onplan(r.hires);
       // An approved access ask turns into the connect task it made, in place.
       if (r.task) made = r.task;
@@ -713,27 +720,7 @@
               class="flex-1 rounded-lg bg-sea px-3 py-2 text-sm font-medium text-night disabled:opacity-40"
               disabled={busy || unsaved || (a.kind === 'plan' && !picked(a))}
               onclick={() => (a.kind === 'call' ? makeCall(a) : decide(a, 'approve'))}
-              >{a.kind === 'goal'
-                ? 'Set the goal'
-                : a.kind === 'call'
-                  ? busy
-                    ? 'Making the call'
-                    : 'Make this call'
-                  : a.access
-                    ? 'Connect'
-                    : a.kind === 'switch'
-                      ? 'Turn on'
-                      : a.kind === 'standing'
-                        ? 'Allow'
-                        : a.kind === 'remove'
-                          ? 'Remove'
-                          : a.kind === 'bring_back'
-                            ? 'Bring back'
-                            : a.kind === 'window'
-                              ? 'Let it carry on'
-                              : a.plan && picked(a) < a.plan.items.length
-                                ? `Approve ${picked(a)} of ${a.plan.items.length}`
-                                : 'Approve'}</button
+              >{yesSaid(a, { picked: picked(a), busy })}</button
             >
           {/if}
         </div>

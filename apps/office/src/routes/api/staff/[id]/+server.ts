@@ -8,6 +8,7 @@
 // tab offers under a switch the Odd's own tool cannot follow.
 import { error, json } from '@sveltejs/kit';
 import {
+  ActCheckNeeded,
   currentPlatform,
   agentsOn,
   offeredAgent,
@@ -106,7 +107,13 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
   }
   const permission = parseLevel(b.permission);
   if (!permission) error(400, 'Pick read, draft or act');
-  await setPermission(params.id, permission);
+  try {
+    await setPermission(params.id, permission);
+  } catch (e) {
+    // Act waits for the owner's Act check; the page shows it on this answer.
+    if (e instanceof ActCheckNeeded) error(409, e.message);
+    throw e;
+  }
   return json({ ok: true });
 };
 
