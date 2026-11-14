@@ -173,8 +173,11 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    while it walks in, and it says hello there in the session later chats
    resume. What the hello says, and whether a first day follows, come from
    `firstDayOf` in `src/lib/server/first-day.ts`. A hire with a job then gets a
-   `first_day` follow-up that starts its work at once: questions the intake left open go on the desk as a
-   task, missing tools as an access ask, otherwise the first real piece of
+   `first_day` follow-up that starts its work at once: it checks its intake,
+   relevant Ledger entries, shared work and colleagues before asking the owner.
+   A colleague's work goes through a hand-off when allowed; only what still
+   needs the owner goes on the desk as a task, missing tools as an access ask,
+   otherwise the first real piece of
    work, whose result goes on the desk. A hire with no job starts nothing: it
    runs only when handed work. One serving a goal joins the goal's thread as a
    colleague, and the hire route links it to the goal before it approves the

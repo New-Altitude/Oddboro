@@ -1956,7 +1956,7 @@ test("a new hire's first day and the manager's planning say how an Odd gets Run 
   const firstText = `${first.system}\n${first.message}`;
   assert.ok(
     firstText.includes(
-      `3. If a tool you need is not in my_access, ask for it with ask_for_access. For Run commands or Browse the web, ask with ask_for_switch when my_access says ${await L.ownerName()} can switch it on.`
+      `4. If a tool you need is not in my_access, ask for it with ask_for_access. For Run commands or Browse the web, ask with ask_for_switch when my_access says ${await L.ownerName()} can switch it on.`
     ),
     firstText
   );

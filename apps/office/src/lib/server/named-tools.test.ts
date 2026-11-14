@@ -33,7 +33,7 @@ const NAMES_UNHELD: Record<string, readonly string[]> = {
     'list_goals',
     'propose_goal_plan'
   ], // NEW-1716
-  'first_day brief': ['give_owner_a_task', 'ask_for_access'], // NEW-1716
+  'first_day brief': ['ask_for_access'], // NEW-1716
   'goal brief': [
     'give_owner_a_task',
     'find_connectors',
@@ -101,7 +101,15 @@ const texts = (has: (tool: string) => boolean, run: ToolRun): Record<string, str
   // Odd without it is never told to call it. That a run whose Odd holds it but is
   // not offered it (`handsOff`) is not told either is staff-run.test.ts's.
   "who's here": whoIsHereSection(
-    [{ id: 'nate', name: 'Nate', role: 'Researcher', persona: true }],
+    [
+      {
+        id: 'nate',
+        name: 'Nate',
+        role: 'Researcher',
+        remit: 'Researches a question.',
+        persona: true
+      }
+    ],
     has('hand_off')
   ),
   ...(!run.chat &&
