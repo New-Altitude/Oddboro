@@ -52,12 +52,17 @@ export async function toolServer(staffId: string, env: Record<string, string>): 
   return client;
 }
 
+/** Close the client processes started since the last cleanup. */
+export async function closeToolServers() {
+  await Promise.all(clients.splice(0).map((client) => client.close()));
+}
+
 // The tool servers close together: a file can start over 60, and each close
 // may wait up to 4 seconds for its server to end. The cleanup has a limit of its
 // own, since a slow runner took it past the 15 seconds each test gets.
 after(
   async () => {
-    await Promise.all(clients.map((c) => c.close()));
+    await closeToolServers();
     await sql.end();
     await stopDatabase();
     rmSync(folder, { recursive: true, force: true });
