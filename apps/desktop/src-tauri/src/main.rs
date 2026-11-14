@@ -101,7 +101,7 @@ fn main() {
                 _ => None,
             };
             if let Some(path) = path {
-                if let Ok(url) = window.url().and_then(|u| u.join(path).map_err(Into::into)) {
+                if let Some(url) = window.url().ok().and_then(|u| u.join(path).ok()) {
                     let _ = window.navigate(url);
                 }
             }
