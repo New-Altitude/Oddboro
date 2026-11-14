@@ -93,45 +93,31 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    note (`pop` on `StaffActor`, art in `fx-pop`). One that arrives while
    another plays is dropped. While it plays, the Odd's name tag rises over it
    (`tagLift`, read in `onRender`) and settles after. Nothing polls.
-6. Two full-height panels flank the floor (`src/lib/ui/SidePanel.svelte`).
-   Each resizes by dragging its inner edge (or the arrow keys on it), and
-   remembers its width per viewer. Where the two overlap, the end one paints
-   over the start one, but the start one's front window can sit on top: the
-   one the owner opened last sits on top, picking an Odd
-   puts that Odd on top, and closing the Odd or clicking the window's tab
-   brings the window back on top (`raised` in `windows.svelte.ts`, passed to
-   `SidePanel.svelte` as `onTop` in `+page.svelte`).
-   The start side is the office plate (name,
-   the clock, Setup, and the Desk, Goals, Lessons, Ledger, Services, Hire and Office
-   buttons), which opens into a bar of windows
-   (`src/lib/ui/windows.svelte.ts`): the Desk, the Goals, the Lessons, the
-   Ledger, each hire and each open file is a tab. D opens the Desk. Every
-   open window stays mounted, so a drawing keeps going while the owner works
-   another. ✕ folds the bar away with its windows still open; closing a
-   window with unsaved edits or a drawing in progress asks first.
-   The end edge holds the Odds rail (`src/lib/ui/OddsRail.svelte`) once the
-   office has an Odd: a ⌘K button on top (Ctrl K off a Mac, set once the
-   page knows), then every Odd's portrait, with its
-   count of work in progress and an ember ring when it waits on the owner.
-   Hovering the rail, moving into it with the keyboard, the ⌘K button or
-   Cmd+K (Ctrl+K) from anywhere widens the rail itself toward the floor
-   (200 ms, none under reduced motion): each portrait gains its name and
-   role, and the top slot a search over name, role and remit (Cmd+K puts the
-   cursor there), with the arrow keys to pick one and Enter to open a chat
-   (`chatAbout(id, '')`). The portraits stay at the edge. Picking an Odd
-   opens its panel, sliding in from the screen's edge, and the rail slides
-   off the screen while the panel is open; Cmd+K brings it back over the
-   panel until an Odd is picked or the pointer leaves. Closing or folding
-   the panel (») brings the rail back. An effect that reads what it writes
-   loops until Svelte stops the page (`effect_update_depth_exceeded`): the
-   rail's ⌘K effect writes untracked. The
-   camera centres on the floor left between the panels and the rail, and
-   the Desk pill moves to stay clear. The floor opens on the whole building
-   and stays where the owner drags it. While an Odd's panel is open, the
-   camera follows that Odd; a drag lets go until the owner selects someone
-   or reopens the panel.
-7. **The Desk** (`src/lib/ui/DeskDrawer.svelte`) is everything waiting on the owner:
-   open asks, open tasks, unread reports. The pill at the top shows the count,
+6. One full-height pane sits beside the floor (`src/lib/ui/SidePanel.svelte`),
+   on the start or end side as the viewer docks it (⇄ on the plate,
+   `paneSide`, kept in localStorage as `oddboro.pane.side`). It resizes by
+   dragging its inner edge (or the arrow keys on it), and remembers its width
+   per viewer. A breadcrumb under the plate says where the owner is: Office,
+   then a picked Odd, then one item or file of it; a click goes back up, and so
+   does Esc outside a field. The Office level opens on Your Odds
+   (`src/lib/ui/OddsList.svelte`): every Odd with what waits on the owner from
+   it, as portraits with names or portraits alone (`oddboro.odds.view`), a
+   click going down to that Odd, and ⌘K (Ctrl K off a Mac) putting the cursor
+   in its search. Under it, the windows (`src/lib/ui/windows.svelte.ts`):
+   Waiting, Goals, Lessons, Ledger, Services, each hire and each open file is
+   a tab, opened from the plate's buttons. D opens Waiting. Every open window
+   stays mounted, so a drawing keeps going while the owner works another. ✕
+   folds the pane away with its windows still open; closing a window with
+   unsaved edits or a drawing in progress asks first. Picking an Odd, on Your
+   Odds or the floor, opens its level in the same pane (`oddInFront`), and an
+   item it delivered opens one level down (`paneItem`), on `DeskDrawer` with
+   `single`. The camera centres on the floor beside the pane, and follows the
+   picked Odd until the owner drags. The floor opens on the whole building.
+7. **The Desk** (`src/lib/ui/DeskDrawer.svelte`, its window titled Waiting) is everything waiting on the owner:
+   open asks, open tasks, unread reports. With more than one, a Next card on
+   top names the first that can be done now and what it unblocks, and the rest
+   group by goal, ordered by `orderItems` (`desk-order.ts` in the ledger); an
+   item that waits on another open one (`needs`) is dimmed and says so. The pill at the top shows the count,
    the tab title carries it, a waiting Odd's tag turns ember, and a
    notification for each new item is one switch away, under You in the Setup
    window (`Welcome.svelte`, per viewer). An open item has All items above it,
@@ -152,7 +138,10 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    pick up from (an intake becomes the hire it was for). One given in a chat
    brings the owner's message there too (`taskDoneBrief` in `src/lib/server/follow-up-brief.ts`). A report has Reply and
    Read: feedback is a reply in its writer's chat, not a form on the desk. Opening
-   any item selects it in its sender's chat on the end side. Selecting text in a report offers Chat (`src/lib/ui/SelectToChat.svelte`):
+   any item opens it there; from an Odd's chat or Items tab, it opens one
+   level down in the pane. Finishing one of the manager's items adds one line
+   to the manager's chat on what is next (`narrateNext` in
+   `src/lib/server/narrate.ts`), with no run. Selecting text in a report offers Chat (`src/lib/ui/SelectToChat.svelte`):
    the owner picks any Odd, and its chat opens with the passage quoted as a
    draft (`chat-about.svelte.ts` carries it to `ChatPanel`). Each of those is a follow-up (`src/lib/server/follow-ups.ts`,
    started from `hooks.server.ts`, woken by changes to `follow_ups` and by any run ending). Its reply

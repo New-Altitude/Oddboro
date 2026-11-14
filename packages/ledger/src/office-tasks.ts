@@ -1,4 +1,5 @@
 // Tasks an Odd gives the owner, from giving one to finishing it.
+import { type ItemRef } from './schema.ts';
 import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import { db } from './db.ts';
 import { parkedWork, wakeOnTask, type TaskEnded } from './task-parking.ts';
@@ -42,6 +43,8 @@ export async function giveTask(
     ownerSaid?: string;
     /** The office gives it in the Odd's name (a plan's steps, a reconnect), so it may repeat a title. */
     byOffice?: true;
+    /** Items open on the desk this one waits on, checked by `openNeeds`. */
+    needs?: ItemRef[];
   }
 ): Promise<TaskRow> {
   const steps = t.steps.map((s) => (typeof s === 'string' ? { text: s, done: false } : s));
@@ -62,7 +65,8 @@ export async function giveTask(
         handOffId: t.handOffId,
         threadId: t.threadId,
         via: t.via,
-        ownerSaid: t.ownerSaid
+        ownerSaid: t.ownerSaid,
+        needs: t.needs
       })
       .returning();
     if (row.threadId) {

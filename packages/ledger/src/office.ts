@@ -187,6 +187,18 @@ export {
   report
 } from './office-desk.ts';
 export {
+  type ItemRef,
+  type Waiting,
+  RESTORE_DAYS,
+  itemKey,
+  clearItem,
+  deleteItem,
+  restoreItem,
+  openNeeds,
+  orderItems,
+  nextItem
+} from './items.ts';
+export {
   jobsFor,
   addJob,
   type FileJob,

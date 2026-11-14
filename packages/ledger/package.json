@@ -25,6 +25,7 @@
     "./run-registry": "./src/run-registry.ts",
     "./desk-answers": "./src/desk-answers.ts",
     "./live-tables": "./src/live-tables.ts",
+    "./desk-order": "./src/desk-order.ts",
     "./filters": "./src/filter-words.ts",
     "./certificates": "./src/certificates.ts",
     "./project-terminal": "./src/project-terminal.ts"

@@ -22,6 +22,7 @@ import {
   type AskRow
 } from '@oddboro/ledger';
 import { OWNER_ANSWERS, type AskEffect } from '@oddboro/ledger/desk-answers';
+import { narrateNext } from '#lib/server/narrate.ts';
 import type { RequestHandler } from './$types';
 
 type Yes = (typeof OWNER_ANSWERS.ask)[AskKind]['approve'];
@@ -99,6 +100,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
     error(400, e instanceof Error ? e.message : String(e));
   }
   if (!decided) error(409, 'This ask was already answered');
+  void narrateNext({ kind: 'ask', id: a.id }).catch(() => {});
   if (decision === 'approve' && a.access) {
     const task = (await tasksFrom(a.staffId)).find((t) => t.askId === a.id && t.status === 'open');
     return json({ ok: true, task: task ?? null });

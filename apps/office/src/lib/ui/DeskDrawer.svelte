@@ -33,6 +33,8 @@
   import { LEVEL_LABEL, type FolderAccess } from '@oddboro/ledger/access';
   import type { StaffProfile } from '../staff/roster.ts';
   import { chatAnswer, stepText, stepsToGo } from './task-steps.ts';
+  import { orderItems } from '@oddboro/ledger/desk-order';
+  import type { GoalsWindow } from '@oddboro/ledger';
 
   type Props = {
     desk: Desk;
@@ -45,8 +47,26 @@
     onplan: (hires: AskRow[]) => void;
     /** Open a staffer's card, from the name on an item. */
     onstaff: (id: string) => void;
+    /**
+     * One item alone, as its own page in the pane or under its card in a
+     * chat: no list, no way back to it, and `ondone` once the item is answered.
+     */
+    single?: boolean;
+    ondone?: () => void;
+    /** Bumps when goals or threads change, so the list groups again. */
+    version?: number;
   };
-  let { desk, staff, focus, onhire, onplan, onstaff }: Props = $props();
+  let {
+    desk,
+    staff,
+    focus,
+    onhire,
+    onplan,
+    onstaff,
+    single = false,
+    ondone,
+    version = 0
+  }: Props = $props();
 
   /** The row each kind of desk item shows. */
   type DeskRow = { ask: AskRow; task: TaskRow; report: ReportRow };
@@ -87,6 +107,49 @@
     ].sort((a, b) => a.at.localeCompare(b.at))
   );
 
+  /** Each waiting item's goal, by item key, from the goals window; the rest is Other work. */
+  let goalOf = $state<Record<string, string>>({});
+  $effect(() => {
+    void version;
+    if (single) return;
+    call<GoalsWindow>('/api/goals')
+      .then((w) => {
+        const m: Record<string, string> = {};
+        for (const g of w.goals)
+          for (const t of g.threads) for (const x of t.waiting) m[`${x.kind}-${x.id}`] = g.title;
+        goalOf = m;
+      })
+      .catch(() => {});
+  });
+  /** What waits, in the order to do it: ready first, then what unblocks most, then oldest. */
+  const ordered = $derived(
+    orderItems(
+      items.map((i) => ({
+        ...i,
+        id: i.row.id,
+        createdAt: i.at,
+        needs: i.kind === 'report' ? [] : (i.row.needs ?? [])
+      }))
+    )
+  );
+  /** The one thing to do next, when more than one thing waits. */
+  const next = $derived(ordered.length > 1 ? ordered.find((i) => !i.blockedBy.length) : undefined);
+  /** The rest by goal, in the order their first item comes, Other work last. */
+  const groups = $derived.by(() => {
+    const by = new Map<string, typeof ordered>();
+    for (const i of ordered) {
+      if (i.key === next?.key) continue;
+      const g = goalOf[i.key] ?? '';
+      by.set(g, [...(by.get(g) ?? []), i]);
+    }
+    const other = by.get('');
+    by.delete('');
+    return [
+      ...[...by].map(([title, list]) => ({ title, list })),
+      ...(other ? [{ title: by.size ? 'Other work' : '', list: other }] : [])
+    ];
+  });
+
   let openKey = $state<string | undefined>();
   /** An attached file with edits the owner has not saved. */
   let unsaved = $state(false);
@@ -98,6 +161,10 @@
   function show(key: string | undefined) {
     openKey = key;
     unsaved = false;
+    if (single) {
+      if (!key) ondone?.();
+      return;
+    }
     const i = items.find((x) => x.key === key);
     if (i?.row.staffId) showInChat(i.row.staffId, delivered(i));
   }
@@ -275,13 +342,13 @@
     });
   }
 
-  const LABEL = { ask: 'Ask', task: 'Task', report: 'Report' } as const;
+  const LABEL = { ask: 'Needs your yes', task: 'Needs your hands', report: 'To read' } as const;
   const doneCount = (steps: Step[]) => steps.filter((s) => s.done).length;
 </script>
 
 <section class="flex h-full min-h-0 flex-col" aria-label="Your desk">
   <!-- No heading: the window's tab already says Desk and how many wait. -->
-  {#if open}
+  {#if open && !single}
     <!-- Back to the list: its own row above the item, where the eye starts. -->
     <div class="border-b border-hairline px-3 py-2">
       <button
@@ -318,7 +385,9 @@
   {/if}
 
   <div class="flex-1 overflow-y-auto p-3">
-    {#if !open}
+    {#if !open && single}
+      <p class="py-6 text-center text-sm text-muted">This is no longer waiting on you.</p>
+    {:else if !open}
       {#if desk.away.length}
         <section class="mb-3 rounded-xl bg-raise px-3 py-2.5" aria-label="While you were away">
           <div class="flex items-center gap-2">
@@ -393,44 +462,67 @@
           Desk clear. Your Odds will bring you anything that needs you.
         </p>
       {/if}
-      <ul class="flex flex-col gap-1.5">
-        {#each items as i (i.key)}
-          {@const from = who(i.row.staffId)}
-          <li>
-            <button
-              class="flex w-full items-start gap-3 rounded-xl bg-raise px-3 py-2.5 text-start transition-colors hover:bg-sea/15"
-              onclick={() => go(i.key)}
-            >
-              {#if from}
-                <Pixel
-                  src={from.look?.portrait}
-                  frame={`${from.portrait}/default`}
-                  fallback={`${from.sprite}@${from.variant}/idle-down-0`}
-                  scale={1}
-                  label={from.name}
-                  class="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-sea-deep"
-                />
-              {/if}
-              <span class="min-w-0 flex-1">
-                <span class="flex items-center gap-2 text-[10px] tracking-[0.16em] uppercase">
-                  <span class={i.kind === 'report' ? 'text-sea' : 'text-ember'}>{labelOf(i)}</span>
-                  <span class="text-faint"
-                    >{from?.name ?? 'Office'}{viaOf(i)
-                      ? `, from ${who(viaOf(i))?.name ?? viaOf(i)}'s work`
-                      : ''} · {ago(i.at)}</span
-                  >
-                </span>
-                <span class="mt-0.5 block text-sm text-ink">{i.row.title}</span>
-                {#if i.kind === 'task' && i.row.steps.length}
-                  <span class="mt-0.5 block text-xs text-muted"
-                    >{doneCount(i.row.steps)} of {i.row.steps.length} steps done</span
-                  >
-                {/if}
-              </span>
-            </button>
-          </li>
-        {/each}
-      </ul>
+      {#snippet row(i: (typeof ordered)[number], isNext = false)}
+        {@const from = who(i.row.staffId)}
+        <button
+          class="flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-start transition-colors hover:bg-sea/15 {isNext
+            ? 'bg-sea/15 ring-1 ring-sea/50'
+            : 'bg-raise'} {i.blockedBy.length ? 'opacity-60' : ''}"
+          onclick={() => go(i.key)}
+        >
+          {#if from}
+            <Pixel
+              src={from.look?.portrait}
+              frame={`${from.portrait}/default`}
+              fallback={`${from.sprite}@${from.variant}/idle-down-0`}
+              scale={1}
+              label={from.name}
+              class="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-sea-deep"
+            />
+          {/if}
+          <span class="min-w-0 flex-1">
+            <span class="flex items-center gap-2 text-[10px] tracking-[0.16em] uppercase">
+              {#if isNext}<span class="text-sea">Next</span>{/if}
+              <span class={i.kind === 'report' ? 'text-sea' : 'text-ember'}>{labelOf(i)}</span>
+              <span class="text-faint"
+                >{from?.name ?? 'Office'}{viaOf(i)
+                  ? `, from ${who(viaOf(i))?.name ?? viaOf(i)}'s work`
+                  : ''} · {ago(i.at)}</span
+              >
+            </span>
+            <span class="mt-0.5 block text-sm text-ink">{i.row.title}</span>
+            {#if i.blockedBy.length}
+              <span class="mt-0.5 block text-xs text-muted"
+                >Waits on {i.blockedBy[0].row.title}</span
+              >
+            {:else if i.unblocks.length}
+              <span class="mt-0.5 block text-xs text-sea"
+                >Unblocks {i.unblocks.length}: {i.unblocks.map((u) => u.row.title).join(', ')}</span
+              >
+            {/if}
+            {#if i.kind === 'task' && i.row.steps.length}
+              <span class="mt-0.5 block text-xs text-muted"
+                >{doneCount(i.row.steps)} of {i.row.steps.length} steps done</span
+              >
+            {/if}
+          </span>
+        </button>
+      {/snippet}
+      {#if next}
+        <div class="mb-3">{@render row(next, true)}</div>
+      {/if}
+      {#each groups as g (g.title)}
+        {#if g.title}
+          <h3 class="mt-3 mb-1.5 text-[10px] tracking-[0.16em] text-muted uppercase">
+            {g.title}
+          </h3>
+        {/if}
+        <ul class="flex flex-col gap-1.5">
+          {#each g.list as i (i.key)}
+            <li>{@render row(i)}</li>
+          {/each}
+        </ul>
+      {/each}
       {#if desk.recent.length}
         <details class="mt-4 border-t border-hairline pt-2 text-xs text-muted">
           <summary class="cursor-pointer">Recent decisions and answers</summary>

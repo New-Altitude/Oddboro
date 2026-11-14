@@ -8,6 +8,7 @@ import {
   AlreadyOnDesk,
   ask,
   grantsFor,
+  openNeeds,
   ownerName,
   staffer,
   type GoAhead,
@@ -166,6 +167,22 @@ const revisesArg = z
   .int()
   .optional()
   .describe(`When ${OWNER} sent an ask back to rework, its id. Leave out otherwise.`);
+
+const afterArg = z
+  .array(z.object({ kind: z.enum(['ask', 'task']), id: z.number().int() }))
+  .max(5)
+  .optional()
+  .describe(
+    `Asks or tasks already open on ${OWNER}'s desk that must be done before this one, by kind and id from my_asks or my_tasks, e.g. [{"kind": "ask", "id": 12}]. ${OWNER} sees this one wait on them, and does them first. Leave out when it can be done on its own.`
+  );
+
+/** The items a new one waits on, checked, or the problem in words the Odd can act on. */
+async function waitsOn(
+  after: { kind: 'ask' | 'task'; id: number }[] | undefined
+): Promise<{ needs: { kind: 'ask' | 'task'; id: number }[] } | { problem: string }> {
+  const r = await openNeeds(after);
+  return typeof r === 'string' ? { problem: r } : { needs: after ?? [] };
+}
 
 const attachArg = z
   .array(z.string())
@@ -634,6 +651,8 @@ export {
   approvedArg,
   goAhead,
   revisesArg,
+  afterArg,
+  waitsOn,
   attachArg,
   attachable,
   jobFiles,

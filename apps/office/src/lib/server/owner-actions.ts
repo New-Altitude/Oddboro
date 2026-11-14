@@ -121,6 +121,11 @@ export const OWNER_ACTIONS = {
   },
   'POST /api/jobs/[id]': { none: NO_ROW },
   'DELETE /api/jobs/away': { none: "Takes the jobs off the desk's While you were away card." },
+  // Clear closes an item the way its own end would; Delete and Restore each add one decision.
+  'POST /api/items': {
+    mayRecord: ['decision', 'work'],
+    when: "Clear writes what the item's own end writes: a decision for an ask (the office's set-aside no), a work row for a task dropped, nothing for a report. Delete adds one decision per item, and Restore one."
+  },
   'PATCH /api/lessons/[id]': { records: 'decision' },
   'POST /api/looks': {
     notAnAction: 'Draws a look for the hire window; nothing is kept until a hire.'
