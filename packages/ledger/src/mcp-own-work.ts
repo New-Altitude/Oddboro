@@ -251,7 +251,7 @@ if (has('propose_goal_plan'))
 tool(
   'keep_lesson',
   {
-    description: `Remember a correction from ${OWNER}, so they never give it twice. Call it once when they correct your work or say how they want something done from now on, in chat, in a reason on an ask, or in feedback on a report: "too long", "always copy Sam", "never book before 9". It works only in a chat, a run carrying ${OWNER}'s note on an ask or a task, or a run reading their edit to one of your files; in any other run it refuses, so tell them in your reply instead. Not for an instruction about this one piece of work only. ${OWNER} sees it in your chat as "I'll remember: ..." with Undo, so do not repeat it to them. It goes live in every later run at once when they said it; a lesson you inferred waits for their Keep.`,
+    description: `Remember a correction from ${OWNER}, so they never give it twice. Call it once when they correct your work or say how they want something done from now on, in chat, or in their answer to something you raised: "too long", "always copy Sam", "never book before 9". It works only in a chat, a run carrying ${OWNER}'s note on an ask or a task, or a run reading their edit to one of your files; in any other run it refuses, so tell them in your reply instead. Not for an instruction about this one piece of work only. ${OWNER} sees it in your chat as "I'll remember: ..." with Undo, so do not repeat it to them. It goes live in every later run at once when they said it; a lesson you inferred waits for their Keep.`,
     inputSchema: {
       lesson: z
         .string()

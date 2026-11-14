@@ -36,6 +36,7 @@ import {
   agents,
   assertKeychainUntouched,
   awayFromHome,
+  bus,
   currentOffice,
   filesOf,
   gave,
@@ -148,7 +149,14 @@ test('a twin pair of access asks starts one carry-out, on the hand-off twin, tol
     [twin.ask.id]
   );
   const task = await L.giveTask('cleo', { title: 'Pick a label', why: 'w', steps: ['Pick one.'] });
-  const run = await runOf(carries[0].id, twin.ask.id);
+  // The floor shows the carry-out as serving the hand-off, so the giver's chat reads Cleo back on it while it goes.
+  const serving = new Set<number | undefined>();
+  const seen = (e: { type: string; inProgress?: Record<string, { handOffId?: number }[]> }) => {
+    if (e.type === 'working') for (const w of e.inProgress?.cleo ?? []) serving.add(w.handOffId);
+  };
+  bus.on('event', seen);
+  const run = await runOf(carries[0].id, twin.ask.id).finally(() => bus.off('event', seen));
+  assert.deepEqual([...serving], [h.id]);
   assert.ok(
     run.system.includes(
       `This also answers your ask #${firstDay.ask.id}, which another of your runs raised for the same tool: do that work once, here.`
@@ -1666,7 +1674,7 @@ test("the run a finished task starts is told where a file attached from a goal's
     select id from follow_ups where task_id = ${task.id} and kind = 'task_done'`;
   const f = await L.startFollowUp(row.id);
   assert.ok(f, 'the task_done follow-up could not start');
-  const r = await followThrough(f, undefined, undefined, task);
+  const r = await followThrough(f, undefined, task);
   assert.equal(r.outcome, 'done', r.text);
   const { message, system } = JSON.parse(r.text) as Gave;
   assert.ok(
@@ -1690,7 +1698,6 @@ test("a lead woken by a colleague's tell_lead is told the work is its to decide 
   const told = await L.tellLead({
     staffId: 'paige',
     threadId: h.thread,
-    owner: 'Sam',
     said,
     words: said,
     reading: 'They want red paint.'
@@ -1700,9 +1707,13 @@ test("a lead woken by a colleague's tell_lead is told the work is its to decide 
     select id from follow_ups where staff_id = 'lead' and kind = 'resume' and thread_id = ${h.thread}`;
   assert.ok(wake, 'tell_lead woke no pick-up');
   const { system } = await runOf(wake.id);
-  assert.match(
-    system,
-    /- Paige passed you what Sam told them in chat about this work\. You decide what comes of it and hand on any work it needs; Paige does nothing more with it\. Sam's words: Make the barn red\. Paige's own reading, which is not Sam's words: They want red paint\./
+  // The note names the owner as the office does, by the name they gave.
+  const owner = await L.ownerName();
+  assert.ok(
+    system.includes(
+      `- Paige passed you what ${owner} told them in chat about this work. You decide what comes of it and hand on any work it needs; Paige does nothing more with it. ${owner}'s words: Make the barn red. Paige's own reading, which is not ${owner}'s words: They want red paint.`
+    ),
+    system
   );
 });
 
@@ -1974,7 +1985,7 @@ test("a new hire's first day and the manager's planning say how an Odd gets Run 
     insert into follow_ups (staff_id, kind, goal_id) values ('sam', 'goal', ${g.id}) returning id`;
   const f = await L.startFollowUp(row.id);
   assert.ok(f, 'the planning run could not start');
-  const r = await followThrough(f, undefined, undefined, undefined, await L.goal(g.id));
+  const r = await followThrough(f, undefined, undefined, await L.goal(g.id));
   assert.equal(r.outcome, 'done', r.text);
   const plan = JSON.parse(r.text) as Gave;
   const planText = `${plan.system}\n${plan.message}`;

@@ -55,6 +55,8 @@ import {
   currentPlatform,
   type Effort
 } from '@oddboro/ledger';
+import type { Launch } from './cli.ts';
+import { claudeReader } from './claude.ts';
 import { andBelow, denyRules, instructionPaths } from './files.ts';
 import { mcpGrant, NOT_SIGNED_IN, replace, sweep, vendorEnv, type RunImage } from './launch.ts';
 import { runEnv } from './run-env-allow.ts';
@@ -260,7 +262,8 @@ function promptFile(h: GrokHome, key: string, message: string, images: RunImage[
 }
 const PROMPT_ENDS = ['.prompt.txt', '.prompt.json'] as const;
 
-type GrokLaunch = { args: string[]; env: NodeJS.ProcessEnv; done: () => void };
+/** Grok reads its message from its prompt file, so its launch has no input (`LAUNCHES.grok` in cli.ts). */
+type GrokLaunch = Omit<Launch, 'stdin'>;
 
 /** A sandbox profile, kept in the Grok home's sandbox.toml. */
 type Profile = { readOnly: string[]; readWrite: string[]; deny: string[] };
@@ -472,7 +475,9 @@ export function grokLaunch(r: GrokRun): GrokLaunch {
     done: () => {
       rmSync(agent, { force: true });
       rmSync(prompt, { force: true });
-    }
+    },
+    // Grok streams in Claude Code's shape, naming its own tools.
+    read: claudeReader('grok')
   };
 }
 

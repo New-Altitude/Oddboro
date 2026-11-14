@@ -4,18 +4,18 @@
 // run with the owner's permissions, outside Oddboro's limits.
 import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, inArray } from 'drizzle-orm';
-import { addFollowUp, type Db } from './threads.ts';
+import type { Db } from './threads.ts';
 import { db } from './db.ts';
 import { ADVANCED_CONSENT } from './access-words.ts';
 import { fixedError } from './errors.ts';
 import { record } from './office.ts';
+import { transitionWork } from './work/apply.ts';
 import {
   owner,
   projectRequests,
   projectSessions,
   reports,
   staff,
-  threads,
   type ProjectRequestState
 } from './schema.ts';
 
@@ -352,21 +352,23 @@ export async function finishProject(id: string, sessionId: string, answer: strin
         .select()
         .from(projectSessions)
         .where(eq(projectSessions.id, sessionId));
-      const [work] = row.threadId
-        ? await tx
-            .select({ endedAt: threads.endedAt })
-            .from(threads)
-            .where(eq(threads.id, row.threadId))
-            .for('update')
-        : [];
-      if (row.threadId && work && !work.endedAt)
-        await addFollowUp(tx, {
-          kind: 'resume',
-          staffId: row.staffId,
-          threadId: row.threadId,
-          note:
-            'Result from ' + session.title + ' for your assignment "' + row.prompt + '":\n' + answer
-        });
+      if (row.threadId) {
+        // Queuing a run leaves nothing for after the commit (`runQueued`).
+        const went = await transitionWork(
+          {
+            kind: 'runQueued',
+            run: {
+              staffId: row.staffId,
+              kind: 'resume',
+              threadId: row.threadId,
+              note: `Result from ${session.title} for your assignment "${row.prompt}":\n${answer}`
+            },
+            onlyWhileOpen: true
+          },
+          { tx }
+        );
+        if ('refused' in went) throw new Error(went.refused);
+      }
       await tx.insert(reports).values({
         staffId: row.staffId,
         title: 'Project session: ' + session.title,

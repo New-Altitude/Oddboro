@@ -224,7 +224,6 @@ if (workingOn.length)
       const r = await tellLead({
         staffId: ME,
         threadId: work,
-        owner: OWNER,
         // `inChat` offers it only where the office sets OWNER_SAID. With none,
         // no words match, so tellLead refuses and nothing reaches the lead.
         said: OWNER_SAID ?? '',

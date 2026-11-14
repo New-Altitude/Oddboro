@@ -42,6 +42,7 @@ export * from './goal-words.ts';
 export * from './updates.ts';
 export * from './update-window.ts';
 export * from './hand-offs.ts';
+export { runsAtDraft, runCeiling } from './work/kinds.ts';
 export * from './hand-off-news.ts';
 export * from './threads.ts';
 export * from './lead-brief.ts';

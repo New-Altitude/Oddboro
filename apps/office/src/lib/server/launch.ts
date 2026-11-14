@@ -95,12 +95,27 @@ export type RunEvent =
   | { type: 'tool'; name: string }
   /** One whole message of the reply. */
   | { type: 'message'; text: string }
+  /** One streamed piece of the reply, as it comes. */
+  | { type: 'delta'; text: string }
   | { type: 'usage'; usage: ModelUsage }
-  /** The turn finished; its reply is the last message. */
-  | { type: 'done' }
-  | { type: 'failed'; message: string }
+  /** What the tool said of the plan's limits (Claude Code's `rate_limit_event`), as it said it. */
+  | { type: 'plan'; info: unknown }
+  /**
+   * The turn finished. `text` is the reply the tool gave with its result,
+   * when it gives one; without it, the reply is what the run said.
+   */
+  | { type: 'done'; text?: string }
+  /** The run ended without its reply; `result`, when the tool's own result line said so. */
+  | { type: 'failed'; message: string; result?: ResultFacts }
   /** Something went wrong that the run may still finish past. */
   | { type: 'error'; message: string };
+
+/**
+ * A Claude Code-shaped `result` line (Claude Code's and Grok's) that is not
+ * a plain success, as the tool sent it. The reader decides nothing about it:
+ * each caller reads these facts by its own rule.
+ */
+export type ResultFacts = { subtype: string; isError: boolean; text?: string; errors: string[] };
 
 /** A file replaced in one step, so the tool never reads it half written. */
 export function replace(path: string, content: string | Uint8Array, mode = 0o600): void {
@@ -196,9 +211,11 @@ export function shellEnv(temp: string): Record<string, string> {
  * of its own (measured on codex-cli 0.166.0), so stopping the tool's group
  * alone leaves a command that was still running when the run timed out. A
  * process that already left the tree (its parent ended, so launchd took it)
- * is not found here.
+ * is not found here. Returns the pids it found under the run, the tool's own
+ * first, so a caller can check after the stop that each is gone: only `[pid]`
+ * on Windows, where taskkill walks the tree itself, and when ps fails.
  */
-export function stopGroups(pid: number, signal: 'SIGTERM' | 'SIGKILL' = 'SIGTERM'): void {
+export function stopGroups(pid: number, signal: 'SIGTERM' | 'SIGKILL' = 'SIGTERM'): number[] {
   if (currentPlatform() === 'win32') {
     try {
       execFileSync(
@@ -209,15 +226,15 @@ export function stopGroups(pid: number, signal: 'SIGTERM' | 'SIGKILL' = 'SIGTERM
     } catch {
       // The run may already have exited.
     }
-    return;
+    return [pid];
   }
   const groups = new Set([pid]);
+  const under = new Set([pid]);
   try {
     const rows = execFileSync('ps', ['-axo', 'pid=,ppid=,pgid='], { encoding: 'utf8' })
       .trim()
       .split('\n')
       .map((l) => l.trim().split(/\s+/).map(Number));
-    const under = new Set([pid]);
     // Once pids wrap, a child can come before its parent in the list, so go round until nothing is added.
     for (let added = true; added;) {
       added = false;
@@ -237,4 +254,5 @@ export function stopGroups(pid: number, signal: 'SIGTERM' | 'SIGKILL' = 'SIGTERM
     } catch {
       // That group is gone already: nothing is left to stop.
     }
+  return [...under];
 }

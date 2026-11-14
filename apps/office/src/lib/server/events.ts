@@ -27,7 +27,11 @@ export type HandOffEvent = { type: 'hand-off' } & HandOffNews;
 
 export type OfficeEvent =
   | { type: 'change'; table: string }
-  | { type: 'working'; working: Record<string, string>; inProgress: Record<string, Work[]> }
+  | {
+      type: 'working';
+      chatting: string[];
+      inProgress: Record<string, Work[]>;
+    }
   | { type: 'persona'; slug: string; joined: Offer['joined']; problem?: string }
   | LessonEvent
   | HandOffEvent

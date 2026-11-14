@@ -20,7 +20,7 @@ import type { ChatEntry, ChatEvent, ChatRef } from '#lib/staff/chat.ts';
 import { isPicture, type ChatFile } from '#lib/attachments.ts';
 import { splitChoices } from '#lib/choices.ts';
 import { run, runHomeOf, type Run } from './staff.ts';
-import { chatRun } from './run-state.ts';
+import { chatRun, show } from './run-state.ts';
 import { addToChat, history, keepOwnerTurn, ChatInputError } from './chat-turns.ts';
 import { attachedFiles, filesNow } from './chat-files.ts';
 import { replyBrief, savedTaskWords } from './chat-delivery.ts';
@@ -130,6 +130,8 @@ export async function replyToOwnerTurn(
   if (chatRun(id)) throw new Error('Another reply is in progress. Your message is saved.');
   // No await between checking and reserving: a second page sees this attempt.
   const live = reserveRun({ staffId: id, kind: 'chat', turnId });
+  // A chat reply never goes through `slot`, so it tells the floor itself.
+  show();
   const started = Date.now();
   // A retry carries what the owner added to the turn with Send now, too.
   const message = log
@@ -289,6 +291,7 @@ export async function replyToOwnerTurn(
   } finally {
     releaseRun(live);
     bus.emit('run-ended');
+    show();
     emit({ type: 'change', table: 'chat' });
   }
 }

@@ -2,29 +2,21 @@
   import { untrack } from 'svelte';
   import { SETTINGS_TAB } from '@oddboro/ledger/access';
   import Pixel from './Pixel.svelte';
-  import type { AskRow, Desk } from '@oddboro/ledger';
   import ChatPanel from './ChatPanel.svelte';
   import { chatRequest, type Delivered } from './chat-about.svelte.ts';
   import AccessTab from './AccessTab.svelte';
   import LessonsTab from './LessonsTab.svelte';
   import OddInfo from './OddInfo.svelte';
   import StorageTab from './StorageTab.svelte';
-  import type { Work } from '../staff/work.ts';
+  import { lineWords, railCount, type ReaderProps } from '../staff/odd-now.ts';
   import { ACTIVITY_LABEL, type Activity, type StaffProfile } from '../staff/roster.ts';
   import type { Place, PlaceGroup } from '../staff/places.ts';
 
-  type Props = {
+  type Props = ReaderProps & {
     profile: StaffProfile;
-    desk: Desk;
-    staff: StaffProfile[];
-    onplan: (hires: AskRow[]) => void;
     activity: Activity;
     /** Bumps when jobs, runs or access change, so those tabs reload. */
     version: number;
-    /** The job this staffer is running, if any. */
-    working: string | undefined;
-    /** Everything it is working on now. */
-    work: Work[];
     /** Open the info page at In progress, e.g. from the agents list. `n` changes to ask again. */
     show?: { tab: 'work'; n: number };
     /** Opens something the staffer delivered, on the start side. */
@@ -47,13 +39,13 @@
 
   let {
     profile,
+    now,
+    nowOf,
     desk,
     staff,
     onplan,
     activity,
     version,
-    working,
-    work,
     show,
     places,
     manual,
@@ -67,6 +59,8 @@
     onclose,
     onitem
   }: Props = $props();
+  /** How much it has in progress: runs going, queued, and follow-ups yet to start. */
+  const inProgress = $derived(railCount(now));
 
   /** Who fills a place, when every spot there is held by someone else. */
   function fullBy(place: Place): string | undefined {
@@ -197,17 +191,17 @@
           </span>
         </button>
         <!-- How much is in progress, in a turning ring, only while there is some. -->
-        {#if work.length}
+        {#if inProgress}
           <button
             class="busy"
-            aria-label="{work.length} in progress"
-            title="{work.length} in progress"
-            onclick={showWork}><span>{work.length}</span></button
+            aria-label="{inProgress} in progress"
+            title="{inProgress} in progress"
+            onclick={showWork}><span>{inProgress}</span></button
           >
         {/if}
       </div>
       <span class="block truncate text-xs text-muted">
-        {profile.role} · {working ? working : ACTIVITY_LABEL[activity]}
+        {profile.role} · {lineWords(now)}
       </span>
     </div>
     <button
@@ -270,15 +264,7 @@
 
   <div class="relative min-h-0 flex-1">
     {#if tab === 'card'}
-      <OddInfo
-        {profile}
-        {activity}
-        {version}
-        {working}
-        {work}
-        focus={toWork}
-        onsend={() => (tab = 'send')}
-      />
+      <OddInfo {profile} {activity} {version} {now} focus={toWork} onsend={() => (tab = 'send')} />
     {:else if tab === 'send'}
       <div class="flex h-full min-h-0 flex-col">
         <div class="border-b border-hairline p-3">
@@ -335,6 +321,8 @@
        survives switching tabs. -->
     <div class="h-full" class:hidden={tab !== 'chat'}>
       <ChatPanel
+        {now}
+        {nowOf}
         {desk}
         {staff}
         {onplan}
@@ -344,7 +332,6 @@
         onend={onchatend}
         visible={tab === 'chat'}
         {onitem}
-        {work}
         onwork={showWork}
       />
     </div>

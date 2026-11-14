@@ -6,11 +6,19 @@ pokes (one-time chat messages an Odd sets for later), reports, connectors and gr
 windows, the names the owner gives the rooms, the owner's goals and who serves
 them, the lessons the owner teaches the Odds, the app's updates, and the ledger itself.
 Drizzle ORM over the `postgres` driver. Server only, except `./time`,
-`./tools`, `./agents`, `./access`, `./grantable`, `./goals`, `./update-window`, `./work-paths`, `./desk-answers`, `./live-tables` and `./filters`, which the page may import.
+`./tools`, `./agents`, `./access`, `./grantable`, `./goals`, `./update-window`, `./work-paths`, `./desk-answers`, `./live-tables`, `./filters` and `./lesson-rules`, which the page may import.
+`./sequences` is for tests in any package, never the page.
 
 `src/run-registry.ts` holds each live run, its stop handle and its work in
 progress. `reserveRun` and `releaseRun` own its lifetime; the office derives
 its slot queue and chat state from these entries. It holds no saved office data.
+
+`src/work/` is the work core: what happens to threads, follow-ups, asks and
+tasks, as events (`WorkEvent` in `src/work/events.ts`), each decided by one
+pure function (`DECIDERS` in `src/work/decide.ts`) and written in one
+transaction (`transitionWork` in `src/work/apply.ts`, over `transition` in
+`src/transition.ts`). `docs/architecture.md` says how a system that keeps
+state takes this shape.
 
 Where a new kind of thing starts, the shared function for each job, and the
 check that catches a missed place: `docs/architecture.md`.
@@ -175,7 +183,7 @@ their change triggers; `0028_advanced_mode` adds `owner.advanced_at` and
   desk, with where each stands; the office shows them in its chat. A folder
   or switch ask also carries its folder (shown, as the Desk shows it), its
   switches and its why, so the chat can show the card. Answering it still
-  goes through `giveFolder`, or approval and `turnOnSwitches`, as on the
+  goes through `giveFolder`, or approval and `changeOwnTools`, as on the
   Desk, and `chat` reaches only the carry-out of the ask answered there. No
   migration.
   `replyToReport` is the owner's feedback, given as a chat reply: it marks the
@@ -183,7 +191,8 @@ their change triggers; `0028_advanced_mode` adds `owner.advanced_at` and
 - A follow-up (carry out an approved ask, rework one the owner sent back, pick
   up after a task the owner finished, read why the owner said no, read the
   owner's edit to a file) runs once. Older rows may also be
-  `feedback`, from before feedback became a chat reply. `startFollowUp` claims it in the
+  `feedback`, from before feedback became a chat reply; such a row reads as
+  ended and never runs (`RETIRED_KINDS` in `src/work/state.ts`). `startFollowUp` claims it in the
   database before the run, and `finishFollowUp` records the outcome. An Odd
   runs once at a time on a thread: any follow-up on one but a `hand_off`
   waits while a run of the same Odd there has yet to end (`waitsOnOwnRun`),
@@ -194,7 +203,7 @@ their change triggers; `0028_advanced_mode` adds `owner.advanced_at` and
   ask or task its hub names the thread for (`raiseAsk`, `giveTask`). The
   office gives every run a key (`RUN_KEY`) and keeps it in `runsGoing` while
   the run goes, and the thread keeps the key of its hub's runs only
-  (`threads.runs`, `keepRun`): a key holds the hub's pick-ups whoever's run it
+  (`threads.runs`, `keepRun` in `src/work/hand-offs.ts`): a key holds the hub's pick-ups whoever's run it
   is, so a colleague's would stall the lead. The tool server writes the key, in a process of its own, so it
   goes in the database; which keys still go lives in memory only, so a
   restart frees every hold and no key needs clearing. One
@@ -332,8 +341,9 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   from `0024_task_response`, saved by `saveTaskResponse`
   against the version they opened, so a stale save never overwrites newer
   words). Finishing one needs its latest saved version; that text is the
-  owner's answer (`taskAnswer`), and the `task_done` run gets it word for word. A dropped task starts nothing,
-  unless it was given on a hand-off or a thread (below).
+  owner's answer (`taskAnswer`), and the `task_done` run gets it word for word. A dropped task's answer goes
+  back to the hand-off or thread it was given on (below); given on neither,
+  it wakes the Odd that gave it, once, as an `answered` run.
   A denied ask with a reason also starts a `denied` follow-up: the Odd reads
   the reason, keeps a lesson if it says how to work from now on, and never
   carries the ask out. It serves no hand-off and joins no thread
@@ -424,7 +434,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   `handed_back` follow-up for the Odd that handed it, a restart's failure
   included, but for two: the colleague's run that ends waiting goes back
   only while something it raised is still open (`answeredAll`), and nothing
-  goes back to a lead that left the office (`leadLeft`). When the
+  goes back to a lead that left the office (`hasLeft` in `handBack`). When the
   owner answered all of it before the run ended, the answer already went
   back, or started a run whose result will. When the lead left, the
   colleague pokes the owner that it finished and could not hand it back, the
@@ -440,11 +450,11 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   it and every hand-off for it (`hand_off` with `goal`), and counts no
   hand-off as it opens. Only its lead hands on there, so a hire serving the
   goal joins it as a colleague. An Odd that serves a goal and has no job leads
-  no thread: `openThread`, the one place a thread is opened, refuses it
+  no thread: `assertMayLead`, checked wherever a thread is opened, refuses it
   (`LEADS_NONE`), whatever tool or run got there; the manager is never refused.
   A finished goal thread is found as it is, so a goal never gets a second: an
-  ask or task raised on it opens it again (`raisedOn`), and so does the lead's
-  next hand-off (`takeHandOff`), so a lookup alone, such as a hand-off the
+  ask or task raised on it opens it again (`raisedOn` in `src/work/threads.ts`), and so does the lead's
+  next hand-off, so a lookup alone, such as a hand-off the
   office refuses, changes nothing. A stopped one stays stopped: a hand-off
   there is refused, and only a new plan for the goal opens it again
   (`raisedOn` with `plan`), since the plan asks the owner afresh. With no
@@ -462,45 +472,49 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   one stays stopped. A round of work takes up to `HAND_OFF_LIMIT` (8)
   hand-offs; continuing an ended thread starts a new one. `handOffsUsed` is
   this round's; every round's are the thread's `hand_off` follow-ups.
-  `takeHandOff` holds the limit, and `count` is its one check. The hand-off
-  past it waits: `askToKeepGoing` raises one `hand_offs` ask on the thread,
+  The hand-off decider (`handedOff` in `src/work/hand-offs.ts`) holds the
+  limit. The hand-off past it waits: it raises one `hand_offs` ask on the thread,
   holding what the lead chose in `asks.held` (the colleague, title and
   brief), and while that ask is open no other hand-off goes. The office raised it, so it
   takes a yes or a no only (`yesOrNo` in `src/tools.ts`). A yes
-  (`startHeld`, in the transaction that claims the ask, so a stop between
+  (`start_held` in `src/work/asks.ts`, in the transaction that claims the ask, so a stop between
   them cannot lose it) starts the held hand-off as the first of a new round,
   with what it carries worked out at the yes (`sharing`), so its result
   brings the hub back; the hub hears the yes itself only when
-  the owner wrote something with it. A no stops the thread, the held hand-off
+  the owner wrote something with it. Past the usage window's guard the yes
+  does not start it: the thread waits for the window as a new hand-off's
+  does (below), its round starts afresh, and the hub wakes now to hear that
+  it hands it on again once the work picks back up. A no stops the thread, the held hand-off
   never goes, and the hub wakes to say where the work stands. An ask raised
   before asks held their hand-off wakes the hub to hand on again. The hub moves it on by a colleague finishing, by
   `resume_at` (`parkThread`; the office clock calls `wakeThread`, which starts
   a `resume` follow-up), by `resume_at`'s `after_task` (`parkOnTask`, which takes
   only a task the hub gave or one on work it is on, any other reading as no
-  task, sets `threads.resume_on_task` and clears the time; `wakeOnTask` wakes it when the
-  task is done or dropped, or taken off the desk (`withdrawTask`, as the task's Odd leaves
-  the office or through its `withdraw` tool), which wakes it as a drop does, and says which,
+  task, sets `threads.resume_on_task` and clears the time; `wakeParked` wakes it when the
+  task is done or dropped, or taken off the desk (as the task's Odd leaves the office,
+  `oddRemoved` in `src/work/leaving.ts`, or through its `withdraw` tool, `withdrawTask`), which wakes it as a drop does, and says which,
   and when a run on the task's own work picks up too, names that work, whose lead carries its
   own part (never a lead that left the office, which runs nothing), or for a task on no work
-  says another run of the hub's does; a stopped thread loses its park, whether the owner
+  says another run of the hub's does, as one does when the owner finishes or drops it (`OWN_RUN`):
+  never when it is taken off the desk; a stopped thread loses its park, whether the owner
   stopped it or its hub left the office (`removeOdd`); and the
   hub's next run on the thread ends a park on a task or a time as it starts, whatever starts it,
   and is told the wait ended (`startFollowUp`), while a colleague's run, a pick-up still waiting
   on the hub's run and a usage-window hold leave it; when that run ends failed having parked
   nothing again, the park comes back on its task or its time (`follow_ups.unparked_task`,
   `follow_ups.unparked_at`, `finishFollowUp`): had the task ended during the run, it wakes the
-  work as `wakeOnTask` would have (`endedAs` reads a withdrawal from `tasks.withdrawn`, and
+  work as `wakeParked` would have (`endedAs` reads a withdrawal from `tasks.withdrawn`, and
   `ownRunOf` names no run on stopped work, so an Odd brought back since changes neither),
   and a time that passed is left for the clock's `wakeThread`,
   which wakes it once), or by the owner answering an ask or task raised on it
-  (`asks.thread_id`, `tasks.thread_id`; `answerThread` when no run follows,
+  (`asks.thread_id`, `tasks.thread_id`; `answerLead` when no run follows,
   carrying the ask, so an approved goal plan starts the hub leading its work).
   An answer that comes while the hub's `resume` has yet to start joins it as
   one more line, so hires landing together wake the hub once, and the claim
   returns the row as joined (`startFollowUp`), so the run reads every line.
-  Every follow-up on a thread is written through `addFollowUp`, which settles
-  the thread's holder and status (`settleThread`, the one place status is
-  worked out; `askToKeepGoing` settles it too): the status is open until the
+  Every follow-up on a thread is written through the work core, which settles
+  the thread's holder and status (`settle` in `src/work/threads.ts`, the one place status is
+  worked out): the status is open until the
   work ends, and an ask or task raised on it that is still open keeps it
   open, however the hub's last run ended. Whether it waits on the owner is
   never stored: `stageOf` reads it from the desk. Each hub run on its thread gets
@@ -529,9 +543,10 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   lists a goal's under it, and every thread for no goal still under way or
   waiting as other work.
 - New hand-offs to Odds on Claude Code wait while the plan's 5-hour usage window is nearly used up
-  (`src/usage-window.ts`). Runs report the share used and the reset time
+  (`handedOff` in `src/work/hand-offs.ts`), and so does a held one the owner
+  says yes to (`start_held`): both ask `windowHolds`. Runs report the share used and the reset time
   (`plan_limits`); the window's size in tokens is not known. Past
-  `WINDOW_GUARD` (85%), `holdForWindow` in `takeHandOff` refuses each new
+  `WINDOW_GUARD` (85%), the hand-off decider refuses each new
   hand-off to an Odd on Claude Code without counting it (one to an Odd on
   another tool goes), parks its thread until the reset
   (`resume_at`, with `threads.held_by` naming the ask; a finished one opens
@@ -539,11 +554,13 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   `plan_limits` so two hand-offs raise one. The ask is office-wide, so it is
   filed under the manager (`manager`), or under the hub that hit the guard
   when the office has none. In an office with Odds on other tools, its why
-  names the Odds on Claude Code. A yes (`answerWindow`) lets
+  names the Odds on Claude Code. A yes (`answerWindow` in `src/work/asks.ts`) lets
   hand-offs run until the reset and wakes the held threads through
-  `answerThread`; a no leaves them held. The clock's `wakeThread` wakes each at
-  the reset with `WINDOW_RESET`, and takes an ask nobody answered off the desk
-  once it holds no thread (`windowWoke`). A hub's own `resume_at` replaces a
+  `answerLead`; a no leaves them held. The clock's `wakeThread` wakes each at
+  the reset with `WINDOW_RESET` (`clockWoke` in `src/work/parking.ts`). At the
+  reset the clock also takes an ask nobody answered off the desk with
+  `withdrawAsk`, whatever work it still holds (`windowAsksDue` in
+  `src/office-usage.ts`). A hub's own `resume_at` replaces a
   hold. A run already going is never stopped. The office raised the ask, so a
   no starts no `denied` run, and it cannot be sent back.
 - What an Odd sees through a thread is no wider than its own access
@@ -571,7 +588,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   (`onStories`, `threadOnKnown`), and may read the thread's folder. `tell_lead`,
   offered only with `OWNER_SAID` set and such a thread, passes the owner's
   words about one to its lead (`tellLead`). The words must be in `OWNER_SAID`;
-  the lead picks the thread up through `answerThread`, joining a `resume` that
+  the lead picks the thread up through `answerLead`, joining a `resume` that
   waits. It refuses a thread the Odd leads, one it does not work on, and a
   stopped one. The lead wakes to read the owner's words, the colleague's own
   reading, labelled as not the owner's, and the last exchange in that chat,
@@ -609,7 +626,8 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   office sets `HAND_OFF_ID` for those runs). `servesHandOff` finds it for the
   follow-up an answer starts, and `finishFollowUp` hands that result back once
   it ends done or failed. With no run to follow (a denial, a dropped task, an
-  approved hire), `handBackLater` sends the owner's answer itself.
+  approved hire), the answer itself goes back (`answerBack` in
+  `src/work/answers.ts`).
 - A `reply` ask carries one email in `asks.reply` (`ReplyDraft`), raised by
   `propose_reply`, which every Odd has (`always` in `tools.ts`, so no hire's
   tool list can leave it out) and `mcp-mail.ts` offers only while it holds a Gmail
@@ -673,7 +691,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   them (`switchAskRefused`, `commandsHow`). `raiseAsk` refuses a repeat from
   the same place that one open covers; one from another place asking no more
   is a twin (`asksNoMore`). A plain approve turns them on in the transaction
-  that approves it (`turnOnSwitches`), refused and left open when the Odd's
+  that approves it (`changeOwnTools`, the Settings tab's own change), refused and left open when the Odd's
   tool can no longer run commands, with one ledger line in the Settings tab's
   words and its network note, and starts one `carry_out` per place
   (`carryOutTogether`). `test/switch-asks.test.ts` holds it, the tool included.
@@ -741,7 +759,8 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   Odd's own open asks and tasks off the owner's desk when the owner says so.
   An ask goes through `withdrawAsk` (the office's no, quoting the owner's
   words, no `denied` run, a held call never made), a task through
-  `withdrawTask`; anything not the Odd's or not open is left as it is.
+  `withdrawTask`; anything not the Odd's, or that the owner answered first, is
+  left as it is.
   `test/withdraw.test.ts` holds it.
 - `draft_bug_report`, every Odd's, offered only in a chat (`OWNER_SAID`),
   keeps a bug report's title and details for the run in the Odd's folder
@@ -757,15 +776,16 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   a new hire's id, and `formerStaff()` lists them. The job clock, the
   follow-up queue, pokes and the desk also skip its rows (`ofWorkingOdd`), as
   a second wall. The owner's Remove (DELETE on the staff route) and a yes to a
-  `remove` ask both call `removeOdd`: in one transaction the Odd leaves, its
+  `remove` ask both call `removeOdd`, one change through the work core
+  (`oddRemoved`) that is saved whole or not at all: the Odd leaves, its
   jobs on turn off and are kept in `staff.jobs_off`, its waiting pokes are
   cancelled and threads it leads stop, with any task, time or usage-window
-  hold they waited on cleared; then each open ask of it or about it is
-  withdrawn (`withdrawAsk`: a no by the office, its line going back, no
-  `denied` run), each open task dropped (`withdrawTask`), each follow-up it has
-  yet to start fails, so a lead that handed it work hears at once, and the
-  office stops any run of it (`whenOddLeaves`). Nothing wakes it after
-  (`answerThread` skips a lead that left). A follow-up on work it led ends
+  hold they waited on cleared; each open ask of it or about it is withdrawn
+  (a no by the office, its line going back, no `denied` run), each open task
+  dropped, and each follow-up it has yet to start fails, so a lead that
+  handed it work hears at once. Once that is saved, the office stops any run
+  of it (`whenOddLeaves`). Nothing wakes it after
+  (`answerLead` skips a lead that left). A follow-up on work it led ends
   with no report, and a colleague's result waiting there is told to the
   owner by that colleague (`Unreturned`). A yes to `bring_back` calls
   `bringBack`, which turns on the jobs in `jobs_off` from now. What it had open
@@ -787,19 +807,22 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   ask, with a note. The
   office approves a hire with `approveHire` (`src/goals.ts`), which links the
   goal in the transaction that approves the ask, so a link that fails leaves
-  the proposal open and wakes nobody.
+  the proposal open and wakes nobody. Raised on no work, the yes wakes the
+  Odd that proposed it with an `answered` run, which carries the owner's note.
 - Goals are the owner's. An Odd never sets one: `propose_goal` raises a
-  `goal` ask, and `approveGoal` sets it. Setting one (`addGoal`) starts a
-  `goal` follow-up for the Office Manager to plan it, and the first goal makes
-  the manager's weekly review job. A `plan` ask (`propose_goal_plan`) holds
+  `goal` ask, and `approveGoal` sets it. Setting one, on its yes or by
+  `addGoal`, opens the goal's work under the Office Manager with a `goal`
+  follow-up there to plan it (`planGoal` in `src/work/threads.ts`), and the
+  first goal makes the manager's weekly review job. A `plan` ask (`propose_goal_plan`) holds
   every part of one goal's plan in `asks.plan`, and `raiseAsk` puts it on the
   goal's one thread (`goalThread`), whatever run raised it, and the thread
-  keeps that run's key when its raiser leads it (`keepRun`).
+  keeps that run's key when its raiser leads it (`raisedOn` in `src/work/threads.ts`).
   `approvePlan` takes the parts the owner ticked: Odds already here serve the
   goal in the transaction that approves the ask and get their job at once,
   and the answer names each Odd by name, never its id. Each hire becomes its own hire ask on the
-  plan's thread, and the owner's steps a task. `approveAsk` does all that
-  before the answer goes back, so the hub's run finds it. Hiring one of those
+  plan's thread, and the owner's steps a task. `approveAsk` does all that in
+  the transaction that approves the ask, so the hub's run finds it, and a
+  part that fails leaves the whole plan open. Hiring one of those
   hires answers its ask on the thread, which brings the hub back again.
 - An Odd sees only the goals it serves (`staff_goals`): `my_goals` and its
   prompt read `goalsFor`, never `allGoals`. `log_progress` takes a goal it
@@ -838,8 +861,11 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   - To add an ask kind, start at `ASK_KINDS` in `src/schema.ts`, then its row
     in `OWNER_ANSWERS` (`src/desk-answers.ts`), which says what each answer
     does.
-  - To add a follow-up kind, start at `FOLLOW_UP_KINDS` in `src/schema.ts`,
-    then its rows in `AT_DRAFT` and `SERVES_NO_THREAD` (`src/hand-offs.ts`).
+  - To add a follow-up kind, start at `FOLLOW_UP_KINDS` in `src/work/kinds.ts`,
+    then its rows in `AT_DRAFT` and `SERVES_NO_THREAD` beside it.
+  - To add a work event, start at `WorkEvent` in `src/work/events.ts`, then
+    its row in `WorkResults` beside it and its decider in `DECIDERS`
+    (`src/work/decide.ts`).
   - To add a connector kind, start at `CONNECTOR_KINDS` in `src/schema.ts`.
   - To add a desk item, start at `DESK_ITEMS` in `src/desk-answers.ts`.
   - To add a goal status, start at `GOAL_STATUSES` in `src/schema.ts`, then
@@ -927,8 +953,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
 Each line says what to do when its trigger comes.
 
 - Building NEW-1651 or NEW-1654, whichever comes first: give each run one
-  row of its own, with `runs.jobId` optional, usage pointing at the run, and
-  one reader per tool of that tool's stream.
+  row of its own, with `runs.jobId` optional and usage pointing at the run.
 - Before any change to what Odds are told (the lines in `capabilities.ts`,
   the office's `house.ts` or a run's brief): add snapshot tests of each kind
   of run's prompt, so the change shows as a diff in review.

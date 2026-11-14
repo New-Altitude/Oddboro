@@ -27,7 +27,9 @@
     "./live-tables": "./src/live-tables.ts",
     "./filters": "./src/filter-words.ts",
     "./certificates": "./src/certificates.ts",
-    "./project-terminal": "./src/project-terminal.ts"
+    "./project-terminal": "./src/project-terminal.ts",
+    "./sequences": "./src/sequences.ts",
+    "./lesson-rules": "./src/lesson-rules.ts"
   },
   "scripts": {
     "generate": "drizzle-kit generate",

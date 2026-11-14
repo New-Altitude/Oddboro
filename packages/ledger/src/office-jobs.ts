@@ -7,7 +7,6 @@ import { isOnThread, type Db } from './threads.ts';
 import {
   asks,
   jobs,
-  reports,
   runs,
   staff,
   tasks,
@@ -117,16 +116,17 @@ export async function updateJob(
   patch: Partial<
     Pick<JobRow, 'name' | 'instructions' | 'schedule' | 'enabled' | 'report' | 'missed' | 'files'>
   >,
-  expectedFiles?: JobFiles
+  expectedFiles?: JobFiles,
+  q: Db = db
 ): Promise<void> {
   if (patch.files)
     refuseFileCycle(
-      (await fileJobs()).map((j) =>
+      (await fileJobs(q)).map((j) =>
         j.id === id ? { ...j, name: patch.name ?? j.name, files: patch.files! } : j
       )
     );
-  const schedule = patch.schedule ?? (patch.enabled ? (await job(id))?.schedule : undefined);
-  const rows = await db
+  const schedule = patch.schedule ?? (patch.enabled ? (await job(id, q))?.schedule : undefined);
+  const rows = await q
     .update(jobs)
     .set({
       ...patch,
@@ -146,14 +146,17 @@ export async function updateJob(
 export type GoAhead = { said: string } | { askId: number };
 
 /** In a chat, the owner's words go in the ledger as their decision, beside the change. */
-async function recordGoAhead(who: StaffRow, go: GoAhead, what: string): Promise<void> {
+async function recordGoAhead(who: StaffRow, go: GoAhead, what: string, q: Db = db): Promise<void> {
   if ('said' in go)
-    await record({
-      kind: 'decision',
-      actor: 'owner',
-      title: `Asked ${who.name} in chat: ${what}`,
-      body: go.said
-    });
+    await record(
+      {
+        kind: 'decision',
+        actor: 'owner',
+        title: `Asked ${who.name} in chat: ${what}`,
+        body: go.said
+      },
+      q
+    );
 }
 
 export async function editOwnJob(
@@ -162,38 +165,42 @@ export async function editOwnJob(
   patch: Partial<
     Pick<JobRow, 'name' | 'instructions' | 'schedule' | 'report' | 'missed' | 'files'>
   >,
-  go: GoAhead
+  go: GoAhead,
+  q: Db = db
 ): Promise<JobRow | undefined> {
-  const who = await staffer(staffId);
-  const [j, other] = await db
+  const who = await staffer(staffId, q);
+  const [j, other] = await q
     .select()
     .from(jobs)
     .where(and(eq(jobs.staffId, staffId), eq(jobs.name, name)))
     .limit(2);
   if (other) throw new Error('Two jobs have that name. Rename one on the Odd’s card first.');
   if (!who || !j) return undefined;
-  if (patch.files && !(await isOnThread(staffId, patch.files.thread)))
+  if (patch.files && !(await isOnThread(staffId, patch.files.thread, q)))
     throw new Error('This Odd has no assignment on that work.');
-  await updateJob(j.id, patch);
-  await recordGoAhead(who, go, `change its job "${name}"`);
-  await record({
-    kind: 'work',
-    actor: staffId,
-    title: `Changed its job: ${patch.name ?? name}`,
-    body: [
-      patch.name && `Former name: ${name}`,
-      patch.files && `Scheduled files: ${JSON.stringify(patch.files)}`,
-      patch.instructions && `Steps:\n${patch.instructions}`,
-      patch.schedule && `Schedule: ${JSON.stringify(patch.schedule)}`,
-      patch.report !== undefined &&
-        `Reports to ${await ownerName()}: ${patch.report ? 'yes' : 'no'}`,
-      patch.missed && `Missed runs: ${MISSED_WORDS[patch.missed]}`
-    ]
-      .filter(Boolean)
-      .join('\n\n'),
-    askId: 'askId' in go ? go.askId : undefined
-  });
-  return job(j.id);
+  await updateJob(j.id, patch, undefined, q);
+  await recordGoAhead(who, go, `change its job "${name}"`, q);
+  await record(
+    {
+      kind: 'work',
+      actor: staffId,
+      title: `Changed its job: ${patch.name ?? name}`,
+      body: [
+        patch.name && `Former name: ${name}`,
+        patch.files && `Scheduled files: ${JSON.stringify(patch.files)}`,
+        patch.instructions && `Steps:\n${patch.instructions}`,
+        patch.schedule && `Schedule: ${JSON.stringify(patch.schedule)}`,
+        patch.report !== undefined &&
+          `Reports to ${await ownerName(q)}: ${patch.report ? 'yes' : 'no'}`,
+        patch.missed && `Missed runs: ${MISSED_WORDS[patch.missed]}`
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+      askId: 'askId' in go ? go.askId : undefined
+    },
+    q
+  );
+  return job(j.id, q);
 }
 
 /**
@@ -240,8 +247,8 @@ export async function enabledJobs(): Promise<JobRow[]> {
     .where(and(eq(jobs.enabled, true), ofWorkingOdd(jobs.staffId)));
 }
 
-export async function job(id: number): Promise<JobRow | undefined> {
-  const [row] = await db.select().from(jobs).where(eq(jobs.id, id));
+export async function job(id: number, q: Db = db): Promise<JobRow | undefined> {
+  const [row] = await q.select().from(jobs).where(eq(jobs.id, id));
   return row;
 }
 
@@ -554,7 +561,6 @@ export async function officeActivity(since: Date) {
         staff: followUps.staffId,
         kind: followUps.kind,
         ask: asks.title,
-        report: reports.title,
         task: tasks.title,
         handOff: followUps.handOff,
         thread: threads.title,
@@ -563,7 +569,6 @@ export async function officeActivity(since: Date) {
       })
       .from(followUps)
       .leftJoin(asks, eq(followUps.askId, asks.id))
-      .leftJoin(reports, eq(followUps.reportId, reports.id))
       .leftJoin(tasks, eq(followUps.taskId, tasks.id))
       .leftJoin(threads, eq(followUps.threadId, threads.id))
       .where(gte(followUps.createdAt, since))
@@ -643,14 +648,14 @@ export async function officeActivity(since: Date) {
       }))
     },
     // Work owed after the owner answered: carrying out an approved ask, reworking one
-    // the owner sent back, acting on their feedback on a report, or picking up after a
-    // task they finished. A hand_off is work a colleague handed this staffer,
-    // handed_back is the colleague's result coming home, and resume is a thread's
-    // hub picking it back up. A null outcome is still to do.
+    // the owner sent back, or picking up after a task they finished. A hand_off is
+    // work a colleague handed this staffer, handed_back is the colleague's result
+    // coming home, and resume is a thread's hub picking it back up. A null outcome
+    // is still to do.
     followUps: follow.map((f) => ({
       from: f.staff,
       kind: f.kind,
-      about: f.ask ?? f.report ?? f.task ?? f.handOff?.title ?? f.thread,
+      about: f.ask ?? f.task ?? f.handOff?.title ?? f.thread,
       ...(f.handOff ? { colleague: f.handOff.from } : {}),
       outcome: f.outcome,
       at: pt(f.at)
