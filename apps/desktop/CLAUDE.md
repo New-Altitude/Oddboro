@@ -29,8 +29,10 @@ Run the installed executable with `--headless` to start the bundled office in th
    Oddboro to X.Y.Z", and the shell downloads it, checks its signature,
    installs it and opens the new version. Offline or any error, it logs the
    problem and starts as it is. See "Updates" below.
-2. Checks the port. If anything answers on it, shows "another office is
-   already running" and quits. It never attaches to that office.
+2. Attaches to an existing headless office only after checking its version and
+   a fresh challenge against this office home's private service record. A
+   listener that cannot prove its identity is refused. The headless and
+   graphical launchers lock the same office directory before starting Node.
 3. Reads the owner's login-shell PATH once (`$SHELL -l -i -c`, so
    `~/.zshrc` and the Node managers it sets up run, then `$SHELL -l -c` if
    that fails; 5 second timeout each; `/bin/zsh` on a Mac and `/bin/sh` on

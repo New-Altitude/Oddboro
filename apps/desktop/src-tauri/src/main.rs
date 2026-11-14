@@ -156,6 +156,46 @@ fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
         return;
     }
 
+    let Some(node) = node_binary() else {
+        return broken_install(app, diagnostics, exit::NO_NODE, NO_NODE);
+    };
+    let Some(code) = server_code(app.package_info()) else {
+        return broken_install(app, diagnostics, exit::NO_SERVER, NO_SERVER);
+    };
+
+    // A window can attach only after the service proves that it owns this
+    // office's private key. An unrelated listener never receives the key.
+    if server::port_taken(port) && headless::recognized(&node, &code, port, &version.to_string()) {
+        open_main(
+            app,
+            &Url::parse(&format!("http://127.0.0.1:{port}")).expect("loopback URL"),
+        );
+        return;
+    }
+    let _lease = match headless::lease() {
+        Ok(lease) => lease,
+        Err(_) => {
+            // Another launcher may still be bringing up the database.
+            let until = std::time::Instant::now() + std::time::Duration::from_secs(90);
+            while std::time::Instant::now() < until {
+                if server::port_taken(port)
+                    && headless::recognized(&node, &code, port, &version.to_string())
+                {
+                    open_main(
+                        app,
+                        &Url::parse(&format!("http://127.0.0.1:{port}")).expect("loopback URL"),
+                    );
+                    return;
+                }
+                thread::sleep(std::time::Duration::from_millis(300));
+            }
+            return fail(
+                app,
+                exit::PORT_TAKEN,
+                "This office is in use. Check its service status.",
+            );
+        }
+    };
     // A newer version installs before the server starts, so an update never
     // swaps the server out from under a running office.
     if update::on_launch(app, &env::log_file(), show_updating) {
@@ -172,13 +212,6 @@ fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
         app.exit(exit::PORT_TAKEN);
         return;
     }
-    let Some(node) = node_binary() else {
-        return broken_install(app, diagnostics, exit::NO_NODE, NO_NODE);
-    };
-    let Some(code) = server_code(app.package_info()) else {
-        return broken_install(app, diagnostics, exit::NO_SERVER, NO_SERVER);
-    };
-
     show_loading(app);
     let update_token = if update::ENABLED {
         update::token()

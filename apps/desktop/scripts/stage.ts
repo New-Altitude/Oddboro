@@ -272,6 +272,10 @@ function checkChunks(dir: string): void {
 
 function stageOffice(): void {
   const office = join(STAGE, 'apps', 'office');
+  const scripts = join(office, 'scripts');
+  mkdirSync(scripts, { recursive: true });
+  for (const file of ['service-probe.mjs', 'service-identity.mjs'])
+    cpSync(join(ROOT, 'apps', 'office', 'scripts', file), join(scripts, file));
   cpSync(join(ROOT, 'apps', 'office', 'build'), join(office, 'build'), { recursive: true });
   writeFileSync(
     join(office, 'package.json'),
