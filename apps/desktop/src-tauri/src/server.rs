@@ -758,6 +758,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn only_the_pairing_notice_reaches_the_launching_owner_and_never_the_log() {
+        assert_eq!(
+            route("oddboro:pairing ob1.test.owner"),
+            Route::Pairing("ob1.test.owner")
+        );
+        for line in [
+            "diagnostic ob1.test.owner",
+            "oddboro:pairing invalid",
+            "prefix oddboro:pairing ob1.test.owner",
+        ] {
+            assert_eq!(route(line), Route::Drop);
+        }
+    }
+
+    #[test]
     fn a_secret_line_never_goes_to_the_log() {
         for line in [
             r#"oddboro:secret {"id":1,"op":"set","account":"github:token","value":"ghp_x"}"#,
