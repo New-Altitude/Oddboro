@@ -1535,17 +1535,28 @@ must carry the app's key (`src/lib/server/app-key.ts`). Anything without it
 gets 403 and "This office opens only in the Oddboro app. Open Oddboro to see
 it.", reads too, which a browser shows as a plain page.
 
-- The shell makes a fresh key at every launch: 32 bytes from the system's
-  random source, held only in its memory (`apps/desktop/src-tauri/src/key.rs`).
-  Node reads it as the first line on its stdin (`readKey`, from
-  `hooks.server.ts`, which waits for it before any other startup step). It is
+- The shell makes a fresh key every time it starts Node: 32 bytes from the
+  system's random source, held only in its memory
+  (`apps/desktop/src-tauri/src/key.rs`). Node reads it as the first line on
+  its stdin (`readKey`, from `hooks.server.ts`, which waits for it after
+  making the home private and before the secrets and the database). It is
   never in a file, the Keychain, the environment, a command line, a URL or a
   log line: any program running as the owner can read another's environment
-  and command line (`ps -E`).
+  and command line (`ps -E`). A key that leaks after its Node is gone opens
+  nothing.
+- Before the shell trusts the server on the port, at the first start and
+  every restart, the server proves it holds the key: `GET /api/proof?nonce=`
+  with a fresh nonce of 64 hex digits, answered with HMAC-SHA256 under the
+  key of `oddboro-proof:` and the nonce (`proof`). The route passes the guard
+  without the key, as a GET, and answers nothing but that shape. The label
+  keeps the answer good for nothing else, and it says nothing of the key. A
+  program that took the port cannot answer it, so the window never sends it
+  the cookie.
 - The window carries it in a cookie, `oddboro-key`: HttpOnly, so no page
   script reads it, SameSite=Strict, and with no expiry, so it ends with the
-  app and the webview never writes it to disk. The shell sets it before the
-  window asks the office for anything. Every request the page makes carries
+  app and the webview never writes it to disk. The shell sets it, after the
+  proof, before the window asks the office for anything, and sets the new
+  start's cookie before the window reloads after a restart. Every request the page makes carries
   it: `fetch`, the live line (`/api/events`), pictures and music.
 - A cookie names a host but no port, so a picture in an Odd's reply at
   another port on 127.0.0.1 would carry the key to whatever listens there.
@@ -1555,8 +1566,8 @@ it.", reads too, which a browser shows as a plain page.
 - The shell's own requests (`/api/update`, `/api/browser-link`) carry it in
   the `X-Oddboro-Key` header. That header counts there and nowhere else.
 - Without the key, only these get in: the sign-in callbacks (rule 5), as
-  GETs to those two exact paths; a run's call to its gateway with its token;
-  and a link for the owner's browser.
+  GETs to those two exact paths; the shell's proof request; a run's call to
+  its gateway with its token; and a link for the owner's browser.
 - The owner's browser has no key. When the window opens an office address in
   a new window (a file attached in a chat), the shell asks
   `POST /api/browser-link` for a code for that path and opens the address

@@ -38,8 +38,6 @@ const LOADING: &str = "loading";
 /// is broken.
 const NO_NODE: &str = "Oddboro cannot find its copy of Node. Reinstall Oddboro.";
 const NO_SERVER: &str = "Oddboro cannot find the office server. Reinstall Oddboro.";
-const NO_KEY: &str =
-    "Oddboro could not make the key its window opens the office with. Open Oddboro again.";
 
 /// Why the shell quit, as its exit code, so a script can tell without the
 /// dialog the owner saw. The dialog's words go to the log too (`alert`).
@@ -50,7 +48,6 @@ mod exit {
     pub const BAD_URL: i32 = 5;
     pub const SERVER_FAILED: i32 = 6;
     pub const NO_WINDOW: i32 = 7;
-    pub const NO_KEY: i32 = 8;
 }
 
 fn main() {
@@ -178,11 +175,6 @@ fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
         return broken_install(app, diagnostics, exit::NO_SERVER, NO_SERVER);
     };
 
-    // A fresh key each launch, the same for every start of Node in it, so the
-    // window's cookie stays good across a restart.
-    let Some(key) = Key::fresh().map(Arc::new) else {
-        return fail(app, exit::NO_KEY, NO_KEY);
-    };
     show_loading(app);
     let server = Server {
         node,
@@ -192,7 +184,6 @@ fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
         home: env::office_home(),
         log: env::log_file(),
         version: app.package_info().version.to_string(),
-        key: Arc::clone(&key),
         updates: update::ENABLED,
         diagnostics_dsn: diagnostics.map(|d| d.dsn().to_string()),
     };
@@ -206,11 +197,11 @@ fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
     update::watch(update::Watch {
         app: app.clone(),
         port,
-        key: Arc::clone(&key),
         log: server.log.clone(),
         show: show_updating,
     });
-    if let Err(why) = server.supervise(|| open_main(app, &url, Some(&key))) {
+    // Each start of Node has its own key, which it has just proved it holds.
+    if let Err(why) = server.supervise(|| open_main(app, &url, key::current().as_ref())) {
         if let Some(d) = diagnostics {
             d.gave_up(&why);
         }
@@ -327,7 +318,7 @@ fn open_main(app: &AppHandle, url: &Url, key: Option<&Arc<Key>>) {
     };
     let home = url.clone();
     let office = url.clone();
-    let carried = key.cloned();
+    let keyed = key.is_some();
     let built = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::External(first))
         .title("Oddboro")
         .inner_size(1280.0, 820.0)
@@ -335,7 +326,7 @@ fn open_main(app: &AppHandle, url: &Url, key: Option<&Arc<Key>>) {
         .center()
         .on_navigation(move |to| stay_or_open(&home, to))
         .on_new_window(move |to, _| {
-            open_new_window(&office, carried.as_ref(), &to);
+            open_new_window(&office, keyed, &to);
             NewWindowResponse::Deny
         })
         // The window's side of a start, for the log: the page itself says it
@@ -396,13 +387,14 @@ fn open_with_key(window: &WebviewWindow, key: &Key, url: &Url) {
 /// goes to the default browser. The browser has no key, so an address of the
 /// office's own, such as a file attached in a chat, goes there as a link the
 /// office makes for that one path, which works once within a minute. On its
-/// own thread: it asks the office first.
-fn open_new_window(office: &Url, key: Option<&Arc<Key>>, to: &Url) {
-    let Some(key) = key.filter(|_| to.origin() == office.origin()) else {
+/// own thread: it asks the office first, with the key of the Node that runs
+/// now. `keyed` is false for a server the shell did not start.
+fn open_new_window(office: &Url, keyed: bool, to: &Url) {
+    if !keyed || to.origin() != office.origin() {
         return open_in_browser(to);
-    };
-    let (office, key, to) = (office.clone(), Arc::clone(key), to.clone());
-    thread::spawn(move || match browser_link(&office, &key, &to) {
+    }
+    let (office, to) = (office.clone(), to.clone());
+    thread::spawn(move || match browser_link(&office, &to) {
         Some(link) => open_in_browser(&link),
         None => server::note(
             &env::log_file(),
@@ -412,10 +404,11 @@ fn open_new_window(office: &Url, key: Option<&Arc<Key>>, to: &Url) {
 }
 
 /// `to` with the office's one-time code for its path added.
-fn browser_link(office: &Url, key: &Key, to: &Url) -> Option<Url> {
+fn browser_link(office: &Url, to: &Url) -> Option<Url> {
     let port = office.port_or_known_default()?;
     let body = serde_json::json!({ "path": to.path() });
-    let answer = server::call(port, key, "POST", "/api/browser-link", Some(&body))?;
+    let key = key::current()?;
+    let answer = server::call(port, &key, "POST", "/api/browser-link", Some(&body))?;
     let code = answer["code"].as_str()?;
     let mut link = to.clone();
     link.query_pairs_mut().append_pair(key::LINK_QUERY, code);

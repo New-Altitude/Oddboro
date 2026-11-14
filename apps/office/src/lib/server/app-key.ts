@@ -2,9 +2,10 @@
 // requests that carry it, so no other program on the computer can read the
 // office or act in the owner's name (`guardOffice` in owner-page.ts).
 //
-// The shell makes a fresh random key at every launch and keeps it in memory.
-// It hands it to this server as the first line on the server's stdin, a pipe
-// only the two of them hold, and this server keeps it in memory too. It is
+// The shell makes a fresh random key every time it starts this server and
+// keeps it in memory. It hands it over as the first line on the server's
+// stdin, a pipe only the two of them hold, and this server keeps it in memory
+// too. A key that leaks once its server is gone opens nothing. It is
 // never in a file, the environment, a command line, a URL or a log line: any
 // program running as the owner can read another's environment (`ps -E`).
 //
@@ -16,9 +17,14 @@
 //   address there (a file attached in a chat), the shell asks for a link that
 //   works once, for that path only, within a minute (`mintLink`).
 //
+// Before the shell trusts a server on the port, the server proves it holds
+// the key (`proof`): it answers a fresh nonce with HMAC-SHA256(key,
+// "oddboro-proof:" + nonce). A program that took the port cannot, so the
+// window never sends it the cookie.
+//
 // An office run from source (npm run dev, setup, the login service) has no
 // key and keeps the other rules alone.
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { Readable } from 'node:stream';
 
 /** The first line the shell writes on the server's stdin: this, then the key. */
@@ -31,6 +37,10 @@ export const KEY_HEADER = 'x-oddboro-key';
 export const LINK_QUERY = 'oddboro-link';
 /** How long a link for the owner's browser works, once. */
 export const LINK_MS = 60_000;
+/** Where the shell asks the server to prove it holds the key. */
+export const PROOF_PATH = '/api/proof';
+/** What the proof signs before the nonce, so the answer is good for nothing else. */
+const PROOF_LABEL = 'oddboro-proof:';
 /** What a request without the key gets: a browser shows it as a plain page. */
 export const OPEN_FROM_APP = 'This office opens only in the Oddboro app. Open Oddboro to see it.';
 
@@ -71,6 +81,18 @@ export function readKey(input: Readable, waitMs = KEY_WAIT_MS): Promise<boolean>
     input.on('data', take);
     input.once('close', closed);
   });
+}
+
+/**
+ * The answer to the shell's nonce: HMAC-SHA256 under the key of the label
+ * and the nonce, as hex. Undefined while there is no key, or for anything but
+ * 64 hex digits, the nonce's shape. It says nothing of the key itself.
+ */
+export function proof(nonce: string): string | undefined {
+  if (!key || !SHAPE.test(nonce)) return undefined;
+  return createHmac('sha256', key)
+    .update(PROOF_LABEL + nonce)
+    .digest('hex');
 }
 
 /** True when `sent` is the key, compared in constant time. False while there is none. */

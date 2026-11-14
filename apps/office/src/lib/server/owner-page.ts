@@ -7,8 +7,8 @@ import { CHAT_REQUEST_BYTES } from '../staff/chat-input.ts';
 //
 // - In the desktop app, first of all, the request must carry the app's key
 //   (app-key.ts): the window's cookie, or the shell's header where the shell
-//   calls. A sign-in callback, a run's gateway call and a link the shell made
-//   for the owner's browser pass without it. No other program on the
+//   calls. A sign-in callback, a run's gateway call, the shell's proof
+//   request and a link the shell made for the owner's browser pass without it. No other program on the
 //   computer has the key, so none can read the office or act in its name.
 //   An office run from source has no key and skips this rule.
 // - The request must come from this computer (`fromThisComputer`, in
@@ -41,6 +41,7 @@ import {
   fromWindow,
   LINK_QUERY,
   OPEN_FROM_APP,
+  PROOF_PATH,
   takeLink,
   WINDOW_CSP
 } from './app-key.ts';
@@ -98,6 +99,7 @@ function carriesKey(request: Request, url: URL): boolean {
     fromWindow(request) ||
     (SHELL_PATHS.has(path) && fromShell(request)) ||
     (get && CALLBACKS.has(path)) ||
+    (get && path === PROOF_PATH) ||
     (path.startsWith(`${GATEWAY_PATH}/`) && fromRun(request)) ||
     (get && takeLink(url.searchParams.get(LINK_QUERY), path))
   );

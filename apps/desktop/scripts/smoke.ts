@@ -32,7 +32,7 @@
 // through its shell, in the Keychain the owner's Oddboro uses, so off CI it
 // runs only with --my-keychain.
 import { spawn, type ChildProcess } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import {
   appendFileSync,
   existsSync,
@@ -468,6 +468,14 @@ async function smokeStage(): Promise<void> {
     await stop(server).catch(() => undefined);
     return;
   }
+  // As the shell checks before it trusts the server on the port.
+  await step('proves it holds the key it was given, without the key', true, async () => {
+    const nonce = randomBytes(32).toString('hex');
+    const r = await send('GET', `/api/proof?nonce=${nonce}`, {});
+    const want = createHmac('sha256', key).update(`oddboro-proof:${nonce}`).digest('hex');
+    if (r.status !== 200 || r.text !== want) throw new Error(`got ${r.status} ${r.text}`);
+    return 'HMAC-SHA256 of the label and the nonce';
+  });
   const health = await officeChecks(
     { version: '0.0.0-smoke', claude: false },
     office,

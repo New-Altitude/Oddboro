@@ -2628,6 +2628,7 @@ dependencies = [
  "libc",
  "mac-notification-sys",
  "reqwest",
+ "ring",
  "rustls",
  "security-framework",
  "sentry",

@@ -4,6 +4,7 @@
 // link the shell made for the owner's browser. Run with
 // `npm test -w @oddboro/office`.
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -25,6 +26,7 @@ const K = await import('./app-key.ts');
 const { guardOffice } = await import('./owner-page.ts');
 const { closeGateway, openGateway } = await import('./gateway.ts');
 const linkRoute = await import('../../routes/api/browser-link/+server.ts');
+const proofRoute = await import('../../routes/api/proof/+server.ts');
 
 const KEY = 'a1'.repeat(32);
 
@@ -255,4 +257,50 @@ test("the window's pages may load only from the office itself, data, blob and ht
     });
   assert.equal((await send(own, { headers: WINDOW })).csp, 'sandbox');
   assert.equal((await send(ok, { headers: WINDOW })).csp, null);
+});
+
+test('the office proves it holds the key: HMAC of the label and the nonce, never the key', async () => {
+  const nonce = 'c3'.repeat(32);
+  const r = await send(proofRoute.GET as Route, { path: `/api/proof?nonce=${nonce}` });
+  assert.deepEqual([r.status, r.ran], [200, true]);
+  assert.equal(r.text, createHmac('sha256', KEY).update(`oddboro-proof:${nonce}`).digest('hex'));
+  assert.notEqual(r.text, createHmac('sha256', KEY).update(nonce).digest('hex'));
+  assert.ok(!r.text.includes(KEY));
+  // Another key would answer otherwise, so only the server with this one passes the shell's check.
+  assert.notEqual(
+    r.text,
+    createHmac('sha256', 'b2'.repeat(32)).update(`oddboro-proof:${nonce}`).digest('hex')
+  );
+});
+
+test('the proof answers only a GET with a nonce of 64 hex digits', async () => {
+  for (const nonce of [
+    '',
+    'c3'.repeat(31),
+    'c3'.repeat(33),
+    'C3'.repeat(32),
+    `${'c3'.repeat(31)}zz`,
+    KEY + '&x=1'
+  ]) {
+    const r = await send(proofRoute.GET as Route, {
+      path: `/api/proof?nonce=${encodeURIComponent(nonce)}`
+    });
+    assert.deepEqual([nonce, r.status], [nonce, 400]);
+  }
+  const post = await send(ok, {
+    method: 'POST',
+    path: `/api/proof?nonce=${'c3'.repeat(32)}`,
+    headers: PAGE
+  });
+  assert.deepEqual([post.status, post.ran, post.text], [403, false, K.OPEN_FROM_APP]);
+  // Only that path: the same nonce elsewhere opens nothing.
+  const elsewhere = await send(ok, { path: `/api/ledger?nonce=${'c3'.repeat(32)}` });
+  assert.deepEqual([elsewhere.status, elsewhere.ran], [403, false]);
+});
+
+test('without a key the office proves nothing', async () => {
+  const before = await given('');
+  assert.equal(before, false);
+  assert.equal(K.proof('c3'.repeat(32)), undefined);
+  assert.equal(await given(`oddboro:key ${KEY}\n`), true);
 });
