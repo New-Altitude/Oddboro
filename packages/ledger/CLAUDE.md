@@ -156,7 +156,9 @@ for the owner's Take over and send, whatever its level, unless
 `project_sessions.sends_unasked` names that Odd and it is at Act
 (`letSendUnasked`); `requestProject` and `claimProject` both check.
 `src/project-session-tools.ts` is the local Claude plugin's tool server, with
-no database credentials. `src/project-terminal.ts` opens the native terminal
+no database credentials. It and `src/project-watch.ts`, the plugin's monitor,
+answer fresh readiness probes through `src/project-receiver.ts` before the
+office offers work. `src/project-terminal.ts` opens the native terminal
 through node-pty, an optional dependency loaded on the first open. Migration
 `0027_project_sessions` adds `project_sessions` and `project_requests` with
 their change triggers; `0028_advanced_mode` adds `owner.advanced_at` and

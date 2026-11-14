@@ -48,6 +48,7 @@ export * from './lead-brief.ts';
 export * from './sharing.ts';
 export { WEEKDAYS } from './time.ts';
 export * from './project-sessions.ts';
+export { PROJECT_RECEIVERS } from './project-receiver.ts';
 export * from './leaving.ts';
 export * from './missed-runs.ts';
 export * from './bug-drafts.ts';

@@ -43,6 +43,15 @@ During a Codex turn, **Send correction** steers that turn. **Stop** targets the 
 
 ## If delivery is unclear
 
+Before sending to Claude, the office checks that both parts of its paired
+plugin answer a fresh probe. If either is missing, the assignment fails
+without being sent. Under **Details**, connect the plugin in that conversation
+and reload it, then choose **Retry** on the saved assignment. An installed
+older plugin may need an update through `/plugin` first.
+
+An offered assignment that Claude has not taken within a minute becomes
+uncertain. The office does not resend it. A late answer can still finish it.
+
 The office saves the instruction before submitting it. A connection failure after submission can leave a tool action complete even though the office missed its reply. Reconnect, inspect the native history and project files, then clear the uncertain request. Sending a new instruction is a separate action. If Claude is waiting to take an assignment, open its terminal to see trust, sign-in, permission or plugin messages. Managed installations must permit the plugin and its monitor. An attached background job belongs to Claude and can outlive the office.
 
 ## Review the implementation
