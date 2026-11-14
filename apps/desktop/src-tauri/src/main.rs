@@ -7,6 +7,7 @@
 
 mod diagnostics;
 mod env;
+mod headless;
 mod secrets;
 mod server;
 mod update;
@@ -52,6 +53,36 @@ fn main() {
     if let Some(d) = &diagnostics {
         Arc::clone(d).watch_panics();
     }
+    let context = tauri::generate_context!();
+    if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--headless")) {
+        if let Err(message) = headless::run(context.package_info(), diagnostics.as_deref()) {
+            server::note(&env::log_file(), &message);
+            eprintln!("{message}");
+            std::process::exit(exit::SERVER_FAILED);
+        }
+        return;
+    }
+    if let Some(command) = std::env::args_os().nth(1) {
+        // Finder and Smoke may pass system arguments to the graphical app.
+        if !command.to_string_lossy().starts_with('-') || command == "--help" {
+            let status = node_binary()
+                .zip(server_code(context.package_info()))
+                .and_then(|(node, code)| {
+                    let executable = std::env::current_exe().ok()?;
+                    #[cfg(target_os = "linux")]
+                    let executable = std::env::var_os("APPIMAGE")
+                        .map(PathBuf::from)
+                        .unwrap_or(executable);
+                    Command::new(node)
+                        .arg(code.join("apps/office/scripts/office-cli.mjs"))
+                        .args(std::env::args_os().skip(1))
+                        .env("ODDBORO_EXECUTABLE", executable)
+                        .status()
+                        .ok()
+                });
+            std::process::exit(status.and_then(|s| s.code()).unwrap_or(1));
+        }
+    }
     let builder = tauri::Builder::default();
     // Linux and Windows have no Dock to bring a hidden window back, so
     // opening Oddboro again shows the one that runs. It goes first, before
@@ -93,7 +124,7 @@ fn main() {
                 }
             }
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("Oddboro could not start");
 
     app.run(|app, event| match event {
@@ -146,6 +177,46 @@ fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
         return;
     }
 
+    let Some(node) = node_binary() else {
+        return broken_install(app, diagnostics, exit::NO_NODE, NO_NODE);
+    };
+    let Some(code) = server_code(app.package_info()) else {
+        return broken_install(app, diagnostics, exit::NO_SERVER, NO_SERVER);
+    };
+
+    // A window can attach only after the service proves that it owns this
+    // office's private key. An unrelated listener never receives the key.
+    if server::port_taken(port) && headless::recognized(&node, &code, port, &version.to_string()) {
+        open_main(
+            app,
+            &Url::parse(&format!("http://127.0.0.1:{port}")).expect("loopback URL"),
+        );
+        return;
+    }
+    let _lease = match headless::lease() {
+        Ok(lease) => lease,
+        Err(_) => {
+            // Another launcher may still be bringing up the database.
+            let until = std::time::Instant::now() + std::time::Duration::from_secs(90);
+            while std::time::Instant::now() < until {
+                if server::port_taken(port)
+                    && headless::recognized(&node, &code, port, &version.to_string())
+                {
+                    open_main(
+                        app,
+                        &Url::parse(&format!("http://127.0.0.1:{port}")).expect("loopback URL"),
+                    );
+                    return;
+                }
+                thread::sleep(std::time::Duration::from_millis(300));
+            }
+            return fail(
+                app,
+                exit::PORT_TAKEN,
+                "This office is in use. Check its service status.",
+            );
+        }
+    };
     // A newer version installs before the server starts, so an update never
     // swaps the server out from under a running office.
     if update::on_launch(app, &env::log_file(), show_updating) {
@@ -162,30 +233,20 @@ fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
         app.exit(exit::PORT_TAKEN);
         return;
     }
-    let Some(node) = node_binary() else {
-        return broken_install(app, diagnostics, exit::NO_NODE, NO_NODE);
-    };
-    let Some(code) = server_code(app) else {
-        return broken_install(app, diagnostics, exit::NO_SERVER, NO_SERVER);
-    };
-
     show_loading(app);
     let update_token = if update::ENABLED {
         update::token()
     } else {
         String::new()
     };
-    let server = Server {
+    let server = office_server(
         node,
         code,
         port,
-        path: env::login_path(),
-        home: env::office_home(),
-        log: env::log_file(),
-        version: app.package_info().version.to_string(),
-        update_token: update_token.clone(),
-        diagnostics_dsn: diagnostics.map(|d| d.dsn().to_string()),
-    };
+        version.to_string(),
+        update_token.clone(),
+        diagnostics,
+    );
     let Ok(url) = Url::parse(&server.url()) else {
         return fail(
             app,
@@ -222,6 +283,27 @@ fn broken_install(
     fail(app, code, text);
 }
 
+fn office_server(
+    node: PathBuf,
+    code: PathBuf,
+    port: u16,
+    version: String,
+    update_token: String,
+    diagnostics: Option<&Diagnostics>,
+) -> Server {
+    Server {
+        node,
+        code,
+        port,
+        path: env::login_path(),
+        home: env::office_home(),
+        log: env::log_file(),
+        version,
+        update_token,
+        diagnostics_dsn: diagnostics.map(|d| d.dsn().to_string()),
+    }
+}
+
 /// Node sits beside the shell: in `Contents/MacOS` on a Mac, in `usr/bin`
 /// inside the AppImage, in the install folder on Windows. A debug build
 /// without the bundle falls back to the copy the stage script leaves in
@@ -240,8 +322,8 @@ fn node_binary() -> Option<PathBuf> {
 
 /// The staged server sits in the bundle's resources, `server/`. A debug build
 /// without the bundle falls back to `apps/desktop/stage`.
-fn server_code(app: &AppHandle) -> Option<PathBuf> {
-    if let Ok(resources) = app.path().resource_dir() {
+fn server_code(package: &tauri::PackageInfo) -> Option<PathBuf> {
+    if let Ok(resources) = tauri::utils::platform::resource_dir(package, &Default::default()) {
         let bundled = resources.join("server");
         if bundled.join(server::ENTRY).is_file() {
             return Some(bundled);

@@ -44,8 +44,11 @@ after(async () => {
 });
 
 test('a build with no address sends nothing and never asks the owner', async () => {
-  // `load` ignores its event; the cast stands in for the one Kit would build.
-  const data = (await page.load({} as never)) as { diagnostics?: { possible: boolean } };
+  // An owner who has already chosen Office.
+  const data = (await page.load({
+    url: new URL('http://localhost:4500/'),
+    cookies: { get: () => 'office' }
+  } as never)) as { diagnostics?: { possible: boolean } };
   assert.equal(data.diagnostics?.possible, false);
 
   const header = JSON.stringify({ dsn: `http://page@127.0.0.1:${door.port}/oddboro/0` });

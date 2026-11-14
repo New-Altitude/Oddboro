@@ -44,6 +44,7 @@ type Body = Partial<Record<'name' | 'role' | 'room' | 'permission' | 'remit' | '
   model?: unknown;
   effort?: unknown;
   askId?: unknown;
+  plain?: unknown;
   look?: unknown;
   portraitPx?: unknown;
   newParts?: unknown;
@@ -66,12 +67,15 @@ export const POST: RequestHandler = async ({ request }) => {
   const drawn = drawnFrom(b);
   const office = await currentOffice();
   const rooms = new Set(office.world.rooms.map((r) => r.id.split('#')[0]));
-  const room = text(b.room, 60);
+  const room =
+    b.plain === true && !b.room
+      ? ([...rooms].find((r) => r === 'workspace') ?? [...rooms][0])
+      : text(b.room, 60);
   const permission = parseLevel(b.permission);
   if (!name || !role || !remit || !desk)
     error(400, 'Fill in the name, role, remit and job description');
-  if (!drawn) error(400, 'Draw them first');
-  const problems = await problemsWith(drawn);
+  if (!drawn && b.plain !== true) error(400, 'Draw them first');
+  const problems = drawn ? await problemsWith(drawn) : [];
   if (problems.length) error(400, problems.join('; '));
   if (!rooms.has(room)) error(400, 'Pick a room on the floor');
   if (!permission) error(400, 'Pick read, draft or act');
@@ -117,12 +121,12 @@ export const POST: RequestHandler = async ({ request }) => {
       model,
       effort,
       sprite: 'staff',
-      variant: 'look',
-      portrait: 'look',
+      variant: drawn ? 'look' : 'marshall',
+      portrait: drawn ? 'look' : 'portrait-marshall',
       tools,
-      look: drawn.look,
-      portraitPx: drawn.portraitPx,
-      newParts: drawn.newParts
+      look: drawn?.look,
+      portraitPx: drawn?.portraitPx,
+      newParts: drawn?.newParts
     });
   } catch (e) {
     error(400, e instanceof Error ? e.message : String(e));

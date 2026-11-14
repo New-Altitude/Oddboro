@@ -113,6 +113,13 @@ export const OUTBOUND: readonly Outbound[] = [
     yes: 'The owner opening the office; nothing leaves this computer.'
   },
   {
+    file: 'apps/office/src/routes/workspace/+page.svelte',
+    calls: 1,
+    to: 'The office on this computer: its live line of changes.',
+    sends: 'A request to hear changes to work in this office.',
+    yes: 'The owner opened Workspace.'
+  },
+  {
     file: 'apps/office/src/routes/+page.svelte',
     calls: 1,
     to: 'The office, on this computer: its live line of changes.',
