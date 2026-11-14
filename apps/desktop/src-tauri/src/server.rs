@@ -13,7 +13,7 @@ use std::thread::{self, sleep};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// The server's entry point, relative to the staged code.
-pub const ENTRY: &str = "apps/office/build/index.js";
+pub const ENTRY: &str = "apps/office/scripts/service-entry.mjs";
 
 const READY_TIMEOUT: Duration = Duration::from_secs(90);
 const STOP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -136,6 +136,11 @@ impl Server {
             };
             mark_gone();
             if QUITTING.load(SeqCst) {
+                return Ok(());
+            }
+            if std::env::var_os("ODDBORO_SERVICE_MODE").is_some()
+                && status.as_ref().is_ok_and(|s| s.code() == Some(75))
+            {
                 return Ok(());
             }
             let code = status.as_ref().ok().and_then(ExitStatus::code);

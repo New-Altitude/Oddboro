@@ -90,7 +90,10 @@ async function fits(request: Request, limit: number): Promise<boolean> {
 /** The server's `handle`: every request passes here before a route sees it. */
 export const guardOffice: Handle = async ({ event, resolve }) => {
   const { request } = event;
+  const ownerCommand = event.platform?.req?.[Symbol.for('oddboro.owner.connection')] === true;
+  if (ownerCommand) event.locals.ownerCommand = true;
   if (
+    !ownerCommand &&
     !fromThisComputer({
       forwardedFor: request.headers.get('x-forwarded-for'),
       peer: event.getClientAddress()
@@ -100,6 +103,7 @@ export const guardOffice: Handle = async ({ event, resolve }) => {
   if (!toThisOffice(request)) return refuse('This office answers only at its own address');
   if (
     READS.has(request.method) ||
+    ownerCommand ||
     fromOwnerPage(request) ||
     (event.url.pathname === '/api/update' && fromShell(request)) ||
     (event.url.pathname.startsWith(`${GATEWAY_PATH}/`) && fromRun(request))

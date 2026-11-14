@@ -187,6 +187,7 @@ export const ROUTE_IDS = {
   '/api/tasks/[id]': true,
   '/api/update': true,
   '/atlas/[file]': true,
+  '/api/workspace': true,
   '/connect/callback': true
 } as const satisfies Record<RouteId, true>;
 
