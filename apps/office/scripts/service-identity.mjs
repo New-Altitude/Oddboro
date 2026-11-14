@@ -88,10 +88,13 @@ export const nonce = () => randomBytes(32).toString('hex');
 
 export async function verifyService({ port, key }) {
   const challenge = nonce();
-  const response = await fetch('http://127.0.0.1:' + port + '/api/proof?client=owner&nonce=' + challenge, {
-    redirect: 'error',
-    signal: AbortSignal.timeout(2500)
-  });
+  const response = await fetch(
+    'http://127.0.0.1:' + port + '/api/proof?client=owner&nonce=' + challenge,
+    {
+      redirect: 'error',
+      signal: AbortSignal.timeout(2500)
+    }
+  );
   if (
     !response.ok ||
     (await response.text()).trim() !==
