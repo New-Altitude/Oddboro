@@ -76,8 +76,12 @@ export function ownerRequest(home, key, method, path, body, signal) {
         method,
         path,
         signal,
-        // This cipher authenticates both sides using the shared key; it has no certificate.
-        rejectUnauthorized: false,
+        // The only enabled cipher authenticates the service by its pre-shared key.
+        // A certificate here would be an unexpected peer identity: fail closed.
+        checkServerIdentity: (_host, peer) =>
+          Object.keys(peer).length
+            ? new Error('Unexpected certificate on the owner channel.')
+            : undefined,
         pskCallback: () => ({ identity: 'owner', psk: keyOf(key) }),
         headers: { 'content-type': 'application/json', accept: 'application/json' }
       },
