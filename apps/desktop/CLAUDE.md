@@ -434,7 +434,11 @@ own shape 404 (#25), the setup checks pass, it onboards, and it starts again
 with its data. On Linux the app's run asks the same from inside the real
 page, which carries the window's key: the setup checks, with a stand-in
 Claude Code found where an install puts it (PR #18, CI only), and the
-onboarding. On a Mac and Windows those two rows say they were not checked.
+onboarding. On a Mac and Windows the setup checks row reads the log: in the
+app the office writes `office: setup <id> ok` or `fail` for each check when
+the window's welcome asks for them, the id and the result alone. That row is
+required there too, Claude Code included. The onboarding row says it was not
+checked, and the restarts do not check the data stayed.
 
 `scripts/driver.ts` drives it, each system its own way: the NSIS installer
 with `/S` and UI Automation on Windows (WebView2 on GitHub's runners drops

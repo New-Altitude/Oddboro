@@ -10,8 +10,10 @@
 // real app's shell keeps in memory. So the checks that need the office's
 // answers run where a key can come along: on the staged server (--stage),
 // which this run starts and gives a key as the shell would, and on Linux from
-// inside the real page. On a Mac and Windows the real app's run checks the
-// window, the log, the refusals and the restarts.
+// inside the real page. On a Mac and Windows the real app's run reads the
+// setup checks from the log instead: the office writes `office: setup <id>
+// ok|fail` for each when the window's welcome asks for them. Onboarding and
+// its data across a restart are not checked there.
 //
 //   node apps/desktop/scripts/smoke.ts --artifact <installer|AppImage|dmg> --version 0.0.9
 //   node apps/desktop/scripts/smoke.ts --from <folder> --version 0.0.9
@@ -176,6 +178,21 @@ const keptInTheApp = (name: string) =>
     throw new Error('not checked here: the app keeps its key to itself. --stage checks it');
   });
 
+/** Each setup check's last state in the log (`office: setup <id> ok|fail`), by id. */
+function setupFromLog(log: string): Map<string, string> {
+  return new Map(
+    [...log.matchAll(/^office: setup ([a-z0-9-]+) (ok|fail)$/gm)].map((m) => [m[1], m[2]])
+  );
+}
+
+/** The setup checks pass: the database, and Claude Code where the run put a stand-in. */
+function setupPasses(state: (id: string) => string | undefined, claude: boolean, summary: string) {
+  if (state('database') !== 'ok') throw new Error(`the database is not ok: ${summary}`);
+  if (claude && state('claude') !== 'ok')
+    throw new Error(`the stand-in Claude Code was not found: ${summary}`);
+  return summary;
+}
+
 /**
  * The checks every start of the office gets, the staged server's included.
  * `office` asks with the app's key: over HTTP with the one this run gave the
@@ -223,7 +240,19 @@ async function officeChecks(
   const setupName = `passes its setup checks${expect.claude ? ', Claude Code found (PR #18)' : ''}`;
   const onboardName = 'onboards with a ready-made manager';
   if (!office) {
-    await keptInTheApp(setupName);
+    // The window's welcome has asked for the checks by now; they can take 35 s on a slow runner.
+    await step(setupName, true, async () => {
+      const states = await until(
+        'the setup checks in the log',
+        async () => {
+          const seen = setupFromLog(log());
+          return seen.has('database') ? seen : undefined;
+        },
+        90
+      );
+      const summary = [...states].map(([id, state]) => `${id}: ${state}`).join('; ');
+      return setupPasses((id) => states.get(id), expect.claude, summary);
+    });
     await keptInTheApp(onboardName);
     return found?.health ?? false;
   }
@@ -233,11 +262,7 @@ async function officeChecks(
       checks: { id: string; state: string; found: string }[];
     }>('/api/setup', 90);
     const summary = checks.map((c) => `${c.id}: ${c.state} (${c.found})`).join('; ');
-    const state = (id: string) => checks.find((c) => c.id === id)?.state;
-    if (state('database') !== 'ok') throw new Error(`the database is not ok: ${summary}`);
-    if (expect.claude && state('claude') !== 'ok')
-      throw new Error(`the stand-in Claude Code was not found: ${summary}`);
-    return summary;
+    return setupPasses((id) => checks.find((c) => c.id === id)?.state, expect.claude, summary);
   });
   // Each ledger line waits for its embedding: with Ollama installed, the first
   // one loads the model cold, about 20 s.

@@ -20,7 +20,9 @@ What the office says about itself, for the app's log and its smoke test
 (`apps/desktop/CLAUDE.md`, "Smoke tests"). `init` writes an `office:` line
 with the version and system, one per startup step with its time (the key in
 the app, secrets, database, tables, update row) and `office: ready N ms after Node started`;
-a new version's first start writes `office: first start of X after Y`
+in the app, each time a request computes the setup checks, one
+`office: setup <id> ok` or `fail` line per check (the id and result alone,
+`logSetup`); a new version's first start writes `office: first start of X after Y`
 (`backup.ts` in the ledger). `GET /api/health` serves the same: version,
 pid, uptime, step times, how many pages hold the live line and how many page
 errors came in (`src/lib/server/health.ts`). The page reports its boot and
