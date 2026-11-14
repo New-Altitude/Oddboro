@@ -25,9 +25,11 @@ export async function publishPairing(key: string) {
   }
   const port = Number(process.env.PORT || process.env.ODDBORO_PORT || 4500);
   const version = process.env.ODDBORO_VERSION || 'development';
-  const launch = (globalThis as typeof globalThis & {
-    [key: symbol]: ((key: string) => Promise<void>) | undefined
-  })[Symbol.for('oddboro.start-owner')];
+  const launch = (
+    globalThis as typeof globalThis & {
+      [key: symbol]: ((key: string) => Promise<void>) | undefined;
+    }
+  )[Symbol.for('oddboro.start-owner')];
   if (!launch) throw Error('Start the office with its packaged launcher.');
   await launch(key);
   const record = await sealSession(registration, { key, port, version });
