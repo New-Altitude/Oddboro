@@ -38,6 +38,16 @@
     <main>
       <p id="title">Opening the office</p>
       <p class="muted" id="detail">The first start can take a minute.</p>
+      <section id="save" hidden>
+        <label for="saved-code">Save your owner pairing code</label>
+        <input id="saved-code" readonly />
+        <button type="button" id="saved">I saved my code</button>
+      </section>
+      <form id="pair" hidden>
+        <label for="code">Owner pairing code</label>
+        <input type="password" id="code" autocomplete="off" required />
+        <button type="submit">Open office</button>
+      </form>
     </main>
     <script src="loading.js"></script>
   </body>

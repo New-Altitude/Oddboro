@@ -8,6 +8,7 @@
 mod diagnostics;
 mod env;
 mod headless;
+mod key;
 mod secrets;
 mod server;
 mod service_update;
@@ -17,16 +18,20 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::thread;
+use std::time::{Duration, Instant};
 
 use tauri::image::Image;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::webview::{NewWindowResponse, PageLoadEvent};
-use tauri::{AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{
+    AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
+};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 use diagnostics::Diagnostics;
+use key::Key;
 use server::Server;
 
 const MAIN: &str = "main";
@@ -89,8 +94,26 @@ fn main() {
     // opening Oddboro again shows the one that runs. It goes first, before
     // anything starts.
     #[cfg(not(target_os = "macos"))]
-    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| show(app)));
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _| {
+        if let Some(window) = app.get_webview_window(MAIN) {
+            let path = match args.get(1).map(String::as_str) {
+                Some("--view-office") => Some("/?view=office"),
+                Some("--view-workspace") => Some("/workspace"),
+                _ => None,
+            };
+            if let Some(path) = path {
+                if let Some(url) = window.url().ok().and_then(|u| u.join(path).ok()) {
+                    let _ = window.navigate(url);
+                }
+            }
+        }
+        show(app)
+    }));
     let app = builder
+        .invoke_handler(tauri::generate_handler![
+            headless::unlock_office,
+            headless::dismiss_pairing
+        ])
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             None,
@@ -168,7 +191,8 @@ fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
     );
     if let Some(url) = server_url {
         match Url::parse(&url) {
-            Ok(url) => open_main(app, &url),
+            // A server the shell did not start has no key to give it.
+            Ok(url) => open_main(app, &url, None),
             Err(e) => fail(
                 app,
                 exit::BAD_URL,
@@ -185,34 +209,68 @@ fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
         return broken_install(app, diagnostics, exit::NO_SERVER, NO_SERVER);
     };
 
-    let version = version.to_string();
-    let present = server::port_taken(port);
-    if present && !headless::recognized(&node, &code, port, &version) {
-        return fail(app, exit::PORT_TAKEN, "Another office or version is using this port. Check its status before opening this version.");
+    if server::port_taken(port) {
+        if !env::office_home().join("service.json").is_file() {
+            return fail(
+                app,
+                exit::PORT_TAKEN,
+                "Another program is using this office port.",
+            );
+        }
+        headless::prompt(app);
+        return;
     }
-    // An update before a fresh start can safely replace the app. An attached
-    // client defers to the running office's update window.
-    if !present && update::on_launch(app, &env::log_file(), show_updating) {
+    if update::on_launch(app, &env::log_file(), show_updating) {
         return;
     }
     show_loading(app);
-    if !present {
-        if let Err(e) = headless::spawn_service() {
+    let mut child = match headless::spawn_service() {
+        Ok(child) => child,
+        Err(e) => {
             return fail(
                 app,
                 exit::SERVER_FAILED,
                 &format!("Could not start the office: {e}"),
-            );
+            )
         }
+    };
+    let errors = child.stderr.take();
+    thread::spawn(move || child.wait());
+    let (tx, rx) = std::sync::mpsc::channel();
+    if let Some(pipe) = errors {
+        thread::spawn(move || {
+            use std::io::{BufRead, BufReader};
+            for line in BufReader::new(pipe).lines().map_while(Result::ok) {
+                if let Some(code) = line.strip_prefix("Oddboro owner pairing code: ") {
+                    let _ = tx.send(code.to_owned());
+                    break;
+                }
+            }
+        });
     }
     let until = std::time::Instant::now() + std::time::Duration::from_secs(90);
+    let mut credential = None;
     while std::time::Instant::now() < until {
-        if server::port_taken(port) && headless::recognized(&node, &code, port, &version) {
-            let url = Url::parse(&format!("http://127.0.0.1:{port}")).expect("loopback URL");
-            open_main(app, &url);
-            return;
+        if credential.is_none() {
+            credential = rx.try_recv().ok();
         }
-        thread::sleep(std::time::Duration::from_millis(300));
+        if env::office_home().join("service.json").is_file() && server::port_taken(port) {
+            if let Some(ref code_text) = credential {
+                if headless::unlock(&node, &code, port, &version.to_string(), code_text).is_some() {
+                    show_owner_code(app, code_text);
+                    return;
+                }
+            } else if env::office_home().join("paired-office").exists() {
+                // The first launch prints a code just after publishing its envelope.
+                if let Ok(code_text) = rx.recv_timeout(std::time::Duration::from_secs(1)) {
+                    credential = Some(code_text);
+                    continue;
+                }
+                headless::prompt(app);
+                return;
+            }
+        }
+        thread::sleep(std::time::Duration::from_millis(200));
     }
     fail(
         app,
@@ -240,7 +298,7 @@ fn office_server(
     code: PathBuf,
     port: u16,
     version: String,
-    update_token: String,
+    updates: bool,
     diagnostics: Option<&Diagnostics>,
 ) -> Server {
     Server {
@@ -251,7 +309,7 @@ fn office_server(
         home: env::office_home(),
         log: env::log_file(),
         version,
-        update_token,
+        updates,
         diagnostics_dsn: diagnostics.map(|d| d.dsn().to_string()),
     }
 }
@@ -300,7 +358,7 @@ fn dev_path(_relative: &str) -> Option<PathBuf> {
 }
 
 fn show_loading(app: &AppHandle) {
-    loading(app, "");
+    loading(app, "", false);
 }
 
 /// The office goes away and the loading window says "Updating Oddboro to X.Y.Z".
@@ -308,14 +366,14 @@ fn show_updating(app: &AppHandle, version: &str) {
     if let Some(main) = app.get_webview_window(MAIN) {
         let _ = main.hide();
     }
-    loading(app, version);
+    loading(app, version, false);
 }
 
 /// The small loading window. `updating` is the version it updates to, or
 /// empty while the office opens. `loading/loading.js` shows the words.
-fn loading(app: &AppHandle, updating: &str) {
+fn loading(app: &AppHandle, updating: &str, pairing: bool) {
     let script = format!(
-        "window.oddboroUpdating = {};",
+        "window.oddboroPairing = {pairing}; window.oddboroUpdating = {};",
         serde_json::Value::from(updating)
     );
     if let Some(window) = app.get_webview_window(LOADING) {
@@ -332,27 +390,56 @@ fn loading(app: &AppHandle, updating: &str) {
         .build();
 }
 
-/// Opens the office in the main window, or reloads it after a restart.
-fn open_main(app: &AppHandle, url: &Url) {
+fn requested_view() -> &'static str {
+    match std::env::args().nth(1).as_deref() {
+        Some("--view-workspace") => "/workspace",
+        Some("--view-office") => "/?view=office",
+        _ => "/",
+    }
+}
+
+/// Opens the office in the main window, or reloads it after a restart. With
+/// the app's key the window opens on a blank page, so it asks the office for
+/// nothing until its cookie is in place (`open_with_key`). Off the main thread.
+fn open_main(app: &AppHandle, url: &Url, key: Option<&Arc<Key>>) {
+    let selected = if key.is_some() {
+        url.join(requested_view()).ok()
+    } else {
+        None
+    };
+    let url = selected.as_ref().unwrap_or(url);
     if let Some(window) = app.get_webview_window(MAIN) {
-        let _ = window.navigate(url.clone());
+        match key {
+            Some(key) => open_with_key(&window, key, url),
+            None => {
+                let _ = window.navigate(url.clone());
+            }
+        }
         return;
     }
+    let first = match key {
+        Some(_) => Url::parse("about:blank").unwrap_or_else(|_| url.clone()),
+        None => url.clone(),
+    };
     let home = url.clone();
-    let built = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::External(url.clone()))
+    let office = url.clone();
+    let keyed = key.is_some();
+    let built = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::External(first))
         .title("Oddboro")
         .inner_size(1280.0, 820.0)
         .min_inner_size(960.0, 600.0)
         .center()
         .on_navigation(move |to| stay_or_open(&home, to))
-        .on_new_window(|to, _| {
-            open_in_browser(&to);
+        .on_new_window(move |to, _| {
+            open_new_window(&office, keyed, &to);
             NewWindowResponse::Deny
         })
         // The window's side of a start, for the log: the page itself says it
         // booted once its script runs (`apps/office/src/hooks.client.ts`).
         .on_page_load(|_, payload| {
-            if matches!(payload.event(), PageLoadEvent::Finished) {
+            if matches!(payload.event(), PageLoadEvent::Finished)
+                && payload.url().scheme() != "about"
+            {
                 server::note(
                     &env::log_file(),
                     &format!("office page loaded: {}", payload.url()),
@@ -363,13 +450,74 @@ fn open_main(app: &AppHandle, url: &Url) {
     if let Some(loading) = app.get_webview_window(LOADING) {
         let _ = loading.close();
     }
-    if let Err(e) = built {
-        fail(
+    match (built, key) {
+        (Ok(window), Some(key)) => open_with_key(&window, key, url),
+        (Ok(_), None) => {}
+        (Err(e), _) => fail(
             app,
             exit::NO_WINDOW,
             &format!("Oddboro could not open its window: {e}"),
-        );
+        ),
     }
+}
+
+/// Gives the window the key's cookie, then opens the office in it. The webview
+/// stores a cookie on its own time, so the shell waits until the webview
+/// reads it back, up to 5 seconds, before it opens the office. It reads the
+/// whole jar: wry's `cookies_for_url` matches no IP address host.
+fn open_with_key(window: &WebviewWindow, key: &Key, url: &Url) {
+    let cookie = key.cookie(url);
+    let _ = window.set_cookie(cookie.clone());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let held = || {
+        window.cookies().is_ok_and(|all| {
+            all.iter()
+                .any(|c| c.name() == cookie.name() && c.value() == cookie.value())
+        })
+    };
+    while !held() {
+        if Instant::now() > deadline {
+            server::note(
+                &env::log_file(),
+                "the window did not take the key's cookie within 5 seconds",
+            );
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    let _ = window.navigate(url.clone());
+}
+
+/// A link the page opens in a new window (`target="_blank"`, `window.open`)
+/// goes to the default browser. The browser has no key, so an address of the
+/// office's own, such as a file attached in a chat, goes there as a link the
+/// office makes for that one path, which works once within a minute. On its
+/// own thread: it asks the office first, with the key of the Node that runs
+/// now. `keyed` is false for a server the shell did not start.
+fn open_new_window(office: &Url, keyed: bool, to: &Url) {
+    if !keyed || to.origin() != office.origin() {
+        return open_in_browser(to);
+    }
+    let (office, to) = (office.clone(), to.clone());
+    thread::spawn(move || match browser_link(&office, &to) {
+        Some(link) => open_in_browser(&link),
+        None => server::note(
+            &env::log_file(),
+            "the office made no link for the browser, so nothing opened",
+        ),
+    });
+}
+
+/// `to` with the office's one-time code for its path added.
+fn browser_link(office: &Url, to: &Url) -> Option<Url> {
+    let port = office.port_or_known_default()?;
+    let body = serde_json::json!({ "path": to.path() });
+    let key = key::current()?;
+    let answer = server::call(port, &key, "POST", "/api/browser-link", Some(&body))?;
+    let code = answer["code"].as_str()?;
+    let mut link = to.clone();
+    link.query_pairs_mut().append_pair(key::LINK_QUERY, code);
+    Some(link)
 }
 
 /// The office's own origin stays in the window. Links anywhere else open in
@@ -527,6 +675,15 @@ fn alert(app: &AppHandle, message: &str) {
         .title("Oddboro")
         .kind(MessageDialogKind::Error)
         .blocking_show();
+}
+
+fn show_owner_code(app: &AppHandle, code: &str) {
+    // Only the local loading webview sees this once. Its field can be copied
+    // into a password manager; the code never goes to a log or the office page.
+    if let Some(window) = app.get_webview_window(LOADING) {
+        let value = serde_json::Value::from(code);
+        let _ = window.eval(format!("window.oddboroSaveCode({value})"));
+    }
 }
 
 fn fail(app: &AppHandle, code: i32, message: &str) {

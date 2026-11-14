@@ -2631,6 +2631,7 @@ dependencies = [
  "mac-notification-sys",
  "minisign-verify",
  "reqwest",
+ "ring",
  "rustls",
  "security-framework",
  "semver",

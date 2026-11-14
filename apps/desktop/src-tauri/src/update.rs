@@ -10,8 +10,6 @@
 //! On Windows the updater runs the new version's installer and ends this app
 //! itself, and the installer opens the new version when it is done.
 
-use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpStream};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc::Sender;
@@ -216,32 +214,9 @@ fn running(pid: u32) -> bool {
     }
 }
 
-/// One request to the server's `/api/update`, with the token that marks it as
-/// the shell's. HTTP/1.0, so the answer comes whole, never chunked.
-pub fn ask(port: u16, token: &str, method: &str, body: Option<&Value>) -> Option<Value> {
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).ok()?;
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
-    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
-    let body = body.map(Value::to_string).unwrap_or_default();
-    let request = format!(
-        "{method} /api/update HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\nX-Oddboro-Update-Token: {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
-        body.len()
-    );
-    stream.write_all(request.as_bytes()).ok()?;
-    let mut answer = String::new();
-    stream.read_to_string(&mut answer).ok()?;
-    let (_, json) = answer.split_once("\r\n\r\n")?;
-    serde_json::from_str(json).ok()
-}
-
-/// A fresh secret for this run, so only this shell can tell the server an
-/// update is ready. Empty if the system has no randomness to give: the server
-/// then takes no update requests at all.
-pub fn token() -> String {
-    let mut bytes = [0u8; 16];
-    if getrandom::fill(&mut bytes).is_err() {
-        return String::new();
-    }
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+/// One request to the server's `/api/update`, with the current key, which
+/// marks it as the shell's. None before Node has started.
+pub fn ask(port: u16, method: &str, body: Option<&Value>) -> Option<Value> {
+    let key = crate::key::current()?;
+    server::call(port, &key, method, "/api/update", body)
 }

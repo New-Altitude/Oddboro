@@ -280,7 +280,7 @@ pub fn install(pending: Pending) -> Result<()> {
     Ok(())
 }
 pub type Slot = Arc<std::sync::Mutex<Option<Pending>>>;
-pub fn watch(version: Version, port: u16, token: String, slot: Slot) {
+pub fn watch(version: Version, port: u16, slot: Slot) {
     if !update::ENABLED {
         return;
     }
@@ -302,13 +302,13 @@ pub fn watch(version: Version, port: u16, token: String, slot: Slot) {
             first = false;
             let result = check(&version).and_then(|release| {
                 let Some(r) = release else {
-                    update::ask(port, &token, "POST", Some(&json!({"checked":true})));
+                    update::ask(port, "POST", Some(&json!({"checked":true})));
                     return Ok(false);
                 };
                 let prepared = prepare(&r)?;
                 let ready = json!({"version":r.version.to_string(),"notes":r.notes});
                 loop {
-                    let status = update::ask(port, &token, "GET", None);
+                    let status = update::ask(port, "GET", None);
                     if status
                         .as_ref()
                         .is_some_and(|s| s["ready"] == true && s["version"] == ready["version"])
@@ -317,7 +317,7 @@ pub fn watch(version: Version, port: u16, token: String, slot: Slot) {
                             break;
                         }
                     } else {
-                        update::ask(port, &token, "POST", Some(&ready));
+                        update::ask(port, "POST", Some(&ready));
                     }
                     thread::sleep(Duration::from_secs(30));
                 }
@@ -334,7 +334,7 @@ pub fn watch(version: Version, port: u16, token: String, slot: Slot) {
                         &env::log_file(),
                         &format!("service update deferred: {message}"),
                     );
-                    update::ask(port, &token, "POST", Some(&json!({"failed":message})));
+                    update::ask(port, "POST", Some(&json!({"failed":message})));
                 }
             }
         }

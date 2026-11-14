@@ -5,10 +5,13 @@ use crate::{
     NO_SERVER,
 };
 
+use crate::key::Key;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::Arc;
+use tauri::{AppHandle, Manager};
 
 /// The operating system releases this lock even after a crash. The lock file
 /// stays in place so simultaneous launchers always lock the same inode.
@@ -30,17 +33,78 @@ pub fn lease() -> io::Result<File> {
     Ok(lock)
 }
 
-pub fn recognized(node: &Path, code: &Path, port: u16, version: &str) -> bool {
-    Command::new(node)
+/// The bundled probe decrypts the current session and verifies the server
+/// on its port before handing the app key to the shell over a private pipe.
+pub fn unlock(
+    node: &Path,
+    code: &Path,
+    port: u16,
+    version: &str,
+    credential: &str,
+) -> Option<Arc<Key>> {
+    let mut child = Command::new(node)
         .arg(code.join("apps/office/scripts/service-probe.mjs"))
         .arg(env::office_home())
         .arg(port.to_string())
         .arg(version)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
+        .spawn()
+        .ok()?;
+    child.stdin.take()?.write_all(credential.as_bytes()).ok()?;
+    let out = child.wait_with_output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    Key::adopt(std::str::from_utf8(&out.stdout).ok()?)
+}
+
+pub fn prompt(app: &AppHandle) {
+    crate::loading(app, "", true);
+}
+
+#[tauri::command]
+pub fn dismiss_pairing(window: tauri::WebviewWindow) {
+    if window.label() != crate::LOADING {
+        return;
+    }
+    if let Some(key) = crate::key::current() {
+        let app = window.app_handle().clone();
+        std::thread::spawn(move || {
+            if let Ok(url) = tauri::Url::parse(&format!("http://127.0.0.1:{}", env::port())) {
+                crate::open_main(&app, &url, Some(&key));
+            }
+        });
+    }
+}
+
+#[tauri::command]
+pub async fn unlock_office(window: tauri::WebviewWindow, credential: String) -> Result<(), String> {
+    if window.label() != crate::LOADING {
+        return Err("Open the pairing window.".into());
+    }
+    let app = window.app_handle().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let info = app.package_info();
+        let port = env::port();
+        let key = unlock(
+            &node_binary().ok_or(NO_NODE)?,
+            &server_code(info).ok_or(NO_SERVER)?,
+            port,
+            &info.version.to_string(),
+            &credential,
+        )
+        .ok_or("Check the pairing code and that this version of the office is running.")?;
+        crate::open_main(
+            &app,
+            &tauri::Url::parse(&format!("http://127.0.0.1:{port}")).map_err(|e| e.to_string())?,
+            Some(&key),
+        );
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 pub fn executable() -> std::io::Result<std::path::PathBuf> {
@@ -51,13 +115,15 @@ pub fn executable() -> std::io::Result<std::path::PathBuf> {
     std::env::current_exe()
 }
 
-pub fn spawn_service() -> std::io::Result<()> {
+pub fn spawn_service() -> std::io::Result<std::process::Child> {
     spawn(false)
 }
 pub fn spawn_successor() -> std::io::Result<()> {
-    spawn(true)
+    let mut child = spawn(true)?;
+    std::thread::spawn(move || child.wait());
+    Ok(())
 }
-fn spawn(successor: bool) -> std::io::Result<()> {
+fn spawn(successor: bool) -> std::io::Result<std::process::Child> {
     let mut command = Command::new(executable()?);
     if successor {
         command.env(crate::update::RELAUNCH_FROM, std::process::id().to_string());
@@ -72,29 +138,44 @@ fn spawn(successor: bool) -> std::io::Result<()> {
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x08000000 | 0x00000200);
     }
-    let mut child = command
+    command
         .arg("--headless")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
-    std::thread::spawn(move || child.wait());
-    Ok(())
+        .stderr(if successor {
+            Stdio::null()
+        } else {
+            Stdio::piped()
+        })
+        .spawn()
 }
 
 pub fn stop_service(package: &tauri::PackageInfo) -> bool {
-    node_binary()
-        .zip(server_code(package))
-        .is_some_and(|(node, code)| {
-            Command::new(node)
-                .arg(code.join("apps/office/scripts/office-cli.mjs"))
-                .arg("stop")
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .is_ok_and(|s| s.success())
-        })
+    let Some(key) = crate::key::current() else {
+        return false;
+    };
+    let Some((node, code)) = node_binary().zip(server_code(package)) else {
+        return false;
+    };
+    let Ok(mut child) = Command::new(node)
+        .arg(code.join("apps/office/scripts/service-probe.mjs"))
+        .arg("--stop")
+        .arg(env::office_home())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return false;
+    };
+    if !child
+        .stdin
+        .take()
+        .is_some_and(|mut input| input.write_all(key.line().as_bytes()).is_ok())
+    {
+        return false;
+    }
+    child.wait().is_ok_and(|s| s.success())
 }
 
 pub fn run(package: &tauri::PackageInfo, diagnostics: Option<&Diagnostics>) -> Result<(), String> {
@@ -103,39 +184,15 @@ pub fn run(package: &tauri::PackageInfo, diagnostics: Option<&Diagnostics>) -> R
     if server::port_taken(port) {
         return Err(format!("Port {port} is already in use."));
     }
-    let update = if crate::update::ENABLED {
-        crate::update::token()
-    } else {
-        String::new()
-    };
     let service = office_server(
         node_binary().ok_or(NO_NODE)?,
         server_code(package).ok_or(NO_SERVER)?,
         port,
         package.version.to_string(),
-        update.clone(),
+        crate::update::ENABLED,
         diagnostics,
     );
-    let key = format!("{}{}", crate::update::token(), crate::update::token());
-    if key.len() != 64 {
-        return Err("Could not create the office identity.".into());
-    }
     let descriptor = env::office_home().join("service.json");
-    let mut options = OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options.open(&descriptor).map_err(|e| e.to_string())?;
-    writeln!(
-        file,
-        "{}",
-        serde_json::json!({"key": key, "port": port, "version": package.version.to_string()})
-    )
-    .map_err(|e| e.to_string())?;
-    std::env::set_var("ODDBORO_SERVICE_KEY", key);
     std::env::set_var("ODDBORO_SERVICE_MODE", "1");
     server::on_quit_signal(server::stop);
     let slot = crate::service_update::Slot::default();
@@ -146,12 +203,7 @@ pub fn run(package: &tauri::PackageInfo, diagnostics: Option<&Diagnostics>) -> R
             watch.call_once(|| {
                 #[cfg(not(windows))]
                 crate::service_update::confirmed(&package.version);
-                crate::service_update::watch(
-                    package.version.clone(),
-                    port,
-                    update.clone(),
-                    slot.clone(),
-                );
+                crate::service_update::watch(package.version.clone(), port, slot.clone());
             });
         })
         .map_err(|why| {

@@ -1,20 +1,23 @@
-// The graphical app and headless service both use the adapter's one server.
-import { server } from '../build/index.js';
-import { handler } from '../build/handler.js';
+// Set up the private channel from the same process that owns the HTTP
+// handler. The office supplies the per-launch client key after startup.
 import { serveOwner } from './service-channel.mjs';
-
 if (process.env.ODDBORO_SERVICE_MODE === '1') {
-  const control = await serveOwner(
-    process.env.ODDBORO_HOME,
-    process.env.ODDBORO_SERVICE_KEY,
-    Number(process.env.ODDBORO_PORT),
-    handler,
-    () => {
-      control.close();
-      // The supervisor recognizes the owner's explicit stop and will not restart Node.
-      process.env.ODDBORO_STOP_REQUESTED = '1';
-      process.emit('SIGTERM');
-    }
-  );
-  server.once('close', () => control.close());
+  globalThis[Symbol.for('oddboro.start-owner')] = async (key) => {
+    const control = await serveOwner(
+      process.env.ODDBORO_HOME,
+      key,
+      Number(process.env.PORT || process.env.ODDBORO_PORT),
+      async (req, res) => {
+        const { handler } = await import('../build/handler.js');
+        handler(req, res, () => res.writeHead(404).end());
+      },
+      () => {
+        control.close();
+        process.env.ODDBORO_STOP_REQUESTED = '1';
+        process.emit('SIGTERM');
+      }
+    );
+    process.once('sveltekit:shutdown', () => control.close());
+  };
 }
+await import('../build/index.js');

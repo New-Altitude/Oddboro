@@ -63,7 +63,6 @@ const env = {
   ODDBORO_CODE: stage,
   ODDBORO_VERSION: '0.0.1',
   ODDBORO_SERVICE_MODE: '1',
-  ODDBORO_SERVICE_KEY: randomBytes(32).toString('hex'),
   ODDBORO_UPDATE_URL: 'http://127.0.0.1:9/no-updates',
   SHUTDOWN_TIMEOUT: '1',
   OLLAMA_URL: 'http://127.0.0.1:9',
@@ -107,36 +106,58 @@ setTimeout(()=>{console.log(JSON.stringify({type:'result',subtype:'success',resu
 process.stdin.on('data',answer);process.stdin.on('end',answer)}`
   );
 }
-const cli = async (...args) =>
-  JSON.parse(
-    (
-      await exec(
-        exe || bundled,
-        [...(exe ? [] : [join(scripts, 'office-cli.mjs')]), ...args, '--json'],
-        { env, timeout: 60000 }
-      )
-    ).stdout
-  );
-let child,
+let credential,
+  session,
+  child,
   output = '';
+const cli = async (...args) => {
+  const result = exec(
+    exe || bundled,
+    [...(exe ? [] : [join(scripts, 'office-cli.mjs')]), ...args, '--json'],
+    { env, timeout: 60000 }
+  );
+  result.child.stdin.end(credential + '\n');
+  return JSON.parse((await result).stdout);
+};
+const web = (url, options = {}) => {
+  const headers = new Headers(options.headers);
+  headers.set(
+    'cookie',
+    'oddboro-key=' + session.key + (headers.has('cookie') ? '; ' + headers.get('cookie') : '')
+  );
+  return fetch(url, { ...options, headers });
+};
 async function start() {
-  if (!exe)
-    writeFileSync(
-      join(office, 'service.json'),
-      JSON.stringify({ key: env.ODDBORO_SERVICE_KEY, port: Number(webPort), version: '0.0.1' }),
-      { mode: 0o600 }
-    );
+  output = '';
   child = spawn(exe || bundled, exe ? ['--headless'] : [join(scripts, 'service-entry.mjs')], {
     env,
     stdio: ['pipe', 'pipe', 'pipe'],
     cwd: join(stage, 'apps', 'office')
   });
-  child.stdout.on('data', (b) => (output += b));
-  child.stderr.on('data', (b) => (output += b));
+  if (!exe) child.stdin.write('oddboro:key ' + randomBytes(32).toString('hex') + '\n');
+  const collect = (b) => {
+    output += b;
+    const match =
+      /(?:oddboro:pairing |Oddboro owner pairing code: )(ob1\.[\w-]+\.[\w-]+)\r?\n/.exec(output);
+    if (match) {
+      credential = match[1];
+      output = output.replace(match[0], '[paired]\n');
+    }
+  };
+  child.stdout.on('data', collect);
+  child.stderr.on('data', collect);
+  const { openSession, verifyService } =
+    await import('../stage/apps/office/scripts/service-identity.mjs');
   await until(async () => {
-    if (child.exitCode != null) throw Error('Office exited ' + child.exitCode);
-    return (await fetch(base + '/api/health').then((r) => r.json())).readyMs != null;
-  }, 'ready');
+    if (!credential) return false;
+    session = await openSession(
+      credential,
+      JSON.parse(readFileSync(join(office, 'service.json'), 'utf8'))
+    );
+    await verifyService(session);
+    return (await web(base + '/api/health').then((r) => r.json())).readyMs != null;
+  }, 'paired office ready');
+  assert.equal((await fetch(base + '/api/health')).status, 403);
 }
 async function until(f, label) {
   let error;
@@ -156,7 +177,7 @@ async function stop() {
   else {
     // The Rust supervisor normally removes the descriptor when Node exits.
     const { ownerRequest } = await import('../stage/apps/office/scripts/service-channel.mjs');
-    const res = await ownerRequest(office, env.ODDBORO_SERVICE_KEY, 'POST', '/service/stop', {});
+    const res = await ownerRequest(office, session.key, 'POST', '/service/stop', {});
     res.resume();
   }
   const expected = exe ? 0 : 75;
@@ -172,7 +193,7 @@ try {
     await Promise.all([cli('start'), cli('start')]);
     assert.equal((await cli('status')).pid, first.pid);
   }
-  const initial = await fetch(base + '/workspace');
+  const initial = await web(base + '/workspace');
   assert.equal(initial.status, 200);
   assert.match(await initial.text(), /Set up your office/);
   const manager = (await cli('setup', 'Modes tester', 'America/Los_Angeles', 'marshall')).manager
@@ -190,7 +211,7 @@ try {
       assert.equal(accepted.turnId, turn);
       // The assigning client has exited. A different HTTP client reads the saved reply.
       await until(async () => {
-        const { history } = await fetch(base + '/api/staff/' + odd + '/chat').then((r) => r.json());
+        const { history } = await web(base + '/api/staff/' + odd + '/chat').then((r) => r.json());
         return history.some(
           (m) => m.turnId === turn && m.from === 'staff' && m.text.includes('provider finished')
         );
@@ -227,7 +248,7 @@ try {
   const pending = await cli('inbox');
   assert.ok(pending.asks.some((a) => a.id === askIds[0]));
   assert.equal((await cli('inspect', String(askIds[0]))).title, 'Check the cover page');
-  const decide = await fetch(base + '/api/asks/' + askIds[0], {
+  const decide = await web(base + '/api/asks/' + askIds[0], {
     method: 'POST',
     headers: { origin: base, 'content-type': 'application/json' },
     body: JSON.stringify({ decision: 'approve' })
@@ -263,12 +284,12 @@ try {
     );
     assert.equal(count, 1);
   }
-  assert.match(await (await fetch(base + '/workspace')).text(), /River/);
-  const page = await fetch(base + '/?view=office', { redirect: 'manual' });
+  assert.match(await (await web(base + '/workspace')).text(), /River/);
+  const page = await web(base + '/?view=office', { redirect: 'manual' });
   assert.equal(page.status, 303);
   assert.equal(
     (
-      await fetch(base + '/', { headers: { cookie: 'oddboro-view=workspace' }, redirect: 'manual' })
+      await web(base + '/', { headers: { cookie: 'oddboro-view=workspace' }, redirect: 'manual' })
     ).headers.get('location'),
     '/workspace'
   );
@@ -287,7 +308,11 @@ try {
         : ', including saved replies after disconnect and idempotent retry.')
   );
 } catch (e) {
-  console.error((existsSync(log) ? readFileSync(log, 'utf8') : output).slice(-2200));
+  console.error(
+    (existsSync(log) ? readFileSync(log, 'utf8') : output)
+      .replace(/ob1\.[\w.-]+/g, '[paired]')
+      .slice(-2200)
+  );
   throw e;
 } finally {
   if (child && child.exitCode === null) {

@@ -84,12 +84,14 @@ export async function until<T>(
   throw new Error(`no ${what} within ${secs} s`);
 }
 
+/** A GET with no key, as any other program on the computer would send it. */
 export async function getJson<T>(path: string, secs = 20): Promise<T> {
   const r = await fetch(BASE + path, { signal: AbortSignal.timeout(secs * 1000) });
   if (!r.ok) throw new Error(`GET ${path}: ${r.status}`);
   return (await r.json()) as T;
 }
 
+/** A request with no key unless `headers` carries one. */
 export async function send(
   method: string,
   path: string,
@@ -104,6 +106,69 @@ export async function send(
     signal: AbortSignal.timeout(secs * 1000)
   });
   return { status: r.status, text: (await r.text()).slice(0, 200) };
+}
+
+/**
+ * How a check asks the office for what only the app may ask. The office in
+ * the app answers only requests with the app's key, which the real app's
+ * shell keeps to itself.
+ */
+export type Office = {
+  getJson<T>(path: string, secs?: number): Promise<T>;
+  send(
+    method: string,
+    path: string,
+    headers: Record<string, string>,
+    body?: unknown,
+    secs?: number
+  ): Promise<{ status: number; text: string }>;
+};
+
+/** The first line a run writes on the staged server's stdin, as the shell does. */
+export const keyLine = (key: string): string => `oddboro:key ${key}\n`;
+
+/** Over HTTP, with the key a run gave the staged server, as the app's window carries it. */
+export function withKey(key: string): Office {
+  const cookie = { cookie: `oddboro-key=${key}` };
+  return {
+    async getJson<T>(path: string, secs = 20) {
+      const r = await fetch(BASE + path, {
+        headers: cookie,
+        signal: AbortSignal.timeout(secs * 1000)
+      });
+      if (!r.ok) throw new Error(`GET ${path}: ${r.status}`);
+      return (await r.json()) as T;
+    },
+    send: (method, path, headers, body, secs) =>
+      send(method, path, { ...headers, ...cookie }, body, secs)
+  };
+}
+
+/**
+ * From inside the real app's page (Linux, through WebDriver), which carries
+ * the window's own key. The page's browser adds its own Origin and
+ * Sec-Fetch-Site, whatever `headers` says.
+ */
+export function inPage(script: Driven['script']): Office {
+  const ask = async (method: string, path: string, body?: unknown) => {
+    const r = await script(
+      `const r = await fetch(arguments[0], { method: arguments[1], headers: { 'content-type': 'application/json' }, body: arguments[2] ?? undefined }); return { status: r.status, text: await r.text() };`,
+      [path, method, body === undefined ? null : JSON.stringify(body)]
+    );
+    if (typeof r !== 'object' || r === null) throw new Error(`${method} ${path}: ${String(r)}`);
+    return r as { status: number; text: string };
+  };
+  return {
+    async getJson<T>(path: string) {
+      const r = await ask('GET', path);
+      if (r.status !== 200) throw new Error(`GET ${path}: ${r.status}`);
+      return JSON.parse(r.text) as T;
+    },
+    send: async (method, path, _headers, body) => {
+      const r = await ask(method, path, body);
+      return { status: r.status, text: r.text.slice(0, 200) };
+    }
+  };
 }
 
 /** What the office's own page sends with a write. WebKit before macOS 13.3 sends no Sec-Fetch-Site. */
@@ -394,7 +459,8 @@ export function launch(exe: string, r: Run): ChildProcess {
 }
 
 /**
- * Waits for the office to answer. A dialog or the shell quitting fails it.
+ * Waits for the office to answer, as the shell does: any answer at all, since
+ * without the app's key it is a refusal. A dialog or the shell quitting fails it.
  * Windows looks for a dialog only after 30 s, then every 15 s: one look takes
  * seconds on the arm64 runner and would blur a normal start's time.
  */
@@ -403,7 +469,7 @@ export async function ready(app: ChildProcess, r: Run, secs = 120): Promise<numb
   let lookForDialog = 30_000;
   while (Date.now() - started < secs * 1000) {
     const answered = await fetch(`${BASE}/api/update`, { signal: AbortSignal.timeout(2000) }).then(
-      (res) => res.ok,
+      () => true,
       () => false
     );
     if (answered) return Date.now() - started;
@@ -486,6 +552,7 @@ export async function quit(app: ChildProcess, r: Run): Promise<number> {
 /** The real window, from outside: its text and buttons, and a press by a button's name. */
 export type Page = {
   read(): Promise<string>;
+  pairingCode?(): Promise<string>;
   press(name: string): Promise<void>;
 };
 
@@ -503,6 +570,12 @@ export function automationPage(pid: number): Page {
     );
   let warm = false;
   return {
+    async pairingCode() {
+      return ps(
+        windows +
+          `foreach ($w in $wins) { foreach ($e in $w.FindAll('Descendants',(New-Object Windows.Automation.PropertyCondition($A::ControlTypeProperty,[Windows.Automation.ControlType]::Edit)))) { try { $v=$e.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).Current.Value; if ($v -like 'ob1.*') { $v; return } } catch {} } }`
+      );
+    },
     async read() {
       if (!warm) {
         view();
@@ -533,6 +606,16 @@ export function automationPage(pid: number): Page {
 export function accessibilityPage(pid: number): Page {
   const osa = (script: string) => sh('osascript', ['-e', script], 90_000);
   return {
+    async pairingCode() {
+      return osa(`tell application "System Events" to tell (first process whose unix id is ${pid})
+        repeat with e in (entire contents of window 1)
+          try
+            if role of e is "AXTextField" and (value of e as text) starts with "ob1." then return value of e as text
+          end try
+        end repeat
+        return ""
+      end tell`).out.trim();
+    },
     async read() {
       const r = osa(`set out to {}
 tell application "System Events" to tell (first process whose unix id is ${pid})
@@ -580,6 +663,7 @@ return "missing"`);
 
 /** Linux: a run through tauri-driver, which starts the app itself. */
 export type Driven = {
+  pairingCode: string;
   page: Page;
   /** Runs a script in the page and gives back what it returns. */
   script(body: string, args?: unknown[]): Promise<unknown>;
@@ -592,6 +676,7 @@ export type Driven = {
  * office answers. The office window then shows up as a new handle to switch to.
  */
 export async function webdriverStart(exe: string, r: Run): Promise<Driven> {
+  let pairingCode = '';
   const driver = spawn('tauri-driver', ['--port', '4444'], {
     env: { ...process.env, ...r.env },
     stdio: ['ignore', 'pipe', 'pipe']
@@ -637,6 +722,14 @@ export async function webdriverStart(exe: string, r: Run): Promise<Driven> {
       'the office window',
       async () => {
         const url = JSON.stringify(await wd('GET', `/session/${session}/url`));
+        if (!pairingCode && /tauri|localhost/.test(url)) {
+          const saved = await wd('POST', `/session/${session}/execute/sync`, {
+            script:
+              "const f=document.getElementById('saved-code'); if (!f?.value) return ''; const value=f.value; document.getElementById('saved').click(); return value;",
+            args: []
+          });
+          if (typeof saved === 'string') pairingCode = saved;
+        }
         if (url.includes(BASE)) return true;
         if (url.includes('no such window')) {
           const handles = (await wd('GET', `/session/${session}/window/handles`)) as string[];
@@ -673,7 +766,7 @@ export async function webdriverStart(exe: string, r: Run): Promise<Driven> {
       if (found !== 'pressed') throw new Error(`no button named ${name} in the page`);
     }
   };
-  return { page, script, stop };
+  return { page, script, stop, pairingCode };
 }
 
 /** A picture of the whole screen. */

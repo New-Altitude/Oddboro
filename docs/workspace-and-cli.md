@@ -4,6 +4,12 @@ On a fresh office, choose **Office** for the floor or **Workspace** for a list o
 
 In Workspace, **Needs you** shows open decisions. Choose a row to read the request and answer it. Choose an Odd to read its chat, send an assignment or steer an active reply. Use Alt+Down and Alt+Up to switch. Turn on Advanced in Settings to include native Codex and Claude project sessions. Select a session to inspect it; explicitly take terminal control to type. Closing a window or a terminal leaves the office running. **Stop office** ends the service, including running work.
 
+## Pair a client with your office
+
+Save the owner pairing code in your password manager when the app first opens. Starting from a terminal prints the code there. The desktop asks for it when it reconnects. The CLI takes it at a hidden prompt or from standard input for scripts. Keep the code out of command arguments, environment variables, and shell history.
+
+The office stores a signed, encrypted client session in its home directory. Only the owner pairing code opens it. Each server process has a fresh session. An open credential store lets the owner reuse the same pairing code after a restart. Without a credential store, the office prints a new code at startup and cannot register unattended startup at login.
+
 ## Run without a display
 
 Use the executable inside the installed app. On a Mac, run `/Applications/Oddboro.app/Contents/MacOS/oddboro`. On Linux run your Oddboro AppImage. On Windows use the installed executable in PowerShell and pipe to `Out-Host` for interactive output from the windowed executable. The commands below use `oddboro` as shorthand for that path. The packaged CLI does not need a separate Node install.
