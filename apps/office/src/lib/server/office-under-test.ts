@@ -1,6 +1,6 @@
 // An office under test, for the tests of a run as the office starts it
 // (`followThrough`, `chat`): the office's own database (local-db.ts) in a
-// throwaway folder on a free port, stand-ins for `claude`, `grok`, `codex`, `gemini`,
+// throwaway folder (on Windows, on a free port), stand-ins for `claude`, `grok`, `codex`, `gemini`,
 // `xcode-select`, `security` and the installers `npm` and `bash` first on PATH, a stand-in secret store, a few
 // Odds, and the helpers that start a run and read back what its stand-in was given. Each stand-in sends back what the run gave it,
 // its arguments, the tool server's environment and the run's instructions,
@@ -537,7 +537,6 @@ Object.assign(process.env, {
   ODDBORO_ENV: join(folder, 'none.env'),
   // No tool's maker is asked for its newest version (versions.ts).
   ODDBORO_NO_LATEST: '1',
-  DATABASE_URL: `postgres://postgres:postgres@127.0.0.1:${port}/postgres`,
   ODDBORO_LOCAL_DB: '1',
   OLLAMA_URL: 'http://127.0.0.1:9',
   // The stand-ins, node for them, and the system's own tools: never the Mac's
@@ -589,8 +588,8 @@ mock.module('@oddboro/ledger/secrets', {
 mkdirSync(join(folder, 'codex'));
 writeFileSync(join(folder, 'codex', 'auth.json'), '{}');
 // A static import beside this file loads as this file waits on its port above,
-// so home.ts would read no ODDBORO_DB_PORT and every such test file would bind
-// the one fixed port.
+// so home.ts would read neither ODDBORO_HOME nor ODDBORO_DB_PORT, and the
+// office would start in a folder other than this one.
 const { DATABASE_PORT } = await import('@oddboro/ledger/home');
 assert.equal(
   DATABASE_PORT,

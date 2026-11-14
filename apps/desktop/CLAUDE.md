@@ -145,7 +145,7 @@ not start or keep running, 7 no window. 0 is a quit.
 | `BODY_SIZE_LIMIT`              | `12M` for chat imports; attachments keep their own limit   |
 | `ODDBORO_HOME`                 | `~/.oddboro` (`%USERPROFILE%\.oddboro`), unless set        |
 | `ODDBORO_CODE`                 | `<resources>/server`                                       |
-| `ODDBORO_DB_PORT`              | passed through when the shell's env sets it                |
+| `ODDBORO_DB_PORT`              | passed through when the shell's env sets it; Windows only  |
 | `PATH`                         | the login-shell PATH from step 3                           |
 | `ODDBORO_VERSION`              | the app's version, like `0.0.4`                            |
 | `BODY_SIZE_LIMIT`              | `11M`, so a 10 MB file attached in a chat gets through     |
@@ -388,7 +388,7 @@ private, `latest.json` answers 404 to them.
 
 `scripts/smoke.ts` checks a real build the way an owner meets it, one row of
 a table per step; a failed required row fails the run. It runs the app on
-port 4590, database port 54590, a throwaway home and its own log
+port 4590 (database port 54590 on Windows), a throwaway home and its own log
 (`ODDBORO_LOG`), and points `ODDBORO_UPDATE_URL` at an address that refuses,
 so the build never updates itself away. The port, home and log are its own;
 the secrets are not, so the office runs with no secret store
@@ -522,7 +522,7 @@ dialogs never show: without a parent window they go through
 office:
 
 ```sh
-ODDBORO_PORT=4510 ODDBORO_DB_PORT=54510 ODDBORO_HOME=/tmp/oddboro-test-home \
+ODDBORO_PORT=4510 ODDBORO_HOME=/tmp/oddboro-test-home \
   src-tauri/target/debug/oddboro
 ```
 
