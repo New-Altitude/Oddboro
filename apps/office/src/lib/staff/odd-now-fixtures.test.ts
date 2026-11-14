@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { register } from 'node:module';
 import { test } from 'node:test';
 import type { AskRow, HandOffLine } from '@oddboro/ledger';
+import { untilStable } from '#lib/server/google/http.ts';
 import {
   CARRY_OUT_LABEL,
   CATCH_UP,
@@ -372,11 +373,10 @@ const FIXTURES: Record<Show['is'], Fixture[]> = {
 };
 
 /** A render's markup without Svelte's hydration markers, which split what the owner reads. */
-const markup = (rendered: { body: string }) => rendered.body.replace(/<!--.*?-->/gs, '');
+const markup = (rendered: { body: string }) => untilStable(rendered.body, /<!--.*?-->/gs, '');
 /** The text of `html` as the owner reads it: tags dropped, entities decoded, spaces collapsed. */
 const plain = (html: string) =>
-  html
-    .replace(/<[^>]*>/g, '')
+  untilStable(html, /<[^>]*>/g, '')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&lt;/g, '<')
@@ -538,4 +538,11 @@ test("the rail's title says where an Odd is headed, and Arriving for one the flo
     Bo: 'At their desk',
     Dee: 'Arriving'
   });
+});
+
+test('a comment that one pass of the strip would leave behind is gone from the markup', () => {
+  assert.equal(markup({ body: '<!-<!---->--->' }), '');
+  // One pass of the tag strip already leaves no tag here, so no input tells
+  // the loop apart from it. The loop is for CodeQL's multi-character rule.
+  assert.equal(plain('<scr<b>ipt>'), 'ipt>');
 });
