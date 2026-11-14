@@ -39,13 +39,25 @@ export const OPEN_LESSON: readonly LessonStatus[] = ['live', 'waiting'];
 export const dropped = (l: Pick<LessonRow, 'status' | 'createdAt'>, now: Date) =>
   l.status === 'waiting' && now.getTime() - l.createdAt.getTime() > GUESS_DAYS * 86_400_000;
 
-/** Words compared without case, spacing, quote marks or end punctuation. */
-export const plain = (s: string) =>
-  s
+/** What `plain` trims from both ends, once every run of whitespace is one space. */
+const END_MARKS = ' .,!?;:';
+
+/**
+ * Words compared without case, spacing, quote marks or end punctuation. The
+ * ends are trimmed with index loops: a regex anchored at the end retries at
+ * every position, so a long run of marks costs time squared in its length.
+ */
+export const plain = (s: string) => {
+  const c = s
     .toLowerCase()
     .replace(/[‘’“”"'`]/g, '')
-    .replace(/\s+/g, ' ')
-    .replace(/^[\s.,!?;:]+|[\s.,!?;:]+$/g, '');
+    .replace(/\s+/g, ' ');
+  let start = 0;
+  let end = c.length;
+  while (start < end && END_MARKS.includes(c.charAt(start))) start++;
+  while (end > start && END_MARKS.includes(c.charAt(end - 1))) end--;
+  return c.slice(start, end);
+};
 
 /** Where a lesson applies, as its lines say it: nothing when it applies everywhere. */
 export const onlyIn = (l: Pick<LessonRow, 'appliesTo'>) =>
