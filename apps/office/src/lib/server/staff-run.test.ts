@@ -788,9 +788,11 @@ test("a Grok Odd's run on a thread reads the thread's folder and writes only its
   const part = join(thread, 'gus');
   const name = run.args[run.args.indexOf('--sandbox') + 1];
   assert.match(name, /^run-/);
-  assert.deepEqual(run.profile?.trim().split('\n').slice(0, 4), [
+  assert.deepEqual(run.profile?.trim().split('\n').slice(0, 5), [
     `[profiles.${name}]`,
     'extends = "strict"',
+    // Or the office's tool server cannot reach the database on Linux.
+    'restrict_network = false',
     `read_only = ${JSON.stringify([dirname(process.execPath), code('packages'), code('node_modules'), ownerData, thread])}`,
     `read_write = ${JSON.stringify([join(folder, 'accounts', 'grok', 'office', 'tmp'), part])}`
   ]);
