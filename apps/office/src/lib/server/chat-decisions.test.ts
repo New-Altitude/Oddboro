@@ -405,3 +405,23 @@ test('a task with an attachment or a sign-in step stays on the Desk', async () =
   });
   assert.equal(chatAnswer(signIn, false), undefined);
 });
+
+test('a yes to access whose grant fails tells the owner why, as the Desk shows a refusal, and the ask reads approved', async () => {
+  const { ask } = await L.raiseAsk('sam', {
+    title: 'Connect Gmail to send',
+    why: 'To send the invoices.',
+    ifApproved: 'Send them.',
+    access: { connector: 'gmail', level: 'act' }
+  });
+  // The owner lowers Sam to Read while the ask waits on the Desk.
+  await L.pg`update staff set permission = 'read' where id = 'sam'`;
+  try {
+    assert.deepEqual(await refusal(post(asks.POST, ask.id, { decision: 'approve' })), {
+      status: 400,
+      message: 'Sam holds read, so it cannot be given act'
+    });
+    assert.equal((await L.ask(ask.id))?.status, 'approved');
+  } finally {
+    await L.pg`update staff set permission = 'act' where id = 'sam'`;
+  }
+});

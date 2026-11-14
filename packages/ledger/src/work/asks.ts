@@ -180,7 +180,8 @@ type DoneWith = ReturnType<typeof doneWith>;
  * twins close with it on a yes or a no, and what the answer starts follows
  * its row in `OWNER_ANSWERS`. The entry's own writes (`perKind`) go first, in
  * the same transaction; the I/O an answer does (`effects`) waits for the
- * commit. Twins hear the same words, each back where it came from; those on
+ * commit. A failure there reaches the owner (`carriesAnswer`), and the ask
+ * stays answered. Twins hear the same words, each back where it came from; those on
  * no work reach their Odd once (`offWorkAnswer`).
  */
 export function askDecided(
@@ -297,6 +298,7 @@ export function askDecided(
         if (!access) break;
         after.push({
           then: 'grantAccess',
+          carriesAnswer: true,
           run: async () => {
             const granted = await effects.grantAccess(ask.staffId, access, ask.id);
             // Another Google account is a new connector: the ask and its twins
@@ -365,17 +367,25 @@ export function askDecided(
       case 'odd_leaves': {
         const odd = ask.odd;
         if (odd)
-          after.push({ then: 'removeOdd', run: () => effects.removeOdd(odd, { askId: ask.id }) });
+          after.push({
+            then: 'removeOdd',
+            carriesAnswer: true,
+            run: () => effects.removeOdd(odd, { askId: ask.id })
+          });
         break;
       }
       case 'odd_returns': {
         const odd = ask.odd;
         if (odd)
-          after.push({ then: 'bringBack', run: () => effects.bringBack(odd, { askId: ask.id }) });
+          after.push({
+            then: 'bringBack',
+            carriesAnswer: true,
+            run: () => effects.bringBack(odd, { askId: ask.id })
+          });
         break;
       }
       case 'catch_up':
-        after.push({ then: 'oweCatchUp', run: () => effects.oweCatchUp(row) });
+        after.push({ then: 'oweCatchUp', carriesAnswer: true, run: () => effects.oweCatchUp(row) });
         break;
       default:
         effect satisfies never;

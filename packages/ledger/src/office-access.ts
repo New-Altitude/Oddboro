@@ -21,6 +21,7 @@ import { task } from './office-tasks.ts';
 import { ownerName } from './office-usage.ts';
 import { transitionWork } from './work/apply.ts';
 import type { EventOf, NewTask } from './work/events.ts';
+import { LEFT_RAISES_NOTHING } from './work/threads.ts';
 
 // Access
 
@@ -81,13 +82,24 @@ export async function grantAccess(
       g && conn.id !== GOOGLE[g].id && !conn.config.account
         ? `another ${conn.name} account`
         : conn.name;
-    await db.insert(tasks).values({
-      staffId,
-      askId,
-      title: `Connect ${called} for ${who.name}`,
-      why: `${who.name} needs ${conn.name} at ${req.level} level.`,
-      steps
+    // Through the work core: an Odd that left since the check above gets no
+    // task, and the task waits on any other change to this tool's connect tasks.
+    const went = await transitionWork({
+      kind: 'taskGiven',
+      task: {
+        staffId,
+        askId,
+        title: `Connect ${called} for ${who.name}`,
+        why: `${who.name} needs ${conn.name} at ${req.level} level.`,
+        steps
+      }
     });
+    if ('refused' in went)
+      throw new Error(
+        went.refused === LEFT_RAISES_NOTHING
+          ? `${who.name} left the office, so there is nothing to connect.`
+          : went.refused
+      );
     return { task: true, connector: conn.id };
   }
   // Already connected: the staffer can use it now, and nothing waits on the owner.

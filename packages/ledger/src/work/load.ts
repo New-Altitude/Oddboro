@@ -143,7 +143,13 @@ const SEEDS: {
     };
   },
   taskGiven: async (tx, { task, oneOpen }) => {
-    if (oneOpen) await lockConnector(tx, oneOpen.connector);
+    // Each tool the task connects, and the one an open task may answer it for,
+    // sorted so two gives take them in one order.
+    const tools = task.steps.flatMap((s) =>
+      s.action && 'connector' in s.action ? [s.action.connector] : []
+    );
+    for (const c of new Set([...(oneOpen ? [oneOpen.connector] : []), ...tools].sort()))
+      await lockConnector(tx, c);
     return {
       staff: one(task.staffId),
       threads: one(task.threadId),
