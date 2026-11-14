@@ -96,7 +96,13 @@ jobs:
           NODE_OPTIONS: --test-reporter=spec --test-reporter-destination=stdout --test-reporter=../../scripts/test-times.ts --test-reporter-destination=${{ runner.temp }}/test-times/ledger.jsonl --report-on-signal --report-exclude-env --report-directory=${{ runner.temp }}/hang-reports
         run: |
           mkdir -p "$RUNNER_TEMP/test-times"
-          node scripts/hang-report.ts 8 npx turbo run test --filter=@oddboro/ledger
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            # Each file starts its own in-memory Postgres. Bound simultaneous
+            # databases on hosted Linux while keeping every test and reporter.
+            (cd packages/ledger && node ../../scripts/hang-report.ts 8 node --test --test-concurrency=2 --test-timeout=15000 --experimental-test-module-mocks "test/*.test.ts")
+          else
+            node scripts/hang-report.ts 8 npx turbo run test --filter=@oddboro/ledger
+          fi
 
       # The test office's stand-in AI tools are scripts that start through
       # their first line, which Windows is taken not to do.
