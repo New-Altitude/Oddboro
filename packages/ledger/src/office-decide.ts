@@ -193,7 +193,8 @@ export async function giveFolder(
  * through the work core (`askDecided`). A yes that moves an Odd is refused
  * first, so the ask stays open with the reason. False when the ask was
  * answered already; any other refusal is thrown with its words, which the
- * desk shows the owner.
+ * desk shows the owner. So is the error of what the answer does once it is
+ * saved, such as a grant that fails (`carriesAnswer`): the ask stays answered.
  */
 async function decide(
   id: number,

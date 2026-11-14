@@ -13,7 +13,17 @@ import type { Tx } from './threads.ts';
  * the decider's input carried, named by `then` for the log.
  */
 export type After =
-  { record: Parameters<typeof record>[0] } | { then: string; run: () => Promise<unknown> };
+  | { record: Parameters<typeof record>[0] }
+  | {
+      then: string;
+      run: () => Promise<unknown>;
+      /**
+       * It does what the owner's answer asked, such as granting the access
+       * they said yes to, so its failure goes to the caller, which shows the
+       * owner why (`runAfters`).
+       */
+      carriesAnswer?: true;
+    };
 
 /** What a decider says: no, with the reason in words, or the change to apply and what follows it. */
 export type Decided<C> = { refused: string } | { change: C; after: After[] };
@@ -91,18 +101,27 @@ function isDeadlock(err: unknown): boolean {
 /**
  * Run after-effects in order, once their transaction has committed. The
  * transition's own runner, and the caller's when it passed its own `tx`.
+ * Every one runs, whatever fails before it. The first failure of one that
+ * `carriesAnswer` is thrown once all have run, so the owner hears that their
+ * answer was not carried out; every other failure is reported.
  */
 export async function runAfters(name: string, after: After[]): Promise<void> {
+  let failed: { err: unknown } | undefined;
   for (const a of after) {
     try {
       if ('record' in a) await record(a.record);
       else await a.run();
     } catch (err) {
-      // Reported, not thrown: the change is committed and stays so, and the
-      // after-effects behind this one still run.
-      console.error(`${name}: the after-effect ${'record' in a ? 'record' : a.then} failed:`, err);
+      // The change is committed and stays so, and the after-effects behind this one still run.
+      if (!('record' in a) && a.carriesAnswer && !failed) failed = { err };
+      else
+        console.error(
+          `${name}: the after-effect ${'record' in a ? 'record' : a.then} failed:`,
+          err
+        );
     }
   }
+  if (failed) throw failed.err;
 }
 
 /**
