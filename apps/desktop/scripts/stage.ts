@@ -278,6 +278,7 @@ function stageOffice(): void {
     'service-probe.mjs',
     'service-identity.mjs',
     'service-entry.mjs',
+    'office-cli.mjs',
     'service-channel.mjs'
   ])
     cpSync(join(ROOT, 'apps', 'office', 'scripts', file), join(scripts, file));

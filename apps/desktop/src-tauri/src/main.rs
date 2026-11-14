@@ -62,6 +62,27 @@ fn main() {
         }
         return;
     }
+    if let Some(command) = std::env::args_os().nth(1) {
+        // Finder and Smoke may pass system arguments to the graphical app.
+        if !command.to_string_lossy().starts_with('-') || command == "--help" {
+            let status = node_binary()
+                .zip(server_code(context.package_info()))
+                .and_then(|(node, code)| {
+                    let executable = std::env::current_exe().ok()?;
+                    #[cfg(target_os = "linux")]
+                    let executable = std::env::var_os("APPIMAGE")
+                        .map(PathBuf::from)
+                        .unwrap_or(executable);
+                    Command::new(node)
+                        .arg(code.join("apps/office/scripts/office-cli.mjs"))
+                        .args(std::env::args_os().skip(1))
+                        .env("ODDBORO_EXECUTABLE", executable)
+                        .status()
+                        .ok()
+                });
+            std::process::exit(status.and_then(|s| s.code()).unwrap_or(1));
+        }
+    }
     let builder = tauri::Builder::default();
     // Linux and Windows have no Dock to bring a hidden window back, so
     // opening Oddboro again shows the one that runs. It goes first, before
