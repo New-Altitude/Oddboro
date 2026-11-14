@@ -142,23 +142,34 @@
       view = record.view;
     }
   }
+  const sessionDrafts = new Map<
+    string,
+    { draft: string; file: string; replies: Record<string, string> }
+  >();
+  function keepDraft() {
+    if (currentId) sessionDrafts.set(currentId, { draft, file, replies: { ...replies } });
+  }
   async function select(id: string) {
     if (currentId === id) return;
+    keepDraft();
     currentId = id;
     work = [];
     view = undefined;
-    draft = '';
-    file = '';
-    replies = {};
+    const kept = sessionDrafts.get(id);
+    draft = kept?.draft ?? '';
+    file = kept?.file ?? '';
+    replies = kept?.replies ?? {};
     handover = undefined;
     unasked = undefined;
     writable = false;
     termView = crypto.randomUUID();
     await history(id);
+    if (currentId !== id) return;
     // Work waiting on the owner shows at once.
     details = work.some((r) => r.state === 'proposed' || r.state === 'uncertain');
   }
   function startNew() {
+    keepDraft();
     currentId = undefined;
     view = undefined;
     work = [];

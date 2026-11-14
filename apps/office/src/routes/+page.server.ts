@@ -1,3 +1,4 @@
+import { redirect } from '@sveltejs/kit';
 import {
   advancedMode,
   desk,
@@ -20,7 +21,16 @@ import { toProfile } from '#lib/server/profile.ts';
 import { heldThreads } from '#lib/staff/thread-tags.ts';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async () => {
+export const load: PageServerLoad = async ({ cookies, url }) => {
+  if (url.searchParams.get('view') === 'office') {
+    cookies.set('oddboro-view', 'office', {
+      path: '/',
+      maxAge: 31536000,
+      secure: url.protocol === 'https:'
+    });
+    redirect(303, '/');
+  }
+  if (cookies.get('oddboro-view') === 'workspace') redirect(303, '/workspace');
   // The owner's Caddy may have dropped the office's site since: put it back.
   void keepAddress();
   const first = !(await welcomed());
