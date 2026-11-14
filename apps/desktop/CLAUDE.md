@@ -20,7 +20,7 @@ an update (`update.rs`).
 
 ## Run without a window
 
-The desktop now starts or attaches to the same independently supervised service as the CLI. Quitting the desktop disconnects the window; **Stop office** or the CLI stops the server. Signed automatic installation still requires a desktop updater. See [Workspace and the command line](../../docs/workspace-and-cli.md).
+The desktop now starts or attaches to the same independently supervised service as the CLI. Quitting the desktop disconnects the window; **Stop office** or the CLI stops the server. The service owns scheduled signed updates, including when no client is attached. See [Workspace and the command line](../../docs/workspace-and-cli.md).
 
 Run the installed executable with `--headless` to start the bundled office in the foreground. It starts before the display or tray initializes. The same executable supervises Node and handles the Mac Keychain. The health probe reads `/api/health` so startup does not render the office. Stop the foreground office with Ctrl-C on Unix.
 
@@ -248,7 +248,8 @@ Every update is required. `src-tauri/src/update.rs` runs them with
 - `src-tauri/src/env.rs`. Port, home, log path and the login-shell PATH.
 - `src-tauri/src/secrets.rs`. The office's secrets in the Mac's Keychain, and
   the line protocol it asks with.
-- `src-tauri/src/update.rs`. Checking, downloading and installing updates,
+- `src-tauri/src/service_update.rs`. The background supervisor checks the signed release version and bytes, stages the new installation, waits for the office update window, and reopens without a display.
+- `src-tauri/src/update.rs`. Desktop launch updates,
   and asking the server when.
 - `src-tauri/tauri.conf.json`. The app, with no sidecar or resources, so
   `cargo check` and `cargo clippy` work before anything is staged.

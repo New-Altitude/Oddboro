@@ -52,7 +52,16 @@ pub fn executable() -> std::io::Result<std::path::PathBuf> {
 }
 
 pub fn spawn_service() -> std::io::Result<()> {
+    spawn(false)
+}
+pub fn spawn_successor() -> std::io::Result<()> {
+    spawn(true)
+}
+fn spawn(successor: bool) -> std::io::Result<()> {
     let mut command = Command::new(executable()?);
+    if successor {
+        command.env(crate::update::RELAUNCH_FROM, std::process::id().to_string());
+    }
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -71,19 +80,6 @@ pub fn spawn_service() -> std::io::Result<()> {
         .spawn()?;
     std::thread::spawn(move || child.wait());
     Ok(())
-}
-
-pub fn update_token() -> Option<String> {
-    if !crate::update::ENABLED {
-        return None;
-    }
-    let saved: serde_json::Value =
-        serde_json::from_slice(&fs::read(env::office_home().join("service.json")).ok()?).ok()?;
-    saved
-        .get("update")?
-        .as_str()
-        .filter(|v| !v.is_empty())
-        .map(String::from)
 }
 
 pub fn stop_service(package: &tauri::PackageInfo) -> bool {
@@ -136,20 +132,42 @@ pub fn run(package: &tauri::PackageInfo, diagnostics: Option<&Diagnostics>) -> R
     writeln!(
         file,
         "{}",
-        serde_json::json!({"key": key, "port": port,"update": update, "version": package.version.to_string()})
+        serde_json::json!({"key": key, "port": port, "version": package.version.to_string()})
     )
     .map_err(|e| e.to_string())?;
     std::env::set_var("ODDBORO_SERVICE_KEY", key);
     std::env::set_var("ODDBORO_SERVICE_MODE", "1");
     server::on_quit_signal(server::stop);
+    let slot = crate::service_update::Slot::default();
+    let watch = std::sync::Once::new();
     let result = service
-        .supervise(|| server::note(&service.log, "office ready without a window"))
+        .supervise(|| {
+            server::note(&service.log, "office ready without a window");
+            watch.call_once(|| {
+                crate::service_update::confirmed(&package.version);
+                crate::service_update::watch(
+                    package.version.clone(),
+                    port,
+                    update.clone(),
+                    slot.clone(),
+                );
+            });
+        })
         .map_err(|why| {
             if let Some(d) = diagnostics {
                 d.gave_up(&why);
             }
             why.message(&service.log_tail())
         });
+    if let Some(next) = slot.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        if let Err(e) = crate::service_update::install(next) {
+            server::note(
+                &service.log,
+                &format!("Service upgrade failed: {e}; restarting the installed office"),
+            );
+            spawn_successor().map_err(|e| e.to_string())?;
+        }
+    }
     let _ = fs::remove_file(descriptor);
     result
 }

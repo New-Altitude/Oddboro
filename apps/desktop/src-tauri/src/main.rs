@@ -10,6 +10,7 @@ mod env;
 mod headless;
 mod secrets;
 mod server;
+mod service_update;
 mod update;
 
 use std::path::PathBuf;
@@ -208,15 +209,6 @@ fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
     while std::time::Instant::now() < until {
         if server::port_taken(port) && headless::recognized(&node, &code, port, &version) {
             let url = Url::parse(&format!("http://127.0.0.1:{port}")).expect("loopback URL");
-            if let Some(token) = headless::update_token() {
-                update::watch(update::Watch {
-                    app: app.clone(),
-                    port,
-                    token,
-                    log: env::log_file(),
-                    show: show_updating,
-                });
-            }
             open_main(app, &url);
             return;
         }

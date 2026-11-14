@@ -335,10 +335,10 @@ fn answers_http(port: u16) -> bool {
     let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
     let request =
         format!("GET /api/health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
-    let mut head = [0u8; 5];
+    let mut head = [0u8; 12];
     stream.write_all(request.as_bytes()).is_ok()
         && stream.read_exact(&mut head).is_ok()
-        && &head == b"HTTP/"
+        && (&head == b"HTTP/1.1 200" || &head == b"HTTP/1.0 200")
 }
 
 /// Asked to go, up to 10 seconds, then killed, for a child this thread owns.
