@@ -37,7 +37,6 @@ export type ChatEntry = {
   source?: ChatSource;
   /** The input's digest makes a repeated import reuse its saved files. */
   inputHash?: string;
-  publication?: import('@oddboro/ledger').PublicationCard;
   poke?: true;
   told?: true;
   failed?: true;

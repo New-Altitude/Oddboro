@@ -1,5 +1,5 @@
 {
-  "id": "40d9b606-53b4-4bef-90c9-27dd430db998",
+  "id": "5b74267c-2ce9-4c92-85db-e11eb7838934",
   "prevId": "089406c6-170a-4f23-baae-7fe08c116ade",
   "version": "7",
   "dialect": "postgresql",
@@ -306,6 +306,18 @@
         "switches": {
           "name": "switches",
           "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "level": {
+          "name": "level",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "office_tools": {
+          "name": "office_tools",
+          "type": "text[]",
           "primaryKey": false,
           "notNull": false
         },
@@ -2148,174 +2160,6 @@
           "value": "\"project_sessions\".\"agent\" IN ('claude', 'codex')"
         }
       },
-      "isRLSEnabled": false
-    },
-    "public.publication_follows": {
-      "name": "publication_follows",
-      "schema": "",
-      "columns": {
-        "staff_id": {
-          "name": "staff_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "account": {
-          "name": "account",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "mode": {
-          "name": "mode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "position": {
-          "name": "position",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "publication_follows_staff_id_staff_id_fk": {
-          "name": "publication_follows_staff_id_staff_id_fk",
-          "tableFrom": "publication_follows",
-          "tableTo": "staff",
-          "columnsFrom": ["staff_id"],
-          "columnsTo": ["id"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.publications": {
-      "name": "publications",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "identity": {
-            "type": "always",
-            "name": "publications_id_seq",
-            "schema": "public",
-            "increment": "1",
-            "startWith": "1",
-            "minValue": "1",
-            "maxValue": "2147483647",
-            "cache": "1",
-            "cycle": false
-          }
-        },
-        "account": {
-          "name": "account",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "slug": {
-          "name": "slug",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source_id": {
-          "name": "source_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "staff_id": {
-          "name": "staff_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "revision": {
-          "name": "revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "title": {
-          "name": "title",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "url": {
-          "name": "url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "published_at": {
-          "name": "published_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "received_at": {
-          "name": "received_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "withdrawn": {
-          "name": "withdrawn",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "read": {
-          "name": "read",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "publications_staff_id_staff_id_fk": {
-          "name": "publications_staff_id_staff_id_fk",
-          "tableFrom": "publications",
-          "tableTo": "staff",
-          "columnsFrom": ["staff_id"],
-          "columnsTo": ["id"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "publications_source_key": {
-          "name": "publications_source_key",
-          "nullsNotDistinct": false,
-          "columns": ["account", "slug", "source_id"]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.reports": {

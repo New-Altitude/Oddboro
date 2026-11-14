@@ -1,5 +1,5 @@
-// The office's own database (local-db.ts) in a throwaway folder on a free port,
-// with every migration, and the office tool server (src/mcp.ts) over it in a
+// The office's own database (local-db.ts) in a throwaway folder, on a free
+// port on Windows, with every migration, and the office tool server (src/mcp.ts) over it in a
 // process of its own, as the office starts one for each run. A test file
 // imports this before it loads any of the office's modules, since they read
 // where everything is as they start. The database stops when the file ends, so
@@ -25,7 +25,6 @@ const place = {
   ODDBORO_DB_PORT: String(port),
   // A file that does not exist, so no .env reaches this office.
   ODDBORO_ENV: join(folder, 'none.env'),
-  DATABASE_URL: `postgres://postgres:postgres@127.0.0.1:${port}/postgres`,
   ODDBORO_LOCAL_DB: '1',
   OLLAMA_URL: 'http://127.0.0.1:9'
 };

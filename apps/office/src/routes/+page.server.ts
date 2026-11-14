@@ -1,4 +1,5 @@
 import {
+  actCheckPassed,
   advancedMode,
   desk,
   goalThreads,
@@ -8,7 +9,7 @@ import {
   roster,
   serviceNames,
   switchedOffIn,
-  unreadMessages,
+  unreadPokes,
   welcomed,
   zone
 } from '@oddboro/ledger';
@@ -36,7 +37,7 @@ export const load: PageServerLoad = async () => {
     desk: await desk(),
     roomNames: await roomNamesFor(office.id),
     switchedOff: await switchedOffIn(office.id),
-    messages: await unreadMessages(),
+    messages: await unreadPokes(),
     // So the first paint already keeps a lead waiting on a colleague at its desk.
     threads: heldThreads(await goalThreads()),
     /** Each service's name by its id, for the lines saying what an Odd is doing. */
@@ -47,6 +48,8 @@ export const load: PageServerLoad = async () => {
     welcomed: !first,
     /** Whether the owner turned on Advanced mode, which shows Projects. */
     advanced: await advancedMode(),
+    /** Whether the owner passed the Act check, so the page asks it before a first raise to Act. */
+    actChecked: await actCheckPassed(),
     diagnostics: diagnosticsState(),
     account: accountStatus()
   };

@@ -1,6 +1,6 @@
 // The hand_off tool as a run sees it: the office tool server (src/mcp.ts) in a
 // process of its own, as the office starts one for each run, over the office's
-// own database (local-db.ts) in a throwaway folder on a free port. It checks
+// own database (local-db.ts) in a throwaway folder. It checks
 // what only the tool server decides: which runs are offered hand_off, that a
 // hand-off or a goal's plan carries the run's key to its thread, that a
 // hand-off that hands nothing on comes back as an error and one held for the

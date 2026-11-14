@@ -93,6 +93,10 @@ export const OWNER_ACTIONS = {
   'POST /api/asks/[id]/filter': { records: 'decision' },
   'POST /api/asks/[id]/folder': { records: 'decision' },
   'POST /api/asks/[id]/reply': { records: 'decision' },
+  'POST /api/browser-link': {
+    notAnAction:
+      "Makes a one-time link for the owner's browser, kept in memory for a minute; no record changes."
+  },
   'PUT /api/files': { records: 'work' },
   'POST /api/files/open': {
     notAnAction: 'Opens a page the Odd built in the browser; it changes nothing.'
@@ -146,9 +150,6 @@ export const OWNER_ACTIONS = {
     mayRecord: ['hire', 'work'],
     when: 'A hire, and a work row for each part of its look, when a kept sign-in still holds, the office is open and it has no Odd of the persona yet.'
   },
-  'PUT /api/personas/[slug]/publications': {
-    none: 'Stores the owner’s publication preference and starting position for this persona.'
-  },
   'DELETE /api/personas/[slug]': { none: "Ends a persona's sign-in and makes its Odd quiet." },
   'POST /api/pokes/[id]': { none: NO_ROW },
   'DELETE /api/pokes/[id]': { none: NO_ROW },
@@ -163,6 +164,11 @@ export const OWNER_ACTIONS = {
   'POST /api/setup/notify': { notAnAction: SETUP },
   // The owner's yes to Advanced mode's warning, and turning it off again.
   'PUT /api/setup/advanced': { records: 'decision' },
+  // The owner's answers to the Act check (`passActCheck`).
+  'POST /api/act-check': {
+    mayRecord: ['decision'],
+    when: 'One row the first time every answer is right. None for a wrong answer, or once the check was passed.'
+  },
   'PATCH /api/services/[id]': { records: 'access' },
   'POST /api/services/[id]': { none: NO_ROW },
   // The owner's Refresh (`refreshTools`).

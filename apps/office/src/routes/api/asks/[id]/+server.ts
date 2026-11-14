@@ -11,6 +11,7 @@
 // answer starts replies there too.
 import { error, json } from '@sveltejs/kit';
 import {
+  ActCheckNeeded,
   approveGoal,
   approvePlan,
   ask,
@@ -96,6 +97,8 @@ export const POST: RequestHandler = async ({ params, request }) => {
   try {
     decided = await decideAsk(a.id, decision, reason || null, body.report === true, inChat);
   } catch (e) {
+    // A yes to Act waits for the owner's Act check, and the ask stays open.
+    if (e instanceof ActCheckNeeded) error(409, e.message);
     error(400, e instanceof Error ? e.message : String(e));
   }
   if (!decided) error(409, 'This ask was already answered');

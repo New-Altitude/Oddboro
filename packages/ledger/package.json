@@ -10,6 +10,7 @@
     "./agents": "./src/agents.ts",
     "./first-questions": "./src/first-questions.ts",
     "./access": "./src/access-words.ts",
+    "./act-check": "./src/act-check.ts",
     "./grantable": "./src/grantable.ts",
     "./goals": "./src/goal-words.ts",
     "./checks": "./src/checks.ts",

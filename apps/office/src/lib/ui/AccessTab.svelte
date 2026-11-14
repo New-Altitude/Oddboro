@@ -17,6 +17,7 @@
   import { AGENT_NAMES, OFFICE_ACCOUNT, type Agent, type Effort } from '@oddboro/ledger/agents';
   import { AgentTools } from './agent-tools.svelte.ts';
   import { call } from './api.ts';
+  import { withActCheck } from './act-check.svelte.ts';
   import FoldersList from './FoldersList.svelte';
   import ModelPicker from './ModelPicker.svelte';
   import IconButton from './IconButton.svelte';
@@ -371,8 +372,10 @@
 
   async function setPermission(permission: Level) {
     problem = refused = '';
+    const set = () => call(`/api/staff/${profile.id}`, { permission }, 'PATCH');
     try {
-      await call(`/api/staff/${profile.id}`, { permission }, 'PATCH');
+      // Act waits for the owner's Act check, the first time only.
+      await (permission === 'act' ? withActCheck(set) : set());
     } catch (e) {
       problem = e instanceof Error ? e.message : String(e);
     }

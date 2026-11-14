@@ -143,13 +143,6 @@ export const OUTBOUND: readonly Outbound[] = [
     yes: "The owner signing a connector in, signing in to their New Altitude account, or a persona's Add or Reconnect."
   },
   {
-    file: 'apps/office/src/lib/server/persona-publications.ts',
-    calls: 2,
-    to: 'The signed-in New Altitude members site.',
-    sends: 'The account token, opted-in creator slugs and last received publication sequence.',
-    yes: 'The owner turning on publication updates for an installed persona.'
-  },
-  {
     file: 'apps/office/src/lib/server/persona-door.ts',
     calls: 1,
     to: "A persona's door on New Altitude, at its account's sign-in server.",
@@ -193,6 +186,13 @@ export const OUTBOUND: readonly Outbound[] = [
     to: 'Ollama at OLLAMA_URL, this computer unless the owner points it elsewhere.',
     sends: 'Text written to the ledger, or searched for, to turn it into a vector.',
     yes: 'The owner, who sets OLLAMA_URL; with it unset nothing leaves this computer.'
+  },
+  {
+    file: 'packages/ledger/src/local-db.ts',
+    calls: 1,
+    to: "The office's own database socket, in the office home on this computer.",
+    sends: 'Nothing: it only opens a connection, to learn whether another office answers there.',
+    yes: 'None needed: nothing leaves this computer, and it carries no data.'
   },
   {
     file: 'packages/ledger/src/office-access.ts',

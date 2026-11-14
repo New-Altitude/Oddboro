@@ -6,17 +6,7 @@
 import { and, eq, inArray, isNull, ne, or } from 'drizzle-orm';
 import { db } from './db.ts';
 import { lookSignature } from '@oddboro/sprites/look';
-import {
-  asks,
-  followUps,
-  jobs,
-  pokes,
-  publicationFollows,
-  staff,
-  tasks,
-  threads,
-  type AskKind
-} from './schema.ts';
+import { asks, followUps, jobs, pokes, staff, tasks, threads, type AskKind } from './schema.ts';
 import {
   anyStaffer,
   finishFollowUp,
@@ -107,7 +97,6 @@ export async function removeOdd(
       .where(and(eq(staff.id, id), isNull(staff.leftAt)))
       .returning({ id: staff.id });
     if (!row) return undefined;
-    if (who.package) await tx.delete(publicationFollows).where(eq(publicationFollows.staffId, id));
     await tx
       .update(pokes)
       .set({ status: 'cancelled' })

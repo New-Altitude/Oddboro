@@ -19,7 +19,7 @@
   import type { LessonEvent, OfficeEvent } from '#lib/server/events.ts';
   import DeskDrawer from '#lib/ui/DeskDrawer.svelte';
   import { account } from '#lib/ui/account.svelte.ts';
-  import { publicationNews, personaNews } from '#lib/ui/persona-offers.svelte.ts';
+  import { personaNews } from '#lib/ui/persona-offers.svelte.ts';
   import { diagnostics } from '#lib/ui/diagnostics.svelte.ts';
   import LedgerPanel from '#lib/ui/LedgerPanel.svelte';
   import ServicesPanel from '#lib/ui/ServicesPanel.svelte';
@@ -31,6 +31,8 @@
   import HireDrawer from '#lib/ui/HireDrawer.svelte';
   import FileViewer from '#lib/ui/FileViewer.svelte';
   import ReportView from '#lib/ui/ReportView.svelte';
+  import ActCheck from '#lib/ui/ActCheck.svelte';
+  import { actCheck } from '#lib/ui/act-check.svelte.ts';
   import {
     advanced,
     close,
@@ -126,6 +128,10 @@
   // Advanced mode as the server says; Setup changes it on this page as the owner answers.
   $effect.pre(() => {
     advanced.on = data.advanced;
+  });
+  // Whether the owner passed the Act check; passing it on this page sets it from then on.
+  $effect.pre(() => {
+    if (data.actChecked) actCheck.passed = true;
   });
   // Off, nothing offers Projects, and an open Projects window closes.
   $effect(() => {
@@ -751,7 +757,6 @@
       }
       // Only the persona offers hear this: the floor meets a persona Odd, or
       // sees it go quiet, through the staff table's change, as any hire.
-      if (e.type === 'publication-settings') return publicationNews();
       if (e.type === 'persona') return void personaNews(e);
       const page = e.table === 'chat' ? ['version'] : (ON_CHANGE.get(e.table) ?? []);
       // A move into another layout rebuilds the whole floor.
@@ -1516,6 +1521,7 @@
       </div>
     </div>
   {/if}
+  {#if actCheck.asking}<ActCheck />{/if}
 </main>
 
 <style>

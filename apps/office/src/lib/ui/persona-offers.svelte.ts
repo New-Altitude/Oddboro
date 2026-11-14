@@ -145,13 +145,3 @@ export class PersonaOffers {
     }
   }
 }
-
-export const publicationSettings = {
-  get version() {
-    return publicationChanges;
-  }
-};
-let publicationChanges = $state(0);
-export function publicationNews() {
-  publicationChanges++;
-}
