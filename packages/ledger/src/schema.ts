@@ -1229,3 +1229,36 @@ export const projectRequests = pgTable(
     index('project_requests_session').on(t.sessionId, t.createdAt)
   ]
 );
+
+/** Local consent and the last service sequence committed for that subscription. */
+export const publicationFollows = pgTable('publication_follows', {
+  staffId: text()
+    .primaryKey()
+    .references(() => staff.id),
+  account: text().notNull(),
+  mode: text().$type<'chat' | 'desktop'>().notNull(),
+  position: text().notNull()
+});
+
+/** Chat reads this row directly. A receipt and its cursor never straddle a file write. */
+export const publications = pgTable(
+  'publications',
+  {
+    id: id(),
+    account: text().notNull(),
+    slug: text().notNull(),
+    sourceId: text().notNull(),
+    staffId: text()
+      .notNull()
+      .references(() => staff.id),
+    revision: integer().notNull(),
+    kind: text().$type<'article' | 'video'>().notNull(),
+    title: text().notNull(),
+    url: text().notNull(),
+    publishedAt: at('published_at').notNull(),
+    receivedAt: created('received_at'),
+    withdrawn: boolean().notNull().default(false),
+    read: boolean().notNull().default(false)
+  },
+  (t) => [unique('publications_source_key').on(t.account, t.slug, t.sourceId)]
+);

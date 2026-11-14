@@ -143,6 +143,13 @@ export const OUTBOUND: readonly Outbound[] = [
     yes: "The owner signing a connector in, signing in to their New Altitude account, or a persona's Add or Reconnect."
   },
   {
+    file: 'apps/office/src/lib/server/persona-publications.ts',
+    calls: 2,
+    to: 'The signed-in New Altitude members site.',
+    sends: 'The account token, opted-in creator slugs and last received publication sequence.',
+    yes: 'The owner turning on publication updates for an installed persona.'
+  },
+  {
     file: 'apps/office/src/lib/server/persona-door.ts',
     calls: 1,
     to: "A persona's door on New Altitude, at its account's sign-in server.",

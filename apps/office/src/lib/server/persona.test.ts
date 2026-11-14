@@ -108,7 +108,7 @@ async function call(
   route: string,
   handler: Handler,
   how: {
-    method?: 'GET' | 'POST' | 'DELETE';
+    method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
     slug?: string;
     body?: unknown;
     headers?: Record<string, string>;
@@ -706,6 +706,64 @@ test("a persona added from a hire ask's window answers that ask once it joins, a
   assert.match(offeredSection(here), /Already working here as personas: Pat Example/);
   assert.equal((await account('DELETE')).status, 200);
   assert.equal(offeredSection(new Set()), '');
+});
+
+test('an advertised publication reaches the opted-in chat through the members feed, without a chat turn', async () => {
+  await signIn();
+  fake.odds = [{ ...PAT, publications: 1 }];
+  await grant('pat');
+  await syncPersonas();
+  const mod = await import('../../routes/api/personas/[slug]/publications/+server.ts');
+  const setting = (mode: string) =>
+    call('/api/personas/[slug]/publications', mod.PUT as Handler, {
+      method: 'PUT',
+      slug: 'pat',
+      body: { mode }
+    });
+  const path = '/api/personas/publications';
+  const before = seenAt(path + '/events').length;
+  const turns = seenAt('/pat/stream').length;
+  assert.equal(
+    (await call('/api/personas/[slug]/publications', mod.GET as Handler, { slug: 'pat' })).body
+      .mode,
+    'off'
+  );
+  fake.publicationHead = 9;
+  fake.publicationBatch = {
+    through: 11,
+    phase: 'live',
+    events: ['article', 'video'].map((kind, i) => ({
+      kind,
+      sequence: 10 + i,
+      slug: 'pat',
+      id: kind,
+      revision: 1,
+      action: 'published',
+      title: 'Creator update',
+      url: 'https://example.test/piece',
+      publishedAt: '2026-01-01T00:00:00Z'
+    }))
+  };
+  assert.equal((await setting('chat')).status, 200);
+  const id = (await odd('pat'))!.id;
+  const until = Date.now() + 3000;
+  while ((await L.publicationLines(id)).length < 2 && Date.now() < until)
+    await new Promise((r) => setTimeout(r, 15));
+  const { chatLog } = await import('./staff.ts');
+  assert.equal((await chatLog(id)).filter((l) => l.publication).length, 2);
+  assert.equal(seenAt(path + '/events').length, before + 1);
+  assert.equal(seenAt('/pat/stream').length, turns);
+  assert.equal((await setting('off')).body.mode, 'off');
+  assert.equal((await setting('chat')).status, 200);
+  assert.equal((await persona('DELETE', 'pat')).status, 200);
+  assert.equal(
+    (await call('/api/personas/[slug]/publications', mod.GET as Handler, { slug: 'pat' })).body
+      .mode,
+    'off'
+  );
+  await account('DELETE');
+  fake.odds = [PAT];
+  fake.publicationBatch = undefined;
 });
 
 test('no token, code, state or verifier reaches .env or the logs', async () => {

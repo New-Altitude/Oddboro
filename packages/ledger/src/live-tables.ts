@@ -25,6 +25,13 @@ export type LiveTable = {
 };
 
 export const LIVE_TABLES: Record<TableName, LiveTable> = {
+  publication_follows: {
+    trigger: {
+      none: 'A subscription is set by its control. Advancing its cursor changes nothing on screen.'
+    },
+    page: []
+  },
+  publications: { trigger: 'all', page: ['refresh', 'version'] },
   project_requests: { trigger: 'all', page: ['refresh', 'version'] },
   project_sessions: { trigger: 'all', page: ['version'] },
   staff: { trigger: 'all', page: ['refresh'] },

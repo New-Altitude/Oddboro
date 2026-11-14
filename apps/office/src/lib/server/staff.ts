@@ -71,6 +71,7 @@ import {
   ownerNoteOf,
   ownToolsSaid,
   pokeMissed,
+  publicationLines,
   recentThreads,
   recentThreadsBrief,
   recordUsage,
@@ -252,9 +253,14 @@ export async function chatLog(id: string): Promise<ChatEntry[]> {
     ];
   });
   const messages = history(id).map(({ item: _item, ...message }) => message);
-  return [...messages, ...items, ...threads, ...handOffs, ...kept].sort((a, b) =>
-    a.at.localeCompare(b.at)
-  );
+  return [
+    ...messages,
+    ...items,
+    ...threads,
+    ...handOffs,
+    ...kept,
+    ...(await publicationLines(id))
+  ].sort((a, b) => a.at.localeCompare(b.at));
 }
 
 /** Every plugin in the owner's user settings, switched off for staff sessions. */

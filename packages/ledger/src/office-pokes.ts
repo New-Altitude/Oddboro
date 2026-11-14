@@ -8,6 +8,8 @@ import type { PokeRow } from './office.ts';
 import { ofWorkingOdd } from './office-staff.ts';
 import { record } from './office-ledger.ts';
 
+import { unreadPublications } from './publications.ts';
+
 // Pokes
 
 /** A poke can be set this far ahead at most. */
@@ -158,4 +160,12 @@ export async function renameRoom(
       });
   await record({ kind: 'work', actor: 'owner', title: `Renamed ${names.was} to ${next}` });
   return next;
+}
+
+/** Unread messages on the floor, from scheduled pokes and creator publications. */
+export async function unreadMessages() {
+  const counts = await unreadPokes();
+  for (const r of await unreadPublications())
+    counts[r.staffId] = (counts[r.staffId] ?? 0) + r.count;
+  return counts;
 }

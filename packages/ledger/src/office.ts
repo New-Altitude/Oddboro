@@ -231,6 +231,7 @@ export {
   schedulePoke,
   waitingPokes,
   unreadPokes,
+  unreadMessages,
   readPokes,
   cancelPoke,
   pokeNow,

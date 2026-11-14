@@ -35,6 +35,7 @@ import { preview } from './looks.ts';
 import { deleteSecret, getSecret, setSecret } from './keychain.ts';
 import { exclusive, freshAccess, KeychainProvider, steadyFetch, type Saved } from './oauth.ts';
 import { askDoor, doorUrl, PERSONA_SCOPE, type DoorAnswer } from './persona-door.ts';
+import { publicationsOffered, signOutPublications } from './persona-publications.ts';
 import { heardOffers } from './persona-offered.ts';
 import { isSlug, packageProblems, readListed, type Listed } from './persona-package.ts';
 import { sayInChat } from './staff.ts';
@@ -231,6 +232,9 @@ export async function disconnectPersona(slug: string): Promise<void> {
  * in and reconnects it.
  */
 export async function endPersonaGrants(): Promise<void> {
+  await signOutPublications().catch(() =>
+    console.error('[persona] publication preferences could not be cleared')
+  );
   heardOffers(undefined);
   // Without the ledger, the kept list still names every sign-in, so the
   // owner's sign-out goes on and ends them all.
@@ -340,8 +344,12 @@ async function toOffer(l: Listed): Promise<Offer> {
 /** Read New Altitude's list once, bring the persona Odds in line with it, and answer the offers. */
 export async function syncPersonas(): Promise<Offers> {
   const listing = await readListing();
-  if (listing.state !== 'ok') return listing;
+  if (listing.state !== 'ok') {
+    if (listing.state !== 'unreachable') publicationsOffered(undefined);
+    return listing;
+  }
   await applyListing(listing.listed);
+  publicationsOffered(listing.listed.filter((l) => l.publications).map((l) => l.slug));
   return { state: 'ok', offers: await Promise.all(listing.listed.map(toOffer)) };
 }
 

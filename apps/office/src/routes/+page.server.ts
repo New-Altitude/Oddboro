@@ -8,7 +8,7 @@ import {
   roster,
   serviceNames,
   switchedOffIn,
-  unreadPokes,
+  unreadMessages,
   welcomed,
   zone
 } from '@oddboro/ledger';
@@ -36,7 +36,7 @@ export const load: PageServerLoad = async () => {
     desk: await desk(),
     roomNames: await roomNamesFor(office.id),
     switchedOff: await switchedOffIn(office.id),
-    messages: await unreadPokes(),
+    messages: await unreadMessages(),
     // So the first paint already keeps a lead waiting on a colleague at its desk.
     threads: heldThreads(await goalThreads()),
     /** Each service's name by its id, for the lines saying what an Odd is doing. */
