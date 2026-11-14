@@ -96,6 +96,7 @@ export const OFFICE_TOOL_WORDS: Record<string, string> = {
   leave_office: 'Asking you to let it leave',
   withdraw: 'Taking things off your desk',
   my_pokes: 'Checking its pokes',
+  oddboro_update: 'Checking Oddboro updates',
   office_report: 'Reading the office report',
   poke_owner: 'Setting a poke for you',
   propose_goal: 'Proposing a goal',

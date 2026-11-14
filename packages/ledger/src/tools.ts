@@ -168,6 +168,13 @@ const TOOLS = [
     does: 'Gives a colleague a piece of work. The colleague starts at once, and the result comes back to it to pick each next step, or a time to pick the work back up. It says up front how many steps it expects. Needing more than it expected, or expecting a lot, asks you first.'
   },
   {
+    id: 'oddboro_update',
+    name: 'Oddboro updates',
+    does: 'Reads this app’s update status and can check for a new version. Shows update controls in chat; only you can choose Install now.',
+    always: true,
+    inChat: true
+  },
+  {
     id: 'poke_owner',
     name: 'Poke you',
     does: 'Sends you a chat message later, once: a check-in or a nudge.'

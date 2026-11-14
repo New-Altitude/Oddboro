@@ -757,6 +757,11 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   office takes it once as the chat run ends (`takeBugDraft`) and puts it on
   the reply, where File this opens the report form. It files nothing.
   `test/bug-drafts.test.ts` holds it.
+- `oddboro_update`, every Odd's and only in owner chat, reads the office's
+  run-start update status and keeps a status or check request for its reply
+  (`src/chat-updates.ts`). A successful reply shows the existing Updates
+  controls. The tool never installs or restarts; Install now is the owner's
+  action. `test/chat-updates.test.ts` holds that limit.
 - An Odd leaves the office only on the owner's yes, and can come back
   (`src/leaving.ts`). `staff.left_at` marks one that left; the row and its
   history stay. `staffer()` and `roster()` find working Odds only, so a run,

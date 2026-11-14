@@ -1,6 +1,7 @@
 // What a run's office tool server (mcp.ts in the ledger) is told about the run,
 // through its environment. The tool server trusts only these, never a tool
 // argument, so each one here is a rule the run is held to.
+import type { ChatUpdateStatus } from '@oddboro/ledger';
 
 /** What `officeEnv` needs to know about one run. */
 export type RunFacts = {
@@ -8,6 +9,8 @@ export type RunFacts = {
   key: string;
   /** The owner's own message, when this is a chat. */
   ownerSaid?: string;
+  /** The updater's status when this owner chat starts. No shell token or release notes. */
+  update?: ChatUpdateStatus;
   /** In a chat, the last exchange before the owner's message, which `tell_lead` passes on. */
   chatExchange?: string;
   /**
@@ -58,6 +61,7 @@ export function officeEnv(r: RunFacts): Record<string, string> {
   return {
     RUN_KEY: r.key,
     ...(r.ownerSaid ? { OWNER_SAID: words(r.ownerSaid) } : {}),
+    ...(r.ownerSaid && r.update ? { ODDBORO_UPDATE_STATUS: JSON.stringify(r.update) } : {}),
     ...(r.chatExchange ? { CHAT_EXCHANGE: words(r.chatExchange) } : {}),
     // Whole, never cut: a list cut short would read as none.
     ...(r.ownerFiles?.length ? { OWNER_FILES: JSON.stringify(r.ownerFiles) } : {}),

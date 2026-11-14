@@ -14,6 +14,7 @@ import {
   setUpdateWindow,
   timeToInstall,
   updateRow,
+  chatUpdateStatus,
   type UpdateRow
 } from '@oddboro/ledger';
 import { fixedError } from '@oddboro/ledger/errors';
@@ -137,3 +138,6 @@ export async function status(shell = false) {
 }
 
 export type UpdateStatus = Awaited<ReturnType<typeof status>>;
+
+/** A chat reads the same status as Setup, without release-note text. */
+export const updateForChat = async () => chatUpdateStatus.parse(await status());
