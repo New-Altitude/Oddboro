@@ -144,6 +144,7 @@ pub fn run(package: &tauri::PackageInfo, diagnostics: Option<&Diagnostics>) -> R
         .supervise(|| {
             server::note(&service.log, "office ready without a window");
             watch.call_once(|| {
+                #[cfg(not(windows))]
                 crate::service_update::confirmed(&package.version);
                 crate::service_update::watch(
                     package.version.clone(),

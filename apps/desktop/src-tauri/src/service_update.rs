@@ -215,13 +215,13 @@ fn same_record(old: &Path, version: &Version) -> bool {
     serde_json::from_slice::<Value>(&bytes)
         .is_ok_and(|r| r == json!({"backup":old,"version":version.to_string()}))
 }
-pub fn confirmed(_version: &Version) {
+#[cfg(not(windows))]
+pub fn confirmed(version: &Version) {
     if !update::ENABLED {
         return;
     }
-    #[cfg(not(windows))]
     if let Ok(path) = installed_path().and_then(|p| backup(&p)) {
-        if same_record(&path, _version) && (!path.exists() || remove_backup(&path).is_ok()) {
+        if same_record(&path, version) && (!path.exists() || remove_backup(&path).is_ok()) {
             let _ = fs::remove_file(record());
         }
     }
