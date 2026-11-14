@@ -14,12 +14,26 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 const folder = mkdtempSync(join(tmpdir(), 'oddboro-tool-server-'));
-const port = await new Promise<number>((done) => {
-  const s = createServer().listen(0, '127.0.0.1', () => {
-    const p = (s.address() as { port: number }).port;
-    s.close(() => done(p));
-  });
-});
+/**
+ * The test database's port. A port the system picks (listen on 0) comes from
+ * the range it also gives outgoing connections, and the database listens only
+ * later: in between, another test file's database or any connection could
+ * take it, and the database's listen then kills this process (EADDRINUSE).
+ * So: below every system's range for those (Linux 32768, the Mac and Windows
+ * 49152), by process id, which no two test files running at once share, and
+ * the next one up if something already listens there.
+ */
+async function databasePort(): Promise<number> {
+  for (let port = 20_000 + (process.pid % 12_000); ; port = port >= 31_999 ? 20_000 : port + 1) {
+    const free = await new Promise<boolean>((done) => {
+      const s = createServer()
+        .once('error', () => done(false))
+        .listen(port, '127.0.0.1', () => s.close(() => done(true)));
+    });
+    if (free) return port;
+  }
+}
+const port = await databasePort();
 const place = {
   ODDBORO_HOME: folder,
   ODDBORO_DB_PORT: String(port),
