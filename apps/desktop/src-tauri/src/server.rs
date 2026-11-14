@@ -317,7 +317,7 @@ fn wait_ready(child: &mut Child, port: u16) -> Ready {
     Ready::TimedOut
 }
 
-/// True when `GET /` gets any HTTP response at all.
+/// Use the health route so a readiness probe never loads a floor or starts the welcome.
 fn answers_http(port: u16) -> bool {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(500)) else {
@@ -325,7 +325,8 @@ fn answers_http(port: u16) -> bool {
     };
     let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
-    let request = format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+    let request =
+        format!("GET /api/health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
     let mut head = [0u8; 5];
     stream.write_all(request.as_bytes()).is_ok()
         && stream.read_exact(&mut head).is_ok()

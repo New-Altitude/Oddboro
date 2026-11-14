@@ -18,6 +18,10 @@ quit, keeping the computer awake and notifications (`server.rs`), opening
 links, the tray icon and closing the window (`main.rs`), and reopening after
 an update (`update.rs`).
 
+## Run without a window
+
+Run the installed executable with `--headless` to start the bundled office in the foreground. It starts before the display or tray initializes. The same executable supervises Node and handles the Mac Keychain. The health probe reads `/api/health` so startup does not render the office. Stop the foreground office with Ctrl-C on Unix.
+
 ## What the shell does
 
 1. Checks for a newer version before anything else (`update::on_launch`,
