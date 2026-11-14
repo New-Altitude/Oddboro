@@ -10,8 +10,8 @@ import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mock, test } from 'node:test';
-import { desc, eq, sql, type SQL } from 'drizzle-orm';
-import { PgDialect } from 'drizzle-orm/pg-core';
+import { desc, eq, getTableName, sql, type SQL } from 'drizzle-orm';
+import { PgDialect, type PgTable } from 'drizzle-orm/pg-core';
 import { asks, attachments, followUps, goals, jobs, pokes, staff, threads } from '../src/schema.ts';
 import type { Tx } from '../src/threads.ts';
 import { GOAL_SET } from '../src/work/asks.ts';
@@ -22,6 +22,7 @@ import { newRun } from '../src/work/threads.ts';
 import { db } from './pglite.ts';
 import {
   answer,
+  AWS_STEP,
   bringingBack,
   calls,
   DRIVE_STEP,
@@ -248,21 +249,44 @@ test('a run that failed before it started, or of a retired kind, is not queued',
 /** Each lock a loader takes, by table, in order, with its mode and ids. */
 type Lock = { table: string; mode: string; ids: string[] };
 
-/** Load an event's rows in a transaction of their own, with every lock the loader took. */
-async function loadLocked(e: WorkEvent): Promise<{ rows: WorkRows; locks: Lock[] }> {
+/**
+ * Load an event's rows in a transaction of their own, with every row lock the
+ * loader took, and its trail: each table it read (`read:asks`), each row lock
+ * (`lock:asks`) and each tool's connect lock (`connect:drive`), in the order
+ * it took them, so a test can see that a read came after the lock that guards it.
+ */
+async function loadLocked(
+  e: WorkEvent
+): Promise<{ rows: WorkRows; locks: Lock[]; trail: string[] }> {
   const dialect = new PgDialect();
   const locks: Lock[] = [];
+  const trail: string[] = [];
   const rows = await officeDb.transaction(async (tx) => {
     const execute = tx.execute.bind(tx);
     mock.method(tx, 'execute', (query: SQL) => {
       const { sql: text, params } = dialect.sqlToQuery(query);
       const lock = /from "(\w+)" .* for (update|share)$/.exec(text);
-      if (lock) locks.push({ table: lock[1], mode: lock[2], ids: params.map(String) });
+      if (lock) {
+        locks.push({ table: lock[1], mode: lock[2], ids: params.map(String) });
+        trail.push(`lock:${lock[1]}`);
+      }
+      // A tool's connect lock is keyed by its one parameter, `connect:<tool>`.
+      if (text.includes('pg_advisory_xact_lock')) trail.push(...params.map(String));
       return execute(query);
+    });
+    const select = tx.select.bind(tx);
+    mock.method(tx, 'select', (...args: Parameters<typeof select>) => {
+      const builder = select(...args);
+      const from = builder.from.bind(builder);
+      mock.method(builder, 'from', (table: PgTable) => {
+        trail.push(`read:${getTableName(table)}`);
+        return from(table);
+      });
+      return builder;
     });
     return loadWork(tx, e);
   });
-  return { rows, locks };
+  return { rows, locks, trail };
 }
 
 const WRITES_HERE = new Set<WorkEvent['kind']>([
@@ -276,6 +300,30 @@ const WRITES_HERE = new Set<WorkEvent['kind']>([
 
 test('every loader locks in the one table order each row its decider reads, and for update each it writes', async () => {
   await seedOffice();
+  // A grant's connect task: its steps name their tools, not in sorted order, and no open task answers it.
+  const grantTask: WorkEvent = {
+    kind: 'taskGiven',
+    task: {
+      staffId: 'cal',
+      askId: 3,
+      title: 'Connect Drive and AWS',
+      why: 'w',
+      steps: [DRIVE_STEP, AWS_STEP]
+    }
+  };
+  const oneOpenTask: WorkEvent = {
+    kind: 'taskGiven',
+    task: { staffId: 'cal', title: 'Connect Drive', why: 'w', steps: [DRIVE_STEP] },
+    oneOpen: { connector: 'drive' }
+  };
+  const dropped: WorkEvent = { kind: 'connectTasksDropped', connector: 'drive' };
+  // The tools whose connect tasks each loader locks, sorted, so two transactions take them in
+  // one order. Every other loader locks none.
+  const connects = new Map<WorkEvent, string[]>([
+    [grantTask, ['connect:aws', 'connect:drive']],
+    [oneOpenTask, ['connect:drive']],
+    [dropped, ['connect:drive']]
+  ]);
   const events: WorkEvent[] = [
     {
       kind: 'runQueued',
@@ -315,14 +363,11 @@ test('every loader locks in the one table order each row its decider reads, and 
       kind: 'taskGiven',
       task: { staffId: 'rae', title: 'Read this', why: 'w', steps: [], threadId: 4 }
     },
-    {
-      kind: 'taskGiven',
-      task: { staffId: 'cal', title: 'Connect Drive', why: 'w', steps: [DRIVE_STEP] },
-      oneOpen: { connector: 'drive' }
-    },
+    oneOpenTask,
+    grantTask,
     { kind: 'taskEnded', id: 3, ended: 'done', note: null, inChat: false },
     { kind: 'taskEnded', id: 4, ended: 'withdrawn', note: 'Gone.', inChat: false },
-    { kind: 'connectTasksDropped', connector: 'drive' },
+    dropped,
     { kind: 'goalStatusChanged', goalId: 1, status: 'met' },
     {
       kind: 'handedOff',
@@ -357,7 +402,7 @@ test('every loader locks in the one table order each row its decider reads, and 
     .where(eq(threads.id, 7));
   const every = new Set<string>();
   for (const e of events) {
-    const { rows, locks } = await loadLocked(e);
+    const { rows, locks, trail } = await loadLocked(e);
     const at = `${e.kind} ${JSON.stringify(e)} locked ${locks.map((l) => `${l.table} ${l.mode} ${l.ids.join(',')}`).join('; ')}`;
     const order = locks.map((l) => LOCK_ORDER.indexOf(l.table as (typeof LOCK_ORDER)[number]));
     for (const l of locks) every.add(l.table);
@@ -367,6 +412,20 @@ test('every loader locks in the one table order each row its decider reads, and 
       e.kind === 'askDecided' && e.decision === 'approve' && rows.asks.get(e.id)?.kind === 'window';
     if (e.kind === 'handedOff' || rows.window || windowYes)
       assert.equal(locks[0]?.table, 'plan_limits', at);
+    // The yes reads the work the ask holds only under the plan's lock, so a hand-off the
+    // window holds at the same moment is either among it or waits for the yes.
+    if (windowYes) {
+      const plan = trail.indexOf('lock:plan_limits');
+      assert.ok(
+        plan !== -1 && plan < trail.indexOf('read:threads'),
+        `the held work was read before the plan's lock: ${trail.join(' ')}`
+      );
+    }
+    assert.deepStrictEqual(
+      trail.filter((s) => s.startsWith('connect:')),
+      connects.get(e) ?? [],
+      `connect locks: ${at}`
+    );
     assert.ok(!order.includes(-1), at);
     assert.deepStrictEqual(
       order,
