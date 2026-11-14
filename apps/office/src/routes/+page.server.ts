@@ -13,6 +13,7 @@ import {
   welcomed,
   zone
 } from '@oddboro/ledger';
+import { unreadNews } from '#lib/server/newsroom.ts';
 import { accountStatus } from '#lib/server/account.ts';
 import { keepAddress } from '#lib/server/address.ts';
 import { diagnosticsState } from '#lib/server/diagnostics.ts';
@@ -51,6 +52,7 @@ export const load: PageServerLoad = async () => {
     /** Whether the owner passed the Act check, so the page asks it before a first raise to Act. */
     actChecked: await actCheckPassed(),
     diagnostics: diagnosticsState(),
+    newsroomUnread: unreadNews(),
     account: accountStatus()
   };
 };

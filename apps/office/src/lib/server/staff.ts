@@ -1,3 +1,4 @@
+import { newsroomChat } from './newsroom.ts';
 // Running a staffer: each chat message or job run is Claude Code, or Grok, Codex
 // or Gemini for an Odd the owner moved to one (cli.ts), run headless, with the staffer's job
 // description from Postgres added to the system prompt. Server only.
@@ -252,8 +253,8 @@ export async function chatLog(id: string): Promise<ChatEntry[]> {
     ];
   });
   const messages = history(id).map(({ item: _item, ...message }) => message);
-  return [...messages, ...items, ...threads, ...handOffs, ...kept].sort((a, b) =>
-    a.at.localeCompare(b.at)
+  return [...messages, ...newsroomChat(id), ...items, ...threads, ...handOffs, ...kept].sort(
+    (a, b) => a.at.localeCompare(b.at)
   );
 }
 
