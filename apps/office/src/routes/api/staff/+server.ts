@@ -12,6 +12,8 @@
 import { error, json } from '@sveltejs/kit';
 import {
   account as accountRow,
+  ACT_CHECK_NEEDED,
+  actCheckPassed,
   addJob,
   AGENT_NAMES,
   agentsOn,
@@ -75,6 +77,8 @@ export const POST: RequestHandler = async ({ request }) => {
   if (problems.length) error(400, problems.join('; '));
   if (!rooms.has(room)) error(400, 'Pick a room on the floor');
   if (!permission) error(400, 'Pick read, draft or act');
+  // A hire at Act waits for the owner's Act check (`hire` refuses it too).
+  if (permission === 'act' && !(await actCheckPassed())) error(409, ACT_CHECK_NEEDED);
   // Left out, the hire runs on the column's default, Claude Code.
   const agent = b.agent === undefined ? undefined : offeredAgent(b.agent, currentPlatform());
   if (b.agent !== undefined && !agent)

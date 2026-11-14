@@ -15,7 +15,7 @@ pub fn run(package: &tauri::PackageInfo, diagnostics: Option<&Diagnostics>) -> R
         server_code(package).ok_or(NO_SERVER)?,
         port,
         package.version.to_string(),
-        String::new(),
+        false,
         diagnostics,
     );
     server::on_quit_signal(server::stop);

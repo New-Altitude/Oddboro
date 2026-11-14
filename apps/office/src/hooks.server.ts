@@ -8,23 +8,27 @@
 // Each step's time goes to the log and to /api/health (`#lib/server/health.ts`).
 // In the app (ODDBORO_APP) it also quits when the app does: on SIGTERM, once
 // the HTTP server has closed, and when the app's stdin pipe closes, which
-// happens however the app ends, Force Quit included. On a Mac it keeps its
-// secrets through the app's shell, over those same pipes (`useShellSecrets`).
-// Every route and API request passes `guardOffice` first: only from this
-// computer, at the office's own names, and actions only from the owner's page
-// (`#lib/server/owner-page.ts`).
+// happens however the app ends, Force Quit included. The first line on that
+// pipe is the app's key, which every request in the app must carry
+// (`#lib/server/app-key.ts`); the office waits for it before anything else.
+// On a Mac it keeps its secrets through the app's shell, over those same
+// pipes (`useShellSecrets`).
+// Every route and API request passes `guardOffice` first: in the app only
+// with the key, only from this computer, at the office's own names, and
+// actions only from the owner's page (`#lib/server/owner-page.ts`).
 // Files built into the page (scripts, styles, images) are served before it.
 // Then Sentry's handle, which traces the request when the owner said yes to diagnostics.
 import { release } from 'node:os';
 import { sequence, type ServerInit } from '@sveltejs/kit/hooks';
 import { handleErrorWithSentry, sentryHandle } from '@sentry/sveltekit';
-import { LOCAL, makeHomePrivate, whenOddLeaves } from '@oddboro/ledger';
+import { IN_APP, LOCAL, makeHomePrivate, whenOddLeaves } from '@oddboro/ledger';
 import { trustSystemCertificates } from '@oddboro/ledger/certificates';
 import { startLocalDatabase } from '@oddboro/ledger/local-db';
 import { currentPlatform } from '@oddboro/ledger/platform';
 import { useShellSecrets } from '@oddboro/ledger/secrets';
 import { bringUpToDate } from '@oddboro/ledger/upgrade';
 import { keepAddress } from '#lib/server/address.ts';
+import { readKey } from '#lib/server/app-key.ts';
 import { startFollowUps } from '#lib/server/follow-ups.ts';
 import { markReady, timed } from '#lib/server/health.ts';
 import { stopRuns } from '#lib/server/staff.ts';
@@ -42,6 +46,8 @@ export const handleError = handleErrorWithSentry();
 // Before anything reaches out: New Altitude, a connector, a model, Sentry.
 trustSystemCertificates();
 
+// Listening before the pipe flows, so the key's line is never dropped.
+const keyRead = IN_APP ? readKey(process.stdin) : Promise.resolve(true);
 if (process.env.ODDBORO_APP) {
   process.on('sveltekit:shutdown', () => process.exit(0));
   process.stdin.on('close', () => process.exit(0)).resume();
@@ -53,6 +59,9 @@ export const init: ServerInit = async () => {
   );
   // Before the office writes anything there, the database's socket included.
   makeHomePrivate();
+  // The key comes first on the pipe, before any answer about secrets.
+  if (IN_APP && !(await timed('key', () => keyRead)))
+    console.error('office: the app gave no key, so the office answers nothing');
   // In the Mac app the shell keeps the secrets; this process alone asks it.
   await timed('secrets', useShellSecrets);
   if (LOCAL) await timed('database', startLocalDatabase);
