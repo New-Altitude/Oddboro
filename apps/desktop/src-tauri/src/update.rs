@@ -169,7 +169,10 @@ fn hand_over(w: &Watch, update: &Update, bytes: &[u8], checks: &Receiver<()>) {
         &format!("installing {to} over {from}: stopping the office"),
     );
     (w.show)(app, &update.version);
-    server::stop();
+    if !crate::headless::stop_service(app.package_info()) {
+        server::note(log, "update cancelled: could not stop the running office");
+        return;
+    }
     match install(update, bytes) {
         Ok(()) => server::note(log, &installed(update)),
         Err(e) => server::note(

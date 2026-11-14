@@ -212,7 +212,10 @@ impl Server {
         // The office keeps its secrets through this shell (`secrets.rs`), over
         // the two pipes above. Mac only.
         #[cfg(target_os = "macos")]
-        command.env("ODDBORO_SECRETS", "shell");
+        if !(cfg!(debug_assertions) && std::env::var("ODDBORO_SECRETS").as_deref() == Ok("office"))
+        {
+            command.env("ODDBORO_SECRETS", "shell");
+        }
         // Node is a console program. Without this, Windows opens a console
         // window for it, and for every program it starts.
         #[cfg(windows)]

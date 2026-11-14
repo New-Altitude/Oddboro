@@ -165,16 +165,24 @@
       saving = false;
     }
   }
+  let projectId = $state('');
+  function pickProject(id: string) {
+    projectId = id;
+    openProject(id);
+    tab = 'panel';
+  }
   function switchByKey(e: KeyboardEvent) {
-    if (e.altKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp') && office.staff.length) {
-      e.preventDefault();
-      const i = office.staff.findIndex((x) => x.id === selected);
-      pick(
-        office.staff[
-          (i + (e.key === 'ArrowDown' ? 1 : -1) + office.staff.length) % office.staff.length
-        ].id
-      );
-    }
+    if (!e.altKey || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')) return;
+    const items = [
+      ...office.staff.map((p) => ({ id: p.id, project: false })),
+      ...office.sessions.map((s) => ({ id: s.id, project: true }))
+    ];
+    if (!items.length) return;
+    e.preventDefault();
+    const i = items.findIndex((x) => x.id === (tab === 'panel' ? projectId : selected));
+    const next = items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length];
+    if (next.project) pickProject(next.id);
+    else pick(next.id);
   }
   function view(t: string) {
     wins.shown = false;
@@ -227,6 +235,16 @@
               tab = 'panel';
             }}>Project sessions</button
           >{/if}
+        {#each office.sessions as session (session.id)}
+          <button title={session.folder} onclick={() => pickProject(session.id)}
+            >{session.title}<small
+              >{session.agent} · {session.status}{session.staffId
+                ? ' · ' +
+                  (office.staff.find((p) => p.id === session.staffId)?.name ?? session.staffId)
+                : ''}</small
+            ></button
+          >
+        {/each}
         <h2>Odds</h2>
         {#each office.staff as p (p.id)}<button
             class:chosen={tab === 'chat' && selected === p.id}

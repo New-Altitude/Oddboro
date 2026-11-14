@@ -20,6 +20,8 @@ an update (`update.rs`).
 
 ## Run without a window
 
+The desktop now starts or attaches to the same independently supervised service as the CLI. Quitting the desktop disconnects the window; **Stop office** or the CLI stops the server. Signed automatic installation still requires a desktop updater. See [Workspace and the command line](../../docs/workspace-and-cli.md).
+
 Run the installed executable with `--headless` to start the bundled office in the foreground. It starts before the display or tray initializes. The same executable supervises Node and handles the Mac Keychain. The health probe reads `/api/health` so startup does not render the office. Stop the foreground office with Ctrl-C on Unix.
 
 ## What the shell does

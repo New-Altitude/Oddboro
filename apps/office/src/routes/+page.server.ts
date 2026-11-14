@@ -34,6 +34,7 @@ export const load: PageServerLoad = async ({ cookies, url }) => {
   // The owner's Caddy may have dropped the office's site since: put it back.
   void keepAddress();
   const first = !(await welcomed());
+  if (first && !cookies.get('oddboro-view')) redirect(303, '/welcome');
   // A new owner arrives at an empty lot; the office goes up on it as they finish.
   const office = await currentOffice({ lot: first });
   const staff = await roster();

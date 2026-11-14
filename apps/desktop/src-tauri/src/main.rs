@@ -184,89 +184,49 @@ fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
         return broken_install(app, diagnostics, exit::NO_SERVER, NO_SERVER);
     };
 
-    // A window can attach only after the service proves that it owns this
-    // office's private key. An unrelated listener never receives the key.
-    if server::port_taken(port) && headless::recognized(&node, &code, port, &version.to_string()) {
-        open_main(
-            app,
-            &Url::parse(&format!("http://127.0.0.1:{port}")).expect("loopback URL"),
-        );
-        return;
+    let version = version.to_string();
+    let present = server::port_taken(port);
+    if present && !headless::recognized(&node, &code, port, &version) {
+        return fail(app, exit::PORT_TAKEN, "Another office or version is using this port. Check its status before opening this version.");
     }
-    let _lease = match headless::lease() {
-        Ok(lease) => lease,
-        Err(_) => {
-            // Another launcher may still be bringing up the database.
-            let until = std::time::Instant::now() + std::time::Duration::from_secs(90);
-            while std::time::Instant::now() < until {
-                if server::port_taken(port)
-                    && headless::recognized(&node, &code, port, &version.to_string())
-                {
-                    open_main(
-                        app,
-                        &Url::parse(&format!("http://127.0.0.1:{port}")).expect("loopback URL"),
-                    );
-                    return;
-                }
-                thread::sleep(std::time::Duration::from_millis(300));
-            }
-            return fail(
-                app,
-                exit::PORT_TAKEN,
-                "This office is in use. Check its service status.",
-            );
-        }
-    };
-    // A newer version installs before the server starts, so an update never
-    // swaps the server out from under a running office.
-    if update::on_launch(app, &env::log_file(), show_updating) {
-        return;
-    }
-
-    if server::port_taken(port) {
-        alert(
-            app,
-            &format!(
-                "Another office is already running on port {port}. Oddboro will quit rather than share it.\n\nQuit the other office, then open Oddboro again."
-            ),
-        );
-        app.exit(exit::PORT_TAKEN);
+    // An update before a fresh start can safely replace the app. An attached
+    // client defers to the running office's update window.
+    if !present && update::on_launch(app, &env::log_file(), show_updating) {
         return;
     }
     show_loading(app);
-    let update_token = if update::ENABLED {
-        update::token()
-    } else {
-        String::new()
-    };
-    let server = office_server(
-        node,
-        code,
-        port,
-        version.to_string(),
-        update_token.clone(),
-        diagnostics,
-    );
-    let Ok(url) = Url::parse(&server.url()) else {
-        return fail(
-            app,
-            exit::BAD_URL,
-            "Oddboro built a bad URL for its server.",
-        );
-    };
-    update::watch(update::Watch {
-        app: app.clone(),
-        port,
-        token: update_token,
-        log: server.log.clone(),
-        show: show_updating,
-    });
-    if let Err(why) = server.supervise(|| open_main(app, &url)) {
-        if let Some(d) = diagnostics {
-            d.gave_up(&why);
+    if !present {
+        if let Err(e) = headless::spawn_service() {
+            return fail(
+                app,
+                exit::SERVER_FAILED,
+                &format!("Could not start the office: {e}"),
+            );
         }
-        fail(app, exit::SERVER_FAILED, &why.message(&server.log_tail()));
     }
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(90);
+    while std::time::Instant::now() < until {
+        if server::port_taken(port) && headless::recognized(&node, &code, port, &version) {
+            let url = Url::parse(&format!("http://127.0.0.1:{port}")).expect("loopback URL");
+            if let Some(token) = headless::update_token() {
+                update::watch(update::Watch {
+                    app: app.clone(),
+                    port,
+                    token,
+                    log: env::log_file(),
+                    show: show_updating,
+                });
+            }
+            open_main(app, &url);
+            return;
+        }
+        thread::sleep(std::time::Duration::from_millis(300));
+    }
+    fail(
+        app,
+        exit::SERVER_FAILED,
+        "The office did not become ready. Check the office log.",
+    );
 }
 
 /// A release that lacks a part of itself: reported, since a broken release
@@ -516,8 +476,9 @@ fn tray(app: &AppHandle) -> tauri::Result<()> {
     let login =
         CheckMenuItem::with_id(app, "login", "Open at login", true, at_login, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Oddboro", true, None::<&str>)?;
+    let stop = MenuItem::with_id(app, "stop-office", "Stop office", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&open, &login, &separator, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &login, &separator, &stop, &quit])?;
     TrayIconBuilder::with_id("oddboro")
         .icon(Image::from_bytes(TRAY_ICON)?)
         .icon_as_template(true)
@@ -527,6 +488,16 @@ fn tray(app: &AppHandle) -> tauri::Result<()> {
             "open" => show(app),
             "login" => toggle_open_at_login(app, &login),
             "quit" => app.exit(0),
+            "stop-office" => {
+                let handle = app.clone();
+                thread::spawn(move || {
+                    if headless::stop_service(handle.package_info()) {
+                        handle.exit(0)
+                    } else {
+                        alert(&handle, "Could not stop this office. Check its status.")
+                    }
+                });
+            }
             _ => {}
         })
         .build(app)?;

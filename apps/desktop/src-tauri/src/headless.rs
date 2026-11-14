@@ -43,18 +43,81 @@ pub fn recognized(node: &Path, code: &Path, port: u16, version: &str) -> bool {
         .is_ok_and(|s| s.success())
 }
 
+pub fn executable() -> std::io::Result<std::path::PathBuf> {
+    #[cfg(target_os = "linux")]
+    if let Some(path) = std::env::var_os("APPIMAGE") {
+        return Ok(path.into());
+    }
+    std::env::current_exe()
+}
+
+pub fn spawn_service() -> std::io::Result<()> {
+    let mut command = Command::new(executable()?);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000 | 0x00000200);
+    }
+    let mut child = command
+        .arg("--headless")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    std::thread::spawn(move || child.wait());
+    Ok(())
+}
+
+pub fn update_token() -> Option<String> {
+    if !crate::update::ENABLED {
+        return None;
+    }
+    let saved: serde_json::Value =
+        serde_json::from_slice(&fs::read(env::office_home().join("service.json")).ok()?).ok()?;
+    saved
+        .get("update")?
+        .as_str()
+        .filter(|v| !v.is_empty())
+        .map(String::from)
+}
+
+pub fn stop_service(package: &tauri::PackageInfo) -> bool {
+    node_binary()
+        .zip(server_code(package))
+        .is_some_and(|(node, code)| {
+            Command::new(node)
+                .arg(code.join("apps/office/scripts/office-cli.mjs"))
+                .arg("stop")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .is_ok_and(|s| s.success())
+        })
+}
+
 pub fn run(package: &tauri::PackageInfo, diagnostics: Option<&Diagnostics>) -> Result<(), String> {
     let _lease = lease().map_err(|e| format!("Could not claim this office: {e}"))?;
     let port = env::port();
     if server::port_taken(port) {
         return Err(format!("Port {port} is already in use."));
     }
+    let update = if crate::update::ENABLED {
+        crate::update::token()
+    } else {
+        String::new()
+    };
     let service = office_server(
         node_binary().ok_or(NO_NODE)?,
         server_code(package).ok_or(NO_SERVER)?,
         port,
         package.version.to_string(),
-        String::new(),
+        update.clone(),
         diagnostics,
     );
     let key = format!("{}{}", crate::update::token(), crate::update::token());
@@ -73,7 +136,7 @@ pub fn run(package: &tauri::PackageInfo, diagnostics: Option<&Diagnostics>) -> R
     writeln!(
         file,
         "{}",
-        serde_json::json!({"key": key, "port": port, "version": package.version.to_string()})
+        serde_json::json!({"key": key, "port": port,"update": update, "version": package.version.to_string()})
     )
     .map_err(|e| e.to_string())?;
     std::env::set_var("ODDBORO_SERVICE_KEY", key);
@@ -81,7 +144,12 @@ pub fn run(package: &tauri::PackageInfo, diagnostics: Option<&Diagnostics>) -> R
     server::on_quit_signal(server::stop);
     let result = service
         .supervise(|| server::note(&service.log, "office ready without a window"))
-        .map_err(|why| why.message(&service.log_tail()));
+        .map_err(|why| {
+            if let Some(d) = diagnostics {
+                d.gave_up(&why);
+            }
+            why.message(&service.log_tail())
+        });
     let _ = fs::remove_file(descriptor);
     result
 }

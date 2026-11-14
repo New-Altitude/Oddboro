@@ -14,7 +14,7 @@ const [command, ...args] = argv.filter((a) => a !== '--json');
 const home = process.env.ODDBORO_HOME || join(homedir(), '.oddboro');
 const help = `oddboro COMMAND [--json]
 
-start | status | stop | open workspace | open office
+start | status | stop | login on|off|status | open workspace | open office
 setup OWNER TIME_ZONE MANAGER [PROVIDER]   managers: status --json
 tools | sign-in PROVIDER | hire NAME ROLE REMIT
 odds | inbox | assign ODD MESSAGE [--turn UUID] | chat ODD | follow ODD
@@ -123,6 +123,30 @@ async function terminal(id) {
 }
 async function run() {
   if (!command || ['help', '--help', '-h'].includes(command)) return out(help);
+  if (command === 'login') {
+    const p = await import('@oddboro/ledger/platform');
+    const label = 'com.oddboro.office';
+    if (args[0] === 'status') return out({ enabled: await p.serviceInstalled(label) });
+    if (args[0] === 'off') {
+      await p.removeService(label);
+      return out({ enabled: await p.serviceInstalled(label) });
+    }
+    if (args[0] !== 'on' || !process.env.ODDBORO_EXECUTABLE)
+      throw Error('Choose on, off, or status using the installed executable.');
+    // start is idempotent. Reuse a source installation's service label.
+    const env = { ODDBORO_HOME: home };
+    for (const k of ['ODDBORO_PORT', 'ODDBORO_DB_PORT'])
+      if (process.env[k]) env[k] = process.env[k];
+    const ok = await p.installService({
+      label,
+      args: [process.env.ODDBORO_EXECUTABLE, 'start'],
+      env,
+      log: p.OFFICE_LOG,
+      headless: true
+    });
+    if (!ok) throw Error('Could not register Oddboro at login.');
+    return out({ enabled: true });
+  }
   if (command === 'start') {
     const exe = process.env.ODDBORO_EXECUTABLE;
     if (!exe) throw Error('Use the installed Oddboro executable to start the office.');
@@ -157,7 +181,20 @@ async function run() {
       'The office did not start. Check its log or run oddboro --headless in the foreground.'
     );
   }
-  if (command === 'stop') return out(await json('/service/stop', {}));
+  if (command === 'stop') {
+    const key = paired().key;
+    const result = await json('/service/stop', {});
+    for (let n = 0; n < 300; n++) {
+      try {
+        if (paired().key !== key) return out(result);
+      } catch (e) {
+        if (e.code === 'ENOENT') return out(result);
+        throw e;
+      }
+      await delay(100);
+    }
+    throw Error('The office did not finish stopping. Check its status.');
+  }
   if (command === 'open') {
     if (!['workspace', 'office'].includes(args[0])) throw Error('Choose workspace or office.');
     await json('/api/health');
@@ -179,12 +216,21 @@ async function run() {
     return;
   }
   if (command === 'tools') return out(await json('/api/agents'));
-  if (command === 'sign-in')
-    return out(
-      await json('/api/agents/' + encodeURIComponent(required(0, 'a provider')), {
-        action: 'sign-in'
-      })
+  if (command === 'sign-in') {
+    const stream = await response(
+      'POST',
+      '/api/agents/' + encodeURIComponent(required(0, 'a provider')),
+      { action: 'sign-in' }
     );
+    for await (const line of createInterface({ input: stream, crlfDelay: Infinity })) {
+      if (!line.trim()) continue;
+      const step = JSON.parse(line);
+      if (raw) out(step);
+      else if (step.url || step.line) out(step.url || step.line);
+      if (step.done && !step.ok) throw Error('Provider sign-in did not finish.');
+    }
+    return;
+  }
   if (command === 'setup') {
     const s = await json('/api/workspace');
     if (s.welcomed) throw Error('This office has already been set up.');

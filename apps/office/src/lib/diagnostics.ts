@@ -189,6 +189,7 @@ export const ROUTE_IDS = {
   '/atlas/[file]': true,
   '/api/workspace': true,
   '/workspace': true,
+  '/welcome': true,
   '/connect/callback': true
 } as const satisfies Record<RouteId, true>;
 

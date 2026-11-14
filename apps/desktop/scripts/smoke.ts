@@ -21,7 +21,7 @@
 // secret store (ODDBORO_SECRETS=office). The Mac app keeps its secrets
 // through its shell, in the Keychain the owner's Oddboro uses, so off CI it
 // runs only with --my-keychain.
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import {
   appendFileSync,
   existsSync,
@@ -207,6 +207,15 @@ async function officeChecks(expect: { version?: string; claude: boolean }): Prom
  */
 async function windowCheck(page: Page): Promise<string> {
   let lastRead = '';
+  const choice = await until(
+    'first launch choice or Office welcome',
+    async () => {
+      const seen = await page.read().catch(() => '');
+      return seen.includes('Choose your view') || seen.includes('Next') ? seen : undefined;
+    },
+    60
+  );
+  if (choice.includes('Choose your view')) await page.press('Office');
   const before = await until(
     'a Next button in the window',
     async () => {
@@ -587,7 +596,21 @@ async function smokeApp(): Promise<void> {
     return `${h.pages} page(s) on the live line, no errors`;
   });
   await step('a screenshot', false, () => screenshot(join(OUT, 'screen.png')));
-  await step('quits with Node and both ports gone', true, async () => {
+  const stopOffice = () =>
+    execFileSync(exe, ['stop'], { env: { ...process.env, ...r.env }, timeout: 45000 });
+  await step('the CLI can attach to the graphical office', true, async () => {
+    const status = JSON.parse(
+      execFileSync(exe, ['status', '--json'], {
+        env: { ...process.env, ...r.env },
+        encoding: 'utf8'
+      })
+    );
+    if (!status.welcomed || status.pid !== (await getJson<{ pid: number }>('/api/health')).pid)
+      throw Error('The CLI reached a different office');
+    return 'same server and manager';
+  });
+  await step('quits with Node and both ports gone after Stop office', true, async () => {
+    stopOffice();
     if (stopDriven) return `${await stopDriven()}; the relaunches quit with SIGTERM`;
     return `${await quit(app!, r)} ms`;
   });
@@ -602,6 +625,7 @@ async function smokeApp(): Promise<void> {
         const setup = await getJson<{ welcomed?: boolean }>('/api/setup', 90);
         if (!setup.welcomed) throw new Error('it forgot the onboarding');
       }
+      stopOffice();
       await quit(again, r);
     }
     return `starts (ms): ${times.join(', ')}`;
