@@ -59,6 +59,9 @@ export const TASK_OPS = [
 export type TaskOp = (typeof TASK_OPS)[number];
 
 export const OWNER_ACTIONS = {
+  'POST /api/newsroom': {
+    none: 'Stores the public edition and this office’s reading and delivery choices.'
+  },
   // The owner's New Altitude account lives in the system's secret store, and
   // the reports switch in the settings file; none of them is a record.
   'POST /api/account': { notAnAction: SETUP },

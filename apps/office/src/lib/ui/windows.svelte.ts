@@ -15,6 +15,7 @@ export type LessonsFilter = 'about' | 'all' | { staff: string };
 /** A session to open in Projects. `n` bumps on every ask, so asking again for the same session still brings it up. */
 export type ProjectAsk = { sessionId?: string; n: number };
 export type Win =
+  | { id: 'newsroom'; kind: 'newsroom' }
   | { id: 'desk'; kind: 'desk' }
   | { id: 'goals'; kind: 'goals' }
   | { id: 'projects'; kind: 'projects'; ask: ProjectAsk }

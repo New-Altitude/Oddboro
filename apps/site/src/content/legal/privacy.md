@@ -310,3 +310,7 @@ The version at oddboro.com is the current one. Earlier versions stay in the repo
 - Privacy questions and requests: privacy@oddboro.com
 - Legal notices: legal@oddboro.com
 - Post: New Altitude, Inc., 910 W Howe St, Seattle, WA 98119
+
+## When you add a newsroom
+
+Choosing Add in Newsroom lets the office read the publisher’s public edition. The publisher receives a normal web request, including the computer’s IP address and the tag of the last edition. Reading choices, saved stories and delivery times stay on this computer. Pause or remove the newsroom to stop scheduled reads. Opening a source visits its website. Discuss opens an editable draft in the persona’s existing chat.

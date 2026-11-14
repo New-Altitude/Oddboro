@@ -17,6 +17,20 @@ export type Outbound = {
 
 export const OUTBOUND: readonly Outbound[] = [
   {
+    file: 'apps/office/src/lib/server/newsroom.ts',
+    calls: 1,
+    to: 'The public newsroom edition on www.natebjones.com.',
+    sends: 'A public read with the cached edition tag; no office or account data.',
+    yes: 'The owner choosing Add newsroom. Pause or Remove stops scheduled reads.'
+  },
+  {
+    file: 'apps/office/src/lib/ui/Newsroom.svelte',
+    calls: 1,
+    to: 'The office on this computer.',
+    sends: 'Reading choices and requests for the local copy of the edition.',
+    yes: 'The owner opening the newsroom and using its controls.'
+  },
+  {
     file: 'apps/office/src/lib/server/project-sessions/codex-rpc.ts',
     calls: 2,
     to: 'The local Codex App Server, through authenticated loopback or the private socket the owner chose.',

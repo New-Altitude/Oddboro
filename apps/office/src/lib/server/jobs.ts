@@ -46,6 +46,7 @@ import {
 } from '@oddboro/ledger';
 import { bus, listen, type OfficeEvent } from './events.ts';
 import { deliverPoke, runJob } from './staff.ts';
+import { newsroomClock } from './newsroom.ts';
 import { held } from './update.ts';
 
 // macOS stops timers while it sleeps, so the clock never waits longer than
@@ -89,6 +90,13 @@ async function plan(): Promise<void> {
         );
       else soonest = Math.min(soonest, t.resumeAt.getTime());
     }
+    soonest = Math.min(
+      soonest,
+      await newsroomClock(now).catch((e) => {
+        console.error('Newsroom clock:', e);
+        return now.getTime() + RETRY_MS;
+      })
+    );
   } catch (e) {
     // Unhandled, the rejection would end the office, or leave no timer set so
     // no job ran again until a restart. What is due is unknown, so the clock

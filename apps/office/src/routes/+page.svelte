@@ -17,6 +17,8 @@
   import OddsRail, { ODDS_RAIL, ODDS_RAIL_OPEN } from '#lib/ui/OddsRail.svelte';
   import type { Work } from '#lib/staff/work.ts';
   import type { LessonEvent, OfficeEvent } from '#lib/server/events.ts';
+  import Newsroom from '#lib/ui/Newsroom.svelte';
+  let newsroomVersion = $state(0);
   import DeskDrawer from '#lib/ui/DeskDrawer.svelte';
   import { account } from '#lib/ui/account.svelte.ts';
   import { personaNews } from '#lib/ui/persona-offers.svelte.ts';
@@ -55,6 +57,7 @@
   import { LIVE_TABLES, type LiveTable } from '@oddboro/ledger/live-tables';
 
   let { data } = $props();
+  let newsroomUnread = $state(untrack(() => data.newsroomUnread));
   // Every time on the page is in the office's zone, which only the server knows.
   // It is fixed for the life of the page: a new zone takes a restart.
   setZone(untrack(() => data.zone));
@@ -206,6 +209,7 @@
   // Every Odd is on the rail at the end edge (OddsRail.svelte), not here.
   const SECTIONS = [
     { id: 'desk', label: 'Desk' },
+    { id: 'newsroom', label: 'Newsroom' },
     { id: 'goals', label: 'Goals' },
     { id: 'lessons', label: 'Lessons' },
     { id: 'ledger', label: 'Ledger' },
@@ -676,6 +680,7 @@
   /** A section's button: brings its window forward, or folds the panel when it already is. */
   function toggle(id: (typeof SECTIONS)[number]['id']) {
     if (leftOpen && front?.kind === id) return hide();
+    if (id === 'newsroom') return open({ id, kind: id });
     if (id === 'desk') return void openDesk();
     if (id === 'ledger') return open({ id: 'ledger', kind: 'ledger' });
     if (id === 'projects') return openProject();
@@ -698,6 +703,7 @@
   }
 
   function winTitle(w: Win): string {
+    if (w.kind === 'newsroom') return 'Newsroom';
     if (w.kind === 'desk') return 'Desk';
     if (w.kind === 'ledger') return 'Ledger';
     if (w.kind === 'projects') return 'Projects';
@@ -732,7 +738,14 @@
     const events = new EventSource('/api/events' satisfies ApiUrl);
     events.onmessage = (m) => {
       const e = JSON.parse(m.data) as OfficeEvent;
+      if (e.type === 'newsroom') {
+        newsroomUnread = e.unread;
+        version++;
+        newsroomVersion++;
+        return;
+      }
       if (e.type === 'account') {
+        newsroomVersion++;
         account.status = e.status;
         return;
       }
@@ -757,7 +770,10 @@
       }
       // Only the persona offers hear this: the floor meets a persona Odd, or
       // sees it go quiet, through the staff table's change, as any hire.
-      if (e.type === 'persona') return void personaNews(e);
+      if (e.type === 'persona') {
+        newsroomVersion++;
+        return void personaNews(e);
+      }
       const page = e.table === 'chat' ? ['version'] : (ON_CHANGE.get(e.table) ?? []);
       // A move into another layout rebuilds the whole floor.
       // During the first run, and until its last drawn pieces land, the floor
@@ -1227,7 +1243,9 @@
             : 'bg-raise text-muted hover:text-ink'}"
           aria-pressed={pressed}
           onclick={() => toggle(sec.id)}
-          >{sec.label}{#if sec.id === 'desk' && deskCount}<span class="ms-1 text-ember"
+          >{sec.label}{#if sec.id === 'newsroom' && newsroomUnread}<span class="ms-1 text-ember"
+              >{newsroomUnread}</span
+            >{/if}{#if sec.id === 'desk' && deskCount}<span class="ms-1 text-ember"
               >{deskCount}</span
             >{/if}{#if wins.list.some((w) => w.kind === sec.id && wins.busy[w.id])}<span
               class="busy ms-1.5"
@@ -1338,6 +1356,12 @@
                   onhire={hireProposal}
                   onplan={planHires}
                   onstaff={select}
+                />
+              {:else if w.kind === 'newsroom'}
+                <Newsroom
+                  version={newsroomVersion}
+                  active={wins.active === w.id && leftOpen}
+                  onconnect={openSetup}
                 />
               {:else if w.kind === 'goals'}
                 <GoalsPanel {staff} {version} onthread={openThread} />
