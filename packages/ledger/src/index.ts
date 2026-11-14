@@ -30,7 +30,7 @@ export {
   type Candidate,
   type WayIn
 } from './registry.ts';
-export { sql as pg, DATABASE_URL, LOCAL } from './db.ts';
+export { sql as pg, DATABASE_URL, LOCAL, openPool } from './db.ts';
 export * from './home.ts';
 export * from './platform.ts';
 export * from './offices.ts';

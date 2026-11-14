@@ -1128,11 +1128,12 @@ pieces under 3,900 bytes a line, so no value is on a command line.
     job on time never waits for it. A catch-up shows in In progress as
     "Catching up <N> periods of <job>". The job form sets the kind ("When the
     office was off at run time"). To try it in a running office, move a
-    job's next run into the past from the repo, with that office's database
-    port. The write wakes the clock at once.
+    job's next run into the past from the repo, with that office's home
+    (on Windows, its database port in `ODDBORO_DB_PORT` too). The write wakes
+    the clock at once.
 
     ```sh
-    ODDBORO_DB_PORT=<port> node --input-type=module <<'EOF'
+    ODDBORO_HOME=<home> node --input-type=module <<'EOF'
     import { pg } from '@oddboro/ledger';
     await pg`update jobs set next_run_at = now() - interval '2 days 45 minutes' where name = '<job>'`;
     await pg.end();

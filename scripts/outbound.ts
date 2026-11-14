@@ -188,6 +188,13 @@ export const OUTBOUND: readonly Outbound[] = [
     yes: 'The owner, who sets OLLAMA_URL; with it unset nothing leaves this computer.'
   },
   {
+    file: 'packages/ledger/src/local-db.ts',
+    calls: 1,
+    to: "The office's own database socket, in the office home on this computer.",
+    sends: 'Nothing: it only opens a connection, to learn whether another office answers there.',
+    yes: 'None needed: nothing leaves this computer, and it carries no data.'
+  },
+  {
     file: 'packages/ledger/src/office-access.ts',
     calls: 1,
     to: "Google's token revocation address.",

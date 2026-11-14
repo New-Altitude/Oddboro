@@ -28,6 +28,7 @@ export const WIN = process.platform === 'win32';
 export const MAC = process.platform === 'darwin';
 export const LINUX = process.platform === 'linux';
 export const PORT = 4590;
+/** The office's database port, which only Windows uses: a Mac and Linux reach it through a socket in the home. */
 export const DB_PORT = 54590;
 export const BASE = `http://127.0.0.1:${PORT}`;
 // A release build installs any newer version before its server starts. An
