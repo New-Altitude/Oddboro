@@ -31,6 +31,7 @@
     type Offer
   } from '#lib/persona.ts';
   import { call } from './api.ts';
+  import { withActCheck } from './act-check.svelte.ts';
   import { wins } from './windows.svelte.ts';
   import type { StaffProfile } from '../staff/roster.ts';
 
@@ -254,8 +255,8 @@
   async function hire() {
     busy = true;
     problem = '';
-    try {
-      const p = await call<StaffProfile>('/api/staff', {
+    const send = () =>
+      call<StaffProfile>('/api/staff', {
         name,
         role,
         look: look?.look,
@@ -281,7 +282,10 @@
             }
           : undefined
       });
-      onhired(p);
+    try {
+      // A hire at Act waits for the owner's Act check, the first time only.
+      const p = await (permission === 'act' ? withActCheck(send) : send());
+      if (p) onhired(p);
     } catch (e) {
       problem = e instanceof Error ? e.message : String(e);
     } finally {

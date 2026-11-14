@@ -304,6 +304,11 @@ const TRY: Record<Recording, (send: Send) => Promise<void>> = {
       await send({ params: { id: String(id) }, body: { path, level: 'read' } });
     }),
   'PUT /api/files': (send) => send({ body: fileOf('plan.md') }),
+  // After the welcome, which keeps the owner's row: the right answers, the first time.
+  'POST /api/act-check': async (send) => {
+    await L.setOwnerName(await L.ownerName());
+    await send({ body: { answers: [true, true, false] } });
+  },
   // After the welcome, which keeps the owner's row; the name stays as it was.
   'PUT /api/setup/advanced': async (send) => {
     await L.setOwnerName(await L.ownerName());

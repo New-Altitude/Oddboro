@@ -1,11 +1,12 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { setTimeout as delay } from 'node:timers/promises';
-import { identityFile } from './service-identity.mjs';
+import { openSession } from './service-identity.mjs';
+import { Writable } from 'node:stream';
 import { ownerRequest } from './service-channel.mjs';
 
 const argv = process.argv.slice(2);
@@ -27,11 +28,41 @@ function required(i, name) {
   if (!args[i]) throw Error('Provide ' + name + '.');
   return args[i];
 }
-function paired() {
-  return JSON.parse(readFileSync(identityFile(home), 'utf8'));
+const descriptor = join(home, 'service.json');
+let credential;
+async function ownerCode() {
+  if (credential) return credential;
+  if (!process.stdin.isTTY) {
+    const code = readFileSync(0, 'utf8').trim();
+    if (!code) throw Error('Provide your owner pairing code on standard input.');
+    return (credential = code);
+  }
+  process.stderr.write('Owner pairing code: ');
+  const silent = new Writable({
+    write(_chunk, _encoding, done) {
+      done();
+    }
+  });
+  const input = createInterface({ input: process.stdin, output: silent, terminal: true });
+  try {
+    credential = await new Promise((resolve, reject) => {
+      input.once('line', (line) => resolve(line.trim()));
+      input.once('close', () => reject(Error('Pairing cancelled.')));
+      input.once('SIGINT', () => input.close());
+    });
+  } finally {
+    input.close();
+    process.stderr.write('\n');
+  }
+  return credential;
+}
+async function paired() {
+  const box = JSON.parse(readFileSync(descriptor, 'utf8'));
+  return openSession(await ownerCode(), box);
 }
 async function response(method, path, body) {
-  const res = await ownerRequest(home, paired().key, method, path, body);
+  const session = await paired();
+  const res = await ownerRequest(home, session.key, method, path, body);
   if (res.statusCode < 200 || res.statusCode >= 300) {
     const parts = [];
     for await (const p of res) parts.push(p);
@@ -126,16 +157,30 @@ async function run() {
   if (command === 'start') {
     const exe = process.env.ODDBORO_EXECUTABLE;
     if (!exe) throw Error('Use the installed Oddboro executable to start the office.');
-    try {
-      await json('/api/health');
-      return out('Office is running.');
-    } catch {
-      /* A stopped office has no socket. */
+    if (existsSync(descriptor)) {
+      try {
+        await json('/api/health');
+        return out('Office is running.');
+      } catch (e) {
+        if (!['ENOENT', 'ECONNREFUSED'].includes(e.code)) throw e;
+      }
     }
     const child = spawn(exe, ['--headless'], {
-      stdio: 'ignore',
+      stdio: ['ignore', 'ignore', 'pipe'],
       detached: true,
       windowsHide: true
+    });
+    const lines = createInterface({ input: child.stderr });
+    lines.on('line', (line) => {
+      const match = /^Oddboro owner pairing code: (ob1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/.exec(
+        line
+      );
+      if (match) {
+        credential = match[1];
+        process.stderr.write(
+          'Save your owner pairing code in your password manager: ' + credential + '\n'
+        );
+      }
     });
     let failed;
     child.once('error', (e) => {
@@ -146,7 +191,11 @@ async function run() {
       if (failed) throw failed;
       try {
         const h = await json('/api/health');
-        if (h.readyMs != null) return out(h);
+        if (h.readyMs != null) {
+          lines.close();
+          child.stderr.destroy();
+          return out(h);
+        }
       } catch {
         /* Waiting for this office. */
       }
@@ -160,22 +209,15 @@ async function run() {
   if (command === 'stop') return out(await json('/service/stop', {}));
   if (command === 'open') {
     if (!['workspace', 'office'].includes(args[0])) throw Error('Choose workspace or office.');
-    await json('/api/health');
-    const url =
-      'http://127.0.0.1:' +
-      paired().port +
-      (args[0] === 'workspace' ? '/workspace' : '/?view=office');
-    const exec =
-      process.platform === 'darwin'
-        ? ['open', url]
-        : process.platform === 'win32'
-          ? ['rundll32.exe', 'url.dll,FileProtocolHandler', url]
-          : ['xdg-open', url];
-    const proc = spawn(exec[0], exec.slice(1), { stdio: 'ignore', windowsHide: true });
-    await new Promise((resolve, reject) => {
-      proc.once('error', reject);
-      proc.once('exit', (c) => (c === 0 ? resolve() : reject(Error('Could not open the office.'))));
+    const exe = process.env.ODDBORO_EXECUTABLE;
+    if (!exe) throw Error('Open the installed Oddboro app to choose a view.');
+    const child = spawn(exe, ['--view-' + args[0]], {
+      stdio: 'ignore',
+      detached: true,
+      windowsHide: true
     });
+    await new Promise((ok, no) => child.once('spawn', ok).once('error', no));
+    child.unref();
     return;
   }
   if (command === 'tools') return out(await json('/api/agents'));
