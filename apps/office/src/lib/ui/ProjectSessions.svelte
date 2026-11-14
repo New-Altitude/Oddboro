@@ -142,6 +142,7 @@
       view = record.view;
     }
   }
+  const scrollback = new Map<string, number>();
   const sessionDrafts = new Map<
     string,
     { draft: string; file: string; replies: Record<string, string> }
@@ -523,6 +524,7 @@
           {#if terminalVisible}
             {#key termView}<ProjectTerminal
                 onstream={updates}
+                {scrollback}
                 id={selected.id}
                 view={termView}
                 bind:writable
