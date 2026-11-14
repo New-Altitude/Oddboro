@@ -29,7 +29,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { afterEach, test } from 'node:test';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { db, sql, toolServer } from './tool-server.ts';
+import { closeToolServers, db, sql, toolServer } from './tool-server.ts';
 import { oneThreadPerGoal } from './one-thread.ts';
 import { TEMP_IN_APPDATA } from './store-states.ts';
 
@@ -51,6 +51,8 @@ const { isOffered, OFFICE_TOOLS, RIDES_WITH, STARTER_TOOLS } = await import('../
 const { MANAGER_ROLE } = await import('../src/managers.ts');
 const { HAND_OFF_LIMIT, LEADS_NONE, threadPart } = await import('../src/threads.ts');
 const { connectProject, shareProject } = await import('../src/project-sessions.ts');
+// Each case starts its own tool processes. Release them before starting the next case.
+afterEach(closeToolServers);
 afterEach(() => oneThreadPerGoal(sql, MANAGER_ROLE));
 
 const odd = (id: string, name: string) => ({
