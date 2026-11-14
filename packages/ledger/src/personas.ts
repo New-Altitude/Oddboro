@@ -9,7 +9,7 @@ import { db } from './db.ts';
 import { fixedError } from './errors.ts';
 import { HIRE_DEFAULTS } from './grantable.ts';
 import { hire, ownerName, record, roster, staffer, type StaffRow } from './office.ts';
-import { parts, staff } from './schema.ts';
+import { parts, staff, publicationFollows } from './schema.ts';
 
 /**
  * Why a persona Odd stays quiet: New Altitude stopped offering it (`access`),
@@ -151,5 +151,8 @@ export async function setQuiet(id: string, quiet: Quiet | undefined): Promise<vo
   const link: PersonaLink = quiet
     ? { slug, version, disclosure, quiet }
     : { slug, version, disclosure };
-  await db.update(staff).set({ package: link }).where(eq(staff.id, id));
+  await db.transaction(async (tx) => {
+    await tx.update(staff).set({ package: link }).where(eq(staff.id, id));
+    if (quiet) await tx.delete(publicationFollows).where(eq(publicationFollows.staffId, id));
+  });
 }

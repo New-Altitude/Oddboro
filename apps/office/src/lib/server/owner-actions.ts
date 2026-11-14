@@ -146,6 +146,9 @@ export const OWNER_ACTIONS = {
     mayRecord: ['hire', 'work'],
     when: 'A hire, and a work row for each part of its look, when a kept sign-in still holds, the office is open and it has no Odd of the persona yet.'
   },
+  'PUT /api/personas/[slug]/publications': {
+    none: 'Stores the owner’s publication preference and starting position for this persona.'
+  },
   'DELETE /api/personas/[slug]': { none: "Ends a persona's sign-in and makes its Odd quiet." },
   'POST /api/pokes/[id]': { none: NO_ROW },
   'DELETE /api/pokes/[id]': { none: NO_ROW },

@@ -37,6 +37,8 @@
   import type { StaffProfile } from '../staff/roster.ts';
   import { runningFor, toolWords, type Work, type WorkAbout } from '../staff/work.ts';
   import type { ChatEntry, ChatEvent, ChatSignIn } from '../staff/chat.ts';
+  import PublicationCard from './PublicationCard.svelte';
+  import PublicationSetting from './PublicationSetting.svelte';
   import { counting, dayBreaks, fullDate, stamp, took } from './chat-lines.ts';
   import { serviceNames } from './service-names.svelte.ts';
 
@@ -246,6 +248,14 @@
         ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
     );
   });
+  function discussPublication(card: import('@oddboro/ledger').PublicationCard) {
+    const question = `What should I take away from this ${card.kind}?\n\n${JSON.stringify({ publication: card.sourceId, title: card.title, url: card.url })}`;
+    draft = draft.trim() ? `${draft}\n\n${question}` : question;
+    void tick().then(() => box?.focus());
+  }
+  function readPublication(id: number) {
+    if (visible) void call(`/api/staff/${profile.id}/pokes`, { publication: id }).catch(() => {});
+  }
   let draft = $state('');
   /** What the bug report form starts with, while it is open. */
   let bugReport = $state<{ title?: string; body: string }>();
@@ -1214,6 +1224,7 @@
   {#if profile.persona}
     <div class="flex flex-col gap-2 border-b border-hairline p-3 text-xs">
       <p class="leading-relaxed text-muted">{profile.persona.disclosure}</p>
+      {#if !profile.persona.quiet}<PublicationSetting slug={profile.persona.slug} />{/if}
       {#if profile.persona.quiet}
         <PersonaQuiet
           slug={profile.persona.slug}
@@ -1242,7 +1253,15 @@
           ></span>
         </div>
       {/if}
-      {#if line.lesson}
+      {#if line.publication}
+        {@const card = line.publication}
+        <PublicationCard
+          {card}
+          name={profile.name}
+          discuss={() => discussPublication(card)}
+          markRead={readPublication}
+        />
+      {:else if line.lesson}
         <Lesson lesson={line.lesson} name={profile.name} />
       {:else if line.thread}
         <!-- One card per piece of work the Odd leads: where it stands, and each step on Open. -->

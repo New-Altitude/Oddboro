@@ -69,6 +69,8 @@ export type FakeNewAltitude = {
   issueGrant(access: string, refresh: string, scope: string): void;
   /** What `/api/personas/odds` lists for a token that holds `personas`; `pat` until a test sets it. */
   odds: unknown[];
+  publicationHead: number;
+  publicationBatch?: unknown;
   /** The settled body a persona's door answers a turn with; an answered turn until a test sets it. */
   door: Record<string, unknown>;
   close(): Promise<void>;
@@ -101,6 +103,7 @@ export async function fakeNewAltitude(port = 0): Promise<FakeNewAltitude> {
       refresh.set(r, scope);
     },
     odds: [PAT],
+    publicationHead: 0,
     door: {
       outcome: 'answered',
       frame: 'From what my hands found:',
@@ -207,6 +210,19 @@ export async function fakeNewAltitude(port = 0): Promise<FakeNewAltitude> {
     if (path === '/api/me') {
       if (bearerScope(req) === undefined) return send(res, 401, { error: 'invalid_token' });
       return send(res, 200, MEMBER);
+    }
+    if (path === '/api/personas/publications' || path === '/api/personas/publications/events') {
+      if (!bearerScope(req)?.split(' ').includes('personas'))
+        return send(res, 401, { error: 'invalid_token' });
+      if (url.searchParams.get('head') === '1')
+        return send(res, 200, { through: fake.publicationHead });
+      if (!url.searchParams.has('after') || !url.searchParams.has('slug'))
+        return send(res, 400, {});
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      res.flushHeaders();
+      if (fake.publicationBatch)
+        res.write(`event: publications\ndata: ${JSON.stringify(fake.publicationBatch)}\n\n`);
+      return;
     }
     if (path === '/api/personas/odds') {
       if (!bearerScope(req)?.split(' ').includes('personas'))

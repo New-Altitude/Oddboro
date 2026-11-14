@@ -14,7 +14,7 @@ import {
   roster,
   serviceNames,
   switchedOffIn,
-  unreadPokes
+  unreadMessages
 } from '@oddboro/ledger';
 import { currentOffice } from '#lib/server/space.ts';
 import { followUpsWaiting } from '#lib/server/follow-ups.ts';
@@ -35,7 +35,7 @@ export const GET: RequestHandler = async () => {
     toStart: await followUpsWaiting(),
     roomNames: await roomNamesFor(office),
     switchedOff: await switchedOffIn(office),
-    messages: await unreadPokes(),
+    messages: await unreadMessages(),
     threads: heldThreads(await goalThreads()),
     services: await serviceNames()
   });

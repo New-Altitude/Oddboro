@@ -1963,3 +1963,5 @@ Projects. Off, `/api/project-sessions` and its event stream answer 403
 (`claude-sessions.ts`); the terminal loads `node-pty` only when it opens. See
 [project sessions](../../docs/project-sessions.md) for native clients,
 handover and recovery.
+
+An installed creator's chat can follow publications when the members listing advertises them. The protocol, consent, resume behavior and card format are in `docs/persona-publications.md`. `src/lib/server/persona-publications.ts` owns the one members connection; the ledger's `publications.ts` commits its receipts and positions together.

@@ -70,6 +70,7 @@ export function readPackage(slug: string, raw: unknown): OddPackage | string {
 
 /** One persona New Altitude lists with an Odd, as `/api/personas/odds` sends it, checked. */
 export type Listed = {
+  publications?: true;
   slug: string;
   displayName: string;
   jobTitle: string | null;
@@ -88,7 +89,14 @@ export function readListed(raw: unknown): Listed | string {
   if (jobTitle !== null && typeof jobTitle !== 'string') return `${slug}'s job title is not text`;
   const pkg = readPackage(slug, raw.odd);
   if (typeof pkg === 'string') return `${slug}'s package: ${pkg}`;
-  return { slug, displayName, jobTitle, disclosure, pkg };
+  return {
+    slug,
+    displayName,
+    jobTitle,
+    disclosure,
+    pkg,
+    ...(raw.publications === 1 ? { publications: true as const } : {})
+  };
 }
 
 /**

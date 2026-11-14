@@ -24,7 +24,8 @@
     "@oddboro/sprites": "*",
     "@oddboro/world": "*",
     "@sentry/core": "^11.10.0",
-    "@sentry/sveltekit": "^11.10.0"
+    "@sentry/sveltekit": "^11.10.0",
+    "eventsource-parser": "^3.1.1"
   },
   "devDependencies": {
     "@aws-sdk/client-secrets-manager": "~3.1156.0",
