@@ -3,7 +3,7 @@ import { workspace } from '#lib/server/workspace.ts';
 import type { PageServerLoad } from './$types';
 export const load: PageServerLoad = async ({ cookies, url }) => {
   // A visit to the HUD from the floor keeps the owner's starting view.
-  if (url.searchParams.get('from') !== 'office') {
+  if (!['office', 'strip'].includes(url.searchParams.get('from') ?? '')) {
     cookies.set('oddboro-view', 'workspace', {
       path: '/',
       maxAge: 31536000,

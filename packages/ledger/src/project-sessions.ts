@@ -393,7 +393,7 @@ export async function activeProjectRequest(id: string) {
   return row;
 }
 
-export const proposedProjectWork = () =>
+export const proposedProjectWork = (state: 'proposed' | 'uncertain' = 'proposed') =>
   db
     .select({
       id: projectRequests.id,
@@ -405,5 +405,5 @@ export const proposedProjectWork = () =>
     })
     .from(projectRequests)
     .innerJoin(projectSessions, eq(projectRequests.sessionId, projectSessions.id))
-    .where(eq(projectRequests.state, 'proposed'))
+    .where(eq(projectRequests.state, state))
     .orderBy(asc(projectRequests.createdAt));

@@ -17,6 +17,7 @@
   } = $props();
   let list = $state<HTMLDivElement>(),
     detail = $state<HTMLElement>();
+  const chats = $derived(items.filter((i) => i.waitingChat).length);
   const selected = $derived(
     items.find((n) => n.id === position.id) ?? items[Math.min(position.index, items.length - 1)]
   );
@@ -53,7 +54,13 @@
 </script>
 
 <section aria-label="Decision queue">
-  <h2>Decision queue <small aria-live="polite">{items.length} waiting</small></h2>
+  <h2>
+    Decision queue <small aria-live="polite"
+      >{items.length - chats}
+      {items.length - chats === 1 ? 'decision' : 'decisions'}{#if chats}
+        · {chats} {chats === 1 ? 'chat needs' : 'chats need'} input{/if}</small
+    >
+  </h2>
   {#if selected}
     <div class="queue">
       <div class="items" bind:this={list}>

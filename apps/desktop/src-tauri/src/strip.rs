@@ -1,6 +1,6 @@
 //! A still office list above other apps. Navigation selects the existing pane,
 //! so an open chat draft survives a click. The page has no native permissions.
-use std::fs;
+use std::{fs, sync::Mutex};
 
 use serde_json::{json, Value};
 use tauri::{
@@ -8,17 +8,25 @@ use tauri::{
     WebviewWindowBuilder,
 };
 
-use crate::{env, server, show, MAIN};
+use crate::{env, server, show, tell_page, MAIN};
 pub const STRIP: &str = "office-strip";
 
 /// Only these same-origin links select the main office. No arbitrary script
 /// or destination from a page reaches the native window.
 fn destination(home: &Url, to: &Url) -> Option<Value> {
-    if to.origin() != home.origin() || to.path() != "/" {
+    if to.origin() != home.origin() {
         return None;
     }
     let pairs: Vec<_> = to.query_pairs().collect();
-    if pairs.len() != 1 {
+    if to.path() == "/workspace" && pairs.len() == 2 {
+        let from_strip = pairs.iter().any(|(k, v)| k == "from" && v == "strip");
+        let target = pairs.iter().find(|(k, _)| k == "review")?.1.as_ref();
+        if from_strip && review_target(target) {
+            return Some(json!({"review": target}));
+        }
+        return None;
+    }
+    if to.path() != "/" || pairs.len() != 1 {
         return None;
     }
     let (key, value) = &pairs[0];
@@ -35,6 +43,43 @@ fn destination(home: &Url, to: &Url) -> Option<Value> {
         return Some(json!({"odd": value}));
     }
     None
+}
+
+fn review_target(target: &str) -> bool {
+    if matches!(target, "hud" | "cpu" | "memory") {
+        return true;
+    }
+    let Some((kind, id)) = target.split_once('-') else {
+        return false;
+    };
+    matches!(
+        kind,
+        "ask" | "proposal" | "uncertain" | "question" | "claude" | "codex"
+    ) && !id.is_empty()
+        && id.len() <= 180
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_.:-".contains(&b))
+}
+
+struct MainState {
+    visible: bool,
+    minimized: bool,
+}
+
+fn return_to_strip(app: &AppHandle, previous: Option<MainState>) {
+    let (Some(previous), Some(main)) = (previous, app.get_webview_window(MAIN)) else {
+        return;
+    };
+    if !previous.visible {
+        let _ = main.hide();
+        tell_page(app, "oddboro:hidden");
+    } else if previous.minimized {
+        let _ = main.minimize();
+    }
+    if let Some(strip) = app.get_webview_window(STRIP) {
+        let _ = strip.set_focus();
+    }
 }
 
 pub fn open(app: &AppHandle) {
@@ -54,6 +99,7 @@ pub fn open(app: &AppHandle) {
         return;
     };
     let handle = app.clone();
+    let previous_main = Mutex::new(None);
     let built = WebviewWindowBuilder::new(app, STRIP, WebviewUrl::External(url))
         .title("Office strip")
         .inner_size(340.0, 360.0)
@@ -61,8 +107,20 @@ pub fn open(app: &AppHandle) {
         .always_on_top(true)
         .center()
         .on_navigation(move |to| {
+            if to.origin() == home.origin() && to.path() == "/strip" && to.query() == Some("return=1") {
+                let previous = previous_main.lock().unwrap_or_else(|e| e.into_inner()).take();
+                return_to_strip(&handle, previous);
+                return false;
+            }
             if let Some(target) = destination(&home, to) {
                 if let Some(main) = handle.get_webview_window(MAIN) {
+                    if target.get("review").is_some() {
+                        let mut previous = previous_main.lock().unwrap_or_else(|e| e.into_inner());
+                        previous.get_or_insert_with(|| MainState {
+                            visible: main.is_visible().unwrap_or(true),
+                            minimized: main.is_minimized().unwrap_or(false),
+                        });
+                    }
                     let _ = main.eval(format!("window.dispatchEvent(new CustomEvent('oddboro:open', {{detail:{target}}}))"));
                     show(&handle);
                 }
@@ -169,6 +227,37 @@ mod tests {
             assert_eq!(destination(&home, &Url::parse(url).unwrap()), None);
         }
     }
+    #[test]
+    fn reviews_accept_only_known_targets_in_the_same_office() {
+        let home = Url::parse("http://127.0.0.1:4500/").unwrap();
+        for target in [
+            "hud",
+            "cpu",
+            "memory",
+            "ask-42",
+            "proposal-a",
+            "uncertain-b",
+            "question-1",
+            "claude-session",
+            "codex-thread",
+        ] {
+            let url = home
+                .join(&format!("/workspace?from=strip&review={target}"))
+                .unwrap();
+            assert_eq!(destination(&home, &url), Some(json!({"review":target})));
+        }
+        for path in [
+            "/workspace?review=cpu",
+            "/workspace?from=strip&review=ask-",
+            "/workspace?from=strip&review=other-1",
+            "/workspace?from=strip&review=ask-a%2Fb",
+            "/workspace?from=strip&review=cpu&review=memory",
+            "http://elsewhere/workspace?from=strip&review=cpu",
+        ] {
+            assert_eq!(destination(&home, &home.join(path).unwrap()), None);
+        }
+    }
+
     #[test]
     fn corrupt_or_unreasonable_bounds_use_the_default() {
         let valid = json!({"x":-400,"y":40,"width":340,"height":360});

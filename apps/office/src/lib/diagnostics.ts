@@ -131,6 +131,7 @@ export const ROUTE_IDS = {
   '/api/browser-link': true,
   '/api/client-log': true,
   '/api/computer-activity': true,
+  '/api/strip-decisions': true,
   '/api/connectors': true,
   '/api/diagnostics': true,
   '/api/diagnostics/envelope': true,

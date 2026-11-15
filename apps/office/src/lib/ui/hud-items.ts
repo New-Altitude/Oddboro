@@ -1,3 +1,4 @@
+import { hudDecisions, isWaitingChat, type Decision } from '../hud-decisions.ts';
 import { AGENT_NAMES } from '@oddboro/ledger/agents';
 import type { workspace } from '#lib/server/workspace.ts';
 import type { ComputerActivity } from '#lib/server/computer-activity.ts';
@@ -5,12 +6,12 @@ import type { AgentNotice } from '#lib/server/agent-attention.ts';
 
 export type HudOffice = Pick<
   Awaited<ReturnType<typeof workspace>>,
-  'staff' | 'sessions' | 'desk' | 'unread' | 'inProgress'
+  'staff' | 'sessions' | 'desk' | 'uncertain' | 'unread' | 'inProgress'
 >;
 export type HudLinks = {
   ondesk: (key: string) => void;
   onstaff: (id: string) => void;
-  onproject: (id: string) => void;
+  onproject: (id: string, item?: string) => void;
   onreport: (id: number, person: string, title: string) => void;
 };
 export type HudItem = {
@@ -21,11 +22,36 @@ export type HudItem = {
   reason: string;
   consequence?: string;
   action: string;
+  waitingChat?: boolean;
   open?: () => void;
   url?: string;
   hint?: string;
 };
 export const codexChatUrl = (id: string) => 'codex://threads/' + encodeURIComponent(id);
+
+export function nativeAction(r: AgentNotice) {
+  if (r.agent === 'codex') return { action: 'Open chat', url: codexChatUrl(r.id) };
+  return {
+    action: 'Find session',
+    hint:
+      r.job && /^[a-zA-Z0-9_][a-zA-Z0-9_-]*$/.test(r.job)
+        ? 'In your terminal: claude attach ' + r.job
+        : 'Select this conversation in claude agents.'
+  };
+}
+
+export function decisionItem(d: Decision, links: HudLinks): HudItem {
+  const t = d.target;
+  if ('desk' in t) return { ...d, action: 'Review decision', open: () => links.ondesk(t.desk) };
+  if ('project' in t)
+    return {
+      ...d,
+      waitingChat: isWaitingChat(d),
+      action: 'Review in project',
+      open: () => links.onproject(t.project, t.item)
+    };
+  return { ...d, waitingChat: true, ...nativeAction(t.native) };
+}
 
 export function hudItems(
   office: HudOffice,
@@ -41,7 +67,6 @@ export function hudItems(
     (r) => !officeIds.has(r.id) && !officeRuns.some((p) => p.agent === r.agent && p.pid === r.pid)
   );
   const live = new Map<string, HudItem>(),
-    needs: HudItem[] = [],
     review: HudItem[] = [];
   function external(r: AgentNotice): HudItem {
     const session = sessions.find((s) => s.agent === r.agent && s.nativeId === r.id);
@@ -54,35 +79,17 @@ export function hudItems(
     };
     if (session)
       return { ...item, action: 'Open project', open: () => links.onproject(session.id) };
-    if (r.agent === 'codex') return { ...item, action: 'Open chat', url: codexChatUrl(r.id) };
-    return {
-      ...item,
-      action: 'Find session',
-      hint:
-        r.job && /^[a-zA-Z0-9_][a-zA-Z0-9_-]*$/.test(r.job)
-          ? 'In your terminal: claude attach ' + r.job
-          : 'Select this conversation in claude agents.'
-    };
+    return { ...item, ...nativeAction(r) };
   }
-  for (const a of desk.asks)
-    needs.push({
-      id: 'ask-' + a.id,
-      group: 'office',
-      source: who(a.staffId) + ' · Oddboro',
-      title: a.title,
-      reason: a.why,
-      consequence: a.ifApproved,
-      action: 'Review decision',
-      open: () => links.ondesk('ask-' + a.id)
-    });
+  const needs: HudItem[] = hudDecisions(office, notices).map((d) => decisionItem(d, links));
   for (const r of native) {
     const item = external(r);
-    if (r.state === 'waiting') needs.push(item);
+    if (r.state === 'waiting') continue;
     else if (r.state === 'working') live.set(item.id, item);
     else review.push(item);
   }
   for (const s of sessions) {
-    if (s.status !== 'waiting' && s.status !== 'working') continue;
+    if (s.status !== 'working') continue;
     const id = s.agent + '-' + s.nativeId;
     if (officeIds.has(s.nativeId) || needs.some((n) => n.id === id)) continue;
     const item = {
@@ -90,14 +97,11 @@ export function hudItems(
       group: s.agent,
       source: AGENT_NAMES[s.agent],
       title: s.title,
-      reason: s.status === 'waiting' ? 'This project needs your answer.' : 'Working',
+      reason: 'Working',
       action: 'Open project',
       open: () => links.onproject(s.id)
     };
-    if (s.status === 'waiting') {
-      live.delete(id);
-      needs.push(item);
-    } else if (!live.has(id)) live.set(id, item);
+    if (!live.has(id)) live.set(id, item);
   }
   const waits = new Set(needs.map((n) => n.id));
   for (const id of sample?.openTurns ?? []) {
@@ -128,8 +132,9 @@ export function hudItems(
         open: () => links.onstaff(id)
       });
     }
+  const messages: HudItem[] = [];
   for (const t of desk.tasks)
-    needs.push({
+    messages.push({
       id: 'task-' + t.id,
       group: 'office',
       source: who(t.staffId) + ' · Oddboro',
@@ -138,17 +143,6 @@ export function hudItems(
       action: 'View task',
       open: () => links.ondesk('task-' + t.id)
     });
-  for (const p of desk.projectWork)
-    needs.push({
-      id: 'proposal-' + p.id,
-      group: 'office',
-      source: who(p.staffId) + ' · Oddboro',
-      title: p.title,
-      reason: 'An Odd proposed work in this project.',
-      action: 'Review proposal',
-      open: () => links.onproject(p.sessionId)
-    });
-  const messages: HudItem[] = [];
   for (const s of staff)
     if (office.unread[s.id])
       messages.push({

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import type {
     ProjectAgent,
     ProjectRequest,
@@ -26,6 +26,7 @@
     reply: string;
     market?: string;
     account?: string;
+    questions?: NonNullable<View['question']>[];
     question?: {
       key: string;
       id: string | number;
@@ -49,6 +50,11 @@
     candidates = $state<Choice[]>([]),
     work = $state<ProjectRequest[]>([]),
     view = $state<View>();
+  const question = $derived(
+    ask.item?.startsWith('question-') && ask.sessionId === currentId
+      ? view?.questions?.find((q) => 'question-' + q.key === ask.item)
+      : view?.question
+  );
   let socket = $state(''),
     folder = $state(''),
     agent = $state<ProjectAgent>('claude'),
@@ -95,7 +101,7 @@
   const oddOf = (id: string | null) => staff.find((p) => p.id === id);
   /** What waits on the owner in the drawer: a native question, proposals and unclear deliveries. */
   const waitingCount = $derived(
-    (view?.question ? 1 : 0) +
+    (view?.questions?.length ?? 0) +
       work.filter((r) => r.state === 'proposed' || r.state === 'uncertain').length
   );
 
@@ -278,14 +284,25 @@
   $effect(() => {
     void ask.n;
     const want = ask.sessionId;
+    const item = ask.item;
     if (!loaded) return;
     untrack(() => {
+      if (item && !connections.some((s) => s.id === want)) {
+        problem = 'This session is no longer connected.';
+        return;
+      }
       const id = connections.find((s) => s.id === want)?.id ?? (currentId || connections[0]?.id);
       if (!id) return;
       void run(async () => {
         await select(id);
         // Opened from the Desk: what waits on the owner shows at once.
-        if (id === want && waitingCount) details = true;
+        if (id === want && (waitingCount || item)) details = true;
+        if (item && id === want) {
+          await tick();
+          const card = document.getElementById(item);
+          if (card) card.focus();
+          else problem = 'This request is no longer waiting.';
+        }
       });
     });
   });
@@ -584,22 +601,26 @@
                   Codex sign-in at connection: {view.account}
                 </p>{/if}
 
-              {#if view?.question}<div class="flex flex-col gap-2 rounded-lg bg-ember/10 p-2">
+              {#if question}<div
+                  id={'question-' + question.key}
+                  tabindex="-1"
+                  class="flex flex-col gap-2 rounded-lg bg-ember/10 p-2"
+                >
                   <strong class="text-ink">Codex needs your answer</strong>
                   <pre class="max-h-48 overflow-auto whitespace-pre-wrap">{JSON.stringify(
-                      view.question.params,
+                      question.params,
                       null,
                       2
                     )}</pre>
-                  {#if ['item/commandExecution/requestApproval', 'item/fileChange/requestApproval', 'item/permissions/requestApproval'].includes(view.question.method)}
+                  {#if ['item/commandExecution/requestApproval', 'item/fileChange/requestApproval', 'item/permissions/requestApproval'].includes(question.method)}
                     <div class="flex gap-2">
                       <button
                         class="btn"
                         onclick={() =>
                           run(() =>
                             action('answer', {
-                              request: view?.question?.id,
-                              key: view?.question?.key,
+                              request: question?.id,
+                              key: question?.key,
                               pick: 'accept'
                             })
                           )}>Allow once</button
@@ -608,15 +629,15 @@
                         onclick={() =>
                           run(() =>
                             action('answer', {
-                              request: view?.question?.id,
-                              key: view?.question?.key,
+                              request: question?.id,
+                              key: question?.key,
                               pick: 'decline'
                             })
                           )}>Decline</button
                       >
                     </div>
-                  {:else if view.question.method === 'item/tool/requestUserInput'}
-                    {#each view.question.params.questions as { id: string; question: string; options?: { label: string }[]; isSecret?: boolean }[] as q (q.id)}
+                  {:else if question.method === 'item/tool/requestUserInput'}
+                    {#each question.params.questions as { id: string; question: string; options?: { label: string }[]; isSecret?: boolean }[] as q (q.id)}
                       <label
                         >{q.question}<input
                           class="field w-full"
@@ -631,8 +652,8 @@
                       onclick={() =>
                         run(async () => {
                           await action('answer', {
-                            request: view?.question?.id,
-                            key: view?.question?.key,
+                            request: question?.id,
+                            key: question?.key,
                             pick: 'accept',
                             answers: Object.fromEntries(
                               Object.entries(replies).map(([k, v]) => [k, [v]])
@@ -757,6 +778,12 @@
                 <h3 class="text-xs tracking-[0.16em] text-sea uppercase">Requests</h3>
               {/if}
               {#each work as r (r.id)}<div
+                  id={r.state === 'proposed'
+                    ? 'proposal-' + r.id
+                    : r.state === 'uncertain'
+                      ? 'uncertain-' + r.id
+                      : undefined}
+                  tabindex="-1"
                   class="flex flex-col gap-1 border-t border-hairline pt-2"
                 >
                   <strong class="text-[10px] tracking-[0.16em] text-ember uppercase"

@@ -785,6 +785,7 @@
       // Only the persona offers hear this: the floor meets a persona Odd, or
       // sees it go quiet, through the staff table's change, as any hire.
       if (e.type === 'persona') return void personaNews(e);
+      if (e.type === 'project-questions') return;
       const page = e.table === 'chat' ? ['version'] : (ON_CHANGE.get(e.table) ?? []);
       // A move into another layout rebuilds the whole floor.
       // During the first run, and until its last drawn pieces land, the floor

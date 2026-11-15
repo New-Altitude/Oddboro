@@ -163,7 +163,7 @@ async function claudeAllowances(): Promise<Allowances | null> {
   };
 }
 
-async function codexActivity(folder: string) {
+async function codexActivity(folder: string, readPlan: boolean) {
   const ignore = () => {};
   // An account-only client can read the plan on installations without a shared daemon.
   // Its own empty thread list says nothing about the owner's other clients.
@@ -172,15 +172,18 @@ async function codexActivity(folder: string) {
     ignore,
     ignore
   ).catch(() => null);
+  if (!existing && !readPlan) return null;
   const rpc = existing ?? (await startCodex(ignore, ignore));
   const timer = setTimeout(() => rpc.close(), 5500);
   try {
     const [live, limits] = await Promise.all([
       existing ? loadedNotices(rpc).catch(() => null) : null,
-      rpc
-        .request<LimitsReply>('account/rateLimits/read')
-        .then((reply) => codexAllowances(reply))
-        .catch(() => null)
+      readPlan
+        ? rpc
+            .request<LimitsReply>('account/rateLimits/read')
+            .then((reply) => codexAllowances(reply))
+            .catch(() => null)
+        : null
     ]);
     return { live, limits };
   } finally {
@@ -189,13 +192,29 @@ async function codexActivity(folder: string) {
   }
 }
 
-export async function agentAttention() {
-  const folder = process.env.CODEX_HOME || join(homedir(), '.codex');
-  const [claude, codex, unread, claudePlan] = await Promise.all([
+async function liveAgents(folder: string, readPlan: boolean) {
+  const [claude, codex] = await Promise.all([
     activeClaude()
       .then(claudeNotices)
       .catch(() => null),
-    codexActivity(folder).catch(() => null),
+    codexActivity(folder, readPlan).catch(() => null)
+  ]);
+  return { claude, codex };
+}
+const codexHome = () => process.env.CODEX_HOME || join(homedir(), '.codex');
+
+export async function nativeWaits() {
+  const { claude, codex } = await liveAgents(codexHome(), false);
+  return {
+    items: [...(claude ?? []), ...(codex?.live?.items ?? [])].filter((r) => r.state === 'waiting'),
+    partial: claude === null || !codex?.live?.complete
+  };
+}
+
+export async function agentAttention() {
+  const folder = codexHome();
+  const [{ claude, codex }, unread, claudePlan] = await Promise.all([
+    liveAgents(folder, true),
     Promise.resolve()
       .then(() => unreadCodex(folder))
       .catch(() => null),

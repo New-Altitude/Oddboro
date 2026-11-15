@@ -4,6 +4,7 @@ import {
   guessesWaiting,
   MANAGERS,
   projectOverview,
+  proposedProjectWork,
   roster,
   unreadPokes,
   welcomed
@@ -20,6 +21,18 @@ export async function workspace() {
     ? (await projectOverview()).map((s) => ({
         id: s.id,
         nativeId: s.nativeId,
+        questions: projectController()
+          .view(s.id)
+          .questions.map((q) => ({
+            key: q.key,
+            label:
+              (Array.isArray(q.params.questions) &&
+                q.params.questions.find((entry) => typeof entry?.question === 'string')
+                  ?.question) ||
+              (q.method.endsWith('requestUserInput')
+                ? 'Answer a question in '
+                : 'Review approval in ') + s.title
+          })),
         terminalPid: projectController().terminalPid(s.id),
         title: s.title,
         folder: s.folder,
@@ -30,6 +43,7 @@ export async function workspace() {
     : [];
   return {
     sessions,
+    uncertain: advanced ? await proposedProjectWork('uncertain') : [],
     staff: rows.map((r) => toProfile(r, guesses[r.id])),
     desk: await desk(),
     unread: await unreadPokes(),

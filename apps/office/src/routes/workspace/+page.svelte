@@ -1,4 +1,7 @@
 <script lang="ts">
+  import type { Decision } from '#lib/hud-decisions.ts';
+  import { nativeAction } from '#lib/ui/hud-items.ts';
+  import { leaveStripReview, reviewTarget } from '#lib/ui/strip-review.ts';
   import PressureNotice from '#lib/ui/PressureNotice.svelte';
   import type { ManagerAdvice } from '#lib/server/pressure-watch.ts';
   import { onMount, setContext, tick, untrack } from 'svelte';
@@ -48,6 +51,33 @@
     position = $state({ id: '', index: 0 });
   let launcher = $state<HTMLButtonElement>(),
     opener: HTMLElement | null = null;
+  let stripTarget = $state(''),
+    stripMessage = $state('');
+  let embedded = $state(false);
+  let nativeReview = $state<Decision>();
+  async function reviewDecision(id: string) {
+    tab = 'strip';
+    stripMessage = 'Checking this decision…';
+    try {
+      const { decision, partial } = await call<{ decision: Decision | null; partial: boolean }>(
+        `/api/strip-decisions?id=${encodeURIComponent(id)}`
+      );
+      if (!decision) {
+        stripMessage =
+          partial && /^(codex|claude)-/.test(id)
+            ? 'This agent’s request could not be verified.'
+            : 'This decision is no longer waiting.';
+        return;
+      }
+      if ('desk' in decision.target) desk(decision.target.desk);
+      else if ('project' in decision.target) {
+        if (office.advanced) pickProject(decision.target.project, decision.target.item);
+        else stripMessage = 'Turn on Advanced mode in Setup to review this project request.';
+      } else nativeReview = decision;
+    } catch {
+      stripMessage = 'Could not open this decision. Return to the strip to try again.';
+    }
+  }
   let initialResource = $state<ManagerAdvice['resource']>();
   function openHud() {
     initialResource = undefined;
@@ -56,6 +86,7 @@
     hudOpen = true;
   }
   async function closeHud() {
+    if (stripTarget) return leaveStripReview(stripTarget);
     hudOpen = false;
     fromHud = false;
     if (fromFloor) {
@@ -172,6 +203,24 @@
       openHud();
       initialResource = resource;
     }
+    embedded = window.parent !== window;
+    const params = new URL(location.href).searchParams;
+    const requested = params.get('review');
+    if (params.get('from') === 'strip' && reviewTarget(requested)) {
+      stripTarget = requested;
+      if (requested === 'cpu' || requested === 'memory' || requested === 'hud') {
+        openHud();
+        if (requested !== 'hud') initialResource = requested;
+      } else void reviewDecision(requested);
+    }
+    function returnOnEscape(event: KeyboardEvent) {
+      if (!stripTarget || event.key !== 'Escape' || event.isComposing) return;
+      if (actCheck.asking || wins.confirm) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      leaveStripReview(stripTarget);
+    }
+    window.addEventListener('keydown', returnOnEscape, true);
     const events = new EventSource('/api/events');
     let pending = false,
       dirty = false,
@@ -204,9 +253,10 @@
         office.inProgress = e.inProgress;
         return;
       }
-      if ('table' in e) void changed();
+      if ('table' in e || e.type === 'project-questions') void changed();
     };
     return () => {
+      window.removeEventListener('keydown', returnOnEscape, true);
       ended = true;
       applied = ++serial;
       events.close();
@@ -247,13 +297,19 @@
     }
   }
   let projectId = $state('');
-  function pickProject(id: string) {
+  function pickProject(id: string, item?: string) {
     projectId = id;
-    openProject(id);
+    openProject(id, item);
     tab = 'panel';
   }
   function switchByKey(e: KeyboardEvent) {
-    if (e.defaultPrevented || e.isComposing || hudOpen || document.querySelector('dialog[open]'))
+    if (
+      stripTarget ||
+      e.defaultPrevented ||
+      e.isComposing ||
+      hudOpen ||
+      document.querySelector('dialog[open]')
+    )
       return;
     if (office.welcomed && keys.open && chord(e) === keys.open) {
       if (
@@ -289,9 +345,9 @@
 <svelte:window onkeydown={switchByKey} />
 <main class="shell text-ink">
   <header>
-    <strong>Oddboro <span>Workspace</span></strong><a href="/?view=office" data-sveltekit-reload
-      >Open Office</a
-    >
+    <strong>Oddboro <span>Workspace</span></strong>{#if stripTarget && !embedded}<button
+        onclick={() => leaveStripReview(stripTarget)}>Back to strip · Esc</button
+      >{:else if !stripTarget}<a href="/?view=office" data-sveltekit-reload>Open Office</a>{/if}
   </header>
   {#if pressure && !hudOpen}<PressureNotice
       advice={pressure}
@@ -326,8 +382,8 @@
       </form>
     </section>
   {:else}
-    <div class="body">
-      <nav aria-label="Workspace">
+    <div class="body" class:reviewing={!!stripTarget}>
+      <nav aria-label="Workspace" hidden={!!stripTarget}>
         <button class:chosen={tab === 'inbox'} onclick={() => view('inbox')}
           >Inbox <small>{count}</small></button
         >
@@ -369,7 +425,17 @@
         {#if fromHud}<button data-hud-return class="return-hud" onclick={openHud}
             >← Back to decision queue</button
           >{/if}
-        {#if tab === 'inbox'}
+        {#if tab === 'strip'}
+          {#if nativeReview && 'native' in nativeReview.target}
+            {@const handoff = nativeAction(nativeReview.target.native)}
+            <small>{nativeReview.source}</small>
+            <h1>{nativeReview.title}</h1>
+            <p>{nativeReview.reason}</p>
+            {#if handoff.url}<a href={handoff.url}>Open this chat in Codex</a>{:else}<p>
+                {handoff.hint}
+              </p>{/if}
+          {:else}<p role="status">{stripMessage}</p>{/if}
+        {:else if tab === 'inbox'}
           <h1>Needs you</h1>
           {#each office.desk.asks as a}<button class="row" onclick={() => desk('ask-' + a.id)}
               >{a.title}<small>{a.why}</small></button
@@ -407,8 +473,14 @@
             ><button disabled={saving}>Hire</button>
           </form>
         {:else if tab === 'panel' && current}
-          {#if current.kind === 'desk'}<h1>Desk</h1>
+          {#if current.kind === 'desk' && stripTarget.startsWith('ask-') && !office.desk.asks.some((a) => 'ask-' + a.id === stripTarget)}
+            <p role="status">This decision is no longer waiting.</p>
+          {:else if current.kind === 'desk'}<h1>Desk</h1>
             <DeskDrawer
+              single={stripTarget.startsWith('ask-')}
+              ondone={() => {
+                if (stripTarget) leaveStripReview(stripTarget);
+              }}
               onlist={deskList}
               selectChat={false}
               desk={office.desk}
@@ -468,9 +540,9 @@
       onrefresh={refresh}
       links={{
         ondesk: (key) => followHud(() => desk(key)),
-        onproject: (id) =>
+        onproject: (id, item) =>
           followHud(() => {
-            if (advanced.on) pickProject(id);
+            if (advanced.on) pickProject(id, item);
             else {
               wins.shown = false;
               tab = 'settings';
@@ -490,6 +562,12 @@
     color: var(--color-sea);
     font-size: 0.83rem;
     margin-block-end: 0.75rem;
+  }
+  .body.reviewing {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  nav[hidden] {
+    display: none;
   }
   .shell {
     height: 100dvh;
