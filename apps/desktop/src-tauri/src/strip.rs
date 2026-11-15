@@ -71,11 +71,12 @@ fn return_to_strip(app: &AppHandle, previous: Option<MainState>) {
     let (Some(previous), Some(main)) = (previous, app.get_webview_window(MAIN)) else {
         return;
     };
-    if !previous.visible {
+    // On macOS a minimized window also reports that it is not visible.
+    if previous.minimized {
+        let _ = main.minimize();
+    } else if !previous.visible {
         let _ = main.hide();
         tell_page(app, "oddboro:hidden");
-    } else if previous.minimized {
-        let _ = main.minimize();
     }
     if let Some(strip) = app.get_webview_window(STRIP) {
         let _ = strip.set_focus();
