@@ -169,6 +169,9 @@ export const OWNER_ACTIONS = {
     mayRecord: ['decision'],
     when: 'One row the first time every answer is right. None for a wrong answer, or once the check was passed.'
   },
+  'POST /api/open-brain': {
+    none: 'Sets up office decision sharing, its project hooks and the last review in Services.'
+  },
   'PATCH /api/services/[id]': { records: 'access' },
   'POST /api/services/[id]': { none: NO_ROW },
   // The owner's Refresh (`refreshTools`).

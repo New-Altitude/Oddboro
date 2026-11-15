@@ -163,6 +163,7 @@ export const ROUTE_IDS = {
   '/api/proof': true,
   '/api/reports/[id]': true,
   '/api/rooms': true,
+  '/api/open-brain': true,
   '/api/services': true,
   '/api/services/[id]': true,
   '/api/services/[id]/tools': true,

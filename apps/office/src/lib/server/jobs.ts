@@ -46,6 +46,7 @@ import {
 } from '@oddboro/ledger';
 import { bus, listen, type OfficeEvent } from './events.ts';
 import { deliverPoke, runJob } from './staff.ts';
+import { checkBrainOnClock } from './open-brain.ts';
 import { held } from './update.ts';
 
 // macOS stops timers while it sleeps, so the clock never waits longer than
@@ -74,6 +75,7 @@ async function plan(): Promise<void> {
   if (!clock?.started) return;
   const revision = (clock.revision = (clock.revision ?? 0) + 1);
   const now = new Date();
+  checkBrainOnClock();
   let soonest = now.getTime() + LONGEST_WAIT_MS;
   try {
     for (const next of await lookAtJobs(now)) soonest = Math.min(soonest, next);
