@@ -1,3 +1,4 @@
+import { DatabaseSync } from 'node:sqlite';
 import { constants } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -36,4 +37,25 @@ export async function activityTitles(
     await file.close();
   }
   return names;
+}
+
+// A desktop process can own chats outside the daemon. Read only the last turn status
+// for files that process has open. An open turn alone cannot tell us if it needs input.
+export function openCodexTurns(
+  ids: Set<string>,
+  folder = process.env.CODEX_HOME || join(homedir(), '.codex')
+): string[] {
+  if (!ids.size) return [];
+  let db: DatabaseSync | undefined;
+  try {
+    db = new DatabaseSync(join(folder, 'thread_history_1.sqlite'), { readOnly: true });
+    const latest = db.prepare(
+      'SELECT status FROM thread_turns WHERE thread_id = ? ORDER BY rollout_ordinal DESC LIMIT 1'
+    );
+    return [...ids].filter((id) => latest.get(id)?.status === 'inProgress');
+  } catch {
+    return [];
+  } finally {
+    db?.close();
+  }
 }

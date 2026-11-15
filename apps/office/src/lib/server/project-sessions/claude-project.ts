@@ -24,21 +24,36 @@ type Active = {
   name?: string;
   status?: string;
   waitingFor?: string;
+  state?: string;
+  pid?: number;
 };
-export async function claudeProjects(folder: string) {
+export async function activeClaude(folder?: string): Promise<Active[]> {
   const [exe, prefix] = nativeCommand('claude');
+  const args = [...prefix, 'agents', '--json'];
+  if (folder) args.push('--cwd', folder);
+  const { stdout } = await promisify(execFile)(exe, args, {
+    env: nativeEnv(),
+    cwd: folder,
+    timeout: 5000,
+    maxBuffer: 4_000_000
+  });
+  const rows: unknown = JSON.parse(stdout);
+  if (
+    !Array.isArray(rows) ||
+    rows.some(
+      (r) => !r || typeof r.cwd !== 'string' || !['interactive', 'background'].includes(r.kind)
+    )
+  ) {
+    throw new Error('Claude session status is unavailable.');
+  }
+  return rows;
+}
+export async function claudeProjects(folder: string) {
   const [history, processes] = await Promise.all([
     savedClaudeSessions(folder),
-    promisify(execFile)(exe, [...prefix, 'agents', '--json', '--cwd', folder], {
-      env: nativeEnv(),
-      cwd: folder,
-      timeout: 10000,
-      maxBuffer: 4_000_000
-    })
+    activeClaude(folder)
   ]);
-  const active = (JSON.parse(processes.stdout) as Active[]).filter(
-    (a) => a.cwd === folder && a.sessionId
-  );
+  const active = processes.filter((a) => a.cwd === folder && a.sessionId);
   const rows = new Map(
     history
       .filter((h) => !h.cwd || h.cwd === folder)

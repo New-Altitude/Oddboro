@@ -4,11 +4,13 @@ On a fresh office, choose **Office** for the floor or **Workspace** for a list o
 
 In Workspace, **Needs you** shows open decisions. Choose a row to read the request and answer it. Choose an Odd to read its chat, send an assignment or steer an active reply. Use Alt+Down and Alt+Up to switch. Turn on Advanced in Settings to include native Codex and Claude project sessions. Select a session to inspect it; explicitly take terminal control to type. Closing a window or a terminal leaves the office running. **Stop office** ends the service, including running work.
 
-## Computer activity
+## Agent HUD
 
-Choose **Computer activity** in Workspace to measure the computer running the office. **Refresh** takes another sample. The panel lists Claude Code, Codex, Gemini and Grok processes running under the office owner's account, including tools opened outside Oddboro. Sort by CPU or memory. CPU is measured over a short interval, with 100% equal to one occupied core. Memory is the sum of resident memory in each process tree and can include shared pages.
+Choose **Agent HUD** in Workspace. **Who needs me?** lists Claude Code and Codex requests for input or approval, decisions on your desk, owner tasks and proposed project work. Choose a row's action to answer in its own chat, project or desk. **Ready to review** holds unread Codex replies, messages from Odds and reports. **In progress** lists active jobs and open Codex turns. Ask your Office Manager to help pick what to do first. You can edit the message before sending it.
 
-A shared server has one CPU and memory reading. On Mac and Linux, expand its open Codex conversations to see names when available. Windows shows process totals. A connected project opens in Projects, and a run owned by an Odd opens its chat. **Ask Office Manager** prepares a chat message with the readings and waiting decisions. Review it and send it to get advice.
+The HUD checks Claude Code's local agent list, including blocked background jobs. For Codex it checks connected projects and the existing local App Server daemon when available. For a separate desktop or terminal server, the HUD checks the last recorded turn of each detected open chat. Open that chat to see any private prompts. The local Codex unread index can still show replies. The panel tells you when it cannot read a source. Office work updates as it changes. Returning to the HUD or choosing **Refresh** checks external agents and takes a new computer sample.
+
+Computer activity lists Claude Code, Codex, Gemini and Grok processes under the owner's account. Sort by CPU or memory. 100% CPU uses one core. Memory sums resident pages in a process tree and can include shared pages. A shared server has one reading. On Mac and Linux, expand its open Codex conversations to see names when available. Windows shows process totals. **Ask about this run** prepares a message about the selected process.
 
 ## Pair a client with your office
 

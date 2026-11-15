@@ -5,6 +5,7 @@ import {
   MANAGERS,
   projectOverview,
   roster,
+  unreadPokes,
   welcomed
 } from '@oddboro/ledger';
 import { projectController } from './project-sessions/controller.ts';
@@ -31,6 +32,7 @@ export async function workspace() {
     sessions,
     staff: rows.map((r) => toProfile(r, guesses[r.id])),
     desk: await desk(),
+    unread: await unreadPokes(),
     working: working(),
     inProgress: inProgress(),
     advanced,

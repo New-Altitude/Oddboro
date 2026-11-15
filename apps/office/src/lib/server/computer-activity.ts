@@ -1,7 +1,7 @@
 import { cpus, totalmem, freemem } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { Agent } from '@oddboro/ledger/agents';
-import { activityTitles } from './activity-titles.ts';
+import { activityTitles, openCodexTurns } from './activity-titles.ts';
 import { processRows, processFiles, type ProcessRow } from './activity-processes.ts';
 
 export type ActivityRun = {
@@ -22,6 +22,7 @@ export type ComputerActivity = {
   used: number;
   total: number;
   titles: Record<string, string>;
+  openTurns: string[];
   runs: ActivityRun[];
 };
 
@@ -106,12 +107,14 @@ export async function computerActivity(
     }
   }
   const total = totalmem();
+  const ids = new Set([...groups.values()].flatMap((r) => r.sessions));
   return {
     measured: new Date().toISOString(),
     cpu: ticks > 0 ? Math.max(0, Math.min(100, 100 * (1 - (end.idle - host.idle) / ticks))) : null,
     used: total - freemem(),
     total,
-    titles: await activityTitles(new Set([...groups.values()].flatMap((r) => r.sessions))),
+    openTurns: openCodexTurns(ids),
+    titles: await activityTitles(ids),
     runs: [...groups.values()].sort((a, b) => (b.cpu ?? -1) - (a.cpu ?? -1) || b.bytes - a.bytes)
   };
 }

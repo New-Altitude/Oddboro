@@ -520,6 +520,21 @@ fn browser_link(office: &Url, to: &Url) -> Option<Url> {
     Some(link)
 }
 
+/// Allow just a direct link to one Codex chat.
+fn codex_chat(url: &Url) -> bool {
+    let Some(id) = url.as_str().strip_prefix("codex://threads/") else {
+        return false;
+    };
+    id.len() == 36
+        && id.bytes().enumerate().all(|(i, byte)| {
+            if matches!(i, 8 | 13 | 18 | 23) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
+}
+
 /// The office's own origin stays in the window. Links anywhere else open in
 /// the default browser. Other schemes (about:, data:, blob:) stay put.
 fn stay_or_open(home: &Url, to: &Url) -> bool {
@@ -529,12 +544,16 @@ fn stay_or_open(home: &Url, to: &Url) -> bool {
             open_in_browser(to);
             false
         }
+        "codex" if codex_chat(to) => {
+            open_in_browser(to);
+            false
+        }
         _ => true,
     }
 }
 
 fn open_in_browser(url: &Url) {
-    if !matches!(url.scheme(), "http" | "https" | "mailto" | "tel") {
+    if !matches!(url.scheme(), "http" | "https" | "mailto" | "tel") && !codex_chat(url) {
         return;
     }
     let (opener, first) = OPENER;
@@ -702,7 +721,21 @@ fn opening(server_url: Option<&str>, port: u16) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::opening;
+    use super::{codex_chat, opening, Url};
+
+    #[test]
+    fn only_a_codex_chat_link_opens_the_app() {
+        let chat = "codex://threads/82000000-0000-4000-9000-000000000001";
+        assert!(codex_chat(&Url::parse(chat).unwrap()));
+        for other in [
+            chat.to_owned() + "?open=other",
+            chat.to_owned() + "/extra",
+            "codex://settings/general".into(),
+            "codex://threads/no-id".into(),
+        ] {
+            assert!(!codex_chat(&Url::parse(&other).unwrap()));
+        }
+    }
 
     #[test]
     fn the_launch_line_names_what_the_shell_opens() {

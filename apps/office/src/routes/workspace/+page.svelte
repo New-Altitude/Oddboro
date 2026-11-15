@@ -230,8 +230,7 @@
         <button class:chosen={tab === 'inbox'} onclick={() => view('inbox')}
           >Inbox <small>{count}</small></button
         >
-        <button class:chosen={tab === 'activity'} onclick={() => view('activity')}
-          >Computer activity</button
+        <button class:chosen={tab === 'activity'} onclick={() => view('activity')}>Agent HUD</button
         >
         {#if advanced.on}<button
             onclick={() => {
@@ -287,6 +286,10 @@
             staff={office.staff}
             sessions={office.sessions}
             desk={office.desk}
+            onrefresh={refresh}
+            unread={office.unread}
+            inProgress={office.inProgress}
+            onreport={(id, person, title) => item(person, { kind: 'report', id, title })}
             onproject={pickProject}
             onstaff={pick}
             ondesk={desk}
