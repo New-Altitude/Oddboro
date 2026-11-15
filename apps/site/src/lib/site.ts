@@ -39,6 +39,7 @@ export const PAGES = [
   '/connectors/aws-read/',
   '/connectors/aws-build/',
   '/info/folder-sharing/',
+  '/info/backup-and-restore/',
   '/privacy/',
   '/terms/'
 ] as const;

@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Eleven questions as native disclosures. Each answer fades in once when
+  // Questions as native disclosures. Each answer fades in once when
   // opened; the chevron turns. Code in an answer is marked in the text with
   // backticks and rendered as <code>.
   import SectionHeader from '#lib/components/SectionHeader.svelte';
@@ -41,6 +41,11 @@
     {
       q: 'What is the Office Manager?',
       a: 'Your first Odd. It runs the floor, puts your daily report on your desk at 7 each morning, and helps you hire the rest. Pick one of the four ready-made managers, or describe your own.'
+    },
+    {
+      q: 'How do I back up my office?',
+      a: 'Quit Oddboro and copy the whole office folder to a private backup drive. You can restore it with its staff, files, history and pending decisions.',
+      guide: { path: '/info/backup-and-restore/', label: 'Back up and restore your office' }
     },
     {
       q: 'How do I start over, or remove it?',
@@ -88,6 +93,9 @@
               >{p.text}</code
             >{:else}{p.text}{/if}
         {/each}
+        {#if f.guide}
+          <a href={f.guide.path} class="text-sea underline">{f.guide.label}</a>
+        {/if}
       </p>
     </details>
   {/each}

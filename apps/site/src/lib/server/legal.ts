@@ -28,8 +28,10 @@ export const legal = (name: 'privacy' | 'terms', fallbackTitle: string): LegalDo
   markdownDoc(`legal/${name}`, fallbackTitle);
 
 /** A page the office links to, from src/content/info/<name>.md. */
-export const info = (name: 'folder-sharing', fallbackTitle: string): LegalDoc =>
-  markdownDoc(`info/${name}`, fallbackTitle);
+export const info = (
+  name: 'folder-sharing' | 'backup-and-restore',
+  fallbackTitle: string
+): LegalDoc => markdownDoc(`info/${name}`, fallbackTitle);
 
 function markdownDoc(name: string, fallbackTitle: string): LegalDoc {
   const text = files[`/src/content/${name}.md`];
