@@ -29,7 +29,10 @@ test('a second reader supplies evidence without knowing which Odd needs it', asy
     const input = JSON.parse(data);
     assert.deepEqual(input.evidence, [move]);
     return JSON.stringify([
-      { job: input.work.find((j: DreamWork) => j.name === prep.name).id, sources: [move.id] }
+      ...input.work.map((j: DreamWork) => ({
+        job: j.id,
+        sources: j.name === prep.name ? [move.id] : []
+      }))
     ]);
   };
   const reviewed = await reviewWork(work, calendar, judge);
@@ -38,6 +41,10 @@ test('a second reader supplies evidence without knowing which Odd needs it', asy
   assert.equal(await reviewWork(work, calendar, judge, reviewed), reviewed);
   await reviewWork([{ ...prep, staffId: 'lee' }, invoice], calendar, judge, reviewed);
   assert.equal(reviews, 2);
+  await assert.rejects(
+    reviewWork(work, calendar, async () => '[]'),
+    /each assignment/
+  );
   const revoked = await reviewWork(work, { read: async () => [] }, judge, reviewed);
   assert.deepEqual(revoked.byJob, {});
 });
