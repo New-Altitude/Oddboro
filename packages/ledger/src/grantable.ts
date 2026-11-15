@@ -23,7 +23,8 @@ export const STAFF_PATCH_KEYS = [
   'accept',
   'effort',
   'model',
-  'account'
+  'account',
+  'actsOnHandOffs'
 ] as const;
 export type StaffPatchKey = (typeof STAFF_PATCH_KEYS)[number];
 
@@ -207,5 +208,6 @@ export const PATCH_KEY: Record<StaffPatchKey, GrantKind | 'run setting' | 'quali
   accept: 'qualifier',
   effort: 'run setting',
   model: 'run setting',
-  account: 'run setting'
+  account: 'run setting',
+  actsOnHandOffs: 'run setting'
 };

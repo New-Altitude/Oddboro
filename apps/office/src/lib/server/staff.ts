@@ -27,6 +27,8 @@ import {
   atDraft,
   capabilities,
   capped,
+  handedOver,
+  handOffsLine,
   CHAT_STORIES_MAX,
   chatSession,
   type ChatCard,
@@ -133,6 +135,8 @@ import {
   type UsageKind
 } from '@oddboro/ledger';
 import { flat } from '@oddboro/ledger/desk-answers';
+import { currentSystem } from '@oddboro/ledger/platform';
+import { computerWord } from '@oddboro/ledger/system-words';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -301,7 +305,9 @@ export async function runHomeOf(who: StaffRow): Promise<string> {
  * (`atDraft`), and any run that serves a colleague's hand-off, works at Draft
  * at most (`ceiling`), so a colleague's words never stand in for the owner's
  * yes. Only the carry-out of an approval ask, the owner's yes to that exact
- * action, keeps the Odd's level. Its
+ * action, keeps the Odd's level, and so does every run that serves a
+ * hand-off when the owner lets the Odd act on its own on work from
+ * colleagues (`actsOnHandOffs`). Its
  * caps come down to the ceiling too (`capped`), so its prompt lists what it loads.
  * Every outside tool reaches the run through the office's gateway
  * (gateway.ts), which keeps the keys and passes on only the tools the grant
@@ -310,10 +316,19 @@ export async function runHomeOf(who: StaffRow): Promise<string> {
  * at Draft lists every tool, and the gateway holds each change for the
  * owner's yes (`writesWait`), on the desk where `place` says, but for the
  * tools the owner lets the Odd use without asking (`standing`), in any run
- * with a place; a run with no place (a lesson run) changes nothing. At Act
- * it holds only calls to the tools the owner set to ask first (`askFirst`).
+ * with a place but one a colleague's words reach (`handed`: one that serves a
+ * colleague's hand-off, or a lead's pick-up of a result) while the owner keeps
+ * such work to ask first (`handedOver`); a run with no place (a
+ * lesson run) changes nothing. At Act it holds only calls to the tools the
+ * owner set to ask first (`askFirst`).
  */
-async function access(who: StaffRow, ceiling: Level, ms: number, place?: CallPlace) {
+async function access(
+  who: StaffRow,
+  ceiling: Level,
+  ms: number,
+  place: CallPlace | undefined,
+  handed: boolean
+) {
   const office: McpServer = {
     type: 'stdio',
     command: process.execPath,
@@ -324,7 +339,8 @@ async function access(who: StaffRow, ceiling: Level, ms: number, place?: CallPla
   };
   const servers: Record<string, McpServer> = { office };
   const allowed = ['mcp__office'];
-  const caps = capped(await capabilities(who), ceiling);
+  const held = capped(await capabilities(who), ceiling);
+  const caps = handed ? handedOver(held) : held;
   const reach: {
     connector: ConnectorRow;
     level: Level;
@@ -378,7 +394,7 @@ async function whoFor(who: StaffRow, dir: string): Promise<string> {
     '',
     '## Who you work for',
     '',
-    '- {owner}. This office is theirs, and runs on their Mac.',
+    `- {owner}. This office is theirs, and runs on their ${computerWord(currentSystem())}.`,
     existsSync(join(dir, 'notes', 'intake.md')) &&
       "- {owner}'s own answers from when you were hired are in notes/intake.md. Read them before your first piece of work, and again whenever you are unsure what they want.",
     serving.length
@@ -456,6 +472,8 @@ function canDo(
     '## What you can do',
     '',
     `- ${levelLine(caps.level, owner)}`,
+    // At Act, what the owner chose for work another Odd hands it, as my_access says.
+    ...(caps.level === 'act' ? [`- ${handOffsLine(caps.actsOnHandOffs, owner)}`] : []),
     `- ${runsOnLine(agent)}`,
     `- ${[writes, ...ownToolsSaid(agent, caps.own, officeHeld), beyond].join(' ')}`,
     '- If a brief names tools you do not have, do the work with your own tools.',
@@ -755,7 +773,7 @@ export type RunOpts = {
   ownerNote?: string;
   /** The file the owner edited, and their version of it, which a lesson read from it quotes. The run may not write that file. */
   ownerEdit?: { path: string; text: string };
-  /** Draft at most: a follow-up `atDraft` names, or one that serves a colleague's hand-off, except an approval ask's carry-out. */
+  /** Draft at most: a follow-up `atDraft` names, or one that serves a colleague's hand-off, except an approval ask's carry-out and an Odd the owner lets act on its own there (`actsOnHandOffs`). */
   draftOnly?: boolean;
   /** A run that only reads the owner's reason or edit for a lesson (`servesNoThread`): it hands nothing on. */
   lessonRun?: boolean;
@@ -765,6 +783,12 @@ export type RunOpts = {
   threadId?: number;
   /** On a lead's pick-up of a colleague's result, that colleague: what the run puts on the desk names them. */
   via?: string;
+  /**
+   * A colleague's words reach this run: it serves a colleague's hand-off, or
+   * is a lead's pick-up of a result. Unless the owner lets the Odd act on its
+   * own on work from colleagues, no standing yes applies (`handedOver`).
+   */
+  fromColleague?: boolean;
   /** The hand-backs this run's brief already holds in full, so its lead's story leaves them out. */
   shown?: number[];
   /** Pictures the owner attached in a chat, for a tool that cannot open one with its own tools (Codex). */
@@ -894,7 +918,8 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
           handOffId: opts.handOffId,
           threadId: opts.threadId,
           via: opts.via
-        }
+        },
+    !!opts.fromColleague
   );
   // A source can sign out between the check of both jobs and this run.
   const unavailable = caps.outside.filter(
@@ -998,6 +1023,7 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
       handOffId: opts.handOffId,
       threadId: opts.threadId,
       via: opts.via,
+      fromColleague: opts.fromColleague,
       lessonRun: !!opts.lessonRun,
       // Every run while held, whatever its own tool or switches: its
       // office_report speaks of other Odds too.
@@ -1586,10 +1612,14 @@ export async function followThrough(
   // so a colleague's words never stand in for the owner's yes, even after a
   // yes that raised this Odd's own level or tools. The carry-out of an
   // approval ask is the owner's yes to that exact action, so it keeps the
-  // Odd's level and one yes stays one yes.
+  // Odd's level and one yes stays one yes. The owner can let an Odd act on
+  // its own on work from colleagues (`actsOnHandOffs`): then every run that
+  // serves a hand-off keeps its level. It never lifts a kind `atDraft` names.
   const draftOnly =
     atDraft(f.kind) ||
-    (serves !== undefined && !(f.kind === 'carry_out' && a?.kind === 'approval'));
+    (serves !== undefined &&
+      !(f.kind === 'carry_out' && a?.kind === 'approval') &&
+      !who.actsOnHandOffs);
   const res = await slot(who.id, work, (onEvent, runId) =>
     run(who, label, {
       kind: 'follow-up',
@@ -1609,6 +1639,9 @@ export async function followThrough(
       draftOnly,
       lessonRun: servesNoThread(f.kind),
       handOffId: serves?.id,
+      // A lead's pick-up reads a colleague's result: it stays at Draft by its
+      // kind, and its standing yeses follow the owner's choice too.
+      fromColleague: serves !== undefined || f.kind === 'handed_back',
       threadId: thread?.id,
       via,
       shown: f.kind === 'handed_back' ? [f.id, ...joinedIds] : undefined,
@@ -1636,12 +1669,18 @@ export async function followThrough(
               result: f.note,
               thread: thread.id,
               goal: goalServed,
-              joined
+              joined,
+              acts: !draftOnly && who.permission === 'act'
             })
           : edit
             ? editBrief(edit.path, edit.shown)
             : [
-                ...followUpBrief(f, a, r, task, g, { also, draftOnly, level: who.permission }),
+                ...followUpBrief(f, a, r, task, g, {
+                  also,
+                  draftOnly,
+                  level: who.permission,
+                  actsOnHandOffs: who.actsOnHandOffs
+                }),
                 ...(serves?.handOff && giver && thread
                   ? handOffContext({
                       h: serves.handOff,
