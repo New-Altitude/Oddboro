@@ -214,6 +214,8 @@ export type Service = {
   env?: Record<string, string>;
   /** Seconds to wait before starting it again after it stops. */
   throttle?: number;
+  /** Launch once at login and let the packaged supervisor own restarts. */
+  headless?: boolean;
 };
 
 /** How one system keeps a program running at login. */
@@ -254,7 +256,10 @@ export function launchdPlist(s: Service): string {
       lines.push(`    <key>${xml(k)}</key><string>${xml(v)}</string>`);
     lines.push('  </dict>');
   }
-  lines.push('  <key>RunAtLoad</key><true/>', '  <key>KeepAlive</key><true/>');
+  lines.push(
+    '  <key>RunAtLoad</key><true/>',
+    s.headless ? '  <key>KeepAlive</key><false/>' : '  <key>KeepAlive</key><true/>'
+  );
   if (s.throttle) lines.push(`  <key>ThrottleInterval</key><integer>${s.throttle}</integer>`);
   lines.push(
     `  <key>StandardOutPath</key><string>${xml(s.log)}</string>`,
@@ -274,7 +279,7 @@ export function systemdUnit(s: Service): string {
   const lines = [
     '[Unit]',
     `Description=Oddboro (${s.label})`,
-    'After=graphical-session.target',
+    ...(s.headless ? [] : ['After=graphical-session.target']),
     '',
     '[Service]',
     `ExecStart=${s.args.map(quoted).join(' ')}`
@@ -283,13 +288,13 @@ export function systemdUnit(s: Service): string {
   for (const [k, v] of Object.entries(s.env ?? {}))
     lines.push(`Environment=${quoted(`${k}=${v}`)}`);
   lines.push(
-    'Restart=always',
+    s.headless ? 'Restart=no' : 'Restart=always',
     `RestartSec=${s.throttle ?? 5}`,
     `StandardOutput=append:${s.log}`,
     `StandardError=append:${s.log}`,
     '',
     '[Install]',
-    'WantedBy=graphical-session.target',
+    s.headless ? 'WantedBy=default.target' : 'WantedBy=graphical-session.target',
     ''
   );
   return lines.join('\n');
@@ -299,6 +304,7 @@ const uid = () => process.getuid?.() ?? 501;
 const plist = (label: string) => join(homedir(), 'Library', 'LaunchAgents', `${label}.plist`);
 const launchd: ServiceManager = {
   async install(s) {
+    mkdirSync(join(plist(s.label), '..'), { recursive: true });
     writeFileSync(plist(s.label), launchdPlist(s));
     await run('launchctl', ['bootout', `gui/${uid()}/${s.label}`]);
     return run('launchctl', ['bootstrap', `gui/${uid()}`, plist(s.label)]);
@@ -355,7 +361,7 @@ export function windowsLoop(s: Service): string {
     `${s.args.map((a) => `"${batch(a)}"`).join(' ')} >> "${batch(s.log)}" 2>&1`,
     // ping waits without a console to read keys from, which timeout needs.
     `ping -n ${(s.throttle ?? 5) + 1} 127.0.0.1 >nul`,
-    'goto run',
+    s.headless ? 'exit /b 0' : 'goto run',
     ''
   );
   return lines.join('\r\n');

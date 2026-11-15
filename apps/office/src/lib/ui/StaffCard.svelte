@@ -9,12 +9,15 @@
   import LessonsTab from './LessonsTab.svelte';
   import OddInfo from './OddInfo.svelte';
   import StorageTab from './StorageTab.svelte';
+  import ItemsTab from './ItemsTab.svelte';
   import type { Work } from '../staff/work.ts';
   import { ACTIVITY_LABEL, type Activity, type StaffProfile } from '../staff/roster.ts';
   import type { Place, PlaceGroup } from '../staff/places.ts';
 
   type Props = {
     profile: StaffProfile;
+    /** The Office level can cover the card without discarding its chat draft. */
+    visible?: boolean;
     desk: Desk;
     staff: StaffProfile[];
     onplan: (hires: AskRow[]) => void;
@@ -25,8 +28,8 @@
     working: string | undefined;
     /** Everything it is working on now. */
     work: Work[];
-    /** Open the info page at In progress, e.g. from the agents list. `n` changes to ask again. */
-    show?: { tab: 'work'; n: number };
+    /** Open In progress or Chat. `n` changes to ask again. */
+    show?: { tab: 'work' | 'chat'; n: number };
     /** Opens something the staffer delivered, on the start side. */
     onitem: (item: Delivered) => void;
     /** Every place on the floor, for the Send tab. */
@@ -47,6 +50,7 @@
 
   let {
     profile,
+    visible = true,
     desk,
     staff,
     onplan,
@@ -75,7 +79,7 @@
     return [...new Set(others.map((h) => h!.name))].join(' and ');
   }
   // The chat comes first: the info page is a click away, on the name.
-  type Tab = 'card' | 'send' | 'chat' | 'lessons' | 'storage' | 'access';
+  type Tab = 'card' | 'send' | 'chat' | 'items' | 'lessons' | 'storage' | 'access';
   let tab = $state<Tab>('chat');
   /** Bumped to open the info page at In progress. */
   let toWork = $state(0);
@@ -84,7 +88,11 @@
     toWork++;
   }
   $effect(() => {
-    if (show) untrack(showWork);
+    if (show?.tab === 'work') untrack(showWork);
+    else if (show?.tab === 'chat') {
+      void show.n;
+      tab = 'chat';
+    }
   });
   // The id, not the profile: every office reload brings a new profile, and an
   // effect that read it would send the owner back to Chat from any tab.
@@ -98,9 +106,10 @@
     if (chatRequest.focus?.staff === id) tab = 'chat';
   });
   /**
-   * Three groups, each an icon and a word (the icon alone when the bar is
+   * Four groups, each an icon and a word (the icon alone when the bar is
    * narrow), and under Data a row of its own tabs. Chat is the chat alone,
-   * and Settings holds its own four tabs. The info page, opened from the
+   * Items everything the Odd put in front of the owner without the chat, and
+   * Settings holds its own four tabs. The info page, opened from the
    * name, sits in no group: it holds In progress and Jobs.
    */
   const GROUPS = [
@@ -109,6 +118,13 @@
       label: 'Chat',
       icon: 'M4 5h16v11H9l-5 4z',
       tabs: [{ id: 'chat', label: 'Chat' }]
+    },
+    {
+      id: 'items',
+      label: 'Items',
+      // A list with ticks.
+      icon: 'M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2',
+      tabs: [{ id: 'items', label: 'Items' }]
     },
     {
       id: 'data',
@@ -146,13 +162,13 @@
    * Work in progress shows by the name.
    */
   const counts: Partial<Record<Tab, number>> = $derived({ lessons: profile.guesses });
-
-  function onkey(e: KeyboardEvent) {
-    if (e.key === 'Escape') onclose();
-  }
+  /** How many of its items wait on the owner, shown on the Items group. */
+  const waitingHere = $derived(
+    desk.asks.filter((a) => a.staffId === profile.id).length +
+      desk.tasks.filter((t) => t.staffId === profile.id).length +
+      desk.reports.filter((r) => r.staffId === profile.id).length
+  );
 </script>
-
-<svelte:window onkeydown={onkey} />
 
 <div class="flex h-full min-h-0 flex-col">
   <header class="flex items-center gap-3 border-b border-hairline p-3">
@@ -245,7 +261,9 @@
           stroke-linejoin="round"
           aria-hidden="true"><path d={g.icon} /></svg
         >
-        <span class="word">{g.label}</span>
+        <span class="word">{g.label}</span>{#if g.id === 'items' && waitingHere}<span
+            class="text-ember">{waitingHere}</span
+          >{/if}
       </button>
     {/each}
   </nav>
@@ -324,6 +342,8 @@
           {/each}
         </div>
       </div>
+    {:else if tab === 'items'}
+      <ItemsTab {profile} {version} {onitem} />
     {:else if tab === 'lessons'}
       <LessonsTab {profile} {version} />
     {:else if tab === 'storage'}
@@ -342,7 +362,7 @@
         {version}
         onstart={onchatstart}
         onend={onchatend}
-        visible={tab === 'chat'}
+        visible={visible && tab === 'chat'}
         {onitem}
         {work}
         onwork={showWork}

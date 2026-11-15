@@ -112,10 +112,12 @@ export const QUIET_ROUTES: ReadonlySet<string> = new Set<RouteId>([
  */
 export const ROUTE_IDS = {
   '/': true,
+  '/strip': true,
   '/account/callback': true,
   '/api/account': true,
   '/api/accounts': true,
   '/api/act-check': true,
+  '/api/agent-attention': true,
   '/api/agents': true,
   '/api/agents/[tool]': true,
   '/api/asks/[id]': true,
@@ -128,6 +130,8 @@ export const ROUTE_IDS = {
   '/api/asks/[id]/reply': true,
   '/api/browser-link': true,
   '/api/client-log': true,
+  '/api/computer-activity': true,
+  '/api/strip-decisions': true,
   '/api/connectors': true,
   '/api/diagnostics': true,
   '/api/diagnostics/envelope': true,
@@ -141,6 +145,7 @@ export const ROUTE_IDS = {
   '/api/goals/[id]': true,
   '/api/goals/[id]/staff': true,
   '/api/health': true,
+  '/api/items': true,
   '/api/jobs/[id]': true,
   '/api/jobs/away': true,
   '/api/ledger': true,
@@ -180,6 +185,7 @@ export const ROUTE_IDS = {
   '/api/staff/[id]/attachments': true,
   '/api/staff/[id]/attachments/[name]': true,
   '/api/staff/[id]/bug-reports': true,
+  '/api/staff/[id]/items': true,
   '/api/staff/[id]/jobs': true,
   '/api/staff/[id]/lessons': true,
   '/api/staff/[id]/look': true,
@@ -192,6 +198,9 @@ export const ROUTE_IDS = {
   '/api/tasks/[id]': true,
   '/api/update': true,
   '/atlas/[file]': true,
+  '/api/workspace': true,
+  '/workspace': true,
+  '/welcome': true,
   '/connect/callback': true
 } as const satisfies Record<RouteId, true>;
 

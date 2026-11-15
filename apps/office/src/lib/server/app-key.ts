@@ -50,6 +50,7 @@ const SHAPE = /^[0-9a-f]{64}$/;
 const KEY_WAIT_MS = 10_000;
 
 let key: Buffer | undefined;
+let pairedKey: Buffer | undefined;
 
 /**
  * Reads the key from the first line on `input`, the server's stdin. Resolves
@@ -66,6 +67,7 @@ export function readKey(input: Readable, waitMs = KEY_WAIT_MS): Promise<boolean>
       input.off('close', closed);
       clearTimeout(timer);
       const sent = line?.startsWith(KEY_LINE) ? line.slice(KEY_LINE.length).trim() : '';
+      pairedKey = undefined;
       key = SHAPE.test(sent) ? Buffer.from(sent) : undefined;
       done(!!key);
     };
@@ -96,10 +98,10 @@ export function proof(nonce: string): string | undefined {
 }
 
 /** True when `sent` is the key, compared in constant time. False while there is none. */
-function isKey(sent: string | null | undefined): boolean {
-  if (!key || !sent) return false;
+function isKey(sent: string | null | undefined, expected = key): boolean {
+  if (!expected || !sent) return false;
   const given = Buffer.from(sent);
-  return given.length === key.length && timingSafeEqual(given, key);
+  return given.length === expected.length && timingSafeEqual(given, expected);
 }
 
 /** Every value of the cookie `name` in a Cookie header. */
@@ -112,10 +114,23 @@ function cookies(header: string | null, name: string): string[] {
 
 /** True when the request comes from the app's window: its cookie holds the key. */
 export const fromWindow = (request: Request): boolean =>
-  cookies(request.headers.get('cookie'), KEY_COOKIE).some(isKey);
+  cookies(request.headers.get('cookie'), KEY_COOKIE).some(
+    (sent) => isKey(sent) || (!!pairedKey && isKey(sent, pairedKey))
+  );
 
 /** True when the request comes from the app's shell: its header holds the key. */
 export const fromShell = (request: Request): boolean => isKey(request.headers.get(KEY_HEADER));
+
+/** A paired window can ask for its own one-use file links. */
+export const fromPairedShell = (request: Request) =>
+  !!pairedKey && isKey(request.headers.get(KEY_HEADER), pairedKey);
+
+export function pairingProof(nonce: string) {
+  if (!pairedKey || !SHAPE.test(nonce)) return undefined;
+  return createHmac('sha256', pairedKey)
+    .update(PROOF_LABEL + nonce)
+    .digest('hex');
+}
 
 const links = new Map<string, { path: string; until: number }>();
 
@@ -153,3 +168,11 @@ export const WINDOW_CSP = [
   "object-src 'none'",
   "form-action 'self'"
 ].join('; ');
+
+/** Publish the current key only inside the envelope for this office's owner. */
+export async function pairService() {
+  if (!key) throw Error('The supervisor did not provide an office key.');
+  const { publishPairing } = await import('./service-pairing.ts');
+  pairedKey = Buffer.from(randomBytes(32).toString('hex'));
+  await publishPairing(pairedKey.toString());
+}

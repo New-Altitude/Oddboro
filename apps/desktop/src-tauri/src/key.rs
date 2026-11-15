@@ -78,6 +78,14 @@ pub fn nonce() -> Option<String> {
 }
 
 impl Key {
+    /// Supplied by the paired client after verifying this Node's proof.
+    pub fn adopt(value: &str) -> Option<Arc<Self>> {
+        unhex(value)?;
+        let key = Arc::new(Self(value.to_owned()));
+        *CURRENT.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::clone(&key));
+        Some(key)
+    }
+
     /// The line Node reads first on its stdin, without its line break.
     pub fn line(&self) -> String {
         format!("{LINE}{}", self.0)

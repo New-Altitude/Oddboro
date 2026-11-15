@@ -5,11 +5,12 @@
 // shell sends none until the server has proved itself. The answer says
 // nothing of the key, and is good for nothing but this.
 import { error } from '@sveltejs/kit';
-import { proof } from '#lib/server/app-key.ts';
+import { pairingProof, proof } from '#lib/server/app-key.ts';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = ({ url }) => {
-  const answer = proof(url.searchParams.get('nonce') ?? '');
+  const nonce = url.searchParams.get('nonce') ?? '';
+  const answer = url.searchParams.get('client') === 'owner' ? pairingProof(nonce) : proof(nonce);
   if (!answer) error(400, 'Send a nonce of 64 hex digits, to an office in the app');
   return new Response(answer, {
     headers: { 'content-type': 'text/plain', 'cache-control': 'no-store' }

@@ -2624,15 +2624,20 @@ dependencies = [
 name = "oddboro"
 version = "0.0.1"
 dependencies = [
+ "base64 0.23.1",
+ "flate2",
  "getrandom 0.3.4",
  "libc",
  "mac-notification-sys",
+ "minisign-verify",
  "reqwest",
  "ring",
  "rustls",
  "security-framework",
+ "semver",
  "sentry",
  "serde_json",
+ "tar",
  "tauri",
  "tauri-build",
  "tauri-plugin-autostart",
@@ -2640,6 +2645,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
  "tauri-winrt-notification",
+ "tempfile",
  "windows-sys 0.61.2",
  "zbus",
 ]

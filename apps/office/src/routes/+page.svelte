@@ -1,5 +1,9 @@
 <script lang="ts">
+  import PressureNotice from '#lib/ui/PressureNotice.svelte';
+  import type { ManagerAdvice } from '#lib/server/pressure-watch.ts';
   import { onMount, tick, untrack } from 'svelte';
+  import { oddStatus, waitingCount, waitingForOwner, ON_CHANGE } from '#lib/ui/office-status.ts';
+  import OfficeStripBridge from '#lib/ui/OfficeStripBridge.svelte';
   import { invalidateAll } from '$app/navigation';
   import type { Desk, GoalThread } from '@oddboro/ledger';
   import { TILE, type World } from '@oddboro/world';
@@ -10,11 +14,11 @@
   import FloorControls, { type Light } from '#lib/ui/FloorControls.svelte';
   import { music, musicEnded, startMusic } from '#lib/ui/music.svelte.ts';
   import { chatAbout } from '#lib/ui/chat-about.svelte.ts';
-  import { ACTIVITY_LABEL, type Activity, type StaffProfile } from '#lib/staff/roster.ts';
+  import { type Activity, type StaffProfile } from '#lib/staff/roster.ts';
   import { threadTag, type HeldThread } from '#lib/staff/thread-tags.ts';
   import StaffCard from '#lib/ui/StaffCard.svelte';
   import { chatRequest, type Delivered } from '#lib/ui/chat-about.svelte.ts';
-  import OddsRail, { ODDS_RAIL, ODDS_RAIL_OPEN } from '#lib/ui/OddsRail.svelte';
+  import OddsList from '#lib/ui/OddsList.svelte';
   import type { Work } from '#lib/staff/work.ts';
   import type { LessonEvent, OfficeEvent } from '#lib/server/events.ts';
   import DeskDrawer from '#lib/ui/DeskDrawer.svelte';
@@ -52,8 +56,8 @@
   import PixelIcon from '#lib/ui/PixelIcon.svelte';
   import { call, type ApiUrl } from '#lib/ui/api.ts';
   import { setZone, zone, zoneName, zoneShort } from '@oddboro/ledger/time';
-  import { LIVE_TABLES, type LiveTable } from '@oddboro/ledger/live-tables';
 
+  let pressure = $state<ManagerAdvice | null>(null);
   let { data } = $props();
   // Every time on the page is in the office's zone, which only the server knows.
   // It is fixed for the life of the page: a new zone takes a restart.
@@ -181,31 +185,43 @@
     )
   );
   /** A request for the card to open on a tab, from the Odds rail's list. */
-  let cardShow = $state<{ id: string; tab: 'work'; n: number } | undefined>();
+  let cardShow = $state<{ id: string; tab: 'work' | 'chat'; n: number } | undefined>();
   /** Bumps when jobs, runs, access, goals, threads or lessons change, so the card's tabs and the Goals and Lessons windows reload. */
   let version = $state(0);
   /** Bumped on a change to the ledger's rows, so the Ledger window searches again. */
   let ledgerVersion = $state(0);
-  /** What the page does when each table changes, by the name the event carries. */
-  const ON_CHANGE = new Map<string, LiveTable['page']>(
-    Object.entries(LIVE_TABLES).map(([table, live]) => [table, live.page])
-  );
-  /** The start panel is open while it holds windows and the owner has not folded it away. */
-  const leftOpen = $derived(wins.shown && wins.list.length > 0);
+  /** Which side the pane sits on, as this viewer last docked it. The first run keeps the start. */
+  let paneSide = $state<'start' | 'end'>('start');
+  function flipPane() {
+    paneSide = paneSide === 'start' ? 'end' : 'start';
+    try {
+      localStorage.setItem('oddboro.pane.side', paneSide);
+    } catch {
+      // Private window: the side holds for this visit only.
+    }
+  }
+  /**
+   * The owner folded the Odd away: it stays picked, and the floor clicks it back.
+   */
+  let rightCollapsed = $state(false);
+  /** An item opened from an Odd's chat or Items: the pane's deepest level. */
+  let paneItem = $state<Delivered | undefined>();
+  /** An Odd's level of the pane is in front: one is picked and no Office window was raised over it. */
+  const oddInFront = $derived(!!selected && !rightCollapsed && !wins.raised);
+  /** The one pane is open while it holds an Odd or windows and the owner has not folded it away. */
+  const leftOpen = $derived(oddInFront || wins.shown);
   const front = $derived(wins.list.find((w) => w.id === wins.active));
   let deskFocus = $state<string | undefined>();
   let notify = $state(false);
   // The two side panels. Widths are remembered per viewer by SidePanel.
   let leftWidth = $state(400);
-  let rightWidth = $state(460);
-  let rightCollapsed = $state(false);
   let innerWidth = $state(1280);
   /** Below this the panels cover the floor instead of sitting beside it. */
   const wide = $derived(innerWidth > 720);
 
   // Every Odd is on the rail at the end edge (OddsRail.svelte), not here.
   const SECTIONS = [
-    { id: 'desk', label: 'Desk' },
+    { id: 'desk', label: 'Waiting' },
     { id: 'goals', label: 'Goals' },
     { id: 'lessons', label: 'Lessons' },
     { id: 'ledger', label: 'Ledger' },
@@ -219,8 +235,8 @@
 
   /** Select a staffer, opening its panel if it was folded away. */
   function select(id: string | undefined) {
+    if (selected !== id) paneItem = undefined;
     selected = id;
-    railAsked = false;
     letGo = false;
     wins.raised = !id;
     if (id) rightCollapsed = false;
@@ -285,32 +301,15 @@
   const profile = $derived(staff.find((p) => p.id === selected));
   /** Screen space each panel takes from the floor, margin included. */
   // The first run's cards live in the start panel too.
-  const leftSpace = $derived((leftOpen || firstRun) && wide ? leftWidth + 16 : 0);
-  /** An Odd's panel is open (not folded away). */
-  const cardOpen = $derived(!!profile && !rightCollapsed);
-  /** ⌘K while a card is open brings the rail back over it, until an Odd is picked or the list closes. */
-  let railAsked = $state(false);
-  /**
-   * The Odds rail, beside the floor once the office has an Odd. It slides off
-   * the screen while an Odd's panel is open, and back when it closes or folds.
-   */
-  const showRail = $derived(!firstRun && staff.length > 0 && (!cardOpen || railAsked));
-  const rightSpace = $derived(
-    (showRail && !cardOpen ? ODDS_RAIL + 16 : 0) + (cardOpen && wide ? rightWidth + 8 : 0)
+  /** The screen space the one pane takes, on the side the owner docked it. */
+  const paneSpace = $derived((leftOpen || firstRun) && wide ? leftWidth + 16 : 0);
+  const leftSpace = $derived(paneSide === 'start' || firstRun ? paneSpace : 0);
+  /** One pane only, so nothing takes the floor's end side. */
+  const rightSpace = $derived(paneSide === 'end' && !firstRun ? paneSpace : 0);
+  /** Projects in front widens the pane to 16 px short of the screen's end edge. */
+  const projectsReach = $derived(
+    wide && leftOpen && !oddInFront && front?.kind === 'projects' ? 16 : undefined
   );
-  /** The Odds rail is wide now: hovered, in the keyboard's path, or opened with ⌘K. */
-  let railOpen = $state(false);
-  /**
-   * Projects in front widens the start panel to the Odd's panel, else to the
-   * Odds rail: px kept free at the end edge, 8 of them a gap. While the rail
-   * is wide, the panel steps back to its edge, so every Odd stays in view.
-   */
-  const projectsReach = $derived.by(() => {
-    if (!wide || !leftOpen || front?.kind !== 'projects') return undefined;
-    if (cardOpen) return rightWidth + 24;
-    if (showRail) return (railOpen ? ODDS_RAIL_OPEN : ODDS_RAIL) + 24;
-    return 16;
-  });
   /** The Odd's panel slides in from the screen's edge (the left in a right-to-left page). */
   const fromEdge = (far = 48) => ({
     x: (getComputedStyle(document.documentElement).direction === 'rtl' ? -1 : 1) * far,
@@ -320,14 +319,7 @@
   const clock = $derived(
     now.toLocaleTimeString('en-US', { ...PT, hour: 'numeric', minute: '2-digit' })
   );
-  // A staffer with an ask, a task or an unread message for the owner comes to their door.
-  const waiting = $derived(
-    new Set([
-      ...desk.asks.map((a) => a.staffId),
-      ...desk.tasks.map((t) => t.staffId),
-      ...Object.keys(messages)
-    ])
-  );
+  const waiting = $derived(waitingForOwner(desk, messages));
   /** Each staffer's thread a colleague holds, or holds for its lead, in words. */
   const threadTags = $derived(
     Object.fromEntries(
@@ -344,20 +336,27 @@
   );
   /** What a staffer is doing, in words: where it is headed, or what it is at. */
   function statusOf(t: Tag): string {
-    if (t.heading) return `→ ${t.heading}`;
-    if (messages[t.id]) return 'Has a message for you';
-    if (waiting.has(t.id)) return 'Waiting on you';
-    return threadTags[t.id]?.text ?? working[t.id] ?? ACTIVITY_LABEL[t.activity];
+    return oddStatus({
+      floor: t,
+      message: messages[t.id],
+      waiting: waiting.has(t.id),
+      thread: threadTags[t.id],
+      working: working[t.id]
+    });
   }
   const status = $derived(Object.fromEntries(tags.map((t) => [t.id, statusOf(t)])));
 
-  // The While you were away card counts once, however many jobs it lists.
-  const deskCount = $derived(
-    desk.asks.length +
-      desk.tasks.length +
-      desk.reports.length +
-      desk.projectWork.length +
-      (desk.away.length ? 1 : 0)
+  const deskCount = $derived(waitingCount(desk));
+
+  // Only changed activity words cross to the strip, never coordinates or frames.
+  let floorHidden = $state(false);
+  const activities = $derived(
+    Object.fromEntries(
+      tags.map((t) => [
+        t.id,
+        { activity: t.activity, heading: floorHidden ? undefined : t.heading }
+      ])
+    )
   );
 
   /** Rooms a new hire can work in: any with a place to work, read or sort mail. */
@@ -629,9 +628,25 @@
       void Notification.requestPermission();
   }
 
-  /** Fold the panel away. Its windows stay open behind it. */
+  /** Fold the pane away. Its windows stay open behind it, and the Odd in it lets go. */
   function hide() {
     wins.shown = false;
+    rightCollapsed = true;
+    paneItem = undefined;
+  }
+
+  /** Up to the Office level: every Odd, and the windows open there. */
+  function toOffice() {
+    paneItem = undefined;
+    wins.shown = true;
+    wins.raised = true;
+  }
+
+  /** Back down to the picked Odd, off its item. */
+  function toOdd() {
+    paneItem = undefined;
+    rightCollapsed = false;
+    wins.raised = false;
   }
 
   async function openDesk(focus?: string) {
@@ -647,6 +662,13 @@
    * else a report on its own. False when there is nothing to open.
    */
   function openDelivered(staffId: string, d: Delivered): boolean {
+    // From the Odd in the pane: the item opens one level down, beside its chat.
+    if (oddInFront && selected === staffId) {
+      const rows = d.kind === 'ask' ? desk.asks : d.kind === 'task' ? desk.tasks : desk.reports;
+      if (d.kind !== 'report' && !rows.some((r) => r.id === d.id)) return false;
+      paneItem = d;
+      return true;
+    }
     const waiting = (rows: { id: number }[]) => {
       const found = rows.some((r) => r.id === d.id);
       if (found) void openDesk(`${d.kind}-${d.id}`);
@@ -675,7 +697,7 @@
 
   /** A section's button: brings its window forward, or folds the panel when it already is. */
   function toggle(id: (typeof SECTIONS)[number]['id']) {
-    if (leftOpen && front?.kind === id) return hide();
+    if (leftOpen && !oddInFront && front?.kind === id) return hide();
     if (id === 'desk') return void openDesk();
     if (id === 'ledger') return open({ id: 'ledger', kind: 'ledger' });
     if (id === 'projects') return openProject();
@@ -698,7 +720,7 @@
   }
 
   function winTitle(w: Win): string {
-    if (w.kind === 'desk') return 'Desk';
+    if (w.kind === 'desk') return 'Waiting';
     if (w.kind === 'ledger') return 'Ledger';
     if (w.kind === 'projects') return 'Projects';
     if (w.kind === 'services') return 'Services';
@@ -721,6 +743,7 @@
     startMusic(firstRun);
     try {
       notify = localStorage.getItem('oddboro.notify') === '1';
+      if (localStorage.getItem('oddboro.pane.side') === 'end') paneSide = 'end';
       const held = localStorage.getItem('oddboro.light');
       if (held === 'day' || held === 'night') light = held;
     } catch {
@@ -732,6 +755,10 @@
     const events = new EventSource('/api/events' satisfies ApiUrl);
     events.onmessage = (m) => {
       const e = JSON.parse(m.data) as OfficeEvent;
+      if (e.type === 'pressure') {
+        pressure = e.advice;
+        return;
+      }
       if (e.type === 'account') {
         account.status = e.status;
         return;
@@ -758,6 +785,7 @@
       // Only the persona offers hear this: the floor meets a persona Odd, or
       // sees it go quiet, through the staff table's change, as any hire.
       if (e.type === 'persona') return void personaNews(e);
+      if (e.type === 'project-questions') return;
       const page = e.table === 'chat' ? ['version'] : (ON_CHANGE.get(e.table) ?? []);
       // A move into another layout rebuilds the whole floor.
       // During the first run, and until its last drawn pieces land, the floor
@@ -777,6 +805,7 @@
         atlasCatalog = atlas.catalog;
         floor = await F.Floor.create(host, office.world, atlas);
         floor.setHour(shownHour);
+        if (floorHidden) floor.app.ticker.stop();
         // Dev only: lets a browser console poke at the floor.
         if (import.meta.env.DEV) (window as unknown as { floor: Floor }).floor = floor;
         start = arrival(office.world);
@@ -1072,20 +1101,24 @@
     renaming = undefined;
   }
 
-  /** Bumps to open the Odds list on the rail with the cursor in its search. */
+  /** Bumps to put the cursor in the Your Odds search on the Desk. */
   let findAgent = $state(0);
 
   function onkey(e: KeyboardEvent) {
     // Cmd+K finds an Odd from anywhere, the box included.
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && !firstRun) {
       e.preventDefault();
-      railAsked = true;
-      findAgent++;
+      void openDesk().then(() => findAgent++);
       return;
     }
-    const el = e.target as HTMLElement | null;
+    const el = e.target instanceof Element ? e.target : null;
     if (el?.closest('input, textarea, select, [contenteditable]')) return;
     if (e.key === 'd' || e.key === 'D') toggle('desk');
+    // Esc goes up one level of the pane: the item to its Odd, the Odd to the Office.
+    if (e.key === 'Escape' && oddInFront) {
+      if (paneItem) paneItem = undefined;
+      else toOffice();
+    }
   }
 
   $effect(() => {
@@ -1112,6 +1145,26 @@
 
 <svelte:window onkeydown={onkey} bind:innerWidth />
 
+<OfficeStripBridge
+  {activities}
+  onopen={(link) => {
+    if ('desk' in link) openDesk();
+    else if (staff.some((s) => s.id === link.odd)) {
+      paneItem = undefined;
+      select(link.odd);
+      cardShow = { id: link.odd, tab: 'chat', n: (cardShow?.n ?? 0) + 1 };
+    }
+  }}
+  onvisibility={(visible) => {
+    floorHidden = !visible;
+    if (visible) {
+      floor?.app.ticker.start();
+      // A hidden native webview can suspend its live connection.
+      void refresh().catch((error) => console.error('office refresh:', error));
+    } else floor?.app.ticker.stop();
+  }}
+/>
+
 <svelte:head>
   <title
     >{firstRun ? 'Welcome' : `${deskCount ? `(${deskCount}) ` : ''}${office.name}`} · Oddboro</title
@@ -1119,6 +1172,18 @@
 </svelte:head>
 
 <main class="fixed inset-0 overflow-clip">
+  {#if pressure && !firstRun}<div class="fixed end-3 bottom-12 z-30 max-w-sm">
+      <PressureNotice advice={pressure} />
+    </div>{/if}
+  <nav
+    aria-label="Workspace views"
+    class="glass fixed end-3 bottom-3 z-30 flex gap-3 rounded-lg px-3 py-1.5 text-xs font-medium text-ink"
+  >
+    <a href="/workspace" data-sveltekit-reload>Workspace</a>
+    {#if !firstRun}<a id="agent-hud" href="/workspace?from=office#agent-hud" data-sveltekit-reload
+        >Agent HUD</a
+      >{/if}
+  </nav>
   <div
     bind:this={host}
     class="absolute inset-0 transition-opacity duration-700"
@@ -1208,6 +1273,26 @@
           >
         </div>
       </div>
+      {#if !firstRun}
+        <button
+          class="rounded-full px-2 py-1 text-muted hover:text-ink"
+          aria-label={paneSide === 'start'
+            ? 'Move the pane to the right'
+            : 'Move the pane to the left'}
+          title={paneSide === 'start' ? 'Move the pane to the right' : 'Move the pane to the left'}
+          onclick={flipPane}
+          ><svg
+            class="size-4"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"><path d="M7 7h13l-3-3M17 17H4l3 3" /></svg
+          ></button
+        >
+      {/if}
       {#if open && !firstRun}
         <button
           class="rounded-full px-2 py-1 text-muted hover:text-ink"
@@ -1282,20 +1367,113 @@
     </SidePanel>
   {:else if leftOpen}
     <SidePanel
-      side="start"
+      side={paneSide}
       label="Office panel"
       bind:width={leftWidth}
       min={340}
       max={Math.max(760, Math.round(innerWidth * 0.4))}
       storageKey="oddboro.panel.start"
-      onTop={wins.raised}
       reach={projectsReach}
     >
       <div class="flex h-full min-h-0 flex-col">
         <div class="pb-2">{@render plate(true)}</div>
+        <!-- Where the owner is in the one pane: Office, then an Odd, then one of its items. -->
+        <nav
+          class="flex min-w-0 items-center gap-1 border-t border-hairline px-3 py-1.5 text-xs"
+          aria-label="Where you are"
+        >
+          <button
+            class="shrink-0 rounded px-1.5 py-0.5 {oddInFront
+              ? 'text-muted hover:text-ink'
+              : 'text-ink'}"
+            aria-current={oddInFront ? undefined : 'page'}
+            onclick={toOffice}>Office</button
+          >
+          {#if profile && !rightCollapsed}
+            <span class="text-faint" aria-hidden="true">›</span>
+            <button
+              class="min-w-0 truncate rounded px-1.5 py-0.5 {oddInFront && !paneItem
+                ? 'text-ink'
+                : 'text-muted hover:text-ink'}"
+              aria-current={oddInFront && !paneItem ? 'page' : undefined}
+              onclick={toOdd}>{profile.name}</button
+            >
+          {/if}
+          {#if oddInFront && paneItem}
+            <span class="text-faint" aria-hidden="true">›</span>
+            <span class="min-w-0 truncate px-1.5 py-0.5 text-ink" aria-current="page"
+              >{paneItem.title}</span
+            >
+          {/if}
+        </nav>
+        {#if !oddInFront && staff.length}
+          <!-- The Office level opens on every Odd, a click from each. -->
+          <OddsList
+            {staff}
+            {desk}
+            {messages}
+            find={findAgent}
+            fill={!wins.list.length}
+            onselect={select}
+          />
+        {/if}
+        {#if profile}
+          <div class="min-h-0 flex-1 border-t border-hairline" class:hidden={!oddInFront}>
+            {#if paneItem}
+              {#key `${paneItem.kind}-${paneItem.id}`}
+                {#if paneItem.kind === 'report' && !desk.reports.some((r) => r.id === paneItem?.id)}
+                  <ReportView
+                    report={{ id: paneItem.id, staff: profile.id, title: paneItem.title }}
+                    {staff}
+                  />
+                {:else}
+                  <DeskDrawer
+                    {desk}
+                    {staff}
+                    focus={`${paneItem.kind}-${paneItem.id}`}
+                    single
+                    ondone={() => (paneItem = undefined)}
+                    onhire={hireProposal}
+                    onplan={planHires}
+                    onstaff={select}
+                  />
+                {/if}
+              {/key}
+            {:else}
+              {#key profile.id}
+                <div class="h-full" in:fly={fromEdge()}>
+                  <StaffCard
+                    visible={oddInFront}
+                    {desk}
+                    {staff}
+                    onplan={planHires}
+                    {profile}
+                    activity={selectedActivity}
+                    {version}
+                    working={working[profile.id]}
+                    work={work[profile.id] ?? []}
+                    show={cardShow?.id === profile.id ? cardShow : undefined}
+                    {places}
+                    manual={!!manual[profile.id]}
+                    sentTo={manual[profile.id]}
+                    {held}
+                    onsend={(place) => send(profile.id, place)}
+                    onschedule={() => backToSchedule(profile.id)}
+                    onchatstart={() => chatStart(profile.id)}
+                    onchatend={() => chatEnd(profile.id)}
+                    oncollapse={hide}
+                    onclose={() => select(undefined)}
+                    onitem={(d) => openDelivered(profile.id, d)}
+                  />
+                </div>
+              {/key}
+            {/if}
+          </div>
+        {/if}
         <!-- One tab per open window. Every window stays mounted, so each keeps its place. -->
         <div
           class="flex gap-1 overflow-x-auto border-t border-hairline px-2 pt-2"
+          class:hidden={oddInFront || !wins.list.length}
           role="tablist"
           aria-label="Open windows"
         >
@@ -1327,7 +1505,10 @@
             </div>
           {/each}
         </div>
-        <div class="min-h-0 flex-1 border-t border-hairline">
+        <div
+          class="min-h-0 flex-1 border-t border-hairline"
+          class:hidden={oddInFront || !wins.list.length}
+        >
           {#each wins.list as w (w.id)}
             <div class="h-full min-h-0" class:hidden={wins.active !== w.id} role="tabpanel">
               {#if w.kind === 'desk'}
@@ -1335,6 +1516,7 @@
                   {desk}
                   {staff}
                   focus={deskFocus}
+                  {version}
                   onhire={hireProposal}
                   onplan={planHires}
                   onstaff={select}
@@ -1410,7 +1592,10 @@
     </SidePanel>
   {:else}
     <header
-      class="glass absolute start-4 top-4 rounded-2xl px-4 py-3 max-sm:start-3 max-sm:px-3 max-sm:py-2"
+      class="glass absolute top-4 rounded-2xl px-4 py-3 max-sm:px-3 max-sm:py-2 {paneSide ===
+      'start'
+        ? 'start-4 max-sm:start-3'
+        : 'end-4 max-sm:end-3'}"
     >
       {@render plate(false)}
       <div class="mt-2 border-t border-hairline pt-2">
@@ -1443,65 +1628,6 @@
       {/if}
     </button>
   </div>
-
-  <!-- The end side: every Odd on the rail, and the picked one's panel beside it.
-       Folding the panel (») leaves the rail, where the Odd's avatar opens it again. -->
-  {#if showRail}
-    <!-- Fills the screen so the rail keeps its place while it slides toward the edge. -->
-    <div class="pointer-events-none absolute inset-0 z-20" transition:fly={fromEdge(80)}>
-      <OddsRail
-        {staff}
-        {status}
-        {waiting}
-        inProgress={work}
-        selected={profile && !rightCollapsed ? selected : undefined}
-        find={findAgent}
-        searching={railAsked}
-        onleave={() => (railAsked = false)}
-        onselect={select}
-        onchat={(id) => chatAbout(id, '')}
-        onwiden={(w) => (railOpen = w)}
-      />
-    </div>
-  {/if}
-  {#if profile && !rightCollapsed}
-    <SidePanel
-      side="end"
-      label="Selected Odd"
-      bind:width={rightWidth}
-      inset={0}
-      min={360}
-      max={1000}
-      storageKey="oddboro.panel.end"
-    >
-      {#key profile.id}
-        <div class="h-full" in:fly={fromEdge()}>
-          <StaffCard
-            {desk}
-            {staff}
-            onplan={planHires}
-            {profile}
-            activity={selectedActivity}
-            {version}
-            working={working[profile.id]}
-            work={work[profile.id] ?? []}
-            show={cardShow?.id === profile.id ? cardShow : undefined}
-            {places}
-            manual={!!manual[profile.id]}
-            sentTo={manual[profile.id]}
-            {held}
-            onsend={(place) => send(profile.id, place)}
-            onschedule={() => backToSchedule(profile.id)}
-            onchatstart={() => chatStart(profile.id)}
-            onchatend={() => chatEnd(profile.id)}
-            oncollapse={() => (rightCollapsed = true)}
-            onclose={() => select(undefined)}
-            onitem={(d) => openDelivered(profile.id, d)}
-          />
-        </div>
-      {/key}
-    </SidePanel>
-  {/if}
 
   {#if failed}
     <div class="absolute inset-0 grid place-items-center p-6">

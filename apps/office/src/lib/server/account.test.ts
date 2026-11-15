@@ -87,7 +87,10 @@ const send = sender(hooks.handle);
 
 // The database keeps timers for its open connections from the first page
 // load on, so the count starts after one: what is left is the sign-in's.
-await page.load({} as Parameters<typeof page.load>[0]);
+await page.load({
+  url: new URL('http://localhost:4500/'),
+  cookies: { get: () => 'office' }
+} as unknown as Parameters<typeof page.load>[0]);
 const timersAtStart = timers();
 const heard: AccountStatus[] = [];
 bus.on('event', (e: { type: string; status?: AccountStatus }) => {
@@ -245,7 +248,10 @@ test('the callback trades the code, asks who signed in once, and every open page
 
 test("the page loads with the account's status and no request to New Altitude", async () => {
   const before = fake.seen.length;
-  const data = (await page.load({} as Parameters<typeof page.load>[0])) as {
+  const data = (await page.load({
+    url: new URL('http://localhost:4500/'),
+    cookies: { get: () => 'office' }
+  } as unknown as Parameters<typeof page.load>[0])) as {
     account: AccountStatus;
   };
   assert.equal(data.account.state, 'in');

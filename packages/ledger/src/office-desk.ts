@@ -57,18 +57,24 @@ export async function desk(): Promise<Desk> {
     db
       .select()
       .from(asks)
-      .where(and(eq(asks.status, 'open'), ofWorkingOdd(asks.staffId)))
+      .where(and(eq(asks.status, 'open'), isNull(asks.hiddenAt), ofWorkingOdd(asks.staffId)))
       .orderBy(asc(asks.createdAt)),
     db
       .select()
       .from(tasks)
-      .where(and(eq(tasks.status, 'open'), or(isNull(tasks.staffId), ofWorkingOdd(tasks.staffId))))
+      .where(
+        and(
+          eq(tasks.status, 'open'),
+          isNull(tasks.hiddenAt),
+          or(isNull(tasks.staffId), ofWorkingOdd(tasks.staffId))
+        )
+      )
       .orderBy(asc(tasks.createdAt)),
     // A report from an Odd that left waits unseen, and shows again if it comes back.
     db
       .select()
       .from(reports)
-      .where(and(isNull(reports.readAt), ofWorkingOdd(reports.staffId)))
+      .where(and(isNull(reports.readAt), isNull(reports.hiddenAt), ofWorkingOdd(reports.staffId)))
       .orderBy(asc(reports.createdAt)),
     db
       .select({ attachments })
@@ -180,8 +186,19 @@ export type Delivery = {
   note?: string | null;
 };
 
-/** What one staffer put on the owner's desk, newest last, with where each stands. */
-export async function deliveries(staffId: string, limit = 200): Promise<Delivery[]> {
+/**
+ * What one staffer put on the owner's desk, newest last, with where each
+ * stands. The owner's deleted items are left out, or with `deleted` are all
+ * there is.
+ */
+export async function deliveries(
+  staffId: string,
+  limit = 200,
+  deleted = false
+): Promise<Delivery[]> {
+  const shown = (
+    hiddenAt: typeof asks.hiddenAt | typeof tasks.hiddenAt | typeof reports.hiddenAt
+  ) => (deleted ? isNotNull(hiddenAt) : isNull(hiddenAt));
   const [a, t, r] = await Promise.all([
     db
       .select({
@@ -196,7 +213,7 @@ export async function deliveries(staffId: string, limit = 200): Promise<Delivery
         why: asks.why
       })
       .from(asks)
-      .where(eq(asks.staffId, staffId))
+      .where(and(eq(asks.staffId, staffId), shown(asks.hiddenAt)))
       .orderBy(desc(asks.createdAt))
       .limit(limit),
     db
@@ -210,7 +227,7 @@ export async function deliveries(staffId: string, limit = 200): Promise<Delivery
         decidedAt: tasks.doneAt
       })
       .from(tasks)
-      .where(eq(tasks.staffId, staffId))
+      .where(and(eq(tasks.staffId, staffId), shown(tasks.hiddenAt)))
       .orderBy(desc(tasks.createdAt))
       .limit(limit),
     db
@@ -221,7 +238,7 @@ export async function deliveries(staffId: string, limit = 200): Promise<Delivery
         readAt: reports.readAt
       })
       .from(reports)
-      .where(eq(reports.staffId, staffId))
+      .where(and(eq(reports.staffId, staffId), shown(reports.hiddenAt)))
       .orderBy(desc(reports.createdAt))
       .limit(limit)
   ]);

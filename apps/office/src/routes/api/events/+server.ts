@@ -1,5 +1,6 @@
 // The page's one live line: table changes and who is working, as server-sent
 // events. Pushed when something happens, silent otherwise.
+import { currentPressure } from '#lib/server/pressure-watch.ts';
 import { bus, listen, type OfficeEvent } from '#lib/server/events.ts';
 import { pageClosed, pageOpened } from '#lib/server/health.ts';
 import { inProgress, working } from '#lib/server/staff.ts';
@@ -14,6 +15,7 @@ export const GET: RequestHandler = ({ request }) => {
       const send = (e: OfficeEvent) =>
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(e)}\n\n`));
       send({ type: 'working', working: working(), inProgress: inProgress() });
+      send({ type: 'pressure', advice: currentPressure() });
       bus.on('event', send);
       pageOpened();
       // Both the abort and cancel call it, so the page count drops once.

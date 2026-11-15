@@ -19,6 +19,8 @@ import {
   RAISED_ON,
   HANDS_OFF,
   revisesArg,
+  afterArg,
+  waitsOn,
   attachArg,
   attachable,
   tool,
@@ -174,12 +176,15 @@ tool(
       if_approved: z.string().describe('What happens next if they say yes.'),
       attach: attachArg,
       revises: revisesArg,
+      after: afterArg,
       ...raisedArgs
     }
   },
-  async ({ title, why, if_approved, attach, revises, ...where }) => {
+  async ({ title, why, if_approved, attach, revises, after, ...where }) => {
     const on = await placed(where);
     if ('problem' in on) return refused(on.problem);
+    const wait = await waitsOn(after);
+    if ('problem' in wait) return refused(wait.problem);
     const files = await attachable(attach);
     if ('problem' in files) return text(files.problem);
     const { ask, precedent } = await raiseAsk(ME, {
@@ -189,7 +194,8 @@ tool(
       ifApproved: if_approved,
       revises,
       via: VIA,
-      attach: files.paths
+      attach: files.paths,
+      needs: wait.needs
     });
     return text(
       `Ask ${ask.id} is on ${OWNER}'s desk. Check my_asks later for their decision.\n` +
@@ -265,12 +271,15 @@ if (has('give_owner_a_task'))
           ),
         choices: z.array(z.string()).min(2).max(4).optional(),
         attach: attachArg,
+        after: afterArg,
         ...raisedArgs
       }
     },
-    async ({ title, why, steps, response, choices, attach, ...where }) => {
+    async ({ title, why, steps, response, choices, attach, after, ...where }) => {
       const on = await placed(where);
       if ('problem' in on) return refused(on.problem);
+      const wait = await waitsOn(after);
+      if ('problem' in wait) return refused(wait.problem);
       const files = await attachable(attach);
       if ('problem' in files) return text(files.problem);
       const all = [
@@ -293,6 +302,7 @@ if (has('give_owner_a_task'))
         attach: files.paths,
         via: VIA,
         ownerSaid: OWNER_SAID,
+        needs: wait.needs,
         ...on
       });
       return text(`Task ${t.id} is on ${OWNER}'s desk. The ledger records it when they finish it.`);

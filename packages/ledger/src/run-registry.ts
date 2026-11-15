@@ -1,6 +1,7 @@
 // One entry for each run, from waiting for a slot through process exit.
 // The clock still owns which jobs are due. This registry owns live execution.
 import { randomUUID } from 'node:crypto';
+import type { Agent } from './agents.ts';
 import type { UsageKind } from './schema.ts';
 
 export type WorkAbout = {
@@ -43,6 +44,7 @@ export type LiveRun = {
   kind: UsageKind | 'hello';
   stop: AbortController;
   end: { promise: Promise<void>; resolve: () => void };
+  process?: { pid: number; agent: Agent };
   turnId?: string;
   work?: Work;
   /** A queued background run is released by the preceding run or by Stop. */

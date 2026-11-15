@@ -26,7 +26,7 @@ import {
   correctClaude,
   hearClaude
 } from './claude-project.ts';
-import { bus, listen } from '../events.ts';
+import { bus, emit, listen } from '../events.ts';
 
 type Thread = {
   id: string;
@@ -68,6 +68,7 @@ type View = {
   turn?: string;
   requestId?: string;
   question?: Question;
+  questions: Question[];
   account?: string;
   note: string;
   reply: string;
@@ -113,10 +114,14 @@ export class ProjectController {
       requestId: c?.request?.id,
       reply: c?.reply ?? '',
       question: c?.questions.values().next().value,
+      questions: [...(c?.questions.values() ?? [])],
       note: c?.note ?? 'Disconnected',
       account: c?.account,
       market: c?.market
     };
+  }
+  terminalPid(id: string) {
+    return this.sessions.get(id)?.terminal?.pid;
   }
   /** A session's dot in the Projects list: the stored status, or what its live connection is doing now. */
   status(id: string, stored: ProjectStatus): ProjectStatus {
@@ -135,7 +140,10 @@ export class ProjectController {
       for (const c of this.sessions.values())
         if (c.session.agent === 'codex' && (c.socket ?? '') === socket) {
           c.connected = false;
-          c.questions.clear();
+          if (c.questions.size) {
+            c.questions.clear();
+            emit({ type: 'project-questions' });
+          }
           c.note = 'Codex disconnected. Reconnect to inspect the conversation.';
           this.changed(c);
         }
@@ -500,7 +508,9 @@ export class ProjectController {
   }
   private async event(c: Runtime, m: RpcMessage, p: Record<string, unknown>) {
     if (m.id !== undefined && m.method) {
+      if (c.questions.has(m.id)) return;
       c.questions.set(m.id, { key: randomUUID(), id: m.id, method: m.method, params: p });
+      emit({ type: 'project-questions' });
       c.note = 'Waiting for you';
       this.changed(c);
       return;
@@ -531,12 +541,15 @@ export class ProjectController {
       }
       c.turn = undefined;
       if (c.request?.turn === t.id) c.request = undefined;
-      c.questions.clear();
+      if (c.questions.size) {
+        c.questions.clear();
+        emit({ type: 'project-questions' });
+      }
       c.note = t.error?.message || t.status;
       await this.pump(c);
-    } else if (m.method === 'serverRequest/resolved')
-      c.questions.delete(p.requestId as number | string);
-    else return;
+    } else if (m.method === 'serverRequest/resolved') {
+      if (c.questions.delete(p.requestId as number | string)) emit({ type: 'project-questions' });
+    } else return;
     this.changed(c);
   }
   async steer(id: string, turn: string, text: string, file?: string) {
@@ -604,6 +617,7 @@ export class ProjectController {
     else throw new Error('Answer this request in the native terminal.');
     (await this.codex(c.socket)).send({ id: q.id, result });
     c.questions.delete(request);
+    emit({ type: 'project-questions' });
     this.changed(c);
   }
   async disconnect(id: string) {

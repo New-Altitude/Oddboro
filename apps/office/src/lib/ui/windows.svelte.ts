@@ -13,7 +13,7 @@ export type HireFrom = { askId: number; staff: string; proposal: HireProposal };
 /** Which lessons the Lessons window shows: those for every Odd, those one Odd follows, or all. */
 export type LessonsFilter = 'about' | 'all' | { staff: string };
 /** A session to open in Projects. `n` bumps on every ask, so asking again for the same session still brings it up. */
-export type ProjectAsk = { sessionId?: string; n: number };
+export type ProjectAsk = { sessionId?: string; item?: string; n: number };
 export type Win =
   | { id: 'desk'; kind: 'desk' }
   | { id: 'goals'; kind: 'goals' }
@@ -72,11 +72,11 @@ export function open(w: Win): void {
 }
 
 /** The one Projects window, on that session when one is named. Only in Advanced mode. */
-export function openProject(sessionId?: string): void {
+export function openProject(sessionId?: string, item?: string): void {
   if (!advanced.on) return;
   const w = wins.list.find((x) => x.kind === 'projects');
-  if (w) w.ask = { sessionId, n: w.ask.n + 1 };
-  open(w ?? { id: 'projects', kind: 'projects', ask: { sessionId, n: 1 } });
+  if (w) w.ask = { sessionId, item, n: w.ask.n + 1 };
+  open(w ?? { id: 'projects', kind: 'projects', ask: { sessionId, item, n: 1 } });
 }
 
 /** The one Lessons window, on that filter. Already open, it switches to it. */

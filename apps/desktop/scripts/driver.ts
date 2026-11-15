@@ -552,6 +552,7 @@ export async function quit(app: ChildProcess, r: Run): Promise<number> {
 /** The real window, from outside: its text and buttons, and a press by a button's name. */
 export type Page = {
   read(): Promise<string>;
+  pairingCode?(): Promise<string>;
   press(name: string): Promise<void>;
 };
 
@@ -569,6 +570,12 @@ export function automationPage(pid: number): Page {
     );
   let warm = false;
   return {
+    async pairingCode() {
+      return ps(
+        windows +
+          `foreach ($w in $wins) { foreach ($e in $w.FindAll('Descendants',(New-Object Windows.Automation.PropertyCondition($A::ControlTypeProperty,[Windows.Automation.ControlType]::Edit)))) { try { $v=$e.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).Current.Value; if ($v -like 'ob1.*') { $v; return } } catch {} } }`
+      );
+    },
     async read() {
       if (!warm) {
         view();
@@ -599,6 +606,16 @@ export function automationPage(pid: number): Page {
 export function accessibilityPage(pid: number): Page {
   const osa = (script: string) => sh('osascript', ['-e', script], 90_000);
   return {
+    async pairingCode() {
+      return osa(`tell application "System Events" to tell (first process whose unix id is ${pid})
+        repeat with e in (entire contents of window 1)
+          try
+            if role of e is "AXTextField" and (value of e as text) starts with "ob1." then return value of e as text
+          end try
+        end repeat
+        return ""
+      end tell`).out.trim();
+    },
     async read() {
       const r = osa(`set out to {}
 tell application "System Events" to tell (first process whose unix id is ${pid})
@@ -646,6 +663,7 @@ return "missing"`);
 
 /** Linux: a run through tauri-driver, which starts the app itself. */
 export type Driven = {
+  pairingCode: string;
   page: Page;
   /** Runs a script in the page and gives back what it returns. */
   script(body: string, args?: unknown[]): Promise<unknown>;
@@ -658,6 +676,7 @@ export type Driven = {
  * office answers. The office window then shows up as a new handle to switch to.
  */
 export async function webdriverStart(exe: string, r: Run): Promise<Driven> {
+  let pairingCode = '';
   const driver = spawn('tauri-driver', ['--port', '4444'], {
     env: { ...process.env, ...r.env },
     stdio: ['ignore', 'pipe', 'pipe']
@@ -703,6 +722,14 @@ export async function webdriverStart(exe: string, r: Run): Promise<Driven> {
       'the office window',
       async () => {
         const url = JSON.stringify(await wd('GET', `/session/${session}/url`));
+        if (!pairingCode && /tauri|localhost/.test(url)) {
+          const saved = await wd('POST', `/session/${session}/execute/sync`, {
+            script:
+              "const f=document.getElementById('saved-code'); if (!f?.value) return ''; const value=f.value; document.getElementById('saved').click(); return value;",
+            args: []
+          });
+          if (typeof saved === 'string') pairingCode = saved;
+        }
         if (url.includes(BASE)) return true;
         if (url.includes('no such window')) {
           const handles = (await wd('GET', `/session/${session}/window/handles`)) as string[];
@@ -739,7 +766,7 @@ export async function webdriverStart(exe: string, r: Run): Promise<Driven> {
       if (found !== 'pressed') throw new Error(`no button named ${name} in the page`);
     }
   };
-  return { page, script, stop };
+  return { page, script, stop, pairingCode };
 }
 
 /** A picture of the whole screen. */
