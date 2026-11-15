@@ -1,14 +1,15 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import DocEditor from './DocEditor.svelte';
   import { call } from './api.ts';
   import type { StaffProfile } from '../staff/roster.ts';
 
   // The staffer's job description, the text every run starts from, in the
   // document editor. Folded until the owner opens it.
-  type Props = { profile: StaffProfile; version: number };
-  let { profile, version }: Props = $props();
+  type Props = { profile: StaffProfile; version: number; proposal?: string };
+  let { profile, version, proposal }: Props = $props();
 
-  let shown = $state(false);
+  let shown = $state(untrack(() => proposal !== undefined));
   let text = $state<string | undefined>();
   let mode = $state<'view' | 'edit'>('view');
   let dirty = $state(false);
@@ -16,6 +17,19 @@
   let editor: DocEditor | undefined = $state();
   let reading = $state(false);
   let fileMessage = $state('');
+
+  // Hire already has the file. Present its instructions once this editor opens.
+  let reviewed = false;
+  $effect(() => {
+    if (!editor || proposal === undefined || reviewed) return;
+    reviewed = true;
+    const next = proposal;
+    const opened = editor;
+    untrack(() => {
+      if (next === text) fileMessage = 'The saved instructions match this file.';
+      else opened.review(next);
+    });
+  });
 
   // Reload when the staffer changes it, unless the owner is mid-edit.
   $effect(() => {
@@ -103,7 +117,7 @@
       {:else if text === undefined}
         <p class="py-4 text-center text-sm text-muted">Opening</p>
       {:else}
-        {#if !profile.persona}
+        {#if !profile.persona && proposal === undefined}
           <label class="mb-2 block text-xs text-muted">
             Review job instructions from a Claude agent file
             <input
@@ -117,8 +131,8 @@
               }}
             />
           </label>
-          {#if fileMessage}<p class="mb-2 text-xs text-muted" role="status">{fileMessage}</p>{/if}
         {/if}
+        {#if fileMessage}<p class="mb-2 text-xs text-muted" role="status">{fileMessage}</p>{/if}
         {#if dirty}
           <details class="mb-2 text-xs text-muted">
             <summary>Compare with saved instructions</summary>

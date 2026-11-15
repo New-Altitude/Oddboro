@@ -430,6 +430,7 @@ export type Hire = Pick<
   StaffRow,
   'name' | 'role' | 'variant' | 'portrait' | 'room' | 'remit' | 'desk'
 > & {
+  claudeAgentName?: string;
   /** Its level; `HIRE_DEFAULTS` when left out. */
   permission?: Level;
   /** The office they work in, by name. */

@@ -13,6 +13,7 @@ export type Activity =
 /** Character limits for an Odd's profile and job description. */
 export const LIMITS = { name: 40, role: 60, remit: 200, desk: 20_000 } as const;
 export type StaffProfile = {
+  claudeAgentName?: string;
   id: string;
   name: string;
   role: string;

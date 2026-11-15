@@ -232,6 +232,13 @@
       "when": 1794698510358,
       "tag": "0032_staff_skill",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1794704091274,
+      "tag": "0033_claude_agent_name",
+      "breakpoints": true
     }
   ]
 }

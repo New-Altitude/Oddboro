@@ -29,6 +29,7 @@ export function readClaudeAgent(file: string) {
   const imported = new Set(['name', 'description']);
   if (model || fields.model === 'inherit') imported.add('model');
   return {
+    sourceName: name,
     name: name.slice(0, LIMITS.name),
     role: name.replaceAll('-', ' ').slice(0, LIMITS.role),
     remit: description.slice(0, LIMITS.remit),

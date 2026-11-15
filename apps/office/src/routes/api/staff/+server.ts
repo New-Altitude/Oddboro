@@ -40,6 +40,7 @@ import { LIMITS } from '#lib/staff/roster.ts';
 import type { RequestHandler } from './$types';
 
 type Body = Partial<Record<'name' | 'role' | 'room' | 'permission' | 'remit' | 'desk', string>> & {
+  claudeAgentName?: unknown;
   tools?: unknown;
   agent?: unknown;
   account?: unknown;
@@ -110,6 +111,7 @@ export const POST: RequestHandler = async ({ request }) => {
     // The atlas names stay as a fallback; the drawn look is what shows.
     row = await hire({
       name,
+      claudeAgentName: text(b.claudeAgentName, 256 * 1024) || undefined,
       office: office.name,
       role,
       remit,

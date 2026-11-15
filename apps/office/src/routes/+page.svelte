@@ -1375,6 +1375,8 @@
                 {/await}
               {:else if w.kind === 'hire'}
                 <HireDrawer
+                  {staff}
+                  {version}
                   id={w.id}
                   rooms={hireRooms}
                   from={w.from}

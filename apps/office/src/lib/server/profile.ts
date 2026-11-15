@@ -28,6 +28,7 @@ export function toProfile(r: StaffRow, guesses = 0): StaffProfile {
   return {
     id: r.id,
     name: r.name,
+    ...(r.claudeAgentName && { claudeAgentName: r.claudeAgentName }),
     role: r.role,
     office: r.office,
     sprite: r.sprite,
