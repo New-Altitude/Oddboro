@@ -1,19 +1,21 @@
 import assert from 'node:assert/strict';
-import * as processes from 'node:child_process';
 import { mock, test } from 'node:test';
-import { promisify } from 'node:util';
+import * as platform from '@oddboro/ledger/platform';
 
-const calls: Array<{ args: string[]; env: NodeJS.ProcessEnv }> = [];
+const calls: string[][] = [];
 let result = 'test credential';
-const execFile = Object.assign(() => {}, {
-  [promisify.custom]: async (_path: string, args: string[], opts: { env: NodeJS.ProcessEnv }) => {
-    calls.push({ args, env: opts.env });
-    if (!result) throw new Error('CLI output that must stay out of the Desk');
-    return { stdout: result };
+mock.module('@oddboro/ledger/platform', {
+  exports: {
+    ...platform,
+    probe: async (cmd: string, args: string[]) => {
+      assert.equal(cmd, 'op');
+      calls.push(args);
+      return result
+        ? { status: 'ok', out: result, err: '' }
+        : { status: 'failed', out: '', err: 'CLI output that must stay out of the Desk' };
+    }
   }
 });
-mock.module('node:child_process', { exports: { ...processes, execFile } });
-mock.module(new URL('./on-path.ts', import.meta.url).href, { exports: { onPath: () => 'op' } });
 const { readOnePasswordField } = await import('./one-password.ts');
 
 test('only a field reference reaches the CLI, and a later connection reads the current field', async () => {
@@ -21,7 +23,7 @@ test('only a field reference reaches the CLI, and a later connection reads the c
   assert.equal(calls.length, 0);
   const ref = 'op://Office vault/Inspection register/keys/API key';
   assert.equal(await readOnePasswordField(ref), 'test credential');
-  assert.deepEqual(calls[0].args, ['read', '--no-newline', ref]);
+  assert.deepEqual(calls[0], ['read', '--no-newline', ref]);
   result = 'rotated credential';
   assert.equal(await readOnePasswordField(ref), result);
   result = '';
