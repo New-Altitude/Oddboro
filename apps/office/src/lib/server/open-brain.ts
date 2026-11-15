@@ -1,5 +1,5 @@
 // The office's opt-in Brain connection. No Odd receives the key or write access.
-import { createHash } from 'node:crypto';
+import { recentCaptures, textHash } from './brain-recent.ts';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -34,11 +34,11 @@ import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 const dir = () => home('dreaming');
 const setup = () => join(dir(), 'connection.json');
 const receipts = () => join(dir(), 'captures');
-type Connection = { id: string; url: string };
+type Connection = { id: string; url: string; recentStart?: string[] };
 function current(): Connection | undefined {
   return existsSync(setup()) ? JSON.parse(readFileSync(setup(), 'utf8')) : undefined;
 }
-type Checked = { id: string; at: number; review: DreamReview; jobs: string };
+type Checked = { id: string; at: number; review: DreamReview; jobs: string; recent?: string[] };
 const reviewPath = () => join(dir(), 'review.json');
 let checked: Checked | undefined;
 function lastReview(): Checked | undefined {
@@ -67,6 +67,7 @@ export async function brainState() {
   return {
     url: connection?.url,
     checkedAt: checked?.at,
+    watchesCaptures: !!(checked?.recent ?? connection?.recentStart),
     affected: Object.keys(checked?.review.byJob ?? {}).length,
     findings: Object.entries(checked?.review.byJob ?? {})
       .filter(([, sources]) => sources.length)
@@ -141,9 +142,15 @@ export async function connectBrain(address: string, key: string) {
     throw new Error('Use the Open Brain service with its x-brain-key header.');
   if (!key && !getSecret(row.id, 'x-brain-key') && !row.config.fromAws?.['x-brain-key'])
     throw new Error('Enter the Brain access key.');
+  const sameAccess = before?.id === row.id && (!key || key === getSecret(row.id, 'x-brain-key'));
+  let recentStart = sameAccess ? (lastReview()?.recent ?? before?.recentStart) : undefined;
   const client = await upstream(row, false, key ? { 'x-brain-key': key } : undefined);
   try {
     const tools = await toolsFor(client);
+    if (!recentStart && tools.some((t) => t.name === 'list_thoughts' && readsOnly(t))) {
+      recentStart = (await recentCaptures((limit) => callText(client, 'list_thoughts', { limit })))
+        .head;
+    }
     if (key && row.config.fromAws?.['x-brain-key'])
       throw new Error('Leave the key empty to reuse the connected AWS key.');
     if (key) setSecret(row.id, 'x-brain-key', key);
@@ -158,9 +165,11 @@ export async function connectBrain(address: string, key: string) {
     await client.close();
   }
   mkdirSync(dir(), { recursive: true, mode: 0o700 });
-  replace(setup(), JSON.stringify({ id: row.id, url: url.href }));
-  if (existsSync(reviewPath())) unlinkSync(reviewPath());
-  checked = undefined;
+  replace(setup(), JSON.stringify({ id: row.id, url: url.href, recentStart }));
+  if (!sameAccess) {
+    if (existsSync(reviewPath())) unlinkSync(reviewPath());
+    checked = undefined;
+  }
   problem = '';
 }
 export function disconnectBrain() {
@@ -183,7 +192,7 @@ export function disconnectBrain() {
     );
 }
 
-async function callText(client: Client, name: string, args: Record<string, string>) {
+async function callText(client: Client, name: string, args: Record<string, string | number>) {
   const result = await client.callTool({ name, arguments: args }, undefined, { timeout: 15000 });
   if (
     name === 'fetch' &&
@@ -213,21 +222,22 @@ async function search(client: Client, query: string): Promise<string[]> {
     .map((r: { id: string }) => r.id)
     .filter((id: unknown) => typeof id === 'string');
 }
-async function fetchRecord(client: Client, id: string): Promise<Evidence | undefined> {
+type Fetched = { hash: string; record?: Evidence };
+async function fetchRecord(client: Client, id: string): Promise<Fetched | undefined> {
   const r = JSON.parse(await callText(client, 'fetch', { id }));
   if (r === null) return;
   if (r.id !== id || typeof r.text !== 'string')
     throw new Error('Open Brain returned an unreadable record.');
+  const hash = textHash(r.text);
   if (
     r.metadata?.source === 'agent_memory' ||
     r.metadata?.source_type === 'agent_memory' ||
     r.metadata?.sensitivity_tier === 'restricted'
   )
-    return;
+    return { hash };
   return {
-    id,
-    text: r.text,
-    date: r.metadata?.updated_at ?? r.metadata?.created_at ?? ''
+    hash,
+    record: { id, text: r.text, date: r.metadata?.updated_at ?? r.metadata?.created_at ?? '' }
   };
 }
 
@@ -252,11 +262,23 @@ async function reviewConnection(c: ConnectorRow, work: DreamWork[], force: boole
       proofs.set(id, { hash, at });
     }
   }
-  const hashOf = (text: string) => createHash('sha256').update(text).digest('hex');
   const client = await upstream(c);
   try {
     const tools = await toolsFor(client);
-    const records = new Map<string, Evidence>();
+    const fetched = new Map<string, Fetched | undefined>();
+    const read = async (id: string) => {
+      if (!fetched.has(id)) fetched.set(id, await fetchRecord(client, id));
+      return fetched.get(id);
+    };
+    const locate = async (text: string) => {
+      const hash = textHash(text);
+      for (const item of fetched.values()) if (item?.hash === hash) return item;
+      for (const id of await search(client, text)) {
+        const item = await read(id);
+        if (item?.hash === hash) return item;
+      }
+    };
+    const captured: string[] = [];
     for (const d of pending) {
       const receiptDir = join(receipts(), d.pairId);
       const receipt = join(receiptDir, d.turn);
@@ -266,45 +288,76 @@ async function reviewConnection(c: ConnectorRow, work: DreamWork[], force: boole
       }
       if (!tools.some((t) => t.name === 'capture_thought'))
         throw new Error('This Brain cannot save paired project decisions.');
-      const locate = async () => {
-        for (const id of await search(client, d.content)) {
-          const item = await fetchRecord(client, id);
-          if (item?.text === d.content) return item;
-        }
-      };
-      let found = await locate();
-      if (!found) {
+      let match = await locate(d.content);
+      if (!match) {
         await callText(client, 'capture_thought', { content: d.content });
-        found = await locate();
+        match = await locate(d.content);
       }
-      if (!found) throw new Error('The Brain has not confirmed the saved decision yet.');
+      const found = match?.record;
+      if (!found)
+        throw new Error('The Brain has not confirmed a shareable copy of the saved decision yet.');
       mkdirSync(receiptDir, { recursive: true, mode: 0o700 });
-      const hash = hashOf(found.text);
+      const hash = textHash(found.text);
       replace(receipt, JSON.stringify({ id: found.id, hash, at: d.at }));
       proofs.set(found.id, { hash, at: d.at });
-      records.set(found.id, found);
+      captured.push(found.id);
       unlinkSync(d.path);
     }
-    const newlyCaptured = [...records.keys()];
+    let recent = checked?.recent ?? current()?.recentStart;
+    const listsCaptures = tools.some((t) => t.name === 'list_thoughts' && readsOnly(t));
+    if (recent && !listsCaptures)
+      throw new Error('Open Brain no longer offers its read-only list of recent captures.');
+
     const source = {
       read: async (jobs: DreamWork[]) => {
-        const groups = [newlyCaptured];
+        const groups = [captured];
         const prior = checked?.id === c.id ? checked.review.byJob : {};
         for (const job of jobs) groups.push((prior[job.id] ?? []).map((r) => r.id));
         for (const name of [...new Set(jobs.map((j) => j.name))].sort())
           groups.push(await search(client, name));
 
-        for (const id of new Set(groups.flat())) {
-          const record = records.get(id) ?? (await fetchRecord(client, id));
-          if (!record) continue;
-          const proof = proofs.get(id);
-          const ownerQuote = proof?.hash === hashOf(record.text);
-          records.set(id, {
-            ...record,
-            text: record.text.slice(0, 2800),
-            date: (ownerQuote && proof?.at) || record.date,
+        const records = new Map<string, Evidence>();
+        const include = (r: Evidence) => {
+          const proof = proofs.get(r.id);
+          const ownerQuote = proof?.hash === textHash(r.text);
+          records.set(r.id, {
+            ...r,
+            text: r.text.slice(0, 2800),
+            date: (ownerQuote && proof?.at) || r.date,
             ownerQuote
           });
+        };
+        for (const id of new Set(groups.flat())) {
+          const record = (await read(id))?.record;
+          if (record) include(record);
+        }
+        if (listsCaptures) {
+          const incoming = await recentCaptures(
+            (limit) => callText(client, 'list_thoughts', { limit }),
+            recent,
+            tools.some((t) => t.name === 'thought_stats' && readsOnly(t))
+              ? async () => {
+                  const stats = await callText(client, 'thought_stats', {});
+                  const count = /^Total thoughts: (\d+)$/m.exec(stats);
+                  if (!count) throw new Error('Open Brain could not confirm its capture count.');
+                  return Number(count[1]);
+                }
+              : undefined
+          );
+          const ids: string[] = [];
+          for (const text of incoming.added) {
+            const match = await locate(text);
+            if (!match)
+              throw new Error(
+                'Open Brain listed a new capture but could not verify its exact record. The office will check again.'
+              );
+            if (match.record) {
+              ids.push(match.record.id);
+              include(match.record);
+            }
+          }
+          groups.unshift(ids);
+          recent = incoming.head;
         }
         return groups.map((ids) => ids.flatMap((id) => records.get(id) ?? []));
       }
@@ -325,8 +378,9 @@ async function reviewConnection(c: ConnectorRow, work: DreamWork[], force: boole
       },
       checked?.id === c.id ? checked.review : undefined
     );
-    checked = { id: c.id, at: Date.now(), review, jobs };
-    replace(reviewPath(), JSON.stringify(checked));
+    const next = { id: c.id, at: Date.now(), review, jobs, recent };
+    replace(reviewPath(), JSON.stringify(next));
+    checked = next;
     problem = '';
     return review;
   } finally {

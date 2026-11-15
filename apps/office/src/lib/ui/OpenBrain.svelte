@@ -55,6 +55,11 @@
   <h3 class="font-semibold">Open Brain</h3>
   {#if brain?.url}
     <p class="break-all text-xs text-muted">{brain.url}</p>
+    <p class="mt-2 text-xs text-muted">
+      {brain.watchesCaptures
+        ? 'Your office checks new captures as well as job search results.'
+        : 'This Brain has no recent-capture list. The office uses job searches and decisions from paired projects.'}
+    </p>
     {#if brain.checkedAt}
       <p class="mt-2">
         Last checked {new Date(brain.checkedAt).toLocaleTimeString()}. {brain.affected} affected {brain.affected ===
@@ -100,9 +105,9 @@
     </div>
   {:else if brain}
     <p class="mt-1 text-xs text-muted">
-      Your office searches this Brain using job names and reviews matching records with its AI. Each
-      Odd gets the decisions that affect its work. Use a Brain whose records you can share with your
-      office.
+      Your office checks for new captures and searches by job name. It asks this Brain to find each
+      new capture by its text, then reviews verified records with the office AI. Each Odd gets the
+      decisions that affect its work. Use a Brain whose records you can share with your office.
     </p>
     <form
       class="mt-2 grid gap-2"
