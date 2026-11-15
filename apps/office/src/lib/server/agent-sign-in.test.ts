@@ -166,8 +166,8 @@ const install = (tool: string) =>
 const installRuns = (): { args: string[]; env: string[] }[] =>
   existsSync(installs)
     ? readFileSync(installs, 'utf8')
-        .trim()
         .split('\n')
+        .slice(0, -1) // The child may still be writing the last line.
         .map((l) => JSON.parse(l) as { args: string[]; env: string[] })
     : [];
 /** Every installer the page ran so far, by its name and arguments. */
