@@ -842,6 +842,31 @@
                       onclick={() => saveSecret(t, index)}>Save</button
                     >
                   </div>
+                  <details class="mt-2 text-xs">
+                    <summary class="cursor-pointer text-muted">Use a field from 1Password</summary>
+                    <p class="mt-1 text-muted">
+                      Copy a field reference from 1Password. The office uses 1Password CLI to read
+                      that field when it connects to this tool.
+                    </p>
+                    <form
+                      class="mt-1 flex gap-2"
+                      onsubmit={(e) => {
+                        e.preventDefault();
+                        const value = new FormData(e.currentTarget).get('reference');
+                        void step(t, index, { op: 'one-password', value });
+                      }}
+                    >
+                      <input
+                        class="min-w-0 flex-1 rounded bg-night px-2 py-1"
+                        aria-label="1Password field reference"
+                        name="reference"
+                        required
+                        autocomplete="off"
+                        placeholder="op://vault/item/field"
+                      />
+                      <button class="text-sea" type="submit" disabled={busy}>Use field</button>
+                    </form>
+                  </details>
                   <AwsSecretPick taskId={t.id} {index} />
                 {:else if s.action?.kind === 'secret' && s.answer}
                   <p class="mt-1.5 text-xs text-muted">{s.answer}</p>

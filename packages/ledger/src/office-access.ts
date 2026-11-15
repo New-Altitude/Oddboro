@@ -2,6 +2,7 @@
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { db } from './db.ts';
 import { deleteSecret, getSecret } from './secrets.ts';
+import { forgetFieldReference } from './one-password.ts';
 import { fixedError } from './errors.ts';
 import { wakeOnTask } from './task-parking.ts';
 import { type Tx } from './threads.ts';
@@ -550,7 +551,12 @@ export async function reconfigureConnector(
   await dropConnectTasks(id);
   if (!before) return;
   const keep = secretNames({ kind: before.kind, config });
-  for (const name of secretNames(before, true)) if (!keep.includes(name)) deleteSecret(id, name);
+  for (const name of secretNames(before, true)) {
+    if (!keep.includes(name)) {
+      forgetFieldReference(id, name);
+      deleteSecret(id, name);
+    }
+  }
 }
 
 /**
@@ -577,7 +583,10 @@ async function forgetConnector(id: string): Promise<{ forgot: boolean; googleTol
     const shared = await sharesGrant(c);
     googleTold = shared.length ? { kept: shared.map((o) => o.name) } : await revokeAtGoogle(id);
   }
-  const removed = secretNames(c, true).filter((name) => deleteSecret(id, name));
+  const removed = secretNames(c, true).filter((name) => {
+    const hadReference = forgetFieldReference(id, name);
+    return deleteSecret(id, name) || hadReference;
+  });
   const hadVaultKeys = Object.keys(c.config.fromAws ?? {}).length > 0;
   if (product && id !== GOOGLE[product].id) {
     await db.delete(connectors).where(eq(connectors.id, id));

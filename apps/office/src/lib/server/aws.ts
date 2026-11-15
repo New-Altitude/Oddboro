@@ -40,6 +40,8 @@ import {
   type AwsSecretRef,
   type ConnectorRow
 } from '@oddboro/ledger';
+import { fieldReference, forgetFieldReference } from '@oddboro/ledger/one-password';
+import { readOnePasswordField } from './one-password.ts';
 import { asHeader, deleteSecret, getSecret, setSecret } from './keychain.ts';
 
 /** The proxy that signs the Odds' requests to AWS's hosted MCP Server, pinned. */
@@ -598,8 +600,8 @@ export async function awsSecret(ref: AwsSecretRef): Promise<string> {
 
 /**
  * The keys a tool's server starts with, as environment variables and
- * headers: each from the secret store, or from AWS when the owner named an
- * AWS secret for it. AWS read only and builder get their role's credentials.
+ * headers: each from the secret store, or from the AWS secret or 1Password
+ * field the owner selected. AWS read only and builder get their role's credentials.
  * Throws when AWS cannot answer, such as when its sign-in ran out.
  */
 export async function toolKeys(
@@ -607,7 +609,9 @@ export async function toolKeys(
 ): Promise<{ env: Record<string, string>; headers: Record<string, string> }> {
   const value = async (name: string) => {
     const ref = c.config.fromAws?.[name];
-    return ref ? awsSecret(ref) : (getSecret(c.id, name) ?? '');
+    if (ref) return awsSecret(ref);
+    const field = fieldReference(c.id, name);
+    return field ? readOnePasswordField(field) : (getSecret(c.id, name) ?? '');
   };
   const env: Record<string, string> =
     isAws(c.id) && c.id !== AWS_SECRETS_ID ? await oddsEnv(c) : {};
@@ -641,6 +645,7 @@ export async function useAwsSecret(id: string, name: string, ref: AwsSecretRef):
     ...c.config,
     fromAws: { ...c.config.fromAws, [name]: ref.key ? ref : { secret: ref.secret } }
   });
+  forgetFieldReference(id, name);
   deleteSecret(id, name);
 }
 
