@@ -44,6 +44,7 @@ import {
   type SpriteCatalog,
   type World
 } from '@oddboro/world';
+import { buildMainStreet } from './main-street.ts';
 import { drawArt } from './office-art.ts';
 import { runAsOffice } from './office-run.ts';
 import { housePalette, officeLibrary, SAMPLE, sheetJson, type ArtSheetJson } from './space.ts';
@@ -368,7 +369,9 @@ export function build(
   office?: Omit<DrawnOffice, 'missing' | 'art' | 'artSheet' | 'artCatalog'>;
   problems: string[];
 } {
-  const built = generateOffice(spec, catalog, staff);
+  const built = spec?.mainStreet
+    ? buildMainStreet(spec, catalog, staff)
+    : generateOffice(spec, catalog, staff);
   if (built.problems.length || !built.world) return { problems: built.problems };
   return {
     office: {
@@ -654,7 +657,7 @@ export async function drawOffice(
       '# Design the office\n',
       `What {owner} wants: ${req.description}\n`,
       req.previous &&
-        `\nYou drew this before, and {owner} wants a change.\n\n\`\`\`json\n${JSON.stringify(req.previous)}\n\`\`\`\n${where ? `\nWhere its rooms stand now, west to east:\n\n${where}\n` : ''}\nKeep the rooms already there in the same order, and their pins, so they stay where they are; add new rooms at the end of the list.\n\nWhat {owner} wants changed: ${req.note || 'draw it again, differently'}`,
+        `\nYou drew this before, and {owner} wants a change.\n\n\`\`\`json\n${JSON.stringify(req.previous)}\n\`\`\`\n${where ? `\nWhere its rooms stand now, west to east:\n\n${where}\n` : ''}\nKeep each existing starterRoom id when editing a copy of Main Street, even when renaming a room. New rooms have no starterRoom. Keep the rooms already there in the same order, and their pins, so they stay where they are; add new rooms at the end of the list.\n\nWhat {owner} wants changed: ${req.note || 'draw it again, differently'}`,
       brief(staff, [...lib.art, ...fresh])
     ]
       .filter(Boolean)
@@ -691,6 +694,13 @@ export async function drawOffice(
     if (!r.ok) throw new Error(r.text);
     const parsed = parse(r.text);
     const problems = [...parsed.problems];
+    if (parsed.spec && req.previous?.mainStreet) {
+      parsed.spec.mainStreet = true;
+      for (const room of Array.isArray(parsed.spec.rooms) ? parsed.spec.rooms : []) {
+        const before = req.previous.rooms.find((r) => r.name === room.name && r.kind === room.kind);
+        if (before?.starterRoom) room.starterRoom = before.starterRoom;
+      }
+    }
     if (parsed.spec) {
       // Over the limit: draw the first pieces, and leave the rest out.
       const over = parsed.draw.slice(ART_LIMITS.pieces).map((d) => d.name);

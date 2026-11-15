@@ -53,6 +53,8 @@ export type Grounds = (typeof GROUNDS)[number];
 export type Plants = (typeof PLANTS)[number];
 
 export type RoomSpec = {
+  /** The hand-built room this copy started from. */
+  starterRoom?: string;
   kind: RoomKind;
   name: string;
   size?: Size;
@@ -100,6 +102,8 @@ export type AreaEdits = Partial<Record<Area, RoomEdit[]>>;
 export type Porch = { floor?: string; extras?: string[] };
 
 export type OfficeSpec = {
+  /** A personal copy of the installed Main Street floor. */
+  mainStreet?: true;
   name: string;
   /** The halls, and every room that does not pick its own. */
   wall: string;
@@ -594,6 +598,29 @@ function editArea(
       }
     }
   }
+}
+
+/** Name the pieces in a hand-built stamp and apply the designer's tile edits. */
+export function editStamp(
+  stamp: RoomTemplate,
+  edits: RoomEdit[],
+  catalog: SpriteCatalog,
+  notes: string[]
+) {
+  withIds(stamp.props);
+  editArea(
+    stamp.name,
+    stamp.props,
+    edits,
+    catalog,
+    {
+      ground: 'room floor',
+      stands: (x, y) => stamp.map[y]?.[x] === '.',
+      hangs: (x, y) => stamp.map[y]?.[x] === 'W',
+      keep: new Set()
+    },
+    notes
+  );
 }
 
 function rng(seed: string): () => number {

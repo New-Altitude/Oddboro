@@ -1232,7 +1232,9 @@
             : 'bg-raise text-muted hover:text-ink'}"
           aria-pressed={pressed}
           onclick={() => toggle(sec.id)}
-          >{sec.label}{#if sec.id === 'desk' && deskCount}<span class="ms-1 text-ember"
+          >{sec.id === 'office' && office.id === 'main-street'
+            ? 'Customize Main Street'
+            : sec.label}{#if sec.id === 'desk' && deskCount}<span class="ms-1 text-ember"
               >{deskCount}</span
             >{/if}{#if wins.list.some((w) => w.kind === sec.id && wins.busy[w.id])}<span
               class="busy ms-1.5"

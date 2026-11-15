@@ -143,7 +143,8 @@
       </p>
       <button
         class="self-start rounded-lg bg-raise px-3 py-2 text-xs font-medium hover:bg-sea/20"
-        onclick={ondesign}>{setup?.sample ? 'Design my office' : 'Open the Office window'}</button
+        onclick={ondesign}
+        >{setup?.sample ? 'Customize Main Street' : 'Open the Office window'}</button
       >
     </section>
 

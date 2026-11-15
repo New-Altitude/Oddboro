@@ -9,7 +9,7 @@ import { artCatalog, artSheet, checkArt, type DrawnArt } from '@oddboro/sprites/
 import { DIST } from '@oddboro/sprites/load';
 import type { Palette, SpriteDef } from '@oddboro/sprites/px';
 import { composeWorld, lotOf, type SpriteCatalog, type World } from '@oddboro/world';
-import { loadSpaces } from '@oddboro/world/load';
+import { loadSpaces, SAMPLE } from '@oddboro/world/load';
 
 /** `id` keys the room names the owner gives: `main-street` for the sample, `office-<n>` for a layout. */
 export type Office = {
@@ -27,7 +27,7 @@ export type ArtSheetJson = {
   frames: Record<string, [number, number, number, number]>;
 };
 
-export const SAMPLE = 'main-street';
+export { SAMPLE };
 
 type Meta = { palette: Palette; sprites: SpriteCatalog };
 const meta = (): Meta => JSON.parse(readFileSync(join(DIST, 'meta.json'), 'utf8')) as Meta;

@@ -1486,7 +1486,7 @@ tile covers whole device pixels; anything between leaves black seams at tile
 edges. The window lists the rooms, what was drawn, and what a floor seen from
 above cannot show, and redraws with a note, keeping the pieces already drawn.
 The office the owner is in changes the same way: `/api/office/layouts` returns
-its spec as `current`, and a note redraws it from that spec. Each note is
+its spec as `current`, including a personal copy of the installed Main Street floor when the sample is active, and a note redraws it from that spec. Each note is
 added to the layout's words as a "Then:" line, so a later change starts from
 everything asked so far. A change in words also shows Claude every room's
 items by id and tile, so it can return room `edits` (remove, move, add) that

@@ -275,7 +275,12 @@
     {#if !drawn}
       {#if here}
         <div class="flex flex-col gap-1">
-          <span class="text-xs text-muted">What should change in {current}?</span>
+          {#if sample?.active}<h3 class="font-medium text-ink">Customize Main Street</h3>{/if}
+          <span class="text-xs text-muted"
+            >{sample?.active
+              ? 'What would you like to change in your copy of Main Street?'
+              : `What should change in ${current}?`}</span
+          >
           <div class="flex gap-2">
             <input
               class={field}
@@ -287,7 +292,8 @@
             <button
               class="shrink-0 rounded-lg bg-sea px-3 py-2 text-xs font-medium text-night disabled:opacity-40"
               disabled={!note.trim() || drawing || moving}
-              onclick={() => draw('change')}>Change it</button
+              onclick={() => draw('change')}
+              >{sample?.active ? 'Preview my copy' : 'Change it'}</button
             >
           </div>
           <details class="text-xs text-muted">

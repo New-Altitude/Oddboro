@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { FloorPlan, RoomTemplate } from './types.ts';
 
+export const SAMPLE = 'main-street';
+
 export const WORLD_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 function readDir<T extends { id: string }>(dir: string): Record<string, T> {
