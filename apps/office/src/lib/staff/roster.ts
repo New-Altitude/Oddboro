@@ -4,7 +4,7 @@
 // the ledger; the server builds the profile (`toProfile` in `lib/server/profile.ts`).
 import type { OwnTools, PersonaLink } from '@oddboro/ledger';
 import type { Level } from '@oddboro/ledger/access';
-import type { Agent, Effort, GrantedFolder } from '@oddboro/ledger/agents';
+import type { Agent, AgentSource, Effort, GrantedFolder } from '@oddboro/ledger/agents';
 import type { LookSpec } from '@oddboro/sprites/look';
 
 export type Activity =
@@ -13,7 +13,7 @@ export type Activity =
 /** Character limits for an Odd's profile and job description. */
 export const LIMITS = { name: 40, role: 60, remit: 200, desk: 20_000 } as const;
 export type StaffProfile = {
-  claudeAgentName?: string;
+  agentSource?: AgentSource;
   id: string;
   name: string;
   role: string;

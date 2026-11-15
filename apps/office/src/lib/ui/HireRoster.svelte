@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { AgentSource } from '@oddboro/ledger/agents';
   import type { ComponentProps } from 'svelte';
   import type { StaffProfile } from '../staff/roster.ts';
   import HireDrawer from './HireDrawer.svelte';
@@ -6,8 +7,9 @@
 
   let props: Omit<
     ComponentProps<typeof HireDrawer>,
-    'file' | 'onfiles' | 'onskip' | 'onupdated'
+    'file' | 'format' | 'onfiles' | 'onskip' | 'onupdated'
   > = $props();
+  let format = $state<AgentSource['format']>('claude');
   let files = $state<File[]>([]);
   let index = $state(0);
   let hired = $state<StaffProfile[]>([]);
@@ -52,7 +54,11 @@
           {...props}
           {staff}
           file={files[index]}
-          onfiles={(picked) => (files = picked)}
+          {format}
+          onfiles={(picked, source) => {
+            format = source;
+            files = picked;
+          }}
           onhired={joined}
           onskip={() => {
             skipped++;

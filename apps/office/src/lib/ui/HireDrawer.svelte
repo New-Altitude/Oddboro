@@ -10,11 +10,13 @@
     MODELS,
     OFFICE_ACCOUNT,
     type Agent,
+    type AgentSource,
     type Effort
   } from '@oddboro/ledger/agents';
   import { HIRE_DEFAULTS } from '@oddboro/ledger/grantable';
   import { OFFICE_TOOLS } from '@oddboro/ledger/tools';
   import Pixel from './Pixel.svelte';
+  import AgentFilePicker from './AgentFilePicker.svelte';
   import JobDescription from './JobDescription.svelte';
   import LookStudio, { type Drawn } from './LookStudio.svelte';
   import SchedulePicker from './SchedulePicker.svelte';
@@ -38,7 +40,8 @@
 
   type Props = {
     file?: File;
-    onfiles: (files: File[]) => void;
+    format?: AgentSource['format'];
+    onfiles: (files: File[], format: AgentSource['format']) => void;
     onskip: () => void;
     onupdated?: () => void;
     staff: StaffProfile[];
@@ -55,6 +58,7 @@
   };
   let {
     file,
+    format = 'claude',
     onfiles,
     onskip,
     onupdated,
@@ -198,28 +202,32 @@
   let problem = $state('');
   let skipped = $state<string[]>([]);
 
-  let sourceName = $state<string>();
+  let source = $state<AgentSource>();
   let updating = $state<StaffProfile>();
   const matches = $derived(
     staff.filter(
-      (p) => !p.persona && (p.claudeAgentName ? p.claudeAgentName === sourceName : p.name === name)
+      (p) =>
+        !p.persona &&
+        (p.agentSource
+          ? p.agentSource.format === source?.format && p.agentSource.name === source?.name
+          : p.name === name)
     )
   );
 
-  async function importAgent(file: File) {
+  async function importAgent(file: File, format: AgentSource['format']) {
     busy = true;
     problem = '';
     try {
-      const { readClaudeAgentFile } = await import('../staff/claude-agent.ts');
-      const draft = await readClaudeAgentFile(file);
+      const { readAgentFile } = await import('../staff/agent-file.ts');
+      const draft = await readAgentFile(file, format);
       name = draft.name;
       role = draft.role;
       remit = draft.remit;
       desk = draft.desk;
-      pickAgent('claude');
+      pickAgent(format);
       pickedModel = draft.model;
       skipped = draft.skipped;
-      sourceName = draft.sourceName;
+      source = draft.source;
       path = matches.length ? 'matches' : 'odd';
     } catch (e) {
       problem = e instanceof Error ? e.message : 'Could not read that agent file.';
@@ -231,7 +239,7 @@
   // Fill the window from the proposal. The job description is read from its
   // file now, so edits the owner made in the viewer are in it.
   onMount(() => {
-    if (file) void importAgent(file);
+    if (file) void importAgent(file, format);
     if (!from) return;
     const p = from.proposal;
     name = p.name;
@@ -313,7 +321,7 @@
       call<StaffProfile>('/api/staff', {
         name,
         role,
-        claudeAgentName: sourceName,
+        agentSource: source,
         look: look?.look,
         portraitPx: look?.portraitPx,
         newParts: look?.newParts,
@@ -384,24 +392,18 @@
       'Hire a persona',
       () => (path = 'persona')
     )}
-    <label class="flex flex-col gap-2 rounded-xl bg-raise p-3">
-      <span class="font-semibold text-ink">Import a Claude Code agent</span>
-      <span class="text-xs text-muted"
-        >Choose one or more agent Markdown files. Review each before hiring.</span
-      >
-      <input
-        type="file"
-        accept=".md,.markdown"
+    <div class="flex flex-col gap-2 rounded-xl bg-raise p-3">
+      <span class="font-semibold text-ink">Import an agent</span>
+      <span class="text-xs text-muted">Review each file before hiring.</span>
+      <AgentFilePicker
         multiple
         disabled={busy}
-        onchange={(e) => {
-          const picked = Array.from(e.currentTarget.files ?? []);
-          e.currentTarget.value = '';
-          if (picked.length > 1) onfiles(picked);
-          else if (picked[0]) void importAgent(picked[0]);
+        onpick={(files, source) => {
+          if (files.length > 1) onfiles(files, source);
+          else void importAgent(files[0], source);
         }}
       />
-    </label>
+    </div>
     {#if problem}<p class="text-xs text-coral" role="alert">{problem}</p>{/if}
   </section>
 {:else if path === 'matches'}

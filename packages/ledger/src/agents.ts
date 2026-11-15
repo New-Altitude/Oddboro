@@ -4,6 +4,9 @@
 // import in the browser.
 import { officeSection, SWITCH_NAMES } from './access-words.ts';
 
+/** The original agent file stays recognizable even if its Odd changes name or runtime. */
+export type AgentSource = { format: 'claude' | 'grok'; name: string };
+
 /** The coding tools an Odd can run on. Each is also the command the office starts. */
 export const AGENTS = ['claude', 'grok', 'codex', 'gemini'] as const;
 export type Agent = (typeof AGENTS)[number];

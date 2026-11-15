@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { LIMITS } from './roster.ts';
-import { readClaudeAgent } from './claude-agent.ts';
+import { readAgentMarkdown } from './agent-file.ts';
+
+const readClaudeAgent = (text: string) => readAgentMarkdown(text, 'claude');
 
 const agent = [
   '---',
@@ -44,6 +46,20 @@ test('an unsupported model is named and the job description is never silently cu
 test('the original agent name survives a shortened display name', () => {
   const sourceName = 'fact-checker-'.repeat(5);
   const draft = readClaudeAgent(agent.replace('name: fact-checker', 'name: ' + sourceName));
-  assert.equal(draft.sourceName, sourceName);
+  assert.equal(draft.source.name, sourceName);
   assert.equal(draft.name, sourceName.slice(0, LIMITS.name));
+});
+
+test('a Grok Build agent keeps its source and lists settings the office leaves behind', () => {
+  const file =
+    '---\nname: orchard\ndescription: Count crates.\npromptMode: extend\ntools: [read_file]\n---\nCheck each batch.';
+  const draft = readAgentMarkdown(file, 'grok');
+  assert.deepEqual(draft.source, { format: 'grok', name: 'orchard' });
+  assert.deepEqual(draft.skipped, ['promptMode', 'tools']);
+  assert.equal(draft.model, null);
+  assert.equal(draft.desk, 'Count crates.\n\nCheck each batch.');
+  assert.throws(
+    () => readAgentMarkdown(file.replace('extend', 'full') + ' ${{ tools.read_file }}', 'grok'),
+    /template/
+  );
 });

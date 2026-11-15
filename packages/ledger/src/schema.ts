@@ -22,7 +22,7 @@ import type { ArtKind, Place } from '@oddboro/sprites/art';
 import type { LookSpec, PartKind } from '@oddboro/sprites/look';
 import type { FloorPlan, OfficeSpec, RoomKind, RoomTemplate } from '@oddboro/world';
 import { HIRE_DEFAULTS } from './grantable.ts';
-import type { Agent, Effort, GrantedFolder } from './agents.ts';
+import type { Agent, AgentSource, Effort, GrantedFolder } from './agents.ts';
 import type { FolderAccess, Level, OwnSwitch } from './access-words.ts';
 import type { GmailFilter } from './filter-words.ts';
 import type { MailAttachment } from './mail-attachments.ts';
@@ -36,8 +36,7 @@ const id = () => integer().primaryKey().generatedAlwaysAsIdentity();
 export const staff = pgTable('staff', {
   id: text().primaryKey(),
   name: text().notNull(),
-  /** Original name in a Claude agent file, even when the owner names the hire differently. */
-  claudeAgentName: text(),
+  agentSource: jsonb().$type<AgentSource>(),
   role: text().notNull(),
   office: text().notNull().default('Main Street'),
   sprite: text().notNull().default('staff'),

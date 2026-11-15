@@ -1,14 +1,14 @@
 import { parse } from 'yaml';
-import { MODELS } from '@oddboro/ledger/agents';
+import { MODELS, type AgentSource } from '@oddboro/ledger/agents';
 import { LIMITS } from './roster.ts';
 
-export async function readClaudeAgentFile(file: File) {
+export async function readAgentFile(file: File, format: AgentSource['format']) {
   if (file.size > 256 * 1024) throw new Error('Choose an agent file smaller than 256 KB.');
-  return readClaudeAgent(await file.text());
+  return readAgentMarkdown(await file.text(), format);
 }
 
-/** Read a Claude Code subagent file for the hire form. Only the owner grants tools. */
-export function readClaudeAgent(file: string) {
+/** Read a Claude Code or Grok Build agent file for the hire form. Only the owner grants tools. */
+export function readAgentMarkdown(file: string, format: AgentSource['format']) {
   const source = file.replace(/^\uFEFF/, '').replaceAll('\r\n', '\n');
   const parts = /^---[ \t]*\n([\s\S]*?)\n---[ \t]*(?:\n|$)/.exec(source);
   if (!parts) throw new Error('Choose an agent Markdown file with a header between --- lines.');
@@ -20,16 +20,20 @@ export function readClaudeAgent(file: string) {
   const description = typeof fields.description === 'string' ? fields.description.trim() : '';
   if (!name || !description) throw new Error('The agent header needs a name and a description.');
   const instructions = source.slice(parts[0].length).trim();
+  if (format === 'grok' && fields.promptMode === 'full' && /\$\{(?:\{|%)/.test(instructions))
+    throw new Error('Replace Grok template expressions with plain instructions before importing.');
   const desk = [description, instructions].filter(Boolean).join('\n\n');
   if (desk.length > LIMITS.desk)
     throw new Error(`Shorten the agent description and instructions to ${LIMITS.desk} characters.`);
   const model =
-    MODELS.claude.find((m) => m.id === fields.model || m.id.startsWith(`claude-${fields.model}-`))
-      ?.id ?? null;
+    MODELS[format].find(
+      (m) =>
+        m.id === fields.model || (format === 'claude' && m.id.startsWith(`claude-${fields.model}-`))
+    )?.id ?? null;
   const imported = new Set(['name', 'description']);
-  if (model || fields.model === 'inherit') imported.add('model');
+  if (model || (format === 'claude' && fields.model === 'inherit')) imported.add('model');
   return {
-    sourceName: name,
+    source: { format, name },
     name: name.slice(0, LIMITS.name),
     role: name.replaceAll('-', ' ').slice(0, LIMITS.role),
     remit: description.slice(0, LIMITS.remit),

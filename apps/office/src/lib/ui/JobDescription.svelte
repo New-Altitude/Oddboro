@@ -1,5 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import type { AgentSource } from '@oddboro/ledger/agents';
+  import AgentFilePicker from './AgentFilePicker.svelte';
   import DocEditor from './DocEditor.svelte';
   import { call } from './api.ts';
   import type { StaffProfile } from '../staff/roster.ts';
@@ -57,14 +59,14 @@
     };
   });
 
-  async function reviewFile(file: File) {
+  async function reviewFile(file: File, format: AgentSource['format']) {
     const opened = editor;
     if (!opened) return;
     reading = true;
     fileMessage = '';
     try {
-      const { readClaudeAgentFile } = await import('../staff/claude-agent.ts');
-      const agent = await readClaudeAgentFile(file);
+      const { readAgentFile } = await import('../staff/agent-file.ts');
+      const agent = await readAgentFile(file, format);
       if (editor !== opened) return;
       if (agent.desk === text) fileMessage = 'The saved instructions match this file.';
       else if (!opened.review(agent.desk))
@@ -130,19 +132,11 @@
         <p class="py-4 text-center text-sm text-muted">Opening</p>
       {:else}
         {#if !profile.persona && proposal === undefined}
-          <label class="mb-2 block text-xs text-muted">
-            Review job instructions from a Claude agent file
-            <input
-              type="file"
-              accept=".md,.markdown"
-              disabled={reading || dirty}
-              onchange={(e) => {
-                const file = e.currentTarget.files?.[0];
-                e.currentTarget.value = '';
-                if (file) void reviewFile(file);
-              }}
-            />
-          </label>
+          <p class="mb-2 text-xs text-muted">Review job instructions from an agent file</p>
+          <AgentFilePicker
+            disabled={reading || dirty}
+            onpick={(files, format) => void reviewFile(files[0], format)}
+          />
         {/if}
         {#if fileMessage}<p class="mb-2 text-xs text-muted" role="status">{fileMessage}</p>{/if}
         {#if dirty}

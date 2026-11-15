@@ -40,6 +40,7 @@ import { LIMITS } from '#lib/staff/roster.ts';
 import type { RequestHandler } from './$types';
 
 type Body = Partial<Record<'name' | 'role' | 'room' | 'permission' | 'remit' | 'desk', string>> & {
+  agentSource?: { format?: unknown; name?: unknown };
   claudeAgentName?: unknown;
   tools?: unknown;
   agent?: unknown;
@@ -95,6 +96,19 @@ export const POST: RequestHandler = async ({ request }) => {
   const account = typeof b.account === 'string' && b.account !== OFFICE_ACCOUNT ? b.account : null;
   if (account && (await accountRow(account))?.agent !== on)
     error(400, `That is not one of ${AGENT_NAMES[on]}'s accounts`);
+  // An already-open Hire window can still send the original Claude-only field.
+  const source =
+    b.agentSource ?? (b.claudeAgentName && { format: 'claude', name: b.claudeAgentName });
+  let agentSource;
+  if (source) {
+    if (typeof source !== 'object' || !('format' in source) || !('name' in source))
+      error(400, 'Choose an agent file again.');
+    const { format } = source;
+    const original = text(source.name, 256 * 1024);
+    if ((format !== 'claude' && format !== 'grok') || !original)
+      error(400, 'Choose an agent file again.');
+    agentSource = { format, name: original } as const;
+  }
   const jobName = text(b.job?.name, 80);
   const jobSteps = text(b.job?.instructions, 8000);
   const jobSchedule = b.job ? parseSchedule(b.job.schedule) : null;
@@ -111,7 +125,7 @@ export const POST: RequestHandler = async ({ request }) => {
     // The atlas names stay as a fallback; the drawn look is what shows.
     row = await hire({
       name,
-      claudeAgentName: text(b.claudeAgentName, 256 * 1024) || undefined,
+      agentSource,
       office: office.name,
       role,
       remit,

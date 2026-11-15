@@ -19,6 +19,7 @@ import {
   MODELS,
   officeAgentOf,
   type Agent,
+  type AgentSource,
   type Effort
 } from './agents.ts';
 // Read only inside functions, so the import cycle with managers.ts is safe.
@@ -430,7 +431,7 @@ export type Hire = Pick<
   StaffRow,
   'name' | 'role' | 'variant' | 'portrait' | 'room' | 'remit' | 'desk'
 > & {
-  claudeAgentName?: string;
+  agentSource?: AgentSource;
   /** Its level; `HIRE_DEFAULTS` when left out. */
   permission?: Level;
   /** The office they work in, by name. */
