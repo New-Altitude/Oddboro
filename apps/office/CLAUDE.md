@@ -1185,8 +1185,10 @@ pieces under 3,900 bytes a line, so no value is on a command line.
 12. **Hire** on the office plate opens the hire drawer
     (`src/lib/ui/HireDrawer.svelte`). An owner can start it from a Claude Code or Grok Build
     agent Markdown file. Its name, description, instructions and supported model
-    fill the same form. The form lists settings left in the file. Access still
-    comes from the office. Step one makes the person's look
+    fill the same form. Hire and the job-description editor show the tools,
+    exclusions and skills named in the file. Office tools are checked against
+    the new hire's defaults or the selected worker's grants. Provider and
+    service tools need a separate check. Access still comes from the office. Step one makes the person's look
     (`src/lib/ui/LookStudio.svelte`), drawn or built. Drawn: the owner
     describes them, LookStudio asks `/api/looks`, and
     the owner sees the portrait and the walk, then redraws with a note or keeps it.

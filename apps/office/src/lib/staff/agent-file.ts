@@ -2,11 +2,30 @@ import { parse } from 'yaml';
 import { MODELS, type AgentSource } from '@oddboro/ledger/agents';
 import { LIMITS } from './roster.ts';
 
+/** Declarations from the file only. Grants and attached skills belong to the office. */
+export type AgentSettings = {
+  tools?: string[];
+  skills?: string[];
+  excluded?: string[];
+  skipped: string[];
+};
+
+function names(value: unknown): string[] | undefined {
+  const items =
+    typeof value === 'string' ? (value.includes('(') ? [value] : value.split(',')) : value;
+  if (!Array.isArray(items) || !items.every((item) => typeof item === 'string')) return undefined;
+  return [...new Set(items.map((item: string) => item.trim()).filter(Boolean))];
+}
+
 export async function readAgentFile(file: File, format: AgentSource['format']) {
   if (format === 'hermes') {
     const { readHermesProfile } = await import('./hermes-profile.ts');
     const { name, description, instructions } = await readHermesProfile(file);
-    return { ...agentDraft({ format, name }, description, instructions), model: null, skipped: [] };
+    return {
+      ...agentDraft({ format, name }, description, instructions),
+      model: null,
+      settings: { skipped: [] } as AgentSettings
+    };
   }
   if (file.size > 256 * 1024) throw new Error('Choose an agent file smaller than 256 KB.');
   return readAgentMarkdown(await file.text(), format);
@@ -32,12 +51,23 @@ export function readAgentMarkdown(file: string, format: 'claude' | 'grok') {
       (m) =>
         m.id === fields.model || (format === 'claude' && m.id.startsWith(`claude-${fields.model}-`))
     )?.id ?? null;
-  const imported = new Set(['name', 'description']);
-  if (model || (format === 'claude' && fields.model === 'inherit')) imported.add('model');
+  const reviewed = new Set(['name', 'description']);
+  if (model || (format === 'claude' && fields.model === 'inherit')) reviewed.add('model');
+  const tools = names(fields.tools);
+  const skills = names(fields.skills);
+  const excluded = names(fields.disallowedTools);
+  if (tools) reviewed.add('tools');
+  if (excluded) reviewed.add('disallowedTools');
+  if (skills) reviewed.add('skills');
   return {
     ...agentDraft({ format, name }, description, instructions),
     model,
-    skipped: Object.keys(fields).filter((key) => !imported.has(key))
+    settings: {
+      tools,
+      skills,
+      excluded,
+      skipped: Object.keys(fields).filter((key) => !reviewed.has(key))
+    }
   };
 }
 

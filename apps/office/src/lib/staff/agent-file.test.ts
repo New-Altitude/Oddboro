@@ -32,13 +32,18 @@ test('a Claude agent opens as an editable job with its other settings named', ()
     draft.remit + '\n\nQuote the passage and flag any mismatch.\n---\nReturn a list of corrections.'
   );
   assert.match(draft.model ?? '', /^claude-sonnet-/);
-  assert.deepEqual(draft.skipped, ['tools', 'skills', 'permissionMode']);
+  assert.deepEqual(draft.settings, {
+    tools: ['Read', 'Grep'],
+    excluded: undefined,
+    skills: ['check-claims'],
+    skipped: ['permissionMode']
+  });
 });
 
 test('an unsupported model is named and the job description is never silently cut', () => {
   const draft = readClaudeAgent(agent.replace('model: sonnet', 'model: unknown'));
   assert.equal(draft.model, null);
-  assert.ok(draft.skipped.includes('model'));
+  assert.ok(draft.settings.skipped.includes('model'));
   assert.throws(() => readClaudeAgent(agent + 'a'.repeat(LIMITS.desk)), /Shorten/);
   assert.throws(() => readClaudeAgent('ordinary Markdown'), /header/);
   assert.throws(() => readClaudeAgent('---\nname: example\n---'), /description/);
@@ -56,7 +61,8 @@ test('a Grok Build agent keeps its source and lists settings the office leaves b
     '---\nname: orchard\ndescription: Count crates.\npromptMode: extend\ntools: [read_file]\n---\nCheck each batch.';
   const draft = readAgentMarkdown(file, 'grok');
   assert.deepEqual(draft.source, { format: 'grok', name: 'orchard' });
-  assert.deepEqual(draft.skipped, ['promptMode', 'tools']);
+  assert.deepEqual(draft.settings.tools, ['read_file']);
+  assert.deepEqual(draft.settings.skipped, ['promptMode']);
   assert.equal(draft.model, null);
   assert.equal(draft.desk, 'Count crates.\n\nCheck each batch.');
   assert.throws(
@@ -78,4 +84,13 @@ test('a Hermes profile export supplies the name, description and instructions', 
     readAgentFile(new File(['not a profile'], 'empty.tgz'), 'hermes'),
     /readable Hermes/
   );
+});
+
+test('a source can declare no tools or name a provider-specific exclusion', () => {
+  const file =
+    '---\nname: checker\ndescription: Review work.\ntools: []\ndisallowedTools: [Write, Edit]\n---\nRead it.';
+  const draft = readAgentMarkdown(file, 'grok');
+  assert.deepEqual(draft.settings.tools, []);
+  assert.deepEqual(draft.settings.excluded, ['Write', 'Edit']);
+  assert.equal(draft.settings.skills, undefined);
 });

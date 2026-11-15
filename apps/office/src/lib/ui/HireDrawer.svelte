@@ -16,6 +16,8 @@
   import { HIRE_DEFAULTS } from '@oddboro/ledger/grantable';
   import { OFFICE_TOOLS } from '@oddboro/ledger/tools';
   import Pixel from './Pixel.svelte';
+  import ImportSettings from './ImportSettings.svelte';
+  import type { AgentSettings } from '../staff/agent-file.ts';
   import AgentFilePicker from './AgentFilePicker.svelte';
   import JobDescription from './JobDescription.svelte';
   import LookStudio, { type Drawn } from './LookStudio.svelte';
@@ -200,7 +202,7 @@
   let busy = $state(false);
   let saving = $state(false);
   let problem = $state('');
-  let skipped = $state<string[]>([]);
+  let settings = $state<AgentSettings>();
 
   let source = $state<AgentSource>();
   let updating = $state<StaffProfile>();
@@ -226,7 +228,7 @@
       desk = draft.desk;
       pickAgent(format === 'hermes' ? undefined : format);
       pickedModel = draft.model;
-      skipped = draft.skipped;
+      settings = draft.settings;
       source = draft.source;
       path = matches.length ? 'matches' : 'odd';
     } catch (e) {
@@ -412,7 +414,14 @@
     aria-label="Review agent import"
   >
     {#if updating}
-      <JobDescription profile={updating} {version} proposal={desk} bind:saving {onupdated} />
+      <JobDescription
+        profile={updating}
+        {version}
+        proposal={desk}
+        {settings}
+        bind:saving
+        {onupdated}
+      />
       <button
         class="self-start text-xs text-muted"
         disabled={saving}
@@ -587,11 +596,8 @@
   </section>
 {:else}
   <section class="flex h-full min-h-0 flex-col" aria-label="Hire an Odd">
-    {#if skipped.length}
-      <p class="border-b border-hairline p-3 text-xs text-ink">
-        Settings left in the agent file: {skipped.join(', ')}. Review this Odd's model and access
-        before hiring.
-      </p>
+    {#if settings}
+      <ImportSettings {settings} granted={tools ?? HIRE_DEFAULTS.staff.tools} />
     {/if}
     <header class="border-b border-hairline p-3">
       <!-- No title: the window's tab already says Hire. -->

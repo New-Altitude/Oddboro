@@ -1,6 +1,8 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import type { AgentSource } from '@oddboro/ledger/agents';
+  import ImportSettings from './ImportSettings.svelte';
+  import type { AgentSettings } from '../staff/agent-file.ts';
   import AgentFilePicker from './AgentFilePicker.svelte';
   import DocEditor from './DocEditor.svelte';
   import { call } from './api.ts';
@@ -12,10 +14,18 @@
     profile: StaffProfile;
     version: number;
     proposal?: string;
+    settings?: AgentSettings;
     saving?: boolean;
     onupdated?: () => void;
   };
-  let { profile, version, proposal, saving = $bindable(false), onupdated }: Props = $props();
+  let {
+    profile,
+    version,
+    proposal,
+    settings,
+    saving = $bindable(false),
+    onupdated
+  }: Props = $props();
 
   let shown = $state(untrack(() => proposal !== undefined));
   let text = $state<string | undefined>();
@@ -25,6 +35,7 @@
   let editor: DocEditor | undefined = $state();
   let reading = $state(false);
   let fileMessage = $state('');
+  let chosenSettings = $state<AgentSettings>();
 
   // Hire already has the file. Present its instructions once this editor opens.
   let reviewed = false;
@@ -63,11 +74,13 @@
     const opened = editor;
     if (!opened) return;
     reading = true;
+    chosenSettings = undefined;
     fileMessage = '';
     try {
       const { readAgentFile } = await import('../staff/agent-file.ts');
       const agent = await readAgentFile(file, format);
       if (editor !== opened) return;
+      chosenSettings = agent.settings;
       if (agent.desk === text) fileMessage = 'The saved instructions match this file.';
       else if (!opened.review(agent.desk))
         fileMessage = 'Finish your current edit, then choose the file again.';
@@ -138,6 +151,11 @@
             onpick={(files, format) => void reviewFile(files[0], format)}
           />
         {/if}
+        {@const sourceSettings = settings ?? chosenSettings}
+        {#if sourceSettings}<ImportSettings
+            settings={sourceSettings}
+            granted={profile.tools}
+          />{/if}
         {#if fileMessage}<p class="mb-2 text-xs text-muted" role="status">{fileMessage}</p>{/if}
         {#if dirty}
           <details class="mb-2 text-xs text-muted">
