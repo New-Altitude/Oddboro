@@ -72,13 +72,12 @@ export function inOrder<T>(op: () => Promise<T>): Promise<T> {
 export async function brainState() {
   const connection = current();
   lastReview();
+  const paged = checked?.position !== undefined || connection?.position !== undefined;
   return {
     url: connection?.url,
     checkedAt: checked?.at,
-    watchesCaptures:
-      checked?.position !== undefined ||
-      connection?.position !== undefined ||
-      !!(checked?.recent ?? connection?.recentStart),
+    paged,
+    watchesCaptures: paged || !!(checked?.recent ?? connection?.recentStart),
     catchingUp: checked?.position !== undefined && checked.at === 0,
     affected: Object.keys(checked?.review.byJob ?? {}).length,
     findings: Object.entries(checked?.review.byJob ?? {})

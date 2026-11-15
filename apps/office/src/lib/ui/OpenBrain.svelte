@@ -56,9 +56,15 @@
   {#if brain?.url}
     <p class="break-all text-xs text-muted">{brain.url}</p>
     <p class="mt-2 text-xs text-muted">
-      {brain.watchesCaptures
-        ? 'Your office checks new captures as well as job search results.'
-        : 'This Brain has no recent-capture list. The office uses job searches and decisions from paired projects.'}
+      {#if brain.paged}
+        Your office reads new captures in order and can resume from its saved place after time away.
+      {:else if brain.watchesCaptures}
+        Your office checks the recent captures this Brain can return. If an older change is out of
+        reach, the office shows the gap here.
+      {:else}
+        This Brain has no recent-capture list. The office uses job searches and decisions from
+        paired projects.
+      {/if}
     </p>
     {#if brain.catchingUp}
       <p class="mt-2">Catching up on captures saved while the office was away.</p>

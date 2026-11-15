@@ -33,6 +33,17 @@ test('an empty Brain and a deleted marker can catch up from a verified complete 
   }
 });
 
+test('an unpaged Brain can return a backlog larger than the default Supabase limit', async () => {
+  const marker = 'Previous capture';
+  const added = Array.from({ length: 1250 }, (_, i) => 'New ' + i);
+  const records = [...added, marker];
+  const result = await recentCaptures(
+    async (n) => listing(records.slice(0, n)),
+    [textHash(marker)]
+  );
+  assert.deepEqual(result.added, added);
+});
+
 test('a capped, ambiguous or broken list cannot advance a saved position', async () => {
   const old = [textHash('last checked')];
   const rows = Array.from({ length: 1001 }, (_, i) => 'Capture ' + i);

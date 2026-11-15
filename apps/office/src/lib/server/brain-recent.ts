@@ -2,7 +2,6 @@
 import { createHash } from 'node:crypto';
 
 const HEAD = 16;
-const MAX_LIST = 1000;
 export const textHash = (text: string) => createHash('sha256').update(text).digest('hex');
 
 function listedTexts(reply: string, limit: number): string[] {
@@ -38,14 +37,14 @@ export async function recentCaptures(
       const added = texts.slice(0, end).filter((_, i) => !known.has(hashes[i]));
       return { head, added };
     }
-    if (texts.length < limit || limit === MAX_LIST) {
+    if (texts.length < limit) {
       // A short list can also mean the server capped the response. Only the
       // source's total proves we saw everything when no previous marker remains.
       if (total && (await total()) === texts.length) return { head, added: texts };
       throw new Error(
-        'Open Brain did not reach the last checked capture. The office kept its place because it could not verify the gap. It will resume when the Brain server offers paging.'
+        'Open Brain did not reach the last checked capture. The office kept its place because it could not verify the gap. The office will retry automatically. For larger gaps, the Brain must return more recent captures or offer paging.'
       );
     }
-    limit = Math.min(limit * 2, MAX_LIST);
+    limit *= 2;
   }
 }
