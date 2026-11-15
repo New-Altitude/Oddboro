@@ -131,7 +131,7 @@
 
   <JobDescription {profile} {version} />
   {#if !profile.persona}
-    {#key profile.id}<StaffSkill staff={profile.id} />{/key}
+    {#key profile.id}<StaffSkill {profile} />{/key}
   {/if}
 
   <section aria-label="Stats">

@@ -1154,7 +1154,8 @@ pieces under 3,900 bytes a line, so no value is on a command line.
     A Hermes export supplies its profile directory name, optional description and SOUL.md. Other archive entries stay out of the office. Hermes instructions start on the office tool.
     Selecting several files opens that same form for each (`HireRoster.svelte`).
     Each hire or update saves at once. Skipping a file leaves the others in the list. On the Odd's info page,
-    Skill previews one SKILL.md. Saving copies its text into the staff row. A local Odd
+    Skill previews one SKILL.md. Its allowed tools are checked against the worker's
+    office grants, and its compatibility description is shown as written. Saving copies its text into the staff row. A local Odd
     receives it with its job description on jobs and chats, including resumed chats.
     Choosing the file again previews an update. Tools and folders keep their grants. While an
     update is about to install it starts no scheduled job (item 17).

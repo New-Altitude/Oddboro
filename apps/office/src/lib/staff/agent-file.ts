@@ -1,14 +1,6 @@
-import { parse } from 'yaml';
+import { fileHeader, type FileSettings } from './file-settings.ts';
 import { MODELS, type AgentSource } from '@oddboro/ledger/agents';
 import { LIMITS } from './roster.ts';
-
-/** Declarations from the file only. Grants and attached skills belong to the office. */
-export type AgentSettings = {
-  tools?: string[];
-  skills?: string[];
-  excluded?: string[];
-  skipped: string[];
-};
 
 function names(value: unknown): string[] | undefined {
   const items =
@@ -24,7 +16,7 @@ export async function readAgentFile(file: File, format: AgentSource['format']) {
     return {
       ...agentDraft({ format, name }, description, instructions),
       model: null,
-      settings: { skipped: [] } as AgentSettings
+      settings: { skipped: [] } as FileSettings
     };
   }
   if (file.size > 256 * 1024) throw new Error('Choose an agent file smaller than 256 KB.');
@@ -33,17 +25,12 @@ export async function readAgentFile(file: File, format: AgentSource['format']) {
 
 /** Read a Claude Code or Grok Build agent file for the hire form. Only the owner grants tools. */
 export function readAgentMarkdown(file: string, format: 'claude' | 'grok') {
-  const source = file.replace(/^\uFEFF/, '').replaceAll('\r\n', '\n');
-  const parts = /^---[ \t]*\n([\s\S]*?)\n---[ \t]*(?:\n|$)/.exec(source);
-  if (!parts) throw new Error('Choose an agent Markdown file with a header between --- lines.');
-  const header: unknown = parse(parts[1], { maxAliasCount: 0 });
-  if (!header || typeof header !== 'object' || Array.isArray(header))
-    throw new Error('The agent header needs a name and a description.');
-  const fields = header as Record<string, unknown>;
+  const result = fileHeader(file);
+  if (!result) throw new Error('Choose an agent Markdown file with a header between --- lines.');
+  const { fields, instructions } = result;
   const name = typeof fields.name === 'string' ? fields.name.trim() : '';
   const description = typeof fields.description === 'string' ? fields.description.trim() : '';
   if (!name || !description) throw new Error('The agent header needs a name and a description.');
-  const instructions = source.slice(parts[0].length).trim();
   if (format === 'grok' && fields.promptMode === 'full' && /\$\{(?:\{|%)/.test(instructions))
     throw new Error('Replace Grok template expressions with plain instructions before importing.');
   const model =

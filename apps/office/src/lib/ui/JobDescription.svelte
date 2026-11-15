@@ -2,7 +2,7 @@
   import { untrack } from 'svelte';
   import type { AgentSource } from '@oddboro/ledger/agents';
   import ImportSettings from './ImportSettings.svelte';
-  import type { AgentSettings } from '../staff/agent-file.ts';
+  import type { FileSettings } from '../staff/file-settings.ts';
   import AgentFilePicker from './AgentFilePicker.svelte';
   import DocEditor from './DocEditor.svelte';
   import { call } from './api.ts';
@@ -14,7 +14,7 @@
     profile: StaffProfile;
     version: number;
     proposal?: string;
-    settings?: AgentSettings;
+    settings?: FileSettings;
     saving?: boolean;
     onupdated?: () => void;
   };
@@ -35,7 +35,7 @@
   let editor: DocEditor | undefined = $state();
   let reading = $state(false);
   let fileMessage = $state('');
-  let chosenSettings = $state<AgentSettings>();
+  let chosenSettings = $state<FileSettings>();
 
   // Hire already has the file. Present its instructions once this editor opens.
   let reviewed = false;

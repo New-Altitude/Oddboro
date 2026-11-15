@@ -1,8 +1,19 @@
 <script lang="ts">
   import { skillProblem, skillSizeProblem } from '../staff/skill.ts';
+  import ImportSettings from './ImportSettings.svelte';
+  import type { StaffProfile } from '../staff/roster.ts';
   import { call } from './api.ts';
 
-  let { staff }: { staff: string } = $props();
+  let { profile }: { profile: StaffProfile } = $props();
+  let readSettings = $state<typeof import('../staff/file-settings.ts').skillSettings>();
+  const settings = $derived.by(() => {
+    if (!draft || !readSettings) return undefined;
+    try {
+      return readSettings(draft);
+    } catch {
+      return 'The skill header could not be read. Review its instructions below.';
+    }
+  });
   let shown = $state(false);
   let saved = $state<string | null>();
   let draft = $state<string | null>(null);
@@ -16,7 +27,8 @@
     problem = '';
     saved = undefined;
     try {
-      const result = await call<{ skill: string | null }>(`/api/staff/${staff}/skill`);
+      if (!readSettings) readSettings = (await import('../staff/file-settings.ts')).skillSettings;
+      const result = await call<{ skill: string | null }>(`/api/staff/${profile.id}/skill`);
       saved = draft = result.skill;
     } catch (e) {
       problem = e instanceof Error ? e.message : String(e);
@@ -51,7 +63,7 @@
     busy = true;
     problem = '';
     try {
-      await call(`/api/staff/${staff}/skill`, { skill: draft, was: saved }, 'PUT');
+      await call(`/api/staff/${profile.id}/skill`, { skill: draft, was: saved }, 'PUT');
       saved = draft;
     } catch (e) {
       problem = e instanceof Error ? e.message : String(e);
@@ -90,6 +102,11 @@
           <summary>Current instructions</summary>
           <pre class="max-h-48 overflow-auto whitespace-pre-wrap">{saved}</pre>
         </details>
+      {/if}
+      {#if typeof settings === 'string'}
+        <p class="mt-2 text-xs text-muted">{settings}</p>
+      {:else if settings}
+        <ImportSettings {settings} granted={profile.tools} />
       {/if}
       {#if draft}
         <pre

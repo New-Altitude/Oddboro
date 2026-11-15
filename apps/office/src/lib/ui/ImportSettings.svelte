@@ -1,8 +1,8 @@
 <script lang="ts">
   import { OFFICE_TOOLS, RIDES_WITH, hasTool } from '@oddboro/ledger/tools';
-  import type { AgentSettings } from '../staff/agent-file.ts';
+  import type { FileSettings } from '../staff/file-settings.ts';
 
-  let { settings, granted }: { settings: AgentSettings; granted: string[] } = $props();
+  let { settings, granted }: { settings: FileSettings; granted: string[] } = $props();
 
   function status(name: string) {
     const id = name.replace(/^mcp__office__/, '');
@@ -12,12 +12,16 @@
   }
 </script>
 
-{#if settings.tools || settings.skills?.length || settings.excluded?.length || settings.skipped.length}
+{#if settings.tools || settings.skills?.length || settings.excluded?.length || settings.skipped?.length || settings.compatibility}
   <div
     class="max-h-44 shrink-0 space-y-1 overflow-y-auto border-b border-hairline p-3 text-xs"
-    aria-label="Settings in the agent file"
+    aria-label="Settings in the file"
     role="group"
   >
+    {#if settings.compatibility}
+      <p class="font-medium">Environment named in the file</p>
+      <p>{settings.compatibility}</p>
+    {/if}
     {#if settings.tools?.length}
       <p class="font-medium">Tools named in the file</p>
       <ul>
@@ -40,7 +44,7 @@
         page.
       </p>
     {/if}
-    {#if settings.skipped.length}
+    {#if settings.skipped?.length}
       <p>Settings left in the agent file: {settings.skipped.join(', ')}.</p>
     {/if}
     {#if settings.tools || settings.excluded?.length}

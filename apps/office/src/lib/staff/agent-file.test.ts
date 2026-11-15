@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
+import { skillSettings } from './file-settings.ts';
 import { LIMITS } from './roster.ts';
 import { readAgentFile, readAgentMarkdown } from './agent-file.ts';
 
@@ -93,4 +94,14 @@ test('a source can declare no tools or name a provider-specific exclusion', () =
   assert.deepEqual(draft.settings.tools, []);
   assert.deepEqual(draft.settings.excluded, ['Write', 'Edit']);
   assert.equal(draft.settings.skills, undefined);
+});
+
+test('a skill preserves tool restrictions and the declared environment', () => {
+  const file =
+    '---\nallowed-tools: mcp__office__search_ledger Bash(git status:*) Read\ncompatibility: Needs jq and a receipts folder.\n---\nCheck receipts.';
+  assert.deepEqual(skillSettings(file), {
+    tools: ['mcp__office__search_ledger', 'Bash(git status:*)', 'Read'],
+    compatibility: 'Needs jq and a receipts folder.'
+  });
+  assert.deepEqual(skillSettings('Read the receipt.'), {});
 });

@@ -17,7 +17,7 @@
   import { OFFICE_TOOLS } from '@oddboro/ledger/tools';
   import Pixel from './Pixel.svelte';
   import ImportSettings from './ImportSettings.svelte';
-  import type { AgentSettings } from '../staff/agent-file.ts';
+  import type { FileSettings } from '../staff/file-settings.ts';
   import AgentFilePicker from './AgentFilePicker.svelte';
   import JobDescription from './JobDescription.svelte';
   import LookStudio, { type Drawn } from './LookStudio.svelte';
@@ -202,7 +202,7 @@
   let busy = $state(false);
   let saving = $state(false);
   let problem = $state('');
-  let settings = $state<AgentSettings>();
+  let settings = $state<FileSettings>();
 
   let source = $state<AgentSource>();
   let updating = $state<StaffProfile>();
