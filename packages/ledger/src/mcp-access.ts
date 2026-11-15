@@ -17,7 +17,7 @@ import {
   raiseAsk,
   staffer
 } from './office.ts';
-import { accessInRun, askAboveLevel, capabilities } from './capabilities.ts';
+import { accessInRun, askAboveLevel, capabilities, handOffsLine } from './capabilities.ts';
 import { standingAsked, standingSaid, standingTitle } from './standing.ts';
 import { commandsOnline } from './agents.ts';
 import { currentPlatform } from './platform.ts';
@@ -316,11 +316,17 @@ tool(
 );
 
 // A level: only the owner raises it, from this ask's card or the Settings
-// tab. A level the Odd holds already never reaches the desk.
+// tab. A level the Odd holds already never reaches the desk. What it says of
+// work another Odd hands this Odd follows the owner's choice for it
+// (`actsOnHandOffs`), which they make each time they put it at Act.
+const handOffsAtAct =
+  me.permission === 'act'
+    ? handOffsLine(me.actsOnHandOffs, OWNER)
+    : `When ${OWNER} puts you at Act, they also choose whether work another Odd hands you runs at Act or at Draft at most.`;
 tool(
   'ask_for_level',
   {
-    description: `Ask ${OWNER} to raise your level when your work keeps needing more than it lets you do. Draft: you prepare changes outside the office, and each waits for their yes. Act: you use a tool they connected for you at read and write without asking each time, from their yes until they lower it. For a single change, do not ask for Act: at Draft, prepare it so it waits for their yes, or ask for that one action with raise_ask. Ask for Act only for changes that repeat, where a yes for each would be a chore. Ask with this instead of giving ${OWNER} steps for your ${SETTINGS_TAB} tab: they raise it with one click. Ask for the lowest level the work needs. Work a colleague hands you still runs at Draft at most. my_access says your level.${raisedNote}`,
+    description: `Ask ${OWNER} to raise your level when your work keeps needing more than it lets you do. Draft: you prepare changes outside the office, and each waits for their yes. Act: you use a tool they connected for you at read and write without asking each time, from their yes until they lower it. For a single change, do not ask for Act: at Draft, prepare it so it waits for their yes, or ask for that one action with raise_ask. Ask for Act only for changes that repeat, where a yes for each would be a chore. Ask with this instead of giving ${OWNER} steps for your ${SETTINGS_TAB} tab: they raise it with one click. Ask for the lowest level the work needs. ${handOffsAtAct} my_access says your level.${raisedNote}`,
     inputSchema: {
       level: z.enum(LEVELS).describe('The level the work needs.'),
       why: z.string().max(1000).describe('What work needs it, in one or two plain sentences.'),
@@ -332,13 +338,14 @@ tool(
     if ('problem' in on) return refused(on.problem);
     const now = (await staffer(ME)) ?? me;
     // A run held below its level only by serving a colleague's hand-off is
-    // told why, since it was told a lower level than this refusal names.
-    // Handed-back and resume runs are capped too, for other reasons.
+    // told why, since it was told a lower level than this refusal names: the
+    // owner chose to be asked first on such work. Handed-back and resume runs
+    // are capped too, for other reasons.
     if (levelAtMost(level, now.permission))
       return refused(
         `Your level is ${LEVEL_NAME[now.permission]} already.${
           HAND_OFF_ID !== undefined && CEILING
-            ? ` Work a colleague hands you runs at ${LEVEL_NAME[CEILING]} whatever your level, so raising it does not change this run.`
+            ? ` Work another Odd hands you runs at ${LEVEL_NAME[CEILING]} whatever your level, since ${OWNER} chose to be asked first there, so raising it does not change this run.`
             : ''
         }`
       );
@@ -353,10 +360,12 @@ tool(
       via: VIA
     });
     // The run that carries out a yes raised in a colleague's hand-off serves
-    // that hand-off, so it stays at Draft whatever level the yes gives.
+    // that hand-off, so it stays at Draft whatever level the yes gives, unless
+    // the owner lets this Odd act on its own on such work, which a yes to Act
+    // asks them right after.
     return text(
       HAND_OFF_ID !== undefined
-        ? `Ask ${ask.id} is on ${OWNER}'s desk. When they say yes, your level is ${LEVEL_NAME[level]}, and a new run of yours picks up the work; it serves a colleague's hand-off, so it works at Draft at most. Check my_asks later for their decision.`
+        ? `Ask ${ask.id} is on ${OWNER}'s desk. When they say yes, your level is ${LEVEL_NAME[level]}, and a new run of yours picks up the work; it serves a colleague's hand-off, so it works at Draft at most${level === 'act' ? `, unless ${OWNER} lets you act on your own on work from colleagues when they say yes` : ''}. Check my_asks later for their decision.`
         : `Ask ${ask.id} is on ${OWNER}'s desk. When they say yes, a new run of yours picks up the work at ${LEVEL_NAME[level]}. Check my_asks later for their decision.`
     );
   }

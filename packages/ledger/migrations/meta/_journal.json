@@ -229,22 +229,29 @@
     {
       "idx": 32,
       "version": "7",
-      "when": 1794698510358,
-      "tag": "0032_staff_skill",
+      "when": 1794671392908,
+      "tag": "0032_colleague_hand_offs",
       "breakpoints": true
     },
     {
       "idx": 33,
       "version": "7",
-      "when": 1794704091274,
-      "tag": "0033_claude_agent_name",
+      "when": 1794719500033,
+      "tag": "0033_staff_skill",
       "breakpoints": true
     },
     {
       "idx": 34,
       "version": "7",
-      "when": 1794705584123,
-      "tag": "0034_agent_source",
+      "when": 1794719500034,
+      "tag": "0034_claude_agent_name",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1794719500035,
+      "tag": "0035_agent_source",
       "breakpoints": true
     }
   ]

@@ -203,16 +203,24 @@
   const decide = (a: AskRow, decision: 'approve' | 'deny' | 'iterate') =>
     act(async () => {
       const picks = a.plan?.items.map((_, i) => i).filter((i) => !skip[i]);
-      const send = () =>
+      const send = (actsOnHandOffs?: boolean) =>
         call<{ hires?: AskRow[]; task?: TaskRow | null }>(`/api/asks/${a.id}`, {
           decision,
           reason,
           report: reportWhenDone,
-          picks
+          picks,
+          actsOnHandOffs
         });
-      // Raise to Act waits for the owner's Act check, the first time only.
-      const raisesToAct = decision === 'approve' && a.kind === 'level' && a.level === 'act';
-      const r = raisesToAct ? await withActCheck(send) : await send();
+      // Raise to Act waits for the owner's Act check, the first time only,
+      // then for their choice for work another Odd hands the Odd. An Odd
+      // already at Act is not asked: the yes changes nothing.
+      const odd = staff.find((s) => s.id === a.staffId);
+      const raisesToAct =
+        decision === 'approve' &&
+        a.kind === 'level' &&
+        a.level === 'act' &&
+        odd?.permission !== 'act';
+      const r = raisesToAct ? await withActCheck(odd?.name ?? a.staffId, send) : await send();
       if (!r) return;
       if (r.hires?.length) onplan(r.hires);
       // An approved access ask turns into the connect task it made, in place.

@@ -13,6 +13,8 @@ test('every run carries its key, so a thread it hands off on holds its pick-ups 
 
 test("only a run that reads the owner's no or edit for a lesson is told it hands nothing on", () => {
   assert.equal(officeEnv({ ...plain, lessonRun: true }).LESSON_RUN, '1');
+  assert.equal(officeEnv({ ...plain, fromColleague: true }).FROM_COLLEAGUE, '1');
+  assert.equal(officeEnv(plain).FROM_COLLEAGUE, undefined);
   assert.equal(officeEnv(plain).LESSON_RUN, undefined);
 });
 

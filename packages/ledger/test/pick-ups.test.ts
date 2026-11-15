@@ -658,16 +658,12 @@ test('a task given on a hand-off and finished while the run goes sends no stale 
   assert.ok(await O.startFollowUp(done.id));
 });
 
-test("only both sides of a hand-off, a pick-up, and a run reading the owner's no or edit work at Draft; only the last two hand nothing on", async () => {
-  // Every kind, from the one map the type checker holds to the full list.
+test("by kind alone, only a pick-up and a run reading the owner's no or edit work at Draft; only the last two hand nothing on", async () => {
+  // Every kind, from the one map the type checker holds to the full list. A
+  // hand-off's own run is held to Draft as a run that serves one, which the
+  // owner's choice for work from colleagues can lift (staff.ts in the office app).
   const kinds = Object.keys((await import('../src/lessons.ts')).NOTE_IS_OWNERS) as FollowUpKind[];
-  assert.deepEqual(kinds.filter(H.atDraft), [
-    'denied',
-    'hand_off',
-    'handed_back',
-    'resume',
-    'edited'
-  ]);
+  assert.deepEqual(kinds.filter(H.atDraft), ['denied', 'handed_back', 'resume', 'edited']);
   assert.deepEqual(kinds.filter(H.servesNoThread), ['denied', 'edited']);
 });
 

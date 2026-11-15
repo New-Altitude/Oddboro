@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { after, test } from 'node:test';
 import type { RequestEvent } from '@sveltejs/kit';
+import { kitUrl, ownProof, REQUEST_TARGETS } from './request-targets.ts';
 
 const folder = mkdtempSync(join(tmpdir(), 'oddboro-app-key-'));
 // Set before the office's modules load: they read whether they run in the app as they start.
@@ -61,7 +62,7 @@ async function send(
   });
   const event = {
     request,
-    url: new URL(request.url),
+    url: kitUrl(request),
     params: {},
     getClientAddress: () => s.from ?? '127.0.0.1'
   } as unknown as RequestEvent;
@@ -303,4 +304,63 @@ test('without a key the office proves nothing', async () => {
   assert.equal(before, false);
   assert.equal(K.proof('c3'.repeat(32)), undefined);
   assert.equal(await given(`oddboro:key ${KEY}\n`), true);
+});
+
+test('without the key only an exact exception passes, judged on the address the request was sent to', async () => {
+  const notes = {
+    id: 'notes',
+    name: 'Notes',
+    readTools: [],
+    tools: [],
+    config: {}
+  } as unknown as import('@oddboro/ledger').ConnectorRow;
+  const { token } = openGateway([{ connector: notes, level: 'read' }], 60_000);
+  const RUN = { authorization: `Bearer ${token}` };
+  const proofs = { get: {}, shell: SHELL, run: RUN };
+  const at = (path: string, code: string) =>
+    `${path}${path.includes('?') ? '&' : '?'}${K.LINK_QUERY}=${encodeURIComponent(code)}`;
+  let rows = 0;
+  try {
+    for (const { target, kitPath, app } of REQUEST_TARGETS) {
+      rows++;
+      const path = target.replace('<root>', folder);
+      if (app === 'unparsed') {
+        assert.throws(() => new Request(`http://127.0.0.1:4500${path}`), TypeError, target);
+        continue;
+      }
+      const named: Record<string, string> = kitPath ? { 'x-sveltekit-pathname': kitPath } : {};
+      if (app === 'passes') {
+        const proof = proofs[ownProof(path)];
+        const method = proof === proofs.get ? 'GET' : 'POST';
+        const r = await send(ok, { method, path, headers: { ...named, ...proof } });
+        assert.deepEqual([target, r.status, r.ran], [target, 200, true]);
+        // Without its proof, an action there is refused like anywhere else.
+        const bare = await send(ok, { method: 'POST', path, headers: { ...named, ...PAGE } });
+        assert.deepEqual([target, bare.status, bare.ran], [target, 403, false]);
+        continue;
+      }
+      for (const method of ['GET', 'POST'])
+        for (const proof of Object.values(proofs)) {
+          const r = await send(ok, { method, path, headers: { ...named, ...proof } });
+          assert.deepEqual(
+            [target, kitPath, method, r.status, r.ran],
+            [target, kitPath, method, 403, false]
+          );
+        }
+      // A link opens only the address it was made for: not another, and not
+      // this one under the path Kit routes it on.
+      const routed = kitUrl(
+        new Request(`http://127.0.0.1:4500${path}`, { headers: named })
+      ).pathname;
+      const links = [K.mintLink('/api/events')];
+      if (routed !== new URL(path, 'http://office').pathname) links.push(K.mintLink(routed));
+      for (const code of links) {
+        const r = await send(ok, { path: at(path, code), headers: named });
+        assert.deepEqual([target, kitPath, r.status, r.ran], [target, kitPath, 403, false]);
+      }
+    }
+  } finally {
+    await closeGateway(token);
+  }
+  assert.equal(rows, REQUEST_TARGETS.length);
 });
