@@ -24,6 +24,16 @@ The desktop now starts or attaches to the same independently supervised service 
 
 Run the installed executable with `--headless` to start the bundled office in the foreground. It starts before the display or tray initializes. The same executable supervises Node and handles the Mac Keychain. The readiness probe verifies the app key at `/api/proof` so startup does not render the office. Stop the foreground office with Ctrl-C on Unix.
 
+## Office strip
+
+The Office menu and the menu bar or tray's Office strip item opens `/strip` in a second window
+(`src/strip.rs`), always on top and with no native page permissions. Its Odd and
+Waiting links select the main window's existing pane through a checked
+same-origin destination and a page event. The main window stays available and
+can be hidden separately. The strip remembers its size and position in
+`strip-window.json` in the office home on close or quit; a removed display puts
+it back in the centre. It adds no service, polling, animation, or dependency.
+
 ## What the shell does
 
 1. Checks for a newer version before anything else (`update::on_launch`,

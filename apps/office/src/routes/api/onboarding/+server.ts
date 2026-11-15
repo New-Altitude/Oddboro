@@ -3,7 +3,8 @@
 // finishes the welcome under their name, hires the Office Manager they picked
 // (ready-made, or the one they described and the office drew), has the
 // manager say hello in chat and ask for the owner's goals, adds each persona
-// signed in to on the New Altitude card, and moves into the drawn office the
+// signed in to on the New Altitude card, has the manager propose a hire for
+// each starter kept on the Your team card, and moves into the drawn office the
 // moment the drawing is done.
 import { error, json } from '@sveltejs/kit';
 import {
@@ -11,7 +12,9 @@ import {
   finishWelcome,
   hireManager,
   managerPortrait,
-  MANAGERS
+  MANAGERS,
+  proposeStarters,
+  STARTERS
 } from '@oddboro/ledger';
 import { isZone, setZone } from '@oddboro/ledger/time';
 import { writeEnv } from '@oddboro/ledger/env';
@@ -22,26 +25,33 @@ import { sayInChat } from '#lib/server/staff.ts';
 import { toProfile } from '#lib/server/profile.ts';
 import type { RequestHandler } from './$types';
 
-/** The four ready-made managers, each with a portrait and a walk to show on the lot. */
-export const GET: RequestHandler = async () =>
-  json(
-    await Promise.all(
-      MANAGERS.map(async (m) => {
-        const px = m.look && managerPortrait(m.id);
-        const art =
-          m.look && px ? await preview({ look: m.look, portraitPx: px, newParts: [] }) : undefined;
-        return {
-          id: m.id,
-          name: m.name,
-          trait: m.trait,
-          says: m.says,
-          // Marshall's portrait is in the atlas; the others are drawn looks.
-          frame: art ? undefined : `portrait-${m.id}/default`,
-          portrait: art?.portrait
-        };
-      })
-    )
+/** The four ready-made managers, each with a portrait and a walk to show on the lot, and the starter team. */
+export const GET: RequestHandler = async () => {
+  const managers = await Promise.all(
+    MANAGERS.map(async (m) => {
+      const px = m.look && managerPortrait(m.id);
+      const art =
+        m.look && px ? await preview({ look: m.look, portraitPx: px, newParts: [] }) : undefined;
+      return {
+        id: m.id,
+        name: m.name,
+        trait: m.trait,
+        says: m.says,
+        // Marshall's portrait is in the atlas; the others are drawn looks.
+        frame: art ? undefined : `portrait-${m.id}/default`,
+        portrait: art?.portrait
+      };
+    })
   );
+  // The starter team for the Your team card, without the job descriptions.
+  const starters = STARTERS.map((s) => ({
+    id: s.id,
+    says: s.says,
+    ticked: s.ticked,
+    proposal: { name: s.proposal.name, role: s.proposal.role }
+  }));
+  return json({ managers, starters });
+};
 
 export const POST: RequestHandler = async ({ request }) => {
   const b = (await request.json().catch(() => ({}))) as Record<string, unknown>;
@@ -80,6 +90,13 @@ export const POST: RequestHandler = async ({ request }) => {
   }
   const preset = 'preset' in choice ? MANAGERS.find((p) => p.id === choice.preset) : undefined;
   sayInChat(row.id, preset ? preset.hello(name) : customHello(row.name, name));
+  // The starters the owner kept on the Your team card: the manager proposes each hire.
+  const team = Array.isArray(b.team)
+    ? b.team.filter((t): t is string => typeof t === 'string')
+    : [];
+  await proposeStarters(row.id, team).catch((e) =>
+    console.error('[starters] after the welcome', e)
+  );
   // The welcome never fails for a persona: a problem is logged and told to the page.
   await installGrantedPersonas().catch((e) => console.error('[persona] after the welcome', e));
   const job = currentDesign();

@@ -112,6 +112,7 @@ export const QUIET_ROUTES: ReadonlySet<string> = new Set<RouteId>([
  */
 export const ROUTE_IDS = {
   '/': true,
+  '/strip': true,
   '/account/callback': true,
   '/api/account': true,
   '/api/accounts': true,
@@ -143,6 +144,7 @@ export const ROUTE_IDS = {
   '/api/goals/[id]': true,
   '/api/goals/[id]/staff': true,
   '/api/health': true,
+  '/api/items': true,
   '/api/jobs/[id]': true,
   '/api/jobs/away': true,
   '/api/ledger': true,
@@ -182,6 +184,7 @@ export const ROUTE_IDS = {
   '/api/staff/[id]/attachments': true,
   '/api/staff/[id]/attachments/[name]': true,
   '/api/staff/[id]/bug-reports': true,
+  '/api/staff/[id]/items': true,
   '/api/staff/[id]/jobs': true,
   '/api/staff/[id]/lessons': true,
   '/api/staff/[id]/look': true,

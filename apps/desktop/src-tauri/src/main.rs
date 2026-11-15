@@ -12,6 +12,7 @@ mod key;
 mod secrets;
 mod server;
 mod service_update;
+mod strip;
 mod update;
 
 use std::path::PathBuf;
@@ -21,7 +22,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use tauri::image::Image;
-use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
 use tauri::webview::{NewWindowResponse, PageLoadEvent};
 use tauri::{
@@ -114,6 +115,17 @@ fn main() {
             headless::unlock_office,
             headless::dismiss_pairing
         ])
+        .menu(|app| {
+            let menu = Menu::default(app)?;
+            let strip = MenuItem::with_id(app, strip::STRIP, "Office strip", true, None::<&str>)?;
+            menu.append(&Submenu::with_items(app, "Office", true, &[&strip])?)?;
+            Ok(menu)
+        })
+        .on_menu_event(|app, event| {
+            if event.id().as_ref() == strip::STRIP {
+                strip::open(app);
+            }
+        })
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             None,
@@ -137,6 +149,11 @@ fn main() {
             // the menu bar item can bring it back. With no tray to do that
             // (GNOME as it ships), closing quits Oddboro instead.
             if let WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == strip::STRIP {
+                    if let Some(view) = window.app_handle().get_webview_window(strip::STRIP) {
+                        strip::save(&view);
+                    }
+                }
                 if window.label() == MAIN {
                     api.prevent_close();
                     if tray_shows() {
@@ -163,6 +180,9 @@ fn main() {
         } => show(app),
         // Windows go first, so the wait for Node never shows a spinning wheel.
         RunEvent::Exit => {
+            if let Some(window) = app.get_webview_window(strip::STRIP) {
+                strip::save(&window);
+            }
             for window in app.webview_windows().values() {
                 let _ = window.hide();
             }
@@ -631,13 +651,14 @@ fn tray_shows() -> bool {
 /// login, Quit Oddboro.
 fn tray(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open Oddboro", true, None::<&str>)?;
+    let strip = MenuItem::with_id(app, strip::STRIP, "Office strip", true, None::<&str>)?;
     let at_login = app.autolaunch().is_enabled().unwrap_or(false);
     let login =
         CheckMenuItem::with_id(app, "login", "Open at login", true, at_login, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Oddboro", true, None::<&str>)?;
     let stop = MenuItem::with_id(app, "stop-office", "Stop office", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&open, &login, &separator, &stop, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &strip, &login, &separator, &stop, &quit])?;
     TrayIconBuilder::with_id("oddboro")
         .icon(Image::from_bytes(TRAY_ICON)?)
         .icon_as_template(true)
