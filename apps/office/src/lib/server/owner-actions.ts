@@ -191,6 +191,7 @@ export const OWNER_ACTIONS = {
   'PATCH /api/staff/[id]#effort': { records: 'access' },
   'PATCH /api/staff/[id]#model': { records: 'access' },
   'PATCH /api/staff/[id]#account': { records: 'access' },
+  'PATCH /api/staff/[id]#actsOnHandOffs': { records: 'access' },
   'POST /api/staff/[id]/access': { records: 'access' },
   'PATCH /api/staff/[id]/access': { records: 'access' },
   'DELETE /api/staff/[id]/access': { records: 'access' },

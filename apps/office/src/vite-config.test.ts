@@ -16,6 +16,7 @@ import config, {
   onlyThisComputer,
   siteUrl
 } from '../vite.config.ts';
+import { REQUEST_TARGETS } from './lib/server/request-targets.ts';
 import { NOT_THIS_COMPUTER } from './lib/server/this-computer.ts';
 
 const folder = mkdtempSync(join(tmpdir(), 'oddboro-vite-'));
@@ -190,4 +191,36 @@ test('a page asking the dev server to open a file in an editor is refused, and n
   assert.equal(res.status, 403);
   assert.equal(await res.text(), 'The office opens no editor');
   assert.equal(existsSync(launched), false);
+});
+
+test('the dev server judges every request target by where it comes from alone', () => {
+  type Middleware = (req: unknown, res: unknown, next: () => void) => void;
+  let middleware: Middleware | undefined;
+  const server = {
+    middlewares: { use: (fn: Middleware) => (middleware = fn) },
+    httpServer: { prependListener: () => {} }
+  } as unknown as ViteDevServer;
+  (onlyThisComputer().configureServer as (server: ViteDevServer) => void)(server);
+  assert.ok(middleware);
+  // From source no request carries a key, so the office's guard (`guardOffice`)
+  // judges the path after this. Here only the address counts, whatever the target.
+  for (const { target } of REQUEST_TARGETS) {
+    const url = target.replace('<root>', folder);
+    for (const [peer, header, ok] of [
+      ['192.168.1.20', undefined, false],
+      ['127.0.0.1', '192.168.1.20', false],
+      ['127.0.0.1', undefined, true],
+      ['::1', '::1', true]
+    ] as const) {
+      const req = {
+        url,
+        headers: header === undefined ? {} : { 'x-forwarded-for': header },
+        socket: { remoteAddress: peer }
+      };
+      const res = { statusCode: 200, end: () => {} };
+      let passed = false;
+      middleware(req, res, () => (passed = true));
+      assert.deepEqual([target, peer, passed, res.statusCode], [target, peer, ok, ok ? 200 : 403]);
+    }
+  }
 });

@@ -437,6 +437,11 @@ const TRY: Record<Recording, (send: Send) => Promise<void>> = {
     send({ params: { id: 'sam' }, body: { model: L.MODELS.claude[0].id } }),
   'PATCH /api/staff/[id]#account': async (send) =>
     send({ params: { id: 'cleo' }, body: { account: await accountOf('Shared') } }),
+  // An Odd of its own at Act, since only one at Act shows the choice.
+  'PATCH /api/staff/[id]#actsOnHandOffs': async (send) => {
+    await L.pg`insert into staff ${L.pg({ ...odd('ada', 'Ada'), permission: 'act' })}`;
+    await send({ params: { id: 'ada' }, body: { actsOnHandOffs: true } });
+  },
   // A tool already connected: one not yet connected puts its connect steps on
   // the desk instead, and the owner finishing them is the row (POST /api/tasks/[id]#finish).
   'POST /api/staff/[id]/access': async (send) => {

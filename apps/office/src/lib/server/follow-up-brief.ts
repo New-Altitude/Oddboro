@@ -58,7 +58,8 @@ export function followUpBrief(
   {
     also = [],
     draftOnly = false,
-    level
+    level,
+    actsOnHandOffs = false
   }: {
     /** Twins answered with `a` whose work this carry-out does too (`standsFor`). */
     also?: AskRow[];
@@ -66,6 +67,8 @@ export function followUpBrief(
     draftOnly?: boolean;
     /** The Odd's level: only at Draft is it offered a standing yes after a call. */
     level?: Level;
+    /** The owner lets this Odd act on its own on work from colleagues (`staff.actsOnHandOffs`). */
+    actsOnHandOffs?: boolean;
   } = {}
 ): string[] {
   switch (f.kind) {
@@ -78,7 +81,7 @@ export function followUpBrief(
     case 'task_done':
       return taskDoneBrief(f, r, t);
     case 'carry_out':
-      return carryOutBrief(f, a, also, draftOnly, level);
+      return carryOutBrief(f, a, also, draftOnly, level, actsOnHandOffs);
     case 'denied':
       return deniedBrief(f, a);
     case 'rework':
@@ -297,7 +300,8 @@ function carryOutBrief(
   a: AskRow | undefined,
   also: AskRow[],
   draftOnly: boolean,
-  level?: Level
+  level?: Level,
+  actsOnHandOffs = false
 ): string[] {
   // A connect task's end starts this run and wakes the work parked on that task at once.
   const askLines = [...askLinesOf(a), ...(f.pickedUp ?? []).map((t) => `- ${pickedUpLine(t)}`)];
@@ -354,8 +358,8 @@ function carryOutBrief(
       return [
         // A yes to Draft reaches a run held to Draft anyway, so only a yes to Act
         // carried out in one says the run does not have it. A level carry-out is
-        // held to Draft only when it serves a colleague's hand-off (staff.ts), as
-        // the line says.
+        // held to Draft only when it serves a colleague's hand-off and the owner
+        // chose to be asked first on such work (staff.ts), as the line says.
         ...(a.level !== 'act'
           ? [`${said}, and this run has it.`]
           : draftOnly
@@ -364,7 +368,9 @@ function carryOutBrief(
               ]
             : [
                 `${said}, and this run has it.`,
-                'Work a colleague hands you, and a thread you pick back up, still runs at Draft at most.'
+                actsOnHandOffs
+                  ? '{owner} lets you act on your own on work a colleague hands you, so it runs at Act too. A thread you pick back up still runs at Draft at most.'
+                  : 'Work a colleague hands you, and a thread you pick back up, still runs at Draft at most.'
               ]),
         ...alsoAnswers('level'),
         '',

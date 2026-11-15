@@ -1,6 +1,6 @@
 {
-  "id": "1f6ddc4d-e516-464f-ae0b-e9ff1b3ccfbb",
-  "prevId": "dfbded0f-6cce-4123-85f6-0c42113c4fa6",
+  "id": "1f1958c4-f8ea-54d2-b8e4-ca6e991ff16e",
+  "prevId": "21e042cf-4d09-4fcc-9c5f-37527a6e383e",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2398,12 +2398,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "claude_agent_name": {
-          "name": "claude_agent_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "role": {
           "name": "role",
           "type": "text",
@@ -2557,6 +2551,13 @@
           "type": "integer[]",
           "primaryKey": false,
           "notNull": false
+        },
+        "acts_on_hand_offs": {
+          "name": "acts_on_hand_offs",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         }
       },
       "indexes": {},

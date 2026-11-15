@@ -42,6 +42,7 @@ export {
   anyStaffer,
   formerStaff,
   setPermission,
+  setActsOnHandOffs,
   setStaffSkill,
   ActCheckNeeded,
   actCheckPassed,

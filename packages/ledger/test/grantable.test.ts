@@ -33,6 +33,7 @@ const heldBack: Capabilities = {
   level: 'draft',
   remit: '',
   office: [],
+  actsOnHandOffs: false,
   agent: 'claude',
   own: { ...bare, granted: [] },
   outside: [
