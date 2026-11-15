@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, setContext, untrack } from 'svelte';
+  import { onMount, setContext, tick, untrack } from 'svelte';
   import type { PageData } from './$types';
   import type { AskRow } from '@oddboro/ledger';
   import type { OfficeEvent } from '#lib/server/events.ts';
@@ -9,6 +9,16 @@
   import ReportView from '#lib/ui/ReportView.svelte';
   import FileViewer from '#lib/ui/FileViewer.svelte';
   import ComputerActivity from '#lib/ui/ComputerActivity.svelte';
+  import {
+    chord,
+    defaultKeys,
+    HUD_STORAGE,
+    keyLabel,
+    readKeys,
+    type HudKeys
+  } from '#lib/ui/hud-keys.ts';
+  import ActCheck from '#lib/ui/ActCheck.svelte';
+  import { actCheck } from '#lib/ui/act-check.svelte.ts';
   import WorkspaceSettings from '#lib/ui/WorkspaceSettings.svelte';
   import { call } from '#lib/ui/api.ts';
   import {
@@ -22,12 +32,53 @@
   import { chatRequest, type Delivered } from '#lib/ui/chat-about.svelte.ts';
   let { data }: { data: PageData } = $props();
   setContext('text-only-office', true);
-  let office = $state(untrack(() => data));
+  let office = $state<Omit<PageData, 'actChecked'>>(untrack(() => data));
   let tab = $state('inbox'),
     focus = $state(''),
     problem = $state(''),
     connected = $state(true),
     version = $state(0);
+  let hudOpen = $state(false),
+    fromHud = $state(false),
+    fromFloor = false;
+  let keys = $state(defaultKeys()),
+    position = $state({ id: '', index: 0 });
+  let launcher = $state<HTMLButtonElement>(),
+    opener: HTMLElement | null = null;
+  function openHud() {
+    if (!fromHud)
+      opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    hudOpen = true;
+  }
+  async function closeHud() {
+    hudOpen = false;
+    fromHud = false;
+    if (fromFloor) {
+      window.location.assign('/?view=office#agent-hud');
+      return;
+    }
+    await tick();
+    (opener?.isConnected && opener !== document.body ? opener : launcher)?.focus();
+  }
+  function followHud(go: () => void) {
+    hudOpen = false;
+    fromHud = true;
+    go();
+    void tick().then(() => document.querySelector<HTMLElement>('[data-hud-return]')?.focus());
+  }
+  async function deskList() {
+    if (!fromHud || tab !== 'panel' || current?.kind !== 'desk') return;
+    await refresh();
+    if (fromHud && tab === 'panel' && current?.kind === 'desk') openHud();
+  }
+  function saveKeys(next: HudKeys) {
+    keys = next;
+    try {
+      localStorage.setItem(HUD_STORAGE, JSON.stringify(next));
+    } catch {
+      problem = 'Shortcuts work for this visit. The browser could not save them.';
+    }
+  }
   let selected = $state(''),
     visited = $state<string[]>([]),
     saving = $state(false),
@@ -70,12 +121,14 @@
     wins.shown = false;
     tab = 'hire';
   }
-  let serial = 0;
+  let serial = 0,
+    applied = 0;
   async function refresh() {
     const n = ++serial;
     try {
-      const fresh = await call<PageData>('/api/workspace');
-      if (n !== serial) return;
+      const fresh = await call<typeof office>('/api/workspace');
+      if (n < applied) return;
+      applied = n;
       office = fresh;
       version++;
     } catch (e) {
@@ -89,13 +142,24 @@
     if (chatRequest.staff) {
       const id = chatRequest.staff;
       chatRequest.staff = undefined;
-      pick(id);
+      if (hudOpen) followHud(() => pick(id));
+      else pick(id);
     }
   });
   $effect(() => {
     if (wins.shown && wins.active) tab = 'panel';
   });
   onMount(() => {
+    if (data.actChecked) actCheck.passed = true;
+    try {
+      keys = readKeys(localStorage.getItem(HUD_STORAGE));
+    } catch {
+      /* This browser may disable local storage. */
+    }
+    if (office.welcomed && location.hash === '#agent-hud') {
+      fromFloor = new URL(location.href).searchParams.get('from') === 'office';
+      openHud();
+    }
     const events = new EventSource('/api/events');
     let pending = false,
       dirty = false,
@@ -128,7 +192,7 @@
     };
     return () => {
       ended = true;
-      serial++;
+      applied = ++serial;
       events.close();
     };
   });
@@ -173,6 +237,19 @@
     tab = 'panel';
   }
   function switchByKey(e: KeyboardEvent) {
+    if (e.defaultPrevented || e.isComposing || hudOpen || document.querySelector('dialog[open]'))
+      return;
+    if (office.welcomed && keys.open && chord(e) === keys.open) {
+      if (
+        e.target instanceof HTMLElement &&
+        (e.target.isContentEditable ||
+          e.target.closest('input,textarea,select,[role="textbox"],.xterm'))
+      )
+        return;
+      e.preventDefault();
+      if (!e.repeat) openHud();
+      return;
+    }
     if (!e.altKey || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')) return;
     const items = [
       ...office.staff.map((p) => ({ id: p.id, project: false })),
@@ -186,6 +263,7 @@
     else pick(next.id);
   }
   function view(t: string) {
+    fromHud = false;
     wins.shown = false;
     tab = t;
   }
@@ -230,8 +308,14 @@
         <button class:chosen={tab === 'inbox'} onclick={() => view('inbox')}
           >Inbox <small>{count}</small></button
         >
-        <button class:chosen={tab === 'activity'} onclick={() => view('activity')}>Agent HUD</button
+        <button
+          bind:this={launcher}
+          aria-haspopup="dialog"
+          aria-keyshortcuts={keys.open || undefined}
+          onclick={openHud}
         >
+          Agent HUD <small>Decisions and usage{keys.open ? ' · ' + keyLabel(keys.open) : ''}</small>
+        </button>
         {#if advanced.on}<button
             onclick={() => {
               openProject();
@@ -259,6 +343,9 @@
         >
       </nav>
       <section class="content">
+        {#if fromHud}<button data-hud-return class="return-hud" onclick={openHud}
+            >← Back to decision queue</button
+          >{/if}
         {#if tab === 'inbox'}
           <h1>Needs you</h1>
           {#each office.desk.asks as a}<button class="row" onclick={() => desk('ask-' + a.id)}
@@ -281,19 +368,6 @@
                 >{w.label}<small>{office.staff.find((p) => p.id === id)?.name}</small></button
               >{/each}{/each}
           {#if !Object.keys(office.working).length}<p>No active jobs.</p>{/if}
-        {:else if tab === 'activity'}
-          <ComputerActivity
-            staff={office.staff}
-            sessions={office.sessions}
-            desk={office.desk}
-            onrefresh={refresh}
-            unread={office.unread}
-            inProgress={office.inProgress}
-            onreport={(id, person, title) => item(person, { kind: 'report', id, title })}
-            onproject={pickProject}
-            onstaff={pick}
-            ondesk={desk}
-          />
         {:else if tab === 'settings'}<h1>Settings</h1>
           <WorkspaceSettings />
         {:else if tab === 'hire'}<h1>Hire an Odd</h1>
@@ -312,6 +386,7 @@
         {:else if tab === 'panel' && current}
           {#if current.kind === 'desk'}<h1>Desk</h1>
             <DeskDrawer
+              onlist={deskList}
               selectChat={false}
               desk={office.desk}
               staff={office.staff}
@@ -358,9 +433,39 @@
       </section>
     </div>
   {/if}
+  {#if hudOpen}
+    <ComputerActivity
+      {office}
+      {keys}
+      bind:position
+      onkeys={saveKeys}
+      onexit={closeHud}
+      onrefresh={refresh}
+      links={{
+        ondesk: (key) => followHud(() => desk(key)),
+        onproject: (id) =>
+          followHud(() => {
+            if (advanced.on) pickProject(id);
+            else {
+              wins.shown = false;
+              tab = 'settings';
+            }
+          }),
+        onstaff: (id) => followHud(() => pick(id)),
+        onreport: (id, person, title) =>
+          followHud(() => item(person, { kind: 'report', id, title }))
+      }}
+    />
+  {/if}
+  {#if actCheck.asking}<ActCheck />{/if}
 </main>
 
 <style>
+  .return-hud {
+    color: var(--color-sea);
+    font-size: 0.83rem;
+    margin-block-end: 0.75rem;
+  }
   .shell {
     height: 100dvh;
     display: flex;

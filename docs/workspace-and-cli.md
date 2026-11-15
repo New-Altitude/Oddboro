@@ -6,11 +6,17 @@ In Workspace, **Needs you** shows open decisions. Choose a row to read the reque
 
 ## Agent HUD
 
-Choose **Agent HUD** in Workspace. **Who needs me?** lists Claude Code and Codex requests for input or approval, decisions on your desk, owner tasks and proposed project work. Choose a row's action to answer in its own chat, project or desk. **Ready to review** holds unread Codex replies, messages from Odds and reports. **In progress** lists active jobs and open Codex turns. Ask your Office Manager to help pick what to do first. You can edit the message before sending it.
+Choose **Agent HUD** on the floor or in Workspace. In Workspace, **Alt+H** also opens it. Close the HUD to return to where you opened it. Opening it does not require Advanced mode.
 
-The HUD checks Claude Code's local agent list, including blocked background jobs. For Codex it checks connected projects and the existing local App Server daemon when available. For a separate desktop or terminal server, the HUD checks the last recorded turn of each detected open chat. Open that chat to see any private prompts. The local Codex unread index can still show replies. The panel tells you when it cannot read a source. Office work updates as it changes. Returning to the HUD or choosing **Refresh** checks external agents and takes a new computer sample.
+Expand an agent to see the work behind its counts. The HUD shows the share left in each reported weekly and five-hour window, with its reset time. Claude uses the last windows the office received from Claude Code. Codex reads the signed-in account’s limits from its local App Server. If there is no shared daemon, an account-only client reads the limits and exits. A missing or expired window shows **Unavailable**. Odds use their linked provider plans.
 
-Computer activity lists Claude Code, Codex, Gemini and Grok processes under the owner's account. Sort by CPU or memory. 100% CPU uses one core. Memory sums resident pages in a process tree and can include shared pages. A shared server has one reading. On Mac and Linux, expand its open Codex conversations to see names when available. Windows shows process totals. **Ask about this run** prepares a message about the selected process.
+Choose a decision to see who is waiting and why. For desk asks, the HUD also shows what approval would do. **Review decision** opens the original Desk card with its choices and any required checks. Returning to the list after answering takes you back to the queue. Native project decisions open in Projects or the owning tool. **Ask your Office Manager** prepares an editable message about the waiting work.
+
+The arrow keys select a decision. Enter moves to its action. Tab moves between controls. Escape returns from the action to the queue, then closes the HUD. Under **Keyboard shortcuts**, choose an action and press new keys, turn its shortcut off, or restore the defaults. Workspace remembers bindings in this browser. Its HUD shortcut leaves typing and terminal input alone.
+
+Office work updates when it changes. Opening the HUD, returning to the window or choosing **Refresh** checks external sources. Claude reports questions and blocked jobs through its agent list. Codex exposes live requests for connected projects and its local daemon. A separate desktop or terminal chat may show only an open turn. Open that chat to check its prompt.
+
+**Ready to review** holds unread replies and reports. Expand **Computer activity** for CPU, memory and processes under the owner’s account. 100% run CPU uses one core. Each process includes child memory and can include shared pages. On Mac and Linux, a shared server can list its open Codex conversations. Windows shows process totals.
 
 ## Pair a client with your office
 

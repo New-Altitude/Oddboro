@@ -1,8 +1,9 @@
 import { basename, join } from 'node:path';
 import { homedir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
+import { plan } from '@oddboro/ledger';
 import { activeClaude } from './project-sessions/claude-project.ts';
-import { joinCodex, type CodexRpc } from './project-sessions/codex-rpc.ts';
+import { joinCodex, startCodex, type CodexRpc } from './project-sessions/codex-rpc.ts';
 import { UUID } from './project-sessions/native.ts';
 
 export type AgentNotice = {
@@ -12,6 +13,7 @@ export type AgentNotice = {
   reason: string;
   state: 'waiting' | 'working' | 'review';
   job?: string;
+  pid?: number;
 };
 type Thread = {
   id: string;
@@ -29,6 +31,7 @@ export function claudeNotices(rows: Awaited<ReturnType<typeof activeClaude>>): A
         agent: 'claude',
         id: r.sessionId || r.id || String(r.pid ?? ''),
         job: r.id,
+        pid: r.pid,
         title: r.name || basename(r.cwd) || 'Claude session',
         state: waiting ? 'waiting' : 'working',
         reason: waiting
@@ -121,35 +124,89 @@ export function unreadCodex(folder: string): AgentNotice[] {
   }
 }
 
+type Limit = { usedPercent: number; windowDurationMins: number | null; resetsAt: number | null };
+type Bucket = { primary?: Limit | null; secondary?: Limit | null };
+type LimitsReply = { rateLimits: Bucket; rateLimitsByLimitId?: Record<string, Bucket> | null };
+export type Allowance = { left: number; resets: number };
+export type Allowances = { session: Allowance | null; week: Allowance | null };
+
+function allowance(used: number | undefined, resets: number, now: number): Allowance | null {
+  if (
+    used == null ||
+    !Number.isFinite(used) ||
+    used < 0 ||
+    used > 100 ||
+    !Number.isFinite(resets) ||
+    resets <= now
+  )
+    return null;
+  return { left: Math.round(100 - used), resets };
+}
+
+export function codexAllowances(reply: LimitsReply, now = Date.now()): Allowances {
+  const bucket = reply.rateLimitsByLimitId?.codex ?? reply.rateLimits;
+  const windows = [bucket.primary, bucket.secondary];
+  function window(minutes: number) {
+    const w = windows.find((w) => w?.windowDurationMins === minutes);
+    return allowance(w?.usedPercent, Number(w?.resetsAt) * 1000, now);
+  }
+  return { session: window(300), week: window(10080) };
+}
+
+async function claudeAllowances(): Promise<Allowances | null> {
+  const p = await plan();
+  if (!p) return null;
+  const now = Date.now();
+  return {
+    session: allowance(p.fiveHour * 100, Number(p.fiveHourResetsAt), now),
+    week: allowance(p.sevenDay * 100, Number(p.sevenDayResetsAt), now)
+  };
+}
+
+async function codexActivity(folder: string) {
+  const ignore = () => {};
+  // An account-only client can read the plan on installations without a shared daemon.
+  // Its own empty thread list says nothing about the owner's other clients.
+  const existing = await joinCodex(
+    join(folder, 'app-server-control', 'app-server-control.sock'),
+    ignore,
+    ignore
+  ).catch(() => null);
+  const rpc = existing ?? (await startCodex(ignore, ignore));
+  const timer = setTimeout(() => rpc.close(), 5500);
+  try {
+    const [live, limits] = await Promise.all([
+      existing ? loadedNotices(rpc).catch(() => null) : null,
+      rpc
+        .request<LimitsReply>('account/rateLimits/read')
+        .then((reply) => codexAllowances(reply))
+        .catch(() => null)
+    ]);
+    return { live, limits };
+  } finally {
+    clearTimeout(timer);
+    rpc.close();
+  }
+}
+
 export async function agentAttention() {
   const folder = process.env.CODEX_HOME || join(homedir(), '.codex');
-  const [claude, codex, unread] = await Promise.allSettled([
-    activeClaude().then(claudeNotices),
-    (async () => {
-      const rpc = await joinCodex(
-        join(folder, 'app-server-control', 'app-server-control.sock'),
-        () => {},
-        () => {}
-      );
-      const timer = setTimeout(() => rpc.close(), 4500);
-      try {
-        return await loadedNotices(rpc);
-      } finally {
-        clearTimeout(timer);
-        rpc.close();
-      }
-    })(),
-    Promise.resolve().then(() => unreadCodex(folder))
+  const [claude, codex, unread, claudePlan] = await Promise.all([
+    activeClaude()
+      .then(claudeNotices)
+      .catch(() => null),
+    codexActivity(folder).catch(() => null),
+    Promise.resolve()
+      .then(() => unreadCodex(folder))
+      .catch(() => null),
+    claudeAllowances().catch(() => null)
   ]);
   return {
     measured: new Date().toISOString(),
-    claude: claude.status === 'fulfilled',
-    codex: codex.status === 'fulfilled' && codex.value.complete,
-    receipts: unread.status === 'fulfilled',
-    items: [
-      ...(claude.status === 'fulfilled' ? claude.value : []),
-      ...(codex.status === 'fulfilled' ? codex.value.items : []),
-      ...(unread.status === 'fulfilled' ? unread.value : [])
-    ]
+    claude: claude !== null,
+    codex: codex?.live?.complete ?? false,
+    receipts: unread !== null,
+    plans: { claude: claudePlan, codex: codex?.limits ?? null },
+    items: [...(claude ?? []), ...(codex?.live?.items ?? []), ...(unread ?? [])]
   };
 }

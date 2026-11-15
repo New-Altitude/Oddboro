@@ -5,7 +5,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { openCodexTurns } from './activity-titles.ts';
-import { claudeNotices, codexNotice, loadedNotices, unreadCodex } from './agent-attention.ts';
+import {
+  codexAllowances,
+  claudeNotices,
+  codexNotice,
+  loadedNotices,
+  unreadCodex
+} from './agent-attention.ts';
 
 test('keeps a blocked background Claude job after its process exits and leaves idle sessions out', () => {
   const notice = (state: string, status: string, waitingFor?: string) => ({
@@ -102,4 +108,33 @@ test('shows only the latest open Codex turn for chats held by a running process'
     db.close();
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test('reads the Codex bucket by duration and leaves missing or expired windows unknown', () => {
+  const now = 1_800_000_000_000,
+    resetsAt = now / 1000 + 3600;
+  const week = { usedPercent: 36, windowDurationMins: 10080, resetsAt };
+  const session = { usedPercent: 19, windowDurationMins: 300, resetsAt };
+  assert.deepEqual(
+    codexAllowances(
+      { rateLimits: {}, rateLimitsByLimitId: { codex: { primary: week, secondary: session } } },
+      now
+    ),
+    {
+      week: { left: 64, resets: resetsAt * 1000 },
+      session: { left: 81, resets: resetsAt * 1000 }
+    }
+  );
+  assert.deepEqual(
+    codexAllowances(
+      {
+        rateLimits: {
+          primary: { ...week, resetsAt: now / 1000 },
+          secondary: { ...session, usedPercent: 101 }
+        }
+      },
+      now
+    ),
+    { week: null, session: null }
+  );
 });
