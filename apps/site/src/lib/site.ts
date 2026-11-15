@@ -34,6 +34,7 @@ export const PAGES = [
   '/',
   '/releases/',
   '/connectors/open-brain/',
+  '/connectors/personas/',
   '/connectors/aws-sign-in/',
   '/connectors/aws-secrets/',
   '/connectors/aws-read/',

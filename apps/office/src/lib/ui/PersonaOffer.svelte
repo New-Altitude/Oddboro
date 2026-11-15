@@ -6,6 +6,7 @@
     personas,
     type PersonaOffers
   } from './persona-offers.svelte.ts';
+  import { siteLink } from '../site.ts';
   import PersonaQuiet, { opened } from './PersonaQuiet.svelte';
 
   // The New Altitude personas offered to this owner, each with what it is and
@@ -89,4 +90,12 @@
     {/if}
   {/if}
   {@render problem(offers.problem)}
+  <a
+    class="self-start text-xs text-muted underline hover:text-ink"
+    href={siteLink('/connectors/personas/')}
+    target="_blank"
+    rel="noopener"
+  >
+    How to connect a New Altitude persona
+  </a>
 </div>
