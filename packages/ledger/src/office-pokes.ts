@@ -1,6 +1,6 @@
 // Pokes the Odds set for later, the props the owner switches off, and the names
 // the owner gives the rooms.
-import { and, asc, eq, lte } from 'drizzle-orm';
+import { and, asc, eq, lte, sql } from 'drizzle-orm';
 import { db } from './db.ts';
 import { fixedError } from './errors.ts';
 import { pokes, roomNames, switchedOff } from './schema.ts';
@@ -133,6 +133,14 @@ export async function roomNamesFor(office: string): Promise<Record<string, strin
   return Object.fromEntries(rows.map((r) => [r.room, r.name]));
 }
 
+export class RoomNameConflict extends Error {
+  readonly current: string;
+  constructor(current: string) {
+    super('The room name changed while you were editing.');
+    this.current = current;
+  }
+}
+
 /**
  * Rename a room. `was` is the name it shows now and `start` the name its floor
  * plan gives it; a blank name, or the plan's own, goes back to the start.
@@ -141,21 +149,30 @@ export async function renameRoom(
   office: string,
   room: string,
   name: string,
-  names: { was: string; start: string }
+  names: { was?: string; start: string }
 ): Promise<string> {
   const next = name.trim().replace(/\s+/g, ' ') || names.start;
   if (next.length > 40) throw fixedError('Keep a room name to 40 characters');
-  if (next === names.was) return next;
-  if (next === names.start)
-    await db.delete(roomNames).where(and(eq(roomNames.office, office), eq(roomNames.room, room)));
-  else
-    await db
-      .insert(roomNames)
-      .values({ office, room, name: next })
-      .onConflictDoUpdate({
-        target: [roomNames.office, roomNames.room],
-        set: { name: next, updatedAt: new Date() }
-      });
-  await record({ kind: 'work', actor: 'owner', title: `Renamed ${names.was} to ${next}` });
-  return next;
+  return db.transaction(async (tx) => {
+    // A room using its floor-plan name has no row to lock.
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${'room-name:' + office}), hashtext(${room}))`
+    );
+    const here = and(eq(roomNames.office, office), eq(roomNames.room, room));
+    const [saved] = await tx.select({ name: roomNames.name }).from(roomNames).where(here);
+    const current = saved?.name ?? names.start;
+    if (next === current) return current;
+    if (names.was !== undefined && names.was !== current) throw new RoomNameConflict(current);
+    if (next === names.start) await tx.delete(roomNames).where(here);
+    else
+      await tx
+        .insert(roomNames)
+        .values({ office, room, name: next })
+        .onConflictDoUpdate({
+          target: [roomNames.office, roomNames.room],
+          set: { name: next, updatedAt: new Date() }
+        });
+    await record({ kind: 'work', actor: 'owner', title: `Renamed ${current} to ${next}` }, tx);
+    return next;
+  });
 }

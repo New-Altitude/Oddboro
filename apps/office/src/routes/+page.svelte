@@ -1042,28 +1042,42 @@
   }
 
   /** The room the owner is renaming, and the name as the owner types it. */
-  let renaming = $state<string | undefined>();
+  let renaming = $state<{ id: string; office: string; was: string }>();
+  let roomChangedTo = $state<string>();
+  let savingRoom = $state(false);
   let roomDraft = $state('');
   let roomProblem = $state('');
 
   function startRename(l: Label) {
-    renaming = l.id;
+    renaming = { id: l.id, office: office.id, was: l.name };
+    roomChangedTo = undefined;
     roomDraft = l.name;
     roomProblem = '';
   }
 
-  async function saveRename() {
-    const id = renaming;
-    if (!id) return;
-    const was = world.rooms.find((r) => r.id === id)?.name;
+  async function saveRename(replace = false) {
+    const edit = renaming;
+    if (!edit || savingRoom || (roomChangedTo !== undefined && !replace)) return;
+    const was = roomChangedTo ?? edit.was;
     if (roomDraft.trim() === was) return void (renaming = undefined);
+    savingRoom = true;
     try {
-      const r = await call<{ name: string }>('/api/rooms', { room: id, name: roomDraft }, 'PUT');
-      roomNames = { ...roomNames, [id]: r.name };
-      renaming = undefined;
+      const result = await call<{ name: string; changedElsewhere?: boolean }>(
+        '/api/rooms',
+        { room: edit.id, office: edit.office, was, name: roomDraft },
+        'PUT'
+      );
+      if (office.id !== edit.office) return;
+      roomNames = { ...roomNames, [edit.id]: result.name };
       floor?.invalidate();
+      if (renaming !== edit) return;
+      if (result.changedElsewhere) roomChangedTo = result.name;
+      else renaming = undefined;
+      roomProblem = '';
     } catch (e) {
-      roomProblem = e instanceof Error ? e.message : String(e);
+      if (renaming === edit) roomProblem = e instanceof Error ? e.message : String(e);
+    } finally {
+      savingRoom = false;
     }
   }
 
@@ -1133,7 +1147,7 @@
         class="absolute origin-top-left flex items-center gap-[0.5em] font-pixel text-[11px] tracking-[0.2em] whitespace-nowrap text-ink/55 uppercase"
         style="transform: translate({l.x}px, {l.y}px) scale({l.scale}) translateY(-50%); max-inline-size: {l.width}px"
       >
-        {#if renaming === l.id}
+        {#if renaming?.id === l.id}
           <form
             class="pointer-events-auto flex flex-col gap-1"
             novalidate
@@ -1151,6 +1165,22 @@
               onkeydown={renameKey}
               onblur={() => void saveRename()}
             />
+            {#if roomChangedTo !== undefined}
+              <div
+                class="rounded bg-night/90 p-2 font-sans text-xs tracking-normal text-ink normal-case"
+              >
+                <p>Now named {roomChangedTo}.</p>
+                <button type="button" class="me-2 underline" onclick={() => (renaming = undefined)}
+                  >Keep saved name</button
+                >
+                <button
+                  type="button"
+                  class="underline"
+                  disabled={savingRoom}
+                  onclick={() => void saveRename(true)}>Use my edit</button
+                >
+              </div>
+            {/if}
             {#if roomProblem}
               <span class="font-sans text-xs tracking-normal text-coral normal-case"
                 >{roomProblem}</span

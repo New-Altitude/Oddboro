@@ -242,5 +242,6 @@ export {
   switchedOffIn,
   setSwitch,
   roomNamesFor,
+  RoomNameConflict,
   renameRoom
 } from './office-pokes.ts';
