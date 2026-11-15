@@ -57,6 +57,23 @@ Use [project sessions](docs/project-sessions.md) to open a native Codex or Claud
   ledger by meaning, and `uv` runs the tools that come from PyPI. The office
   says when either is missing.
 
+### Use a second computer for ledger search
+
+Use the same Nomic Embed Text v1.5 model on both installations so existing
+ledger entries remain searchable. Only ledger entries and search queries go
+to this server. Your Odds still run their jobs with the AI tool you picked.
+
+1. Start Ollama or LM Studio on the model computer. Load the model and make
+   the server reachable from the office computer on your private network.
+2. Edit the office computer's `~/.oddboro/.env` (the repo's `.env` when
+   running from source). For Ollama, set `OLLAMA_URL` to its base address.
+   For LM Studio, set `OFFICE_EMBEDDINGS_URL` to the full
+   `/v1/embeddings` address and `OFFICE_EMBEDDINGS_MODEL` to the loaded
+   model's identifier. See [.env.example](.env.example) for both forms.
+3. Restart the office and open Setup. Ledger search checks the LM Studio
+   endpoint with a sample. If the server goes offline, the office still
+   records work and can search the ledger by words.
+
 ## Work on it
 
 | Path               | What it holds                                         |

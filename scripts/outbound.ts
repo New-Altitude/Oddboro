@@ -183,9 +183,10 @@ export const OUTBOUND: readonly Outbound[] = [
   {
     file: 'packages/ledger/src/embed.ts',
     calls: 1,
-    to: 'Ollama at OLLAMA_URL, this computer unless the owner points it elsewhere.',
-    sends: 'Text written to the ledger, or searched for, to turn it into a vector.',
-    yes: 'The owner, who sets OLLAMA_URL; with it unset nothing leaves this computer.'
+    to: 'The owner’s OFFICE_EMBEDDINGS_URL, or Ollama at OLLAMA_URL (this computer by default).',
+    sends:
+      'A fixed sample for setup, or text written to the ledger, or searched for, to turn it into a vector.',
+    yes: 'The owner sets the server in .env. With neither address set, nothing leaves this computer.'
   },
   {
     file: 'packages/ledger/src/local-db.ts',

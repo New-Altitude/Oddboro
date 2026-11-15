@@ -109,7 +109,7 @@ To stop: open Setup and turn off "Send error and tracing reports to New Altitude
 
 ### Local search embeddings
 
-If you install [Ollama](https://ollama.com) and the `nomic-embed-text` model, the office turns ledger text into vectors so Odds can search decisions by meaning. That request goes to Ollama at `127.0.0.1:11434` on your computer and nowhere else. Without Ollama, search works by words only and nothing changes about where data lives.
+If you install [Ollama](https://ollama.com) and the `nomic-embed-text` model, the office turns ledger text into vectors so Odds can search decisions by meaning. By default the request goes to Ollama at `127.0.0.1:11434` on your computer. If you set `OLLAMA_URL` or `OFFICE_EMBEDDINGS_URL` in your office configuration, the office sends ledger entries and search text to the server you choose. Without a working embedding server, search works by words only.
 
 ### System features the software uses
 

@@ -6,6 +6,7 @@ import { execFile } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { release } from 'node:os';
 import postgres from 'postgres';
+import { EMBED_TIMEOUT_MS, requestEmbedding } from './embed.ts';
 import {
   LINUX,
   MAC,
@@ -160,10 +161,30 @@ export async function checkClaude(): Promise<Check> {
 }
 
 /** Ollama and its embedding model, for searching the ledger by meaning. */
-export async function checkOllama(): Promise<Check> {
-  const url = process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434';
+export async function checkOllama(env: NodeJS.Dict<string> = process.env): Promise<Check> {
+  if (env.OFFICE_EMBEDDINGS_URL) {
+    const result = await requestEmbedding('office setup', 'query', EMBED_TIMEOUT_MS, env).catch(
+      () => null
+    );
+    return result
+      ? {
+          id: 'ollama',
+          name: 'Ledger search',
+          state: 'ok',
+          found: 'Model server returned a search vector'
+        }
+      : {
+          id: 'ollama',
+          name: 'Ledger search',
+          state: 'optional',
+          found: 'Could not get a 768-number vector from the configured server',
+          fix: 'Check OFFICE_EMBEDDINGS_URL and the model name in .env. Until then the ledger is searched by its words only.'
+        };
+  }
+  const url = env.OLLAMA_URL ?? 'http://127.0.0.1:11434';
   try {
     const res = await fetch(`${url}/api/tags`, { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) throw new Error('Ollama did not list its models');
     const tags = (await res.json()) as { models?: { name: string }[] };
     if (tags.models?.some((m) => m.name.startsWith('nomic-embed-text')))
       return { id: 'ollama', name: 'Ollama', state: 'ok', found: 'Running, with nomic-embed-text' };
@@ -175,6 +196,14 @@ export async function checkOllama(): Promise<Check> {
       fix: 'Run `ollama pull nomic-embed-text`. Until then the ledger is searched by its words only.'
     };
   } catch {
+    if (env.OLLAMA_URL)
+      return {
+        id: 'ollama',
+        name: 'Ollama',
+        state: 'optional',
+        found: 'Could not reach the configured Ollama server',
+        fix: 'Check OLLAMA_URL and start Ollama on that computer. Until then the ledger is searched by its words only.'
+      };
     const installed = (await run('ollama', ['--version'])).ok;
     return {
       id: 'ollama',
@@ -183,7 +212,7 @@ export async function checkOllama(): Promise<Check> {
       found: installed ? 'Installed, not running' : 'Not installed',
       fix: installed
         ? 'Open the Ollama app, then run `ollama pull nomic-embed-text`.'
-        : 'Install Ollama from ollama.com, then run `ollama pull nomic-embed-text`. Until then the ledger is searched by its words only.'
+        : 'Install Ollama and run `ollama pull nomic-embed-text`, or set a model server in your office .env (see the README). Until then the ledger is searched by its words only.'
     };
   }
 }
@@ -416,13 +445,13 @@ export async function checkDatabase(url: string): Promise<DatabaseReport> {
 }
 
 /** Every check that needs no database, in the order setup shows them. */
-export async function checkMachine(): Promise<Check[]> {
+export async function checkMachine(env: NodeJS.Dict<string> = process.env): Promise<Check[]> {
   return Promise.all([
     checkMac(),
     checkNode(),
     checkClaude(),
     checkDocker(),
-    checkOllama(),
+    checkOllama(env),
     checkUv(),
     checkService(),
     checkKeyring()

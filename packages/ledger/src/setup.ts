@@ -58,11 +58,14 @@ console.log(
 
 // The browser fixes a missing Claude Code or sign-in, and the office no longer
 // needs Docker or uv to open. Only the system and Node have to be right first.
-const machine = (await checkMachine()).filter((c) => !['docker', 'uv', 'service'].includes(c.id));
+const settings = readEnv(ENV);
+const machine = (await checkMachine({ ...settings, ...process.env })).filter(
+  (c) => !['docker', 'uv', 'service'].includes(c.id)
+);
 machine.forEach(show);
 const blocking = machine.filter((c) => c.state === 'missing' && ['mac', 'node'].includes(c.id));
 
-const url = readEnv(ENV).DATABASE_URL;
+const url = settings.DATABASE_URL;
 let database = true;
 if (url) {
   const r = await checkDatabase(url);

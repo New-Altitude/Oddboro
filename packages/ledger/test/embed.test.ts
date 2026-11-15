@@ -33,3 +33,36 @@ test('an Ollama that is not running is tried again, and one that never answers i
   assert.equal(await embed('the next line', 'document', 300), null);
   assert.equal(asked, 1);
 });
+
+test('setup and ledger search use the configured embeddings endpoint and reject a wrong-sized vector', async (t) => {
+  const { requestEmbedding } = await import('../src/embed.ts');
+  const { checkOllama } = await import('../src/checks.ts');
+  const requests: { url?: string; model: string; input: string }[] = [];
+  let vector = Array(768).fill(0.25);
+  const server = createServer(async (req, res) => {
+    const parts = [];
+    for await (const chunk of req) parts.push(chunk);
+    const body = JSON.parse(Buffer.concat(parts).toString());
+    requests.push({ url: req.url, model: body.model, input: body.input });
+    res.end(JSON.stringify({ data: [{ embedding: vector }] }));
+  });
+  await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+  t.after(() => server.close());
+  const env = {
+    OFFICE_EMBEDDINGS_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/embeddings`,
+    OFFICE_EMBEDDINGS_MODEL: 'my-nomic-v1.5'
+  };
+  assert.equal((await checkOllama(env)).state, 'ok');
+  assert.deepEqual(await requestEmbedding('orchard', 'document', 1000, env), vector);
+  assert.deepEqual(
+    requests,
+    ['search_query: office setup', 'search_document: orchard'].map((input) => ({
+      url: '/v1/embeddings',
+      model: 'my-nomic-v1.5',
+      input
+    }))
+  );
+  vector = [0.25];
+  assert.equal(await requestEmbedding('orchard', 'query', 1000, env), null);
+  assert.equal((await checkOllama(env)).state, 'optional');
+});
