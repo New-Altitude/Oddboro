@@ -185,7 +185,13 @@ export type WorkEvent =
       from: string;
       to: string;
       /** `files` already names each carried file where it lands, `<from>/<name>`. */
-      work: { title: string; brief: string; files?: string[] };
+      work: {
+        title: string;
+        brief: string;
+        files?: string[];
+        station?: number;
+        readers?: string[];
+      };
       /**
        * The work it goes on, or a new thread to open for it. The entry finds a
        * goal's thread, and checks that a new one's lead may lead work, since

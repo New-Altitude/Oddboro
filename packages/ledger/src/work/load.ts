@@ -375,9 +375,8 @@ export async function loadWork(tx: Tx, e: WorkEvent): Promise<WorkRows> {
  * has no colleague on it yet: no thread has id 0, so `sharing` finds none.
  */
 function handOffSharing(tx: Tx, e: EventOf<'handedOff'>): Promise<HandOff> {
-  const { title, brief, files } = e.work;
   const threadId = 'id' in e.thread ? e.thread.id : 0;
-  return sharing(tx, { from: e.from, to: e.to, title, brief, files, threadId });
+  return sharing(tx, { from: e.from, to: e.to, ...e.work, threadId });
 }
 
 /**
@@ -407,9 +406,18 @@ async function prepareYes(
   if (effectsOf(ask.kind, 'approve').includes('start_held') && ask.held && ask.threadId) {
     // Only what the lead chose: an ask held by an earlier build also stored
     // what it carried then, which access may have changed since.
-    const { from, to, title, brief, files } = ask.held;
+    const { from, to, title, brief, files, station, readers } = ask.held;
     return {
-      sharing: await sharing(tx, { from, to, title, brief, files, threadId: ask.threadId })
+      sharing: await sharing(tx, {
+        from,
+        to,
+        title,
+        brief,
+        files,
+        station,
+        readers,
+        threadId: ask.threadId
+      })
     };
   }
   return {};

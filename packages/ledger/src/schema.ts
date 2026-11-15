@@ -837,7 +837,34 @@ export type Outcome = 'done' | 'failed' | 'waiting';
  * comes home again once they answer; `answered` marks a hand-back whose text
  * is the owner's answer itself, since no run followed it.
  */
+export type Station = { name: string; odd: string; doneWhen: string; reviseTo?: number };
+
+export const stationWorkflows = pgTable('station_workflows', {
+  id: id(),
+  name: text().notNull(),
+  stations: jsonb().$type<Station[]>().notNull()
+});
+
+// One ordinary work thread per job. Keep the route as it was when it started.
+export const stationJobs = pgTable('station_jobs', {
+  requestId: uuid().primaryKey(),
+  workflowId: integer()
+    .notNull()
+    .references(() => stationWorkflows.id),
+  threadId: integer()
+    .unique()
+    .references(() => threads.id),
+  job: text().notNull(),
+  stations: jsonb().$type<Station[]>().notNull(),
+  station: integer().notNull().default(0),
+  fromStation: integer(),
+  lastResult: integer(),
+  pending: boolean().notNull().default(false)
+});
+
 export type HandOff = {
+  /** Set by the workflow dispatcher on the ordinary hand-off. */
+  station?: number;
   from: string;
   title: string;
   brief: string;
@@ -861,7 +888,11 @@ export type HandOff = {
  * the colleague it goes to. What it carries is worked out at the yes
  * (`sharing`), since access can change while the ask waits.
  */
-export type HeldHandOff = Pick<HandOff, 'from' | 'title' | 'brief' | 'files'> & { to: string };
+export type HeldHandOff = Pick<HandOff, 'from' | 'title' | 'brief' | 'files' | 'station'> & {
+  /** Future station colleagues who will read this work. Grants stay with their Odd. */
+  readers?: string[];
+  to: string;
+};
 
 /**
  * The owner saved an edit to a staffer's file: its path inside the staffer's

@@ -703,8 +703,13 @@ export type GoalThread = {
  * its status says. A thread stays here once it ends, so its goal lists it to
  * the end, and a reopened one is still one row.
  */
-export async function goalThreads(): Promise<GoalThread[]> {
-  const rows = await db.select().from(threads).orderBy(desc(threads.id));
+export async function goalThreads(only?: number[]): Promise<GoalThread[]> {
+  if (only && !only.length) return [];
+  const rows = await db
+    .select()
+    .from(threads)
+    .where(only ? inArray(threads.id, only) : undefined)
+    .orderBy(desc(threads.id));
   if (!rows.length) return [];
   const ids = rows.map((t) => t.id);
   const waiting = await waitingOn(db, ids);

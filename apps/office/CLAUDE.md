@@ -1127,6 +1127,10 @@ pieces under 3,900 bytes a line, so no value is on a command line.
     office was off at run time"). To try it in a running office, move a
     job's next run into the past from the repo, with that office's database
     port. The write wakes the clock at once.
+    Its Workflow stations section saves an ordered route with a colleague and a
+    completion condition at each stop. Each job is one ordinary thread led by
+    the Office Manager. A review station can send work to an earlier station.
+    Opening a job opens its usual thread, with the same asks, files and history.
 
     ```sh
     ODDBORO_DB_PORT=<port> node --input-type=module <<'EOF'

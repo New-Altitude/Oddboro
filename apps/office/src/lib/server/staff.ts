@@ -74,6 +74,7 @@ import {
   recordUsage,
   releaseRun,
   reserveRun,
+  continueStations,
   resultsToJoin,
   roster,
   rulePath,
@@ -1254,6 +1255,8 @@ export async function followThrough(
 ): Promise<{ outcome: Outcome; text: string; saw?: string; joined?: number[] }> {
   const who = await staffer(f.staffId);
   if (!who) return { outcome: 'failed', text: `No Odd named ${f.staffId}` };
+  const station = await continueStations(f);
+  if (station) return station;
   // Work a colleague handed over, or its result coming home.
   const handed =
     (f.kind === 'hand_off' || f.kind === 'handed_back') && f.handOff

@@ -16,6 +16,7 @@
     HORIZONS,
     STATUS_WORDS
   } from '@oddboro/ledger/goals';
+  import WorkflowStations from './WorkflowStations.svelte';
   import { call } from './api.ts';
   import { ago, workLine } from './format.ts';
   import type { StaffProfile } from '../staff/roster.ts';
@@ -482,6 +483,8 @@
         {/each}
       </ul>
     {/each}
+
+    <WorkflowStations {staff} {version} {onthread} />
 
     {#if other.length}
       <h3 class="mt-1 mb-1.5 text-[10px] tracking-[0.16em] text-faint uppercase">Other work</h3>
