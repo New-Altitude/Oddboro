@@ -44,6 +44,13 @@ export const staff = pgTable('staff', {
   /** The room template it works in. */
   room: text().notNull().default('workspace'),
   permission: text().$type<Level>().notNull().default(HIRE_DEFAULTS.staff.permission),
+  /**
+   * The owner's choice for work another Odd hands it, made each time they put
+   * it at Act: off, that work runs at Draft at most and no standing yes
+   * applies there; on, it runs at the Odd's own level, standing yeses and
+   * all. Kept when the level comes down, and changed on the Settings tab.
+   */
+  actsOnHandOffs: boolean().notNull().default(false),
   /** The coding tool its runs go through. The owner picks it at hire and on the Settings tab. */
   agent: text().$type<Agent>().notNull().default('claude'),
   /** The office tools the owner granted, beyond the ones every staffer has. See tools.ts. */

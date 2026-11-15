@@ -1,7 +1,8 @@
 // What each kind of run an Odd makes is told, held word for word in
 // prompts.test.ts.snapshot beside this file: a chat, a chat with an outside
 // tool held back by the level, the Office Manager's chat, a hire's hello, a
-// job, and one follow-up of each kind. A change to what Odds are told fails
+// job, one follow-up of each kind, and a hand-off to an Odd the owner lets act
+// on its own on work from colleagues. A change to what Odds are told fails
 // here until it is accepted with `npm run prompts:accept -w @oddboro/office`,
 // so review reads it line by line. The cases share one database, so a new
 // case goes at the end, where it moves no id in the cases before it. Run with
@@ -209,3 +210,10 @@ for (const kind of L.FOLLOW_UP_KINDS)
     onPlatform('linux', async () => {
       t.assert.snapshot(told(await dueRun(await FOLLOW_UPS[kind]())));
     }));
+
+test("a hand-off to an Odd at Act that acts on its own on colleagues' work is told exactly what its snapshot holds", (t) =>
+  onPlatform('linux', async () => {
+    await L.pg`update staff set permission = 'act', acts_on_hand_offs = true where id = 'paige'`;
+    const h = await gave('lead', 'paige', { title: 'Count the cups' });
+    t.assert.snapshot(told(await dueRun(h.id)));
+  }));

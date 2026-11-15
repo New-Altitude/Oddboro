@@ -384,7 +384,12 @@ test('the secret stores are the ones the office keeps shut', () => {
     '.codex',
     '.gemini',
     '.docker',
-    '.kube'
+    '.kube',
+    '.mozilla',
+    '.local/share/keyrings',
+    '.pki',
+    'snap',
+    '.var/app'
   ]);
 });
 

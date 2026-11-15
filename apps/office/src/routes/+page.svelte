@@ -32,6 +32,7 @@
   import FileViewer from '#lib/ui/FileViewer.svelte';
   import ReportView from '#lib/ui/ReportView.svelte';
   import ActCheck from '#lib/ui/ActCheck.svelte';
+  import HandOffChoice from '#lib/ui/HandOffChoice.svelte';
   import { actCheck } from '#lib/ui/act-check.svelte.ts';
   import {
     advanced,
@@ -1522,6 +1523,7 @@
     </div>
   {/if}
   {#if actCheck.asking}<ActCheck />{/if}
+  {#if actCheck.choosing}<HandOffChoice name={actCheck.choosing} />{/if}
 </main>
 
 <style>

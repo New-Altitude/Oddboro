@@ -431,8 +431,11 @@ Windows; `Info.plist`, `codesign`, `spctl` and the stapled ticket on a Mac);
 it starts with no dialog; the real window shows the welcome and Next moves it
 to the name step; a request without the app's key gets 403, a read too, while
 the page's built files under `/_app/` load; the log has the window loading
-the page and the page booting, with no page errors; it quits with Node and
-both ports gone; it starts twice more; on Windows it uninstalls.
+the page and the page booting, with no page errors; the shell's launch line
+and the office's own `office: port <n>, home <folder>` line name the port and
+home the run set (NEW-1694: each side works them out, and the shell hands them
+over); it quits with Node and both ports gone; it starts twice more; on
+Windows it uninstalls.
 
 The real app's shell keeps its key to itself, so the rows that need the
 office's answers run where a key can come along. `--stage` starts the staged

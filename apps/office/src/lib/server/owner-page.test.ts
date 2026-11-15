@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import type { RequestEvent } from '@sveltejs/kit';
+import { kitUrl, ownProof, REQUEST_TARGETS } from './request-targets.ts';
 
 const folder = mkdtempSync(join(tmpdir(), 'oddboro-owner-page-'));
 const port = await new Promise<number>((done) => {
@@ -89,7 +90,7 @@ async function send(
   });
   const event = {
     request,
-    url: new URL(request.url),
+    url: kitUrl(request),
     params: s.params ?? {},
     getClientAddress: () => s.from ?? '127.0.0.1'
   } as unknown as RequestEvent;
@@ -488,4 +489,51 @@ test('the app allows a screenshot in chat while other actions keep their smaller
     if (before === undefined) delete process.env.ODDBORO_APP;
     else process.env.ODDBORO_APP = before;
   }
+});
+
+test('from source, an action without the page passes only as a run at its gateway, judged on the address it was sent to, and another computer gets nothing', async () => {
+  const notes = {
+    id: 'notes',
+    name: 'Notes',
+    readTools: [],
+    tools: [],
+    config: {}
+  } as unknown as import('@oddboro/ledger').ConnectorRow;
+  const { token } = openGateway([{ connector: notes, level: 'read' }], 60_000);
+  const RUN = { authorization: `Bearer ${token}` };
+  // Outside the app no request carries a key, so the shell's header opens nothing.
+  const SHELL = { 'x-oddboro-key': 'a1'.repeat(32) };
+  let rows = 0;
+  try {
+    for (const { target, kitPath, app } of REQUEST_TARGETS) {
+      rows++;
+      const path = target.replace('<root>', folder);
+      if (app === 'unparsed') {
+        assert.throws(() => new Request(`http://127.0.0.1:4500${path}`), TypeError, target);
+        continue;
+      }
+      const named: Record<string, string> = kitPath ? { 'x-sveltekit-pathname': kitPath } : {};
+      const runs = app === 'passes' && ownProof(path) === 'run';
+      for (const proof of [{}, SHELL, RUN]) {
+        const r = await send(ok, { method: 'POST', path, headers: { ...named, ...proof } });
+        const passes = runs && proof === RUN;
+        assert.deepEqual(
+          [target, kitPath, r.status, r.ran],
+          [target, kitPath, passes ? 200 : 403, passes]
+        );
+        for (const method of ['GET', 'POST']) {
+          const away = await send(ok, {
+            method,
+            path,
+            headers: { ...named, ...PAGE, ...proof },
+            from: '192.168.1.20'
+          });
+          assert.deepEqual([target, method, away.status, away.ran], [target, method, 403, false]);
+        }
+      }
+    }
+  } finally {
+    await closeGateway(token);
+  }
+  assert.equal(rows, REQUEST_TARGETS.length);
 });

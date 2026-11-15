@@ -22,6 +22,8 @@ export type StaffProfile = {
   portrait: string;
   hired: string;
   permission: Level;
+  /** At Act, whether work another Odd hands it runs at Act (true) or at Draft at most. Kept below Act. */
+  actsOnHandOffs: boolean;
   /** The coding tool its runs go through. */
   agent: Agent;
   /** The account it signs in with on that tool (accounts.ts), or nothing for the Office account. */

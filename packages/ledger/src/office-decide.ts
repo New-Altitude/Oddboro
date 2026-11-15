@@ -49,16 +49,19 @@ import { ownerName } from './office-usage.ts';
  * to connect; approving any other ask but a hire sends the staffer to carry it
  * out. A hire is approved by hiring, from the hire window. Iterate sends it
  * back with what to change, and needs their words; an ask the office raised
- * itself takes a yes or a no only (`yesOrNo`).
+ * itself takes a yes or a no only (`yesOrNo`). A yes to a level ask that
+ * puts the Odd at Act takes the owner's choice for work another Odd hands it
+ * (`actsOnHandOffs`); left out, the stored choice stays.
  */
 export async function decideAsk(
   id: number,
   decision: Decision,
   reason: string | null,
   reportWhenDone = false,
-  inChat = false
+  inChat = false,
+  actsOnHandOffs?: boolean
 ): Promise<boolean> {
-  return decide(id, decision, reason, { reportWhenDone, inChat });
+  return decide(id, decision, reason, { reportWhenDone, inChat, actsOnHandOffs });
 }
 
 /** What approving an ask means, done before the answer goes back. */
@@ -210,16 +213,21 @@ async function turnOnSwitches(
  * passed stays as it is, so a yes never undoes a higher level set since, and
  * tools already on stay on; either still starts the work (`{}`). Nothing for
  * any other kind, or when the Odd is gone. A new kind fails the type check
- * here until it says which.
+ * here until it says which. A raise to Act takes the owner's choice for work
+ * another Odd hands it (`actsOnHandOffs`), and `also` is its ledger line.
  */
-async function grantSetting(tx: Tx, claimed: AskRow): Promise<{ title?: string } | undefined> {
+async function grantSetting(
+  tx: Tx,
+  claimed: AskRow,
+  actsOnHandOffs?: boolean
+): Promise<{ title?: string; also?: string } | undefined> {
   switch (claimed.kind) {
     case 'level': {
       if (!claimed.level) throw fixedError('This ask names no level');
       const before = await staffer(claimed.staffId, tx);
       if (!before) return;
       if (levelAtMost(claimed.level, before.permission)) return {};
-      return changeLevel(tx, claimed.staffId, claimed.level);
+      return changeLevel(tx, claimed.staffId, claimed.level, actsOnHandOffs);
     }
     case 'office_tool':
       if (!claimed.officeTools?.length) throw fixedError('This ask names no office tool');
@@ -299,6 +307,8 @@ async function decide(
   reason: string | null,
   o: Approval & {
     reportWhenDone?: boolean;
+    /** A yes that puts the Odd at Act: the owner's choice for work another Odd hands it. */
+    actsOnHandOffs?: boolean;
     reply?: ReplyDraft;
     filter?: GmailFilter;
     call?: HeldCall;
@@ -374,7 +384,10 @@ async function decide(
     if (claimed && effectsOf(claimed.kind, decision).includes('give_standing'))
       await giveStanding(tx, claimed);
     // The level or office tools change with the yes, or neither happens.
-    const granted = claimed && decision === 'approve' ? await grantSetting(tx, claimed) : undefined;
+    const granted =
+      claimed && decision === 'approve'
+        ? await grantSetting(tx, claimed, o.actsOnHandOffs)
+        : undefined;
     // A yes or a no answers the twins too, at the same moment (`answeredWith`).
     // Sending one back leaves them waiting for the new version's answer.
     const open =
@@ -434,6 +447,8 @@ async function decide(
     reason: ask.reason,
     askId: ask.id
   });
+  // The owner's choice for work from colleagues, made with a raise to Act, as the Settings tab writes it.
+  if (granted?.also) await record({ kind: 'access', actor: 'owner', title: granted.also });
   await o.carryOut?.(ask);
   // Only the run this ask's own answer starts, never a twin's, replies under its card.
   const chat: InChat | undefined = o.inChat

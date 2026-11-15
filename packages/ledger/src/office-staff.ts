@@ -24,7 +24,7 @@ import {
 // Read only inside functions, so the import cycle with managers.ts is safe.
 import { MANAGER_ROLE } from './managers.ts';
 import { currentPlatform } from './platform.ts';
-import { levelAtMost, type Level } from './access-words.ts';
+import { HAND_OFF_CHOICE, levelAtMost, type Level } from './access-words.ts';
 import { isGrantable, OFFICE_TOOLS, officeToolsSaid, ON_BY_DEFAULT } from './tools.ts';
 import { HIRE_DEFAULTS } from './grantable.ts';
 import { lookSignature, type DrawnPart, type LookSpec } from '@oddboro/sprites/look';
@@ -111,32 +111,76 @@ export async function passActCheck(answers: unknown): Promise<{ wrong: number[] 
 
 /**
  * Only the owner moves a staffer's level. Grants above the new level wait
- * until it rises again. Act waits for the Act check (`ActCheckNeeded`).
+ * until it rises again. Act waits for the Act check (`ActCheckNeeded`). A
+ * move up to Act also takes the owner's choice for work another Odd hands it
+ * (`actsOnHandOffs`); left out, the stored choice stays.
  */
-export async function setPermission(id: string, permission: Level): Promise<void> {
-  const done = await changeLevel(db, id, permission);
-  if (done) await record({ kind: 'access', actor: 'owner', title: done.title });
+export async function setPermission(
+  id: string,
+  permission: Level,
+  actsOnHandOffs?: boolean
+): Promise<void> {
+  const done = await changeLevel(db, id, permission, actsOnHandOffs);
+  if (!done) return;
+  await record({ kind: 'access', actor: 'owner', title: done.title });
+  if (done.also) await record({ kind: 'access', actor: 'owner', title: done.also });
 }
 
 /**
  * The change `setPermission` makes, in `q`, with the ledger title it is
  * written under. Nothing when the Odd is gone or already at that level. A
  * move up to Act throws `ActCheckNeeded` until the owner passed the Act check,
- * so the Settings tab and a level ask's yes both wait for it.
+ * so the Settings tab and a level ask's yes both wait for it. A move up to
+ * Act from a lower level stores `actsOnHandOffs` when the owner chose it,
+ * and `also` is the ledger line for that choice when it changed.
  */
 async function changeLevel(
   q: Db,
   id: string,
-  permission: Level
-): Promise<{ title: string } | undefined> {
+  permission: Level,
+  actsOnHandOffs?: boolean
+): Promise<{ title: string; also?: string } | undefined> {
   const before = await staffer(id, q);
   if (!before || before.permission === permission) return;
   await needActCheck(q, permission);
-  await q.update(staff).set({ permission }).where(eq(staff.id, id));
+  const chose =
+    permission === 'act' &&
+    actsOnHandOffs !== undefined &&
+    actsOnHandOffs !== before.actsOnHandOffs;
+  await q
+    .update(staff)
+    .set(chose ? { permission, actsOnHandOffs } : { permission })
+    .where(eq(staff.id, id));
   const up = !levelAtMost(permission, before.permission);
   return {
-    title: `${up ? 'Raised' : 'Lowered'} ${before.name} from ${before.permission} to ${permission}`
+    title: `${up ? 'Raised' : 'Lowered'} ${before.name} from ${before.permission} to ${permission}`,
+    ...(chose ? { also: HAND_OFF_CHOICE.ledger(before.name, actsOnHandOffs) } : {})
   };
+}
+
+/**
+ * The owner's choice for work another Odd hands an Odd at Act, changed on its
+ * Settings tab: on, that work runs at Act and its standing yeses apply there;
+ * off, it runs at Draft at most and each change waits for the owner's yes.
+ * Only an Odd at Act shows the choice, so only one at Act takes a change.
+ */
+export async function setActsOnHandOffs(
+  id: string,
+  acts: boolean
+): Promise<{ refused: string } | undefined> {
+  const before = await staffer(id);
+  if (!before) return { refused: 'No such Odd' };
+  if (before.permission !== 'act')
+    return {
+      refused: `Put ${before.name} at Act first. Below Act, work from colleagues cannot pass its level anyway.`
+    };
+  if (before.actsOnHandOffs === acts) return;
+  await db.update(staff).set({ actsOnHandOffs: acts }).where(eq(staff.id, id));
+  await record({
+    kind: 'access',
+    actor: 'owner',
+    title: HAND_OFF_CHOICE.ledger(before.name, acts)
+  });
 }
 
 /**
@@ -403,6 +447,8 @@ export type Hire = Pick<
 > & {
   /** Its level; `HIRE_DEFAULTS` when left out. */
   permission?: Level;
+  /** At Act, the owner's choice for work another Odd hands it: true lets it act on its own there. */
+  actsOnHandOffs?: boolean;
   /** The office they work in, by name. */
   office?: string;
   sprite?: string;
@@ -471,7 +517,11 @@ export async function setLook(
   await record({ kind: 'work', actor: 'owner', title: `Redrew ${who.name}'s look` });
 }
 
-/** Hire an Odd. A hire at Act waits for the Act check (`ActCheckNeeded`). */
+/**
+ * Hire an Odd. A hire at Act waits for the Act check (`ActCheckNeeded`), and
+ * keeps the owner's choice for work another Odd hands it (`actsOnHandOffs`),
+ * which only a hire at Act takes.
+ */
 export async function hire(h: Hire): Promise<StaffRow> {
   await needActCheck(db, h.permission ?? HIRE_DEFAULTS.staff.permission);
   const base =
@@ -489,7 +539,8 @@ export async function hire(h: Hire): Promise<StaffRow> {
     const twin = await lookTaken(h.look);
     if (twin) throw new Error(`${twin.name} already looks exactly like that. Redraw first.`);
   }
-  const { newParts, ...values } = h;
+  const { newParts, actsOnHandOffs, ...values } = h;
+  const acts = values.permission === 'act' && actsOnHandOffs === true;
   const [row] = await db
     .insert(staff)
     // With no tool picked, the hire runs on the office's own.
@@ -497,7 +548,8 @@ export async function hire(h: Hire): Promise<StaffRow> {
       ...values,
       agent: values.agent ?? officeAgent(),
       id,
-      tools: tools ?? HIRE_DEFAULTS.staff.tools
+      tools: tools ?? HIRE_DEFAULTS.staff.tools,
+      actsOnHandOffs: acts
     })
     .returning();
   await saveParts(newParts, id);
@@ -507,6 +559,8 @@ export async function hire(h: Hire): Promise<StaffRow> {
     title: `Hired ${h.name}, ${h.role}`,
     body: h.remit
   });
+  if (acts)
+    await record({ kind: 'access', actor: 'owner', title: HAND_OFF_CHOICE.ledger(h.name, true) });
   return row;
 }
 

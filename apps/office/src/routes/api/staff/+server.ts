@@ -49,6 +49,8 @@ type Body = Partial<Record<'name' | 'role' | 'room' | 'permission' | 'remit' | '
   look?: unknown;
   portraitPx?: unknown;
   newParts?: unknown;
+  /** At Act, the owner's choice for work another Odd hands the hire. */
+  actsOnHandOffs?: unknown;
   job?: {
     name?: unknown;
     instructions?: unknown;
@@ -126,7 +128,8 @@ export const POST: RequestHandler = async ({ request }) => {
       tools,
       look: drawn.look,
       portraitPx: drawn.portraitPx,
-      newParts: drawn.newParts
+      newParts: drawn.newParts,
+      actsOnHandOffs: b.actsOnHandOffs === true
     });
   } catch (e) {
     error(400, e instanceof Error ? e.message : String(e));

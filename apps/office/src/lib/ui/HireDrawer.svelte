@@ -255,8 +255,9 @@
   async function hire() {
     busy = true;
     problem = '';
-    const send = () =>
+    const send = (actsOnHandOffs = false) =>
       call<StaffProfile>('/api/staff', {
+        actsOnHandOffs,
         name,
         role,
         look: look?.look,
@@ -283,8 +284,9 @@
           : undefined
       });
     try {
-      // A hire at Act waits for the owner's Act check, the first time only.
-      const p = await (permission === 'act' ? withActCheck(send) : send());
+      // A hire at Act waits for the owner's Act check, the first time only,
+      // then for their choice for work another Odd hands it.
+      const p = await (permission === 'act' ? withActCheck(name, send) : send());
       if (p) onhired(p);
     } catch (e) {
       problem = e instanceof Error ? e.message : String(e);

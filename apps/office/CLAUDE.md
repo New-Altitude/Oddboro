@@ -601,6 +601,19 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    `changeLevel` and `hire` throw `ActCheckNeeded`, so a level ask's yes
    leaves the ask open. Read and Draft never need it, and an Odd already at
    Act stays there. No Odd's prompt or tool sees the check.
+   Right after the check passes, or at once when it was passed before, the
+   same three actions ask what happens when another Odd hands that Odd work
+   (`HandOffChoice.svelte`, in the check's look), every time an Odd goes to
+   Act from a lower level and never for one already there. Ask me first is
+   picked to start with every time, by design: no permission is given unless
+   the owner picks it. Cancel changes nothing. The raise sends the pick as
+   `actsOnHandOffs` (Settings PATCH, the ask POST, the hire POST), and the
+   office keeps the stored value when none comes. The words live in the
+   ledger's `HAND_OFF_CHOICE`. While the Odd is at Act, the Settings tab shows
+   the same two options under Permission level (PATCH with `actsOnHandOffs`
+   alone, `setActsOnHandOffs`, refused below Act); below Act they are hidden
+   and the stored value stays. Each change writes its own access line, such as
+   "Let Ada act on its own on work from colleagues".
    The Settings tab has four tabs, Model first, then Office, Folders and
    Services, each an icon and a word, the icon alone when the bar is under
    22rem (a container query). Office, Folders and Services each have a search
@@ -849,7 +862,9 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    `~/.aws`, `~/.gnupg`, `~/.config`, `~/Library`, `~/AppData`,
    `~/.claude.json`, `~/.google_workspace_mcp` (where
    that MCP server keeps its sign-ins for other apps on the Mac), `~/.grok`,
-   `~/.codex`, `~/.gemini`, `~/.docker` and `~/.kube`, everything
+   `~/.codex`, `~/.gemini`, `~/.docker` and `~/.kube`, and the Linux
+   browsers' and keyrings' folders `~/.mozilla`, `~/.local/share/keyrings`,
+   `~/.pki`, `~/snap` and `~/.var/app`, everything
    in `~/.oddboro` besides `staff/` and `data/` (and `threads/<id>/` for a
    run on that thread), every other
    Odd's folder, and everything in `~/.claude` besides this run's sessions.
@@ -1016,6 +1031,10 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    call without both is refused and holds nothing. The run hears that
    nothing changed yet. A tool the Odd uses without asking (`grants.standing`,
    the ledger's `standing.ts`) goes straight through in any run with a place,
+   but one a colleague's words reach (one that serves a colleague's hand-off,
+   or a lead's pick-up of a result) while the owner asks first on
+   that Odd's work from colleagues (`actsOnHandOffs` off, `handedOver` in the
+   ledger's `capabilities.ts`): there each call waits for the owner's yes,
    is listed without the two fields, and each such call rides on the run's
    next held call to that service (`before`), which the desk lists as "Made
    without asking before this call", so a commit shows what it applies.
@@ -1042,7 +1061,15 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    carry-out of an approval ask, the owner's yes to that exact action, runs
    at the Odd's level) passes its ceiling as `CEILING` the same way, so `my_access`
    says Draft and why, with a write grant read only, as the prompt does
-   (`capped`, `accessInRun`).
+   (`capped`, `accessInRun`). When the owner lets the Odd act on its own on
+   work from colleagues (`staff.acts_on_hand_offs`), the hand-off's own run
+   and every run that serves it keep the Odd's level; the hub's pick-up, a
+   thread picked back up and a lesson run stay at Draft. A run a colleague's
+   words reach (one that serves a hand-off, or the hub's pick-up of a result)
+   passes `FROM_COLLEAGUE`, so `my_access` leaves out the standing yeses it
+   does not have there. An Odd at Act is told what the owner chose, in its
+   prompt and in `my_access` (`handOffsLine`). `run-ceiling.test.ts` checks
+   every state with the choice off and on.
    Physical mail signs in to LegalZoom's read-only endpoint. The owner chooses
    one PMB for the office on the Desk. A run receives only list, details, and
    scanned text. The gateway supplies the chosen PMB and checks the Odd still
@@ -1482,7 +1509,7 @@ welcomed, the page loads the sample's empty lot (`currentOffice({ lot: true })`,
 the start panel, titled "{name}'s Lot" until the office stands on it. The
 command center's buttons and tabs appear there once the first run is over, so
 the owner meets the panel first. The cards: Your computer (`MacCard`, the checks
-from `/api/setup`, and Notifications: a test of the Mac's (`notifyMac` in `src/lib/server/notify.ts`, which macOS shows as Oddboro's in the app and as Script Editor's from the repo) with the way to System Settings if it does not show, and, outside the app, the browser's for the Desk; the owner moves on with Next), their name, Your AI (`AiCard`, item 18: a tile per tool, the picked one the office's tool, and its panel below: Claude Code's installs it through `/api/setup/claude` and is `ClaudeCard`, a Claude plan tab with the account Claude Code is signed in to, from `claude auth status`, and Sign in with Claude or Switch account, or an API key tab, with a model picker in both. On Claude Code, Sonnet cannot draw looks or design offices: `canDraw()` in `claude.ts` refuses them, and the later cards offer only the ready-made managers and Main Street; the model,
+from `/api/setup`, and Notifications: a test of the computer's (`notifyMac` in `src/lib/server/notify.ts`, which macOS shows as Oddboro's in the app and as Script Editor's from the repo) with that system's own steps if it does not show (`notify-help.ts`, shown by `NotifyHelp.svelte`: System Settings on a Mac, Settings on Windows, and on Linux a check that notifications are on and that the desktop has a notification service), and, outside the app, the browser's for the Desk; the owner moves on with Next), their name, Your AI (`AiCard`, item 18: a tile per tool, the picked one the office's tool, and its panel below: Claude Code's installs it through `/api/setup/claude` and is `ClaudeCard`, a Claude plan tab with the account Claude Code is signed in to, from `claude auth status`, and Sign in to Claude Code or Switch account, or an API key tab, with a model picker in both. On Claude Code, Sonnet cannot draw looks or design offices: `canDraw()` in `claude.ts` refuses them, and the later cards offer only the ready-made managers and Main Street; the model,
 or an API key kept in the keychain; `src/lib/server/claude.ts` passes both to
 every run. Next waits until the picked tool is signed in), the Office Manager (`ManagerCard`: four ready-made ones from
 `GET /api/onboarding`, or one described and drawn by `/api/looks` while the
@@ -1526,18 +1553,24 @@ falling back to `oddboro.localhost` where a network's DNS drops that answer.
 The desktop app (`ODDBORO_APP`) skips all of this: it opens the office in its own
 window, onboarding shows no address step, and it never touches Caddy.
 
-Caddy takes ports 80 and 443 and hands everything to the office on 4500
-(`src/lib/server/address.ts`, the Address row on the first card). With nothing on
-port 80 the office runs its own Caddy as `com.oddboro.caddy`, downloading it
-from Caddy's releases (checked against the published checksum) if the Mac has
+Caddy takes ports 80 and 443 and hands everything to the office on its own
+port, `OFFICE_PORT` (4500, or `ODDBORO_PORT`) (`src/lib/server/address.ts`,
+the Address row on the first card). With nothing on port 80 the office runs
+its own Caddy as `com.oddboro.caddy`, downloading it from Caddy's releases (checked against the published checksum) if the Mac has
 none. With the owner's Caddy on port 80 it adds two routes and a certificate
 policy through Caddy's admin API (127.0.0.1:2019, with an explicit origin, which
 that API wants), touches none of their files, and adds them again when the
 office starts and when a page loads (`keepAddress`). With anything else on port
-80 it stays at `:4500`; on Windows that is often http.sys, Windows' own web
-server. On Windows the office's own Caddy listens on 127.0.0.1 and [::1]
-only (`ownCaddyfile`), so the firewall never asks. On a Mac it listens on
-every address, since a process the owner runs can bind a port under 1024
+80 it stays at the office's own port; on Windows that is often http.sys,
+Windows' own web server. Port 80 is looked at with `ss` on Linux,
+`/usr/sbin/lsof` on a Mac and PowerShell on Windows, each through `probe`. A
+look that fails, times out or finds its command missing gives `unchecked`,
+never free, since reading it as free would offer a Caddy that cannot start:
+the address then stays at the office's own port and the card says it could
+not look. The card shows that port from the server (`shownAddress` in
+`src/lib/address.ts`). On Windows the office's own Caddy listens on 127.0.0.1
+and [::1] only (`ownCaddyfile`), so the firewall never asks. On a Mac it
+listens on every address, since a process the owner runs can bind a port under 1024
 only there (127.0.0.1 and ::1 were refused, measured), so other machines on
 the network can reach it, and what keeps an Odd's commands off it is the
 deny list each run gets (`macAddresses`, item 9). Linux was not measured and
@@ -1600,6 +1633,15 @@ it.", reads too, which a browser shows as a plain page.
 - Without the key, only these get in: the sign-in callbacks (rule 5), as
   GETs to those two exact paths; the shell's proof request; a run's call to
   its gateway with its token; and a link for the owner's browser.
+- Those, and the shell's and a run's way past rule 3, are judged on the
+  address the request was sent to (`sentTo`), never on the path SvelteKit
+  hands the handle. Kit takes `/__data.json` off a data request, and a remote
+  function call under `/_app/remote/` names its page in a header the caller
+  writes, so either could otherwise pass as an exception. The table of
+  hostile and legitimate targets in `src/lib/server/request-targets.ts` runs
+  through the guard in the app (`app-key.test.ts`), from source
+  (`owner-page.test.ts`) and through the dev server's rule
+  (`vite-config.test.ts`).
 - The owner's browser has no key. When the window opens an office address in
   a new window (a file attached in a chat), the shell asks
   `POST /api/browser-link` for a code for that path and opens the address

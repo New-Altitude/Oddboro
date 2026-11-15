@@ -691,6 +691,32 @@ async function smokeApp(): Promise<void> {
     if (errors.length) throw new Error(`${errors.length} page error(s): ${errors.join(' / ')}`);
     return 'no page: error line in the log';
   });
+  // Both sides log where they are: the shell's launch line, and in the app the
+  // office's own `office: port <n>, home <folder>` line (hooks.server.ts).
+  // Required once the office writes that line; builds before NEW-1694 do not.
+  const lines = logText(r).split('\n');
+  const officeLine = lines.filter((l) => /^office: port \d+, home /.test(l)).at(-1);
+  await step(
+    'the shell and the office agree on the port and the home folder',
+    officeLine !== undefined,
+    () => {
+      const launch = lines.filter((l) => l.includes('opening: pid')).at(-1);
+      const shell = launch?.match(/, port (\d+), home (.+?), webview /);
+      if (!shell) throw new Error(`no launch line with a port and a home: ${launch ?? '(none)'}`);
+      const office = officeLine?.match(/^office: port (\d+), home (.+)$/);
+      if (!office) throw new Error('no office: port line in the log');
+      const said = {
+        shell: { port: shell[1], home: shell[2] },
+        office: { port: office[1], home: office[2].trim() }
+      };
+      for (const [who, s] of Object.entries(said))
+        if (s.port !== String(PORT) || s.home !== r.home)
+          throw new Error(
+            `the ${who} says port ${s.port} and home ${s.home}; the run set port ${PORT} and home ${r.home}`
+          );
+      return `port ${PORT} and home ${r.home}, in the shell's launch line and the office's own`;
+    }
+  );
   await step('a screenshot', false, () => screenshot(join(OUT, 'screen.png')));
   await step('quits with Node and both ports gone', true, async () => {
     if (stopDriven) return `${await stopDriven()}; the relaunches quit with SIGTERM`;
