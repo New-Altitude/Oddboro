@@ -22,6 +22,7 @@ import { release } from 'node:os';
 import { sequence, type ServerInit } from '@sveltejs/kit/hooks';
 import { handleErrorWithSentry, sentryHandle } from '@sentry/sveltekit';
 import { IN_APP, LOCAL, makeHomePrivate, whenOddLeaves } from '@oddboro/ledger';
+import { home, OFFICE_PORT } from '@oddboro/ledger/home';
 import { trustSystemCertificates } from '@oddboro/ledger/certificates';
 import { startLocalDatabase } from '@oddboro/ledger/local-db';
 import { currentPlatform } from '@oddboro/ledger/platform';
@@ -57,6 +58,11 @@ export const init: ServerInit = async () => {
   console.log(
     `office: ${VERSION || 'development'} on ${currentPlatform()} ${release()} ${process.arch}, Node ${process.version}`
   );
+  // In the app, the port and home the office ended up on, beside the shell's
+  // own launch line, so the release smoke test can hold the two together
+  // (NEW-1694). The log stays on this computer; /api/health leaves the home
+  // out, since a bug report carries that and the home names the account.
+  if (IN_APP) console.log(`office: port ${OFFICE_PORT}, home ${home()}`);
   // Before the office writes anything there, the database's socket included.
   makeHomePrivate();
   // The key comes first on the pipe, before any answer about secrets.

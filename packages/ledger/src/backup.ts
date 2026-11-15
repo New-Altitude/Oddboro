@@ -9,8 +9,10 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync
 } from 'node:fs';
@@ -30,7 +32,20 @@ export function backUpForNewVersion(version = process.env.ODDBORO_VERSION): stri
   if (existsSync(home('db'))) {
     const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
     made = home('backups', `pre-${version}-${stamp}`);
-    cpSync(home('db'), join(made, 'db'), { recursive: true });
+    const dir = home('backups');
+    mkdirSync(dir, { recursive: true });
+    // A copy a force-quit or crash cut off is never a backup, and only one
+    // office opens this home at a time, so clear any before copying again.
+    for (const name of readdirSync(dir))
+      if (name.startsWith('.copying-')) rmSync(join(dir, name), { recursive: true, force: true });
+    const copying = mkdtempSync(join(dir, '.copying-'));
+    try {
+      cpSync(home('db'), join(copying, 'db'), { recursive: true });
+      renameSync(copying, made);
+    } catch (error) {
+      rmSync(copying, { recursive: true, force: true });
+      throw error;
+    }
     prune();
   }
   // A first start on a new Mac has no office folder yet.

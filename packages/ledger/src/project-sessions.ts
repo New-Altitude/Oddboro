@@ -168,7 +168,9 @@ export async function projectOverview() {
     db
       .select({ sessionId: projectRequests.sessionId, state: projectRequests.state })
       .from(projectRequests)
-      .where(inArray(projectRequests.state, ['proposed', 'uncertain', 'sending', 'working'])),
+      .where(
+        inArray(projectRequests.state, ['proposed', 'failed', 'uncertain', 'sending', 'working'])
+      ),
     db
       .selectDistinctOn([projectRequests.sessionId], {
         sessionId: projectRequests.sessionId,
@@ -179,7 +181,9 @@ export async function projectOverview() {
   ]);
   return sessions.map((s) => {
     const states = open.filter((r) => r.sessionId === s.id).map((r) => r.state);
-    const status: ProjectStatus = states.some((x) => x === 'proposed' || x === 'uncertain')
+    const status: ProjectStatus = states.some(
+      (x) => x === 'proposed' || x === 'failed' || x === 'uncertain'
+    )
       ? 'waiting'
       : states.length
         ? 'working'
@@ -256,7 +260,23 @@ export async function requestProject(input: {
   });
 }
 
-/** A claim is durable before the prompt leaves. A crash never replays a sent request. */
+/** The next unsent assignment, also read while checking the native receiver. */
+export async function nextProjectRequest(id: string, q: Db = db) {
+  const [row] = await q
+    .select()
+    .from(projectRequests)
+    .where(
+      and(
+        eq(projectRequests.sessionId, id),
+        inArray(projectRequests.state, ['queued', 'authorized'])
+      )
+    )
+    .orderBy(asc(projectRequests.createdAt), asc(projectRequests.id))
+    .limit(1);
+  return row;
+}
+
+/** A claim is durable before the prompt leaves, and reads the owner's current grants. */
 export async function claimProject(id: string) {
   return db.transaction(async (tx) => {
     const [s] = await tx
@@ -276,17 +296,7 @@ export async function claimProject(id: string) {
       )
       .limit(1);
     if (busy.length) return;
-    const [next] = await tx
-      .select()
-      .from(projectRequests)
-      .where(
-        and(
-          eq(projectRequests.sessionId, id),
-          inArray(projectRequests.state, ['queued', 'authorized'])
-        )
-      )
-      .orderBy(asc(projectRequests.createdAt), asc(projectRequests.id))
-      .limit(1);
+    const next = await nextProjectRequest(id, tx);
     if (!next) return;
     if (next.staffId) {
       const [odd] = await tx.select().from(staff).where(eq(staff.id, next.staffId)).for('share');

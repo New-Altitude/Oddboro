@@ -1490,7 +1490,7 @@
           class="max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed break-words
           {line.from === 'owner'
             ? 'ms-auto rounded-ee-md bg-sea/25 whitespace-pre-wrap text-ink'
-            : `me-auto rounded-es-md bg-raise ${line.failed || line.runFailed ? 'text-coral' : 'text-ink'}`}"
+            : `me-auto rounded-es-md bg-raise ${line.failed || line.runFailed ? 'text-coral whitespace-pre-wrap' : 'text-ink'}`}"
         >
           {#if line.pending && !line.text}
             <span class="dots" aria-label="Replying"><span></span><span></span><span></span></span>
