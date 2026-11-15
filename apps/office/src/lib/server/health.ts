@@ -4,6 +4,8 @@
 // how many errors pages have reported. GET /api/health serves it, and
 // POST /api/client-log brings the page's own reports here.
 
+import { homedir } from 'node:os';
+
 /** At most this many page lines a minute, so a page stuck in a loop cannot fill the log. */
 export const PAGE_LINES_PER_MINUTE = 30;
 const PAGE_LINE_MAX = 600;
@@ -63,11 +65,33 @@ export function pageClosed(): void {
  * never say it.
  */
 export function pageLine(kind: string, text: string): string {
-  const clean = text
+  return `page: ${kind} ${defused(text).slice(0, PAGE_LINE_MAX)}`;
+}
+
+const defused = (text: string) =>
+  text
     .replace(/\s+/g, ' ')
     .replace(/oddboro:/gi, 'oddboro_')
     .trim();
-  return `page: ${kind} ${clean.slice(0, PAGE_LINE_MAX)}`;
+
+const RUN_ERROR_MAX = 200;
+
+/**
+ * The log's line for a run that failed or was stopped: the Odd, the kind of
+ * run, and only the first line of what went wrong, cut short, with the home
+ * folder as `~`. Never the owner's message or the Odd's reply. Logs go into
+ * bug reports, and a tool's error can name a file under the home folder.
+ */
+export function runEndLine(
+  odd: string,
+  kind: string,
+  r: { text: string; interrupted?: true },
+  home = homedir()
+): string {
+  const text = home ? r.text.replaceAll(home, '~') : r.text;
+  const first = text.split('\n').find((l) => l.trim()) ?? '';
+  const why = defused(first).slice(0, RUN_ERROR_MAX) || 'no reason given';
+  return `office: ${defused(odd)}'s ${kind} run ${r.interrupted ? 'stopped' : 'failed'}: ${why}`;
 }
 
 /** A page's report: counted if an error, logged unless this minute's lines are spent. */
