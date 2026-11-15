@@ -28,10 +28,11 @@ import { currentPlatform } from '@oddboro/ledger/platform';
 import { useShellSecrets } from '@oddboro/ledger/secrets';
 import { bringUpToDate } from '@oddboro/ledger/upgrade';
 import { keepAddress } from '#lib/server/address.ts';
-import { readKey } from '#lib/server/app-key.ts';
+import { pairService, readKey } from '#lib/server/app-key.ts';
 import { startFollowUps } from '#lib/server/follow-ups.ts';
 import { markReady, timed } from '#lib/server/health.ts';
 import { stopRuns } from '#lib/server/staff.ts';
+import { startPressureWatch } from '#lib/server/pressure-watch.ts';
 import { startClock } from '#lib/server/jobs.ts';
 import { guardOffice } from '#lib/server/owner-page.ts';
 import { syncPersonas } from '#lib/server/persona.ts';
@@ -49,7 +50,9 @@ trustSystemCertificates();
 // Listening before the pipe flows, so the key's line is never dropped.
 const keyRead = IN_APP ? readKey(process.stdin) : Promise.resolve(true);
 if (process.env.ODDBORO_APP) {
-  process.on('sveltekit:shutdown', () => process.exit(0));
+  process.on('sveltekit:shutdown', () =>
+    process.exit(process.env.ODDBORO_STOP_REQUESTED === '1' ? 75 : 0)
+  );
   process.stdin.on('close', () => process.exit(0)).resume();
 }
 
@@ -70,10 +73,12 @@ export const init: ServerInit = async () => {
   await timed('update row', loadUpdate);
   startClock();
   startFollowUps();
+  startPressureWatch();
   // An Odd that leaves the office stops what it is running at once.
   whenOddLeaves(stopRuns);
   // Never awaited: an office offline or signed out starts as fast as any.
   void syncPersonas().catch((e) => console.error('[persona] sync at start', e));
   void keepAddress();
+  if (IN_APP && process.env.ODDBORO_SERVICE_MODE === '1') await pairService();
   markReady();
 };

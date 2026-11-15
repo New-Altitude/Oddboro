@@ -1,4 +1,6 @@
 <script lang="ts">
+  import PressureNotice from '#lib/ui/PressureNotice.svelte';
+  import type { ManagerAdvice } from '#lib/server/pressure-watch.ts';
   import { onMount, tick, untrack } from 'svelte';
   import { invalidateAll } from '$app/navigation';
   import type { Desk, GoalThread } from '@oddboro/ledger';
@@ -54,6 +56,7 @@
   import { setZone, zone, zoneName, zoneShort } from '@oddboro/ledger/time';
   import { LIVE_TABLES, type LiveTable } from '@oddboro/ledger/live-tables';
 
+  let pressure = $state<ManagerAdvice | null>(null);
   let { data } = $props();
   // Every time on the page is in the office's zone, which only the server knows.
   // It is fixed for the life of the page: a new zone takes a restart.
@@ -732,6 +735,10 @@
     const events = new EventSource('/api/events' satisfies ApiUrl);
     events.onmessage = (m) => {
       const e = JSON.parse(m.data) as OfficeEvent;
+      if (e.type === 'pressure') {
+        pressure = e.advice;
+        return;
+      }
       if (e.type === 'account') {
         account.status = e.status;
         return;
@@ -1119,6 +1126,18 @@
 </svelte:head>
 
 <main class="fixed inset-0 overflow-clip">
+  {#if pressure && !firstRun}<div class="fixed end-3 bottom-12 z-30 max-w-sm">
+      <PressureNotice advice={pressure} />
+    </div>{/if}
+  <nav
+    aria-label="Workspace views"
+    class="glass fixed end-3 bottom-3 z-30 flex gap-3 rounded-lg px-3 py-1.5 text-xs font-medium text-ink"
+  >
+    <a href="/workspace" data-sveltekit-reload>Workspace</a>
+    {#if !firstRun}<a id="agent-hud" href="/workspace?from=office#agent-hud" data-sveltekit-reload
+        >Agent HUD</a
+      >{/if}
+  </nav>
   <div
     bind:this={host}
     class="absolute inset-0 transition-opacity duration-700"

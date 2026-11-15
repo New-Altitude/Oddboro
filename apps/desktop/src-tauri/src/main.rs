@@ -7,9 +7,11 @@
 
 mod diagnostics;
 mod env;
+mod headless;
 mod key;
 mod secrets;
 mod server;
+mod service_update;
 mod update;
 
 use std::path::PathBuf;
@@ -57,13 +59,61 @@ fn main() {
     if let Some(d) = &diagnostics {
         Arc::clone(d).watch_panics();
     }
+    let context = tauri::generate_context!();
+    if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--headless")) {
+        if let Err(message) = headless::run(context.package_info(), diagnostics.as_deref()) {
+            server::note(&env::log_file(), &message);
+            eprintln!("{message}");
+            std::process::exit(exit::SERVER_FAILED);
+        }
+        return;
+    }
+    if let Some(command) = std::env::args_os().nth(1) {
+        // Finder and Smoke may pass system arguments to the graphical app.
+        if !command.to_string_lossy().starts_with('-') || command == "--help" {
+            let status = node_binary()
+                .zip(server_code(context.package_info()))
+                .and_then(|(node, code)| {
+                    let executable = std::env::current_exe().ok()?;
+                    #[cfg(target_os = "linux")]
+                    let executable = std::env::var_os("APPIMAGE")
+                        .map(PathBuf::from)
+                        .unwrap_or(executable);
+                    Command::new(node)
+                        .arg(code.join("apps/office/scripts/office-cli.mjs"))
+                        .args(std::env::args_os().skip(1))
+                        .env("ODDBORO_EXECUTABLE", executable)
+                        .status()
+                        .ok()
+                });
+            std::process::exit(status.and_then(|s| s.code()).unwrap_or(1));
+        }
+    }
     let builder = tauri::Builder::default();
     // Linux and Windows have no Dock to bring a hidden window back, so
     // opening Oddboro again shows the one that runs. It goes first, before
     // anything starts.
     #[cfg(not(target_os = "macos"))]
-    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| show(app)));
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _| {
+        if let Some(window) = app.get_webview_window(MAIN) {
+            let path = match args.get(1).map(String::as_str) {
+                Some("--view-office") => Some("/?view=office"),
+                Some("--view-workspace") => Some("/workspace"),
+                _ => None,
+            };
+            if let Some(path) = path {
+                if let Some(url) = window.url().ok().and_then(|u| u.join(path).ok()) {
+                    let _ = window.navigate(url);
+                }
+            }
+        }
+        show(app)
+    }));
     let app = builder
+        .invoke_handler(tauri::generate_handler![
+            headless::unlock_office,
+            headless::dismiss_pairing
+        ])
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             None,
@@ -98,7 +148,7 @@ fn main() {
                 }
             }
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("Oddboro could not start");
 
     app.run(|app, event| match event {
@@ -152,61 +202,81 @@ fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
         return;
     }
 
-    // A newer version installs before the server starts, so an update never
-    // swaps the server out from under a running office.
-    if update::on_launch(app, &env::log_file(), show_updating) {
-        return;
-    }
-
-    if server::port_taken(port) {
-        alert(
-            app,
-            &format!(
-                "Another office is already running on port {port}. Oddboro will quit rather than share it.\n\nQuit the other office, then open Oddboro again."
-            ),
-        );
-        app.exit(exit::PORT_TAKEN);
-        return;
-    }
     let Some(node) = node_binary() else {
         return broken_install(app, diagnostics, exit::NO_NODE, NO_NODE);
     };
-    let Some(code) = server_code(app) else {
+    let Some(code) = server_code(app.package_info()) else {
         return broken_install(app, diagnostics, exit::NO_SERVER, NO_SERVER);
     };
 
-    show_loading(app);
-    let server = Server {
-        node,
-        code,
-        port,
-        path: env::login_path(),
-        home: env::office_home(),
-        log: env::log_file(),
-        version: app.package_info().version.to_string(),
-        updates: update::ENABLED,
-        diagnostics_dsn: diagnostics.map(|d| d.dsn().to_string()),
-    };
-    let Ok(url) = Url::parse(&server.url()) else {
-        return fail(
-            app,
-            exit::BAD_URL,
-            "Oddboro built a bad URL for its server.",
-        );
-    };
-    update::watch(update::Watch {
-        app: app.clone(),
-        port,
-        log: server.log.clone(),
-        show: show_updating,
-    });
-    // Each start of Node has its own key, which it has just proved it holds.
-    if let Err(why) = server.supervise(|| open_main(app, &url, key::current().as_ref())) {
-        if let Some(d) = diagnostics {
-            d.gave_up(&why);
+    if server::port_taken(port) {
+        if !env::office_home().join("service.json").is_file() {
+            return fail(
+                app,
+                exit::PORT_TAKEN,
+                "Another program is using this office port.",
+            );
         }
-        fail(app, exit::SERVER_FAILED, &why.message(&server.log_tail()));
+        headless::prompt(app);
+        return;
     }
+    if update::on_launch(app, &env::log_file(), show_updating) {
+        return;
+    }
+    show_loading(app);
+    let mut child = match headless::spawn_service() {
+        Ok(child) => child,
+        Err(e) => {
+            return fail(
+                app,
+                exit::SERVER_FAILED,
+                &format!("Could not start the office: {e}"),
+            )
+        }
+    };
+    let errors = child.stderr.take();
+    thread::spawn(move || child.wait());
+    let (tx, rx) = std::sync::mpsc::channel();
+    if let Some(pipe) = errors {
+        thread::spawn(move || {
+            use std::io::{BufRead, BufReader};
+            for line in BufReader::new(pipe).lines().map_while(Result::ok) {
+                if let Some(code) = line.strip_prefix("Oddboro owner pairing code: ") {
+                    let _ = tx.send(code.to_owned());
+                    break;
+                }
+            }
+        });
+    }
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(90);
+    let mut credential = None;
+    while std::time::Instant::now() < until {
+        if credential.is_none() {
+            credential = rx.try_recv().ok();
+        }
+        if env::office_home().join("service.json").is_file() && server::port_taken(port) {
+            if let Some(ref code_text) = credential {
+                if headless::unlock(&node, &code, port, &version.to_string(), code_text).is_some() {
+                    show_owner_code(app, code_text);
+                    return;
+                }
+            } else if env::office_home().join("paired-office").exists() {
+                // The first launch prints a code just after publishing its envelope.
+                if let Ok(code_text) = rx.recv_timeout(std::time::Duration::from_secs(1)) {
+                    credential = Some(code_text);
+                    continue;
+                }
+                headless::prompt(app);
+                return;
+            }
+        }
+        thread::sleep(std::time::Duration::from_millis(200));
+    }
+    fail(
+        app,
+        exit::SERVER_FAILED,
+        "The office did not become ready. Check the office log.",
+    );
 }
 
 /// A release that lacks a part of itself: reported, since a broken release
@@ -221,6 +291,27 @@ fn broken_install(
         d.failed(text);
     }
     fail(app, code, text);
+}
+
+fn office_server(
+    node: PathBuf,
+    code: PathBuf,
+    port: u16,
+    version: String,
+    updates: bool,
+    diagnostics: Option<&Diagnostics>,
+) -> Server {
+    Server {
+        node,
+        code,
+        port,
+        path: env::login_path(),
+        home: env::office_home(),
+        log: env::log_file(),
+        version,
+        updates,
+        diagnostics_dsn: diagnostics.map(|d| d.dsn().to_string()),
+    }
 }
 
 /// Node sits beside the shell: in `Contents/MacOS` on a Mac, in `usr/bin`
@@ -241,8 +332,8 @@ fn node_binary() -> Option<PathBuf> {
 
 /// The staged server sits in the bundle's resources, `server/`. A debug build
 /// without the bundle falls back to `apps/desktop/stage`.
-fn server_code(app: &AppHandle) -> Option<PathBuf> {
-    if let Ok(resources) = app.path().resource_dir() {
+fn server_code(package: &tauri::PackageInfo) -> Option<PathBuf> {
+    if let Ok(resources) = tauri::utils::platform::resource_dir(package, &Default::default()) {
         let bundled = resources.join("server");
         if bundled.join(server::ENTRY).is_file() {
             return Some(bundled);
@@ -267,7 +358,7 @@ fn dev_path(_relative: &str) -> Option<PathBuf> {
 }
 
 fn show_loading(app: &AppHandle) {
-    loading(app, "");
+    loading(app, "", false);
 }
 
 /// The office goes away and the loading window says "Updating Oddboro to X.Y.Z".
@@ -275,14 +366,14 @@ fn show_updating(app: &AppHandle, version: &str) {
     if let Some(main) = app.get_webview_window(MAIN) {
         let _ = main.hide();
     }
-    loading(app, version);
+    loading(app, version, false);
 }
 
 /// The small loading window. `updating` is the version it updates to, or
 /// empty while the office opens. `loading/loading.js` shows the words.
-fn loading(app: &AppHandle, updating: &str) {
+fn loading(app: &AppHandle, updating: &str, pairing: bool) {
     let script = format!(
-        "window.oddboroUpdating = {};",
+        "window.oddboroPairing = {pairing}; window.oddboroUpdating = {};",
         serde_json::Value::from(updating)
     );
     if let Some(window) = app.get_webview_window(LOADING) {
@@ -299,10 +390,24 @@ fn loading(app: &AppHandle, updating: &str) {
         .build();
 }
 
+fn requested_view() -> &'static str {
+    match std::env::args().nth(1).as_deref() {
+        Some("--view-workspace") => "/workspace",
+        Some("--view-office") => "/?view=office",
+        _ => "/",
+    }
+}
+
 /// Opens the office in the main window, or reloads it after a restart. With
 /// the app's key the window opens on a blank page, so it asks the office for
 /// nothing until its cookie is in place (`open_with_key`). Off the main thread.
 fn open_main(app: &AppHandle, url: &Url, key: Option<&Arc<Key>>) {
+    let selected = if key.is_some() {
+        url.join(requested_view()).ok()
+    } else {
+        None
+    };
+    let url = selected.as_ref().unwrap_or(url);
     if let Some(window) = app.get_webview_window(MAIN) {
         match key {
             Some(key) => open_with_key(&window, key, url),
@@ -415,6 +520,21 @@ fn browser_link(office: &Url, to: &Url) -> Option<Url> {
     Some(link)
 }
 
+/// Allow just a direct link to one Codex chat.
+fn codex_chat(url: &Url) -> bool {
+    let Some(id) = url.as_str().strip_prefix("codex://threads/") else {
+        return false;
+    };
+    id.len() == 36
+        && id.bytes().enumerate().all(|(i, byte)| {
+            if matches!(i, 8 | 13 | 18 | 23) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
+}
+
 /// The office's own origin stays in the window. Links anywhere else open in
 /// the default browser. Other schemes (about:, data:, blob:) stay put.
 fn stay_or_open(home: &Url, to: &Url) -> bool {
@@ -424,12 +544,16 @@ fn stay_or_open(home: &Url, to: &Url) -> bool {
             open_in_browser(to);
             false
         }
+        "codex" if codex_chat(to) => {
+            open_in_browser(to);
+            false
+        }
         _ => true,
     }
 }
 
 fn open_in_browser(url: &Url) {
-    if !matches!(url.scheme(), "http" | "https" | "mailto" | "tel") {
+    if !matches!(url.scheme(), "http" | "https" | "mailto" | "tel") && !codex_chat(url) {
         return;
     }
     let (opener, first) = OPENER;
@@ -511,8 +635,9 @@ fn tray(app: &AppHandle) -> tauri::Result<()> {
     let login =
         CheckMenuItem::with_id(app, "login", "Open at login", true, at_login, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Oddboro", true, None::<&str>)?;
+    let stop = MenuItem::with_id(app, "stop-office", "Stop office", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&open, &login, &separator, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &login, &separator, &stop, &quit])?;
     TrayIconBuilder::with_id("oddboro")
         .icon(Image::from_bytes(TRAY_ICON)?)
         .icon_as_template(true)
@@ -522,6 +647,16 @@ fn tray(app: &AppHandle) -> tauri::Result<()> {
             "open" => show(app),
             "login" => toggle_open_at_login(app, &login),
             "quit" => app.exit(0),
+            "stop-office" => {
+                let handle = app.clone();
+                thread::spawn(move || {
+                    if headless::stop_service(handle.package_info()) {
+                        handle.exit(0)
+                    } else {
+                        alert(&handle, "Could not stop this office. Check its status.")
+                    }
+                });
+            }
             _ => {}
         })
         .build(app)?;
@@ -561,6 +696,15 @@ fn alert(app: &AppHandle, message: &str) {
         .blocking_show();
 }
 
+fn show_owner_code(app: &AppHandle, code: &str) {
+    // Only the local loading webview sees this once. Its field can be copied
+    // into a password manager; the code never goes to a log or the office page.
+    if let Some(window) = app.get_webview_window(LOADING) {
+        let value = serde_json::Value::from(code);
+        let _ = window.eval(format!("window.oddboroSaveCode({value})"));
+    }
+}
+
 fn fail(app: &AppHandle, code: i32, message: &str) {
     alert(app, message);
     app.exit(code);
@@ -577,7 +721,21 @@ fn opening(server_url: Option<&str>, port: u16) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::opening;
+    use super::{codex_chat, opening, Url};
+
+    #[test]
+    fn only_a_codex_chat_link_opens_the_app() {
+        let chat = "codex://threads/82000000-0000-4000-9000-000000000001";
+        assert!(codex_chat(&Url::parse(chat).unwrap()));
+        for other in [
+            chat.to_owned() + "?open=other",
+            chat.to_owned() + "/extra",
+            "codex://settings/general".into(),
+            "codex://threads/no-id".into(),
+        ] {
+            assert!(!codex_chat(&Url::parse(&other).unwrap()));
+        }
+    }
 
     #[test]
     fn the_launch_line_names_what_the_shell_opens() {

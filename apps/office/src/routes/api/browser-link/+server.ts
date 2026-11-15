@@ -5,11 +5,12 @@
 // minute (`mintLink` in app-key.ts). Only the shell asks: the page has no use
 // for one.
 import { error, json } from '@sveltejs/kit';
-import { fromShell, mintLink } from '#lib/server/app-key.ts';
+import { fromPairedShell, fromShell, mintLink } from '#lib/server/app-key.ts';
 import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = async ({ request }) => {
-  if (!fromShell(request)) error(403, 'Only the app makes browser links');
+  if (!fromShell(request) && !fromPairedShell(request))
+    error(403, 'Only the app makes browser links');
   const b = (await request.json().catch(() => ({}))) as { path?: unknown };
   if (typeof b.path !== 'string' || !b.path.startsWith('/')) error(400, 'Name the path');
   return json({ code: mintLink(b.path) });

@@ -102,3 +102,5 @@ Report a vulnerability privately, never in a public issue. See `SECURITY.md`.
 Apache License 2.0. See `LICENSE`, and `NOTICE` for the attribution that
 travels with the code. The license grants no rights to the Oddboro name.
 The 25 music tracks are not covered by it: see `LICENSE-ASSETS`.
+
+[Use Workspace or run an office from the command line](docs/workspace-and-cli.md).

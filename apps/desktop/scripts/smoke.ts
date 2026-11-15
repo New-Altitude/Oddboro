@@ -31,7 +31,7 @@
 // secret store (ODDBORO_SECRETS=office). The Mac app keeps its secrets
 // through its shell, in the Keychain the owner's Oddboro uses, so off CI it
 // runs only with --my-keychain.
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createHmac, randomBytes } from 'node:crypto';
 import {
   appendFileSync,
@@ -290,6 +290,15 @@ async function officeChecks(
  */
 async function windowCheck(page: Page): Promise<string> {
   let lastRead = '';
+  const choice = await until(
+    'first launch choice or Office welcome',
+    async () => {
+      const seen = await page.read().catch(() => '');
+      return seen.includes('Choose your view') || seen.includes('Next') ? seen : undefined;
+    },
+    60
+  );
+  if (choice.includes('Choose your view')) await page.press('Office');
   const before = await until(
     'a Next button in the window',
     async () => {
@@ -634,6 +643,7 @@ async function smokeApp(): Promise<void> {
   // The first start comes with its window: Linux through tauri-driver, which
   // starts the app itself, Windows and the Mac by reading the window as is.
   let app: ChildProcess | undefined;
+  let pairingCode = '';
   let page: Page | undefined;
   let stopDriven: (() => Promise<string>) | undefined;
   let script: ((body: string) => Promise<unknown>) | undefined;
@@ -641,13 +651,23 @@ async function smokeApp(): Promise<void> {
     if (LINUX) {
       const t = Date.now();
       const driven = await webdriverStart(exe, r);
-      ({ page, script } = driven);
+      ({ page, script, pairingCode } = driven);
       stopDriven = driven.stop;
       return `${Date.now() - t} ms, through tauri-driver`;
     }
     app = launch(exe, r);
     const ms = await ready(app, r);
     page = WIN ? automationPage(app.pid ?? 0) : accessibilityPage(app.pid ?? 0);
+    const current = page;
+    pairingCode = await until(
+      'the new owner pairing code',
+      async () => {
+        const code = await current.pairingCode?.();
+        return code?.startsWith('ob1.') ? code : undefined;
+      },
+      90
+    );
+    await current.press('I saved my code');
     return `${ms} ms`;
   });
   if (!started || !page) return;
@@ -692,7 +712,29 @@ async function smokeApp(): Promise<void> {
     return 'no page: error line in the log';
   });
   await step('a screenshot', false, () => screenshot(join(OUT, 'screen.png')));
-  await step('quits with Node and both ports gone', true, async () => {
+  const ownerCommand = (command: string) =>
+    JSON.parse(
+      execFileSync(exe, [command, '--json'], {
+        env: { ...process.env, ...r.env },
+        input: pairingCode + '\n',
+        encoding: 'utf8',
+        timeout: 45000
+      })
+    );
+  const stopOffice = () => ownerCommand('stop');
+  await step('the paired CLI reaches the graphical office', true, async () => {
+    const status = ownerCommand('status');
+    if (typeof status.welcomed !== 'boolean' || (args.version && status.version !== args.version))
+      throw Error('The CLI did not reach the configured office.');
+    if (
+      script &&
+      status.pid !== (await script("return (await (await fetch('/api/health')).json()).pid"))
+    )
+      throw Error('The window and CLI reached different offices.');
+    return 'same office';
+  });
+  await step('quits with Node and both ports gone after Stop office', true, async () => {
+    stopOffice();
     if (stopDriven) return `${await stopDriven()}; the relaunches quit with SIGTERM`;
     return `${await quit(app!, r)} ms`;
   });
@@ -703,7 +745,19 @@ async function smokeApp(): Promise<void> {
     for (let i = 1; i <= relaunches; i++) {
       const again = launch(exe, r);
       times.push(await ready(again, r));
-      // Its data is checked on the staged server (--stage), which this run can give a key.
+      const status = await until(
+        'the paired office again',
+        async () => {
+          try {
+            return ownerCommand('status');
+          } catch {
+            return undefined;
+          }
+        },
+        90
+      );
+      if (typeof status.welcomed !== 'boolean') throw Error('Could not read the saved office.');
+      stopOffice();
       await quit(again, r);
     }
     return `starts (ms): ${times.join(', ')}`;

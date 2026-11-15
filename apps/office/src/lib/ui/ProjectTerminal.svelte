@@ -9,8 +9,10 @@
     view,
     writable = $bindable(false),
     onerror,
-    onstream
+    onstream,
+    scrollback
   }: {
+    scrollback: Map<string, number>;
     onstream: (stream: EventSource, id: string) => void;
     id: string;
     /** This window's terminal view: one view at a time takes the typing. */
@@ -55,7 +57,11 @@
       onstream(stream, id);
       stream.addEventListener('screen', (e) => {
         term.reset();
-        term.write(JSON.parse(e.data));
+        const behind = scrollback.get(id) ?? 0;
+        term.write(JSON.parse(e.data), () => {
+          if (!disposed && behind)
+            term.scrollToLine(Math.max(0, term.buffer.active.baseY - behind));
+        });
       });
       stream.addEventListener('control', (e) => {
         writable = JSON.parse(e.data);
@@ -109,6 +115,7 @@
         stream.close();
         observer.disconnect();
         input.dispose();
+        scrollback.set(id, term.buffer.active.baseY - term.buffer.active.viewportY);
         term.dispose();
       };
     })().catch((e) => onerror(e.message));

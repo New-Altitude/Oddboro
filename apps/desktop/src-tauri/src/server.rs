@@ -17,7 +17,7 @@ use serde_json::Value;
 use crate::key::Key;
 
 /// The server's entry point, relative to the staged code.
-pub const ENTRY: &str = "apps/office/build/index.js";
+pub const ENTRY: &str = "apps/office/scripts/service-entry.mjs";
 
 const READY_TIMEOUT: Duration = Duration::from_secs(90);
 const STOP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -142,6 +142,11 @@ impl Server {
             if QUITTING.load(SeqCst) {
                 return Ok(());
             }
+            if std::env::var_os("ODDBORO_SERVICE_MODE").is_some()
+                && status.as_ref().is_ok_and(|s| s.code() == Some(75))
+            {
+                return Ok(());
+            }
             let code = status.as_ref().ok().and_then(ExitStatus::code);
             let status = status.map_or_else(|e| e.to_string(), |s| s.to_string());
             note(&self.log, &format!("node stopped: {status}"));
@@ -211,7 +216,10 @@ impl Server {
         // The office keeps its secrets through this shell (`secrets.rs`), over
         // the two pipes above. Mac only.
         #[cfg(target_os = "macos")]
-        command.env("ODDBORO_SECRETS", "shell");
+        if !(cfg!(debug_assertions) && std::env::var("ODDBORO_SECRETS").as_deref() == Ok("office"))
+        {
+            command.env("ODDBORO_SECRETS", "shell");
+        }
         // Node is a console program. Without this, Windows opens a console
         // window for it, and for every program it starts.
         #[cfg(windows)]
@@ -570,6 +578,7 @@ enum Route<'a> {
     Drop,
     /// The owner's Check now.
     Check,
+    Pairing(&'a str),
     Notify(&'a str, &'a str),
     Log,
 }
@@ -578,7 +587,20 @@ fn route(line: &str) -> Route<'_> {
     if crate::secrets::private(line) {
         return Route::Secret;
     }
-    if line.contains(crate::key::LINE.trim_end()) {
+    if let Some(code) = line.strip_prefix("oddboro:pairing ") {
+        if code.starts_with("ob1.")
+            && code.len() < 180
+            && code
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+        {
+            return Route::Pairing(code);
+        }
+    }
+    if line.contains("oddboro:pairing")
+        || line.contains("ob1.")
+        || line.contains(crate::key::LINE.trim_end())
+    {
         return Route::Drop;
     }
     if line == crate::update::CHECK_LINE {
@@ -608,6 +630,11 @@ fn relay(out: impl Read, mut log: File) {
                     );
                 }
             },
+            Route::Pairing(code) => {
+                // Only the launching owner's terminal or the launcher's private
+                // pipe receives the first credential. Never put it in office.log.
+                eprintln!("Oddboro owner pairing code: {code}");
+            }
             Route::Drop => {}
             Route::Check => crate::update::check_now(),
             Route::Notify(title, text) => notify(title, text),
@@ -729,6 +756,21 @@ fn tail(path: &Path, count: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_pairing_notice_reaches_the_launching_owner_and_never_the_log() {
+        assert_eq!(
+            route("oddboro:pairing ob1.test.owner"),
+            Route::Pairing("ob1.test.owner")
+        );
+        for line in [
+            "diagnostic ob1.test.owner",
+            "oddboro:pairing invalid",
+            "prefix oddboro:pairing ob1.test.owner",
+        ] {
+            assert_eq!(route(line), Route::Drop);
+        }
+    }
 
     #[test]
     fn a_secret_line_never_goes_to_the_log() {

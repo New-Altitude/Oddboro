@@ -116,6 +116,7 @@ export const ROUTE_IDS = {
   '/api/account': true,
   '/api/accounts': true,
   '/api/act-check': true,
+  '/api/agent-attention': true,
   '/api/agents': true,
   '/api/agents/[tool]': true,
   '/api/asks/[id]': true,
@@ -128,6 +129,7 @@ export const ROUTE_IDS = {
   '/api/asks/[id]/reply': true,
   '/api/browser-link': true,
   '/api/client-log': true,
+  '/api/computer-activity': true,
   '/api/connectors': true,
   '/api/diagnostics': true,
   '/api/diagnostics/envelope': true,
@@ -192,6 +194,9 @@ export const ROUTE_IDS = {
   '/api/tasks/[id]': true,
   '/api/update': true,
   '/atlas/[file]': true,
+  '/api/workspace': true,
+  '/workspace': true,
+  '/welcome': true,
   '/connect/callback': true
 } as const satisfies Record<RouteId, true>;
 

@@ -37,6 +37,7 @@ import { CHAT_REQUEST_BYTES } from '../staff/chat-input.ts';
 import type { Handle } from '@sveltejs/kit/hooks';
 import { IN_APP } from '@oddboro/ledger';
 import {
+  fromPairedShell,
   fromShell,
   fromWindow,
   LINK_QUERY,
@@ -84,6 +85,12 @@ const READS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 /** Where the shell's header counts, as the key and as the owner's own page. */
 const SHELL_PATHS = new Set(['/api/update', '/api/browser-link']);
+function allowedShell(request: Request, path: string) {
+  return (
+    (SHELL_PATHS.has(path) && fromShell(request)) ||
+    (path === '/api/browser-link' && fromPairedShell(request))
+  );
+}
 /**
  * Where a service's sign-in page sends the owner's browser back, which has no
  * key. Each checks its own state, made for one sign-in and spent on use, and
@@ -97,7 +104,7 @@ function carriesKey(request: Request, url: URL): boolean {
   const get = request.method === 'GET';
   return (
     fromWindow(request) ||
-    (SHELL_PATHS.has(path) && fromShell(request)) ||
+    allowedShell(request, path) ||
     (get && CALLBACKS.has(path)) ||
     (get && path === PROOF_PATH) ||
     (path.startsWith(`${GATEWAY_PATH}/`) && fromRun(request)) ||
@@ -128,8 +135,11 @@ async function fits(request: Request, limit: number): Promise<boolean> {
 /** The server's `handle`: every request passes here before a route sees it. */
 export const guardOffice: Handle = async ({ event, resolve }) => {
   const { request } = event;
-  if (IN_APP && !carriesKey(request, event.url)) return refuse(OPEN_FROM_APP);
+  const ownerCommand = event.platform?.req?.[Symbol.for('oddboro.owner.connection')] === true;
+  if (ownerCommand) event.locals.ownerCommand = true;
+  if (IN_APP && !ownerCommand && !carriesKey(request, event.url)) return refuse(OPEN_FROM_APP);
   if (
+    !ownerCommand &&
     !fromThisComputer({
       forwardedFor: request.headers.get('x-forwarded-for'),
       peer: event.getClientAddress()
@@ -139,8 +149,9 @@ export const guardOffice: Handle = async ({ event, resolve }) => {
   if (!toThisOffice(request)) return refuse('This office answers only at its own address');
   if (
     READS.has(request.method) ||
+    ownerCommand ||
     fromOwnerPage(request) ||
-    (SHELL_PATHS.has(event.url.pathname) && fromShell(request)) ||
+    allowedShell(request, event.url.pathname) ||
     (event.url.pathname.startsWith(`${GATEWAY_PATH}/`) && fromRun(request))
   ) {
     const chat =

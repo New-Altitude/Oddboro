@@ -10,14 +10,14 @@
 //! On Windows the updater runs the new version's installer and ends this app
 //! itself, and the installer opens the new version when it is done.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::Sender;
 use std::sync::OnceLock;
-use std::thread::{self, sleep};
+use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use serde_json::{json, Value};
+use serde_json::Value;
 use tauri::{AppHandle, Url};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
@@ -30,11 +30,9 @@ pub const ENABLED: bool = cfg!(not(debug_assertions));
 
 const CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
-const EVERY: Duration = Duration::from_secs(4 * 60 * 60);
-const ASK_EVERY: Duration = Duration::from_secs(30);
 /// Set on a version the shell opens itself (Linux, or Windows after a failed
 /// install): the pid of the one it replaces.
-const RELAUNCH_FROM: &str = "ODDBORO_RELAUNCH_FROM";
+pub const RELAUNCH_FROM: &str = "ODDBORO_RELAUNCH_FROM";
 /// The longest a new version waits for the old one to quit.
 const OLD_QUITS_WITHIN: Duration = Duration::from_secs(30);
 
@@ -83,98 +81,14 @@ pub fn on_launch(app: &AppHandle, log: &Path, show: ShowUpdating) -> bool {
     }
 }
 
-/// What the watcher needs: the app, the server's port, the log, and how to
-/// show the owner it is updating. Its requests carry the current key.
-pub struct Watch {
-    pub app: AppHandle,
-    pub port: u16,
-    pub log: PathBuf,
-    pub show: ShowUpdating,
+/// Wake the service's one update worker when the owner chooses Check now.
+pub fn set_checks(tx: Sender<()>) -> Result<(), Sender<()>> {
+    CHECK_NOW.set(tx)
 }
-
-/// While the office runs: check every 4 hours and on Check now, download a
-/// new version, and install it when the server says so.
-pub fn watch(w: Watch) {
-    if !ENABLED {
-        return;
-    }
-    let (tx, rx) = channel();
-    if CHECK_NOW.set(tx).is_err() {
-        return;
-    }
-    thread::spawn(move || loop {
-        match rx.recv_timeout(EVERY) {
-            Ok(()) | Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => return,
-        }
-        let found = check(&w.app).and_then(|found| match found {
-            Some(update) => {
-                server::note(&w.log, &format!("downloading {}", update.version));
-                download(&update).map(|bytes| Some((update, bytes)))
-            }
-            None => Ok(None),
-        });
-        match found {
-            Ok(Some((update, bytes))) => {
-                server::note(&w.log, &format!("{} is ready to install", update.version));
-                hand_over(&w, &update, &bytes, &rx);
-            }
-            Ok(None) => {
-                server::note(&w.log, "update check: this is the newest version");
-                ask(w.port, "POST", Some(&json!({ "checked": true })));
-            }
-            Err(e) => {
-                server::note(&w.log, &format!("update check failed: {e}"));
-                ask(w.port, "POST", Some(&json!({ "failed": e })));
-            }
-        }
-    });
-}
-
-/// The server asked for a check (Check now).
 pub fn check_now() {
     if let Some(tx) = CHECK_NOW.get() {
         let _ = tx.send(());
     }
-}
-
-/// Tell the server a version is ready, then ask it every 30 seconds until it
-/// says to install. A server that restarted forgets the update, so the shell
-/// tells it again.
-fn hand_over(w: &Watch, update: &Update, bytes: &[u8], checks: &Receiver<()>) {
-    let (app, port, log) = (&w.app, w.port, w.log.as_path());
-    let ready =
-        json!({ "version": update.version, "notes": update.body.clone().unwrap_or_default() });
-    loop {
-        let answer = ask(port, "GET", None);
-        let knows = answer.as_ref().is_some_and(|a| {
-            a["ready"] == true && a["version"].as_str() == Some(update.version.as_str())
-        });
-        if knows && answer.as_ref().is_some_and(|a| a["install"] == true) {
-            break;
-        }
-        if !knows {
-            ask(port, "POST", Some(&ready));
-        }
-        // A check now changes nothing while a version waits to install.
-        while checks.try_recv().is_ok() {}
-        sleep(ASK_EVERY);
-    }
-    let (from, to) = (&update.current_version, &update.version);
-    server::note(
-        log,
-        &format!("installing {to} over {from}: stopping the office"),
-    );
-    (w.show)(app, &update.version);
-    server::stop();
-    match install(update, bytes) {
-        Ok(()) => server::note(log, &installed(update)),
-        Err(e) => server::note(
-            log,
-            &format!("install of {} failed, reopening: {e}", update.version),
-        ),
-    }
-    relaunch(app);
 }
 
 /// The office's next start logs "first start of X" (`packages/ledger/src/backup.ts`).
@@ -302,7 +216,7 @@ fn running(pid: u32) -> bool {
 
 /// One request to the server's `/api/update`, with the current key, which
 /// marks it as the shell's. None before Node has started.
-fn ask(port: u16, method: &str, body: Option<&Value>) -> Option<Value> {
+pub fn ask(port: u16, method: &str, body: Option<&Value>) -> Option<Value> {
     let key = crate::key::current()?;
     server::call(port, &key, method, "/api/update", body)
 }

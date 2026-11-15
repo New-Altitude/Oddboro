@@ -1275,6 +1275,7 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
     const results: Run[] = [];
     let added = 0;
     const live = runsGoing.get(key);
+    if (live && child.pid) live.process = { pid: child.pid, agent: who.agent };
     const heard = (): Run | undefined =>
       results.length
         ? (results.find((r) => !r.ok) ?? {
@@ -1285,7 +1286,10 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
     const finish = (end: Run) => {
       if (finished) return;
       finished = true;
-      if (live) live.add = undefined;
+      if (live) {
+        live.add = undefined;
+        live.process = undefined;
+      }
       if (!child.stdin.writableEnded) child.stdin.end();
       // A Claude Code that refuses the open network fails this run: the owner
       // is told plainly, and from now on this office's Claude Code runs keep

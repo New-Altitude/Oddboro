@@ -41,6 +41,10 @@
     staff: StaffProfile[];
     /** Open on this item when set, e.g. after clicking a waiting staffer. */
     focus?: string;
+    /** Office can show the chat beside the Desk. Workspace shows one panel at a time. */
+    selectChat?: boolean;
+    /** Return to the queue that opened this card once the Desk returns to its list. */
+    onlist?: () => void;
     /** Approving a proposed hire opens the hire window with it. */
     onhire: (a: AskRow) => void;
     /** Approving a goal plan opens a hire window for each hire in it. */
@@ -48,7 +52,7 @@
     /** Open a staffer's card, from the name on an item. */
     onstaff: (id: string) => void;
   };
-  let { desk, staff, focus, onhire, onplan, onstaff }: Props = $props();
+  let { desk, staff, focus, selectChat = true, onlist, onhire, onplan, onstaff }: Props = $props();
 
   /** The row each kind of desk item shows. */
   type DeskRow = { ask: AskRow; task: TaskRow; report: ReportRow };
@@ -99,9 +103,10 @@
   /** Open an item, and select it in the chat of the staffer who delivered it. */
   function show(key: string | undefined) {
     openKey = key;
+    if (!key) onlist?.();
     unsaved = false;
     const i = items.find((x) => x.key === key);
-    if (i?.row.staffId) showInChat(i.row.staffId, delivered(i));
+    if (selectChat && i?.row.staffId) showInChat(i.row.staffId, delivered(i));
   }
   const delivered = (i: Item) => ({ kind: i.kind, id: i.row.id, title: i.row.title });
   /** Moving off an item with unsaved edits waits for the owner to say so. */

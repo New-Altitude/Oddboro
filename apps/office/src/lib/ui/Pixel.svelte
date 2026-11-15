@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { getContext } from 'svelte';
+  const textOnly = getContext<boolean>('text-only-office');
   import { paint, paintImage } from './atlas.ts';
 
   type Props = {
@@ -18,7 +20,7 @@
   let canvas: HTMLCanvasElement | undefined = $state();
 
   $effect(() => {
-    if (!canvas) return;
+    if (textOnly || !canvas) return;
     const c = canvas;
     const atlasArt = () =>
       (frame ? paint(c, frame, scale, crop) : Promise.resolve(false)).then((ok) => {
@@ -32,6 +34,9 @@
   });
 </script>
 
-<span role="img" aria-label={label} class={cls}
-  ><canvas bind:this={canvas} aria-hidden="true" class="block max-h-full max-w-full"></canvas></span
->
+{#if !textOnly}
+  <span role="img" aria-label={label} class={cls}
+    ><canvas bind:this={canvas} aria-hidden="true" class="block max-h-full max-w-full"
+    ></canvas></span
+  >
+{/if}
