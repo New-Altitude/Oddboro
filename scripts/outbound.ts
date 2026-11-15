@@ -91,6 +91,13 @@ export const OUTBOUND: readonly Outbound[] = [
     yes: 'The owner sending the message; nothing leaves this computer here.'
   },
   {
+    file: 'apps/office/src/lib/ui/phone/phone-goals.ts',
+    calls: 1,
+    to: "The office, on this computer: the chat route of a goal's lead.",
+    sends: "The owner's message to the team on a goal's page, to the office that runs the lead.",
+    yes: 'The owner sending the message; nothing leaves this computer here.'
+  },
+  {
     file: 'apps/office/src/lib/ui/UpdatesSection.svelte',
     calls: 1,
     to: 'The office, on this computer: its live line of changes.',
@@ -125,6 +132,36 @@ export const OUTBOUND: readonly Outbound[] = [
     to: 'The office, on this computer: its live line of changes.',
     sends: "A request to hear changes. Nothing of the owner's.",
     yes: 'The owner opening the office; nothing leaves this computer.'
+  },
+  {
+    file: 'apps/office/src/lib/server/push.ts',
+    calls: 1,
+    to: "The push service of each phone the owner turned the buzz on for: Apple's, Google's, Mozilla's or Microsoft's, and no other (`PUSH_HOSTS`).",
+    sends:
+      "An empty push, signed with the office's own key, when something new lands on the desk. Nothing of the desk: the phone shows a fixed line.",
+    yes: 'The owner tapping Buzz me on the phone desk, on that phone. Buzz on turns it off.'
+  },
+  {
+    file: 'apps/office/src/routes/desk/+page.svelte',
+    calls: 1,
+    to: "The office's live line of changes, from the owner's phone over their own tailnet to the home computer.",
+    sends: "A request to hear changes. Nothing of the owner's.",
+    yes: 'The owner opening the phone desk; the request stays on their tailnet.'
+  },
+  {
+    file: 'apps/office/src/lib/ui/phone/PhoneCall.svelte',
+    calls: 2,
+    to: "The office's chat route, from the owner's phone over their own tailnet to the home computer.",
+    sends: "The owner's words on a call with an Odd, to the office that runs the Odd.",
+    yes: 'The owner sending the message on the call; the request stays on their tailnet.'
+  },
+  {
+    file: 'apps/office/src/lib/server/phone-door.ts',
+    calls: 1,
+    to: 'The office itself, at 127.0.0.1 on this computer, and nowhere else (`OFFICE_URL`).',
+    sends:
+      "A request from the owner's phone over their tailnet, handed on as it came, without what Tailscale added.",
+    yes: "The owner listing their tailnet name with Let my phone in, and pointing tailscale serve at the door; the office's own checks still run."
   },
   {
     file: 'apps/office/src/lib/server/gemini.ts',

@@ -1,0 +1,14 @@
+{
+  "name": "Oddboro Desk",
+  "short_name": "Desk",
+  "description": "What your Odds are waiting on.",
+  "start_url": "/desk",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b0d17",
+  "theme_color": "#0b0d17",
+  "icons": [
+    { "src": "/desk-256.png", "sizes": "256x256", "type": "image/png" },
+    { "src": "/desk-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

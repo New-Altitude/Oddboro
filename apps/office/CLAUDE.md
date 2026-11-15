@@ -1517,6 +1517,124 @@ the one being entered, and moves the rest to the work room with the most free
 seats. The `offices` trigger reloads every open page. Earlier layouts and the
 sample stay in the window to move back to.
 
+## The phone desk
+
+`/desk` (`src/routes/desk/`) is the Desk alone, for the owner's phone on
+their tailnet (`docs/remote-desk.md`). Setup's Your phone section
+(`src/lib/ui/PhoneDeskSection.svelte`, under Updates once the office is
+welcomed) sets it up: `GET /api/phone` asks Tailscale on this computer
+(`src/lib/server/tailscale.ts`: on PATH, else the Mac app's own binary or
+Windows' `Program Files`) for its name (`status --json`, `Self.DNSName`) and
+whether `serve status --json` sends that name to the phone's door. Each step
+shows only while it is to do: install or sign in to Tailscale, the
+`tailscale serve` command to run (with `sudo` on Linux; the office never runs
+it, since it changes what the tailnet reaches), and Let my phone in, which
+posts to `/api/phone` to add the name to `ODDBORO_EXTRA_HOSTS` in `.env` and
+in this process. Then it shows the link and a QR code
+(`qrcode-generator`). It reads Tailscale when it opens and on Check again;
+nothing polls. `tailscale.test.ts` runs it on a Mac, Linux and Windows
+(hard rule 14).
+
+The office answers only this computer ("Who the office answers"), so
+`tailscale serve` points at the phone's door (`src/lib/server/phone-door.ts`)
+instead: a second listener on 127.0.0.1, port 4502 (`ODDBORO_PHONE_PORT`),
+which `init` in `hooks.server.ts` opens from source and never in the app. It
+lets a request through only with Tailscale's `Tailscale-User-Login` (never
+there through funnel) at a name in `ODDBORO_EXTRA_HOSTS`, read on each
+request; drops `X-Forwarded-*` and Tailscale's headers; asks the office at
+`127.0.0.1:<port>`; makes an Origin naming the tailnet address the office's
+own; and makes a Location at the office's address relative. Sec-Fetch-Site
+passes through, so `guardOffice` runs unchanged. No websocket.
+`phone-door.test.ts` covers it.
+
+The page is the phone app, with four tabs along its foot
+(`src/lib/ui/phone/`, `PhoneTabs.svelte`; `#desk` and the like in the address
+picks one, so the buzz opens Desk). Home (`PhoneHome.svelte`) lists the asks
+alone under Waiting on you, newest first; under Happening now the goals with
+work handed on or back today, with no count (`happeningToday`); and under
+Who's around each Odd with a dot and one line (`aroundLine`: its running work
+and minutes, else waiting on you, else free and its next job) and a call
+button. Home's next jobs and goals come from
+`GET /api/phone/home` (`src/lib/server/phone-home.ts`, read only, from the
+ledger's own readers), read again on a change to `jobs`, `threads`,
+`follow_ups`, `goals` or `staff_goals`. Its minutes move once a minute only
+while an Odd is at work. Goals (`PhoneGoals.svelte`) lists the active goals,
+newest first, from `GET /api/phone/goals` (`src/lib/server/phone-goals.ts`,
+read only): area, title, when, the lead (the hub of the goal's newest open
+thread, else the Office Manager, `leadOf`), the faces of the Odds serving it,
+what of it waits on the owner, and its threads done out of all with the
+latest health in words (`progressOf`), never a percentage. There is no New:
+goals are set at the computer. A card, or a goal under Happening now, opens
+its page (`PhoneGoal.svelte`, `GET /api/phone/goals/[id]`): why, done when,
+progress and the team, then its work read only as one conversation
+(`goalConversation`: each hand-off's brief, each result going back and the
+lead's next step, in the Odds' own words), with what waits on the owner
+woven in by when it landed and the Desk tab's buttons on it (`goalLines`).
+Call opens the lead's chat, and Message the team posts to the lead's own
+chat route (`messageLead`). Both read again on a change to the goal's
+tables. Desk
+(`PhoneDesk.svelte`) lists every item as a card, newest first, with All, Asks,
+Tasks and Reports chips, and each card's buttons from `cardButtons` in
+`phone-desk.ts`: a one-tap button posts the same route and body as the Desk
+window's, a card whose yes may send something out (a reply, or a held call the
+office did not put in words, `sendsOut`) and every kind with its own review
+get Open only, and a task shows its steps done. Open shows the same
+`DeskDrawer.svelte` over the list with `away`
+set: no hire window is there, and nothing reaches the office computer's folder
+picker or a sign-in that comes back to it, so a hire ask, a hosted or AWS
+sign-in step and a folder ask's Change say "Open this at the office".
+Selecting a report's text to chat about it stays at the computer too.
+Everything else answers as on the computer, through the same routes.
+Messages (`PhoneMessages.svelte`) lists every Odd with its dot and its chat's
+last line ("You: ..." when the owner said it, `previewLine`), from
+`GET /api/phone/messages` (`src/lib/server/phone-messages.ts`, read only),
+read again when the tab opens, on a change to `pokes` or `staff` (a poke
+landing, a new Odd's hello), and when a chat or call on the phone ends. A row opens the Odd's own
+`ChatPanel.svelte`, as on the computer, with Call in its header. The sender card and a colleague's name
+on an item, and a report's Reply (`replyAbout`), open that Odd's chat; opening
+an item alone (`showInChat`) does not, since on a phone that would leave the
+desk. A desk item tapped in a chat opens on the Desk tab while it waits
+(`waitingKey` in `src/lib/desk.ts`, which the floor's page uses too), and a
+report no longer there opens on its own (`ReportView.svelte`), as does a file
+(`FileViewer.svelte`), over the page, which stays as it was beneath. It hears
+`/api/events` and reloads `/api/office` on a change to a table whose page
+refreshes or reloads (`LIVE_TABLES`), bumps an open chat's `version` as the
+floor does, takes each `working` event, and does all of it again each time
+the line opens, as when the phone wakes. Nothing polls. A call
+(`PhoneCall.svelte`, `phone-call.ts`) opens over any tab from Home's call
+buttons, an open chat and a Desk card, with the tab bar hidden. It is the
+Odd's own chat route: it opens on the chat's last spoken lines as captions,
+and a reply shows as the route streams it, while bars move. Above them: the
+Odd's portrait, name and role, a timer that ticks only while the call shows,
+what else the Odd is doing (`alsoLine`), and Waiting on you with its newest
+ask or task (`waitingFor`) and Open, which goes to the Desk. Talk opens the
+Type box so the keyboard's own mic dictates; Desk goes to the Desk tab; End
+and Back close it, and Back names the tab it was opened from. Its own styles give every control 44px
+and every field 16px text, so a phone neither misses a tap nor zooms. The
+page links `static/desk.webmanifest` and the icons `desk-256.png` and
+`desk-512.png` (drawn by `npm run mark`), so a phone adds it to its home
+screen and opens it straight to the desk. Nothing of the desk is kept on the
+phone.
+
+Buzz me at the top of Home turns on a buzz for that phone
+(`src/lib/ui/phone-buzz.ts`): the phone asks for leave to notify, registers
+`static/desk-push.js` for `/desk` alone, asks its push service for an address
+with the office's key, and gives the office that address (`/api/push`).
+`src/lib/server/push.ts` keeps the key (VAPID) and the addresses in the
+system's secret store under `push-<hash of the office's home>`, so dev offices
+sharing one Keychain service never share them, and only at the push services
+`PUSH_HOSTS` names. It reads the phones from the store once and keeps them in
+memory (on `globalThis`, past a dev reload), so a change with no phone on
+starts nothing. On a change to asks, tasks or reports, while a phone is on, it
+reads the desk and sends each phone an empty push when anything is there that
+was not before, and logs `[push] sent to N of M phones`; a restart or a phone
+just turned on sees the desk first and buzzes nothing. The
+push is empty, so nothing of the desk leaves: the worker shows "Something is
+waiting on your desk." and a tap opens `/desk`. A phone its push service no
+longer knows (404 or 410) is dropped. An iPhone gets push only for a desk
+added to its home screen, and the page says so where a browser has none. The office has one theme, dark,
+and so does this page.
+
 ## A new owner's first visit
 
 `npm run setup` asks nothing and opens the browser. Until the owner is

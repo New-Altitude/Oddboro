@@ -45,6 +45,7 @@
     "layerchart": "~2.8.0",
     "markdown-it": "^14.3.3",
     "pixi.js": "^8.22.0",
+    "qrcode-generator": "~2.0.4",
     "svelte": "^5.57.3",
     "svelte-check": "^4.7.7",
     "tailwindcss": "^4.3.3",

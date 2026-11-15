@@ -45,10 +45,18 @@
     onhire: (a: AskRow) => void;
     /** Approving a goal plan opens a hire window for each hire in it. */
     onplan: (hires: AskRow[]) => void;
-    /** Open a staffer's card, from the name on an item. */
+    /** Open a staffer's card, from the name on an item; on the phone desk, its chat. */
     onstaff: (id: string) => void;
+    /**
+     * Shown away from the office, on the phone desk (`/desk`): no hire window
+     * is there, and nothing reaches this computer's folder picker or a sign-in
+     * that comes back to it, so those say to open them at the office instead of
+     * offering a button. Selecting a report's text to chat about it stays at
+     * the office too; Reply works here.
+     */
+    away?: boolean;
   };
-  let { desk, staff, focus, onhire, onplan, onstaff }: Props = $props();
+  let { desk, staff, focus, onhire, onplan, onstaff, away = false }: Props = $props();
 
   /** The row each kind of desk item shows. */
   type DeskRow = { ask: AskRow; task: TaskRow; report: ReportRow };
@@ -294,6 +302,12 @@
   const doneCount = (steps: Step[]) => steps.filter((s) => s.done).length;
 </script>
 
+{#snippet atOffice(why: string)}
+  <p class="flex-[1.4] rounded-lg bg-ember/10 px-3 py-2 text-xs text-ink">
+    Open this at the office. {why}
+  </p>
+{/snippet}
+
 <section class="flex h-full min-h-0 flex-col" aria-label="Your desk">
   <!-- No heading: the window's tab already says Desk and how many wait. -->
   {#if open}
@@ -489,7 +503,7 @@
       {#if from}
         <button
           class="mb-3 flex w-full items-center gap-3 rounded-xl bg-raise px-3 py-2.5 text-start transition-colors hover:bg-sea/15"
-          title={`Open ${from.name}'s card`}
+          title={away ? `Chat with ${from.name}` : `Open ${from.name}'s card`}
           onclick={() => onstaff(from.id)}
         >
           <Pixel
@@ -705,7 +719,7 @@
             >
           {/if}
           {#if a.folder}
-            {#if !changing}
+            {#if !changing && !away}
               <button
                 class="flex-1 rounded-lg bg-raise px-3 py-2 text-sm font-medium hover:bg-sea/25 disabled:opacity-40"
                 disabled={busy || unsaved}
@@ -718,11 +732,15 @@
               onclick={() => giveFolder(a)}>Give access</button
             >
           {:else if a.kind === 'hire'}
-            <button
-              class="flex-[1.4] rounded-lg bg-sea px-3 py-2 text-sm font-medium text-night disabled:opacity-40"
-              disabled={busy || unsaved}
-              onclick={() => onhire(a)}>Open hire window</button
-            >
+            {#if away}
+              {@render atOffice('Hiring happens in the hire window.')}
+            {:else}
+              <button
+                class="flex-[1.4] rounded-lg bg-sea px-3 py-2 text-sm font-medium text-night disabled:opacity-40"
+                disabled={busy || unsaved}
+                onclick={() => onhire(a)}>Open hire window</button
+              >
+            {/if}
           {:else}
             <button
               class="flex-1 rounded-lg bg-sea px-3 py-2 text-sm font-medium text-night disabled:opacity-40"
@@ -741,7 +759,9 @@
         {#if a.folder}
           <p class="mt-1.5 text-[11px] text-faint">
             Give access gives {who(a.staffId)?.name ?? 'the Odd'} this folder, and it starts on the work
-            that waited for it. Change lets you pick a smaller folder or Can read first.
+            that waited for it. {away
+              ? 'To pick a smaller folder or Can read first, open this at the office.'
+              : 'Change lets you pick a smaller folder or Can read first.'}
           </p>
         {/if}
         {#if !yesOrNo(a.kind)}
@@ -814,7 +834,9 @@
                     >
                   {/if}
                 </div>
-                {#if s.action?.kind === 'oauth' && !s.done}
+                {#if away && !s.done && (s.action?.kind === 'oauth' || s.action?.kind === 'aws')}
+                  {@render atOffice('The sign-in comes back to the office.')}
+                {:else if s.action?.kind === 'oauth' && !s.done}
                   <button
                     class="mt-2 rounded-lg bg-sea px-3 py-1.5 text-xs font-medium text-night disabled:opacity-40"
                     disabled={busy}
@@ -955,12 +977,16 @@
         </div>
       {:else}
         {@const r = open.row}
-        <SelectToChat {staff} author={r.staffId} what={`report "${r.title}"`}>
+        {#if away}
           <Markdown text={r.body} staff={r.staffId} class="mt-3 text-sm" />
-        </SelectToChat>
-        <p class="mt-2 text-[11px] text-faint">
-          Select any part of it to chat with an Odd about it.
-        </p>
+        {:else}
+          <SelectToChat {staff} author={r.staffId} what={`report "${r.title}"`}>
+            <Markdown text={r.body} staff={r.staffId} class="mt-3 text-sm" />
+          </SelectToChat>
+          <p class="mt-2 text-[11px] text-faint">
+            Select any part of it to chat with an Odd about it.
+          </p>
+        {/if}
         <p class="mt-4 text-[11px] text-faint">
           Feedback goes to {from?.name ?? 'the Odd'} as a reply in their chat. Replying marks it read.
         </p>

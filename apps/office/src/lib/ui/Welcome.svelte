@@ -8,6 +8,7 @@
   import { call } from './api.ts';
   import DiagnosticsSection from './DiagnosticsSection.svelte';
   import OfficeTools from './OfficeTools.svelte';
+  import PhoneDeskSection from './PhoneDeskSection.svelte';
   import { selectOnFocus } from './select-on-focus.ts';
   import UpdatesSection from './UpdatesSection.svelte';
   import { shown } from './diagnostics.svelte.ts';
@@ -191,6 +192,7 @@
 
     {#if welcomed}
       <UpdatesSection />
+      <PhoneDeskSection />
       {#if shown()}
         <DiagnosticsSection />
       {/if}

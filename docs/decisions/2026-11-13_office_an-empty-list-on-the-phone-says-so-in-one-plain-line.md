@@ -1,0 +1,1 @@
+- [office] **Decision (2026-11-13): every empty list on the phone says so in one plain line, such as "Nothing waiting on you", and every list goes newest first.** One line is enough on a small screen, and the newest item is the one the owner most likely came for. Code in `apps/office/src/lib/ui/phone/`.

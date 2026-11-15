@@ -1,0 +1,1 @@
+- [office] **Decision (2026-11-14): a phone call's timer ticks once a second only while the call is open and the page shows.** A call is live, and its time is what the owner looks for, so it moves by the second. It stops the moment the call ends or the phone hides the page, so nothing ticks on a still screen. Code in `apps/office/src/lib/ui/phone/PhoneCall.svelte`.

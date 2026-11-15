@@ -1,0 +1,1 @@
+- [office] **Decision (2026-11-13): the phone's Home lists under Waiting on you only what needs the owner's yes or no, the asks with the held calls among them, newest first.** Tasks and reports stay on the phone's Desk tab, so Home stays short enough to read at a glance. Code in `apps/office/src/lib/ui/phone/PhoneHome.svelte` and `waitingOnYou` in `phone-desk.ts`.

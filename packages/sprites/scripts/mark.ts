@@ -3,6 +3,7 @@
 //
 //   apps/site/static/logo.png             the site's favicon, header and footer
 //   apps/office/static/logo.png           the office's favicon
+//   apps/office/static/desk-*.png         the phone desk's home screen icon (/desk)
 //   apps/desktop/branding/google-oauth-logo.png   the logo on Google's sign-in screen
 //   apps/desktop/src-tauri/icons/         the app's icons, and the menu bar's template
 //
@@ -155,6 +156,9 @@ write(`${icons}/32x32.png`, encodePng(appIcon(32)));
 write(`${icons}/128x128.png`, encodePng(appIcon(128)));
 write(`${icons}/128x128@2x.png`, encodePng(appIcon(256)));
 write(`${icons}/icon.png`, encodePng(appIcon(512)));
+// The same icon for the phone desk, which a phone adds to its home screen.
+write('apps/office/static/desk-256.png', encodePng(appIcon(256)));
+write('apps/office/static/desk-512.png', encodePng(appIcon(512)));
 write(`${icons}/tray.png`, encodePng(tray()));
 write(`${icons}/icon.ico`, ico([16, 24, 32, 48, 64, 256].map(appIcon)));
 icns(join(ROOT, icons, 'icon.icns'));

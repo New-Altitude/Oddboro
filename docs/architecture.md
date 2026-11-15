@@ -95,7 +95,7 @@ change.
   `apps/office/src/lib/server/follow-up-brief.ts`.
 - **A desk item.** Start at `DESK_ITEMS` in `desk-answers.ts`. Check-types
   fails at `OWNER_ANSWERS`, `Item` in `DeskDrawer.svelte`, `replyBrief` and
-  `openDelivered`.
+  `waitingKey` in `apps/office/src/lib/desk.ts`.
 - **A connector kind.** Start at `CONNECTOR_KINDS` in `schema.ts`. Check-types
   fails at each switch on it, each ending in a `never` default. `builtin`
   connectors (Gmail, Google Drive) are served by the office itself (`builtin`

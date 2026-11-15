@@ -1,0 +1,1 @@
+- [office] **Decision (2026-11-13): on the phone, an Odd whose portrait does not draw shows the first letter of its name on the square, in the office's tokens.** A blank square says nothing about who it is. The face tries the drawn portrait, the atlas portrait and the sprite first, as the office does. Code in `apps/office/src/lib/ui/phone/OddFace.svelte`.
