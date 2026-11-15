@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { LIMITS } from './roster.ts';
-import { readAgentMarkdown } from './agent-file.ts';
+import { readAgentFile, readAgentMarkdown } from './agent-file.ts';
 
 const readClaudeAgent = (text: string) => readAgentMarkdown(text, 'claude');
 
@@ -61,5 +62,20 @@ test('a Grok Build agent keeps its source and lists settings the office leaves b
   assert.throws(
     () => readAgentMarkdown(file.replace('extend', 'full') + ' ${{ tools.read_file }}', 'grok'),
     /template/
+  );
+});
+
+test('a Hermes profile export supplies the name, description and instructions', async () => {
+  const archive = await readFile(new URL('./fixtures/orchard-auditor.tar.gz', import.meta.url));
+  const file = new File([new Uint8Array(archive)], 'renamed-archive.tgz');
+  const draft = await readAgentFile(file, 'hermes');
+  assert.deepEqual(draft.source, { format: 'hermes', name: 'orchard-auditor' });
+  assert.equal(draft.remit, 'Reconcile a fictional orchard harvest.');
+  assert.equal(draft.model, null);
+  assert.match(draft.desk, /Count only undamaged crates/);
+  assert.match(draft.desk, /ORCHARD-RECEIPT-VERIFIED/);
+  await assert.rejects(
+    readAgentFile(new File(['not a profile'], 'empty.tgz'), 'hermes'),
+    /readable Hermes/
   );
 });

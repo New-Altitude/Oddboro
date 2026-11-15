@@ -105,7 +105,7 @@ export const POST: RequestHandler = async ({ request }) => {
       error(400, 'Choose an agent file again.');
     const { format } = source;
     const original = text(source.name, 256 * 1024);
-    if ((format !== 'claude' && format !== 'grok') || !original)
+    if ((format !== 'claude' && format !== 'grok' && format !== 'hermes') || !original)
       error(400, 'Choose an agent file again.');
     agentSource = { format, name: original } as const;
   }

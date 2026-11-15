@@ -18,12 +18,20 @@
   <select bind:value={format} {disabled}>
     <option value="claude">Claude Code</option>
     <option value="grok">Grok Build</option>
+    <option value="hermes">Hermes profile</option>
   </select>
 </label>
+{#if format === 'hermes'}
+  <p class="text-xs text-muted">
+    Choose a .tar.gz from hermes profile export. The office brings in the profile name, description
+    and SOUL.md. Skills, connections, memories and schedules stay in the archive. Choose an office
+    tool to run the Odd.
+  </p>
+{/if}
 <input
   type="file"
-  aria-label="Agent Markdown files"
-  accept=".md,.markdown"
+  aria-label={format === 'hermes' ? 'Hermes profile archives' : 'Agent Markdown files'}
+  accept={format === 'hermes' ? '.tar.gz,.tgz' : '.md,.markdown'}
   {multiple}
   {disabled}
   onchange={(e) => {

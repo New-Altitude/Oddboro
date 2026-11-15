@@ -1146,11 +1146,12 @@ pieces under 3,900 bytes a line, so no value is on a command line.
     (office times) tells the two apart. The Jobs tab edits a job in place, and opens the Odd's job description
     in the document editor (`src/lib/ui/JobDescription.svelte`); a save
     refuses if the description changed since the owner opened it. A local Odd's
-    owner can open a Claude Code or Grok Build agent file here to compare and edit its proposed
+    owner can open a Claude Code file, Grok Build file or Hermes profile export here to compare and edit its proposed
     instructions. Save updates the same Odd through the description route.
     A hire from a file keeps the original format and agent name. Importing that pair
     again offers matching Odds and a separate new hire. For older staff rows
     without a source name, Hire offers a same-name Odd for the owner to check.
+    A Hermes export supplies its profile directory name, optional description and SOUL.md. Other archive entries stay out of the office. Hermes instructions start on the office tool.
     Selecting several files opens that same form for each (`HireRoster.svelte`).
     Each hire or update saves at once. Skipping a file leaves the others in the list. On the Odd's info page,
     Skill previews one SKILL.md. Saving copies its text into the staff row. A local Odd

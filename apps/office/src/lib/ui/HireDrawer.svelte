@@ -178,7 +178,7 @@
   );
 
   /** Another tool: the account and model were that tool's, so both go back to the office's. */
-  function pickAgent(a: Agent) {
+  function pickAgent(a: Agent | undefined) {
     pickedAgent = a;
     pickedAccount = null;
     pickedModel = null;
@@ -224,7 +224,7 @@
       role = draft.role;
       remit = draft.remit;
       desk = draft.desk;
-      pickAgent(format);
+      pickAgent(format === 'hermes' ? undefined : format);
       pickedModel = draft.model;
       skipped = draft.skipped;
       source = draft.source;
