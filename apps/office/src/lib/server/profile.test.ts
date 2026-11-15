@@ -34,6 +34,7 @@ const row = (o: Partial<StaffRow> = {}): StaffRow => ({
   web: false,
   folders: [],
   remit: 'Writes the newsletter.',
+  skill: null,
   desk: 'You are Penny.',
   look: null,
   portraitPx: null,

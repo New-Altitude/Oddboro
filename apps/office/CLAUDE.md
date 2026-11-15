@@ -1147,7 +1147,10 @@ pieces under 3,900 bytes a line, so no value is on a command line.
     in the document editor (`src/lib/ui/JobDescription.svelte`); a save
     refuses if the description changed since the owner opened it. A local Odd's
     owner can open a Claude agent file here to compare and edit its proposed
-    instructions. Save updates the same Odd through the description route. While an
+    instructions. Save updates the same Odd through the description route. On the Odd's info page,
+    Skill previews one SKILL.md. Saving copies its text into the staff row. A local Odd
+    receives it with its job description on jobs and chats, including resumed chats.
+    Choosing the file again previews an update. Tools and folders keep their grants. While an
     update is about to install it starts no scheduled job (item 17).
     Every job run is told the time it is for and the time it is now
     (`src/lib/server/job-brief.ts`); Run now is for the moment it is pressed. A

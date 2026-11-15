@@ -225,6 +225,13 @@
       "when": 1794669369838,
       "tag": "0031_act_check",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1794698510358,
+      "tag": "0032_staff_skill",
+      "breakpoints": true
     }
   ]
 }

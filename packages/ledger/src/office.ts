@@ -42,6 +42,7 @@ export {
   anyStaffer,
   formerStaff,
   setPermission,
+  setStaffSkill,
   ActCheckNeeded,
   actCheckPassed,
   passActCheck,

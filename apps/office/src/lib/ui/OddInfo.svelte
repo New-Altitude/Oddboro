@@ -12,6 +12,7 @@
   import { AGENT_NAMES, EFFORT_NAMES, MODELS } from '@oddboro/ledger/agents';
   import Pixel from './Pixel.svelte';
   import JobDescription from './JobDescription.svelte';
+  import StaffSkill from './StaffSkill.svelte';
   import JobsSection from './JobsSection.svelte';
   import LookStudio from './LookStudio.svelte';
   import WorkSection from './WorkSection.svelte';
@@ -129,6 +130,9 @@
   <JobsSection {profile} {version} {working} />
 
   <JobDescription {profile} {version} />
+  {#if !profile.persona}
+    {#key profile.id}<StaffSkill staff={profile.id} />{/key}
+  {/if}
 
   <section aria-label="Stats">
     <h3 class="mb-2 text-xs font-semibold text-ink">Stats</h3>

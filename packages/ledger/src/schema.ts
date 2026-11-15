@@ -64,6 +64,8 @@ export const staff = pgTable('staff', {
   remit: text().notNull(),
   /** The job description its Claude session runs with. */
   desk: text().notNull(),
+  /** A copy of the instruction skill the owner attached. */
+  skill: text(),
   /** A generated look. Null keeps the hand-drawn art named by sprite and variant. */
   look: jsonb().$type<LookSpec>(),
   /** The drawn portrait for a generated look, as .px text. */

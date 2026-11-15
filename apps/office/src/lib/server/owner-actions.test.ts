@@ -466,6 +466,8 @@ const TRY: Record<Recording, (send: Send) => Promise<void>> = {
     await send({ params: { id: 'lead' }, query: { connector: p.id } });
     assert.ok(await woke(thread), 'the work parked on the connect task did not wake');
   },
+  'PUT /api/staff/[id]/skill': (send) =>
+    send({ params: { id: 'sam' }, body: { was: null, skill: 'Review the invoice total.' } }),
   'PUT /api/staff/[id]/description': async (send) =>
     send({
       params: { id: 'sam' },

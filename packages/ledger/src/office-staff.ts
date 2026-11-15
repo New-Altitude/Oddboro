@@ -45,6 +45,35 @@ export async function roster(): Promise<StaffRow[]> {
   return db.select().from(staff).where(isNull(staff.leftAt)).orderBy(asc(staff.hiredAt));
 }
 
+/** Replace the skill only if the owner reviewed the copy still on this Odd. */
+export async function setStaffSkill(id: string, before: string | null, skill: string | null) {
+  return db.transaction(async (tx) => {
+    const [who] = await tx
+      .update(staff)
+      .set({ skill })
+      .where(
+        and(
+          eq(staff.id, id),
+          isNull(staff.leftAt),
+          isNull(staff.package),
+          before === null ? isNull(staff.skill) : eq(staff.skill, before)
+        )
+      )
+      .returning({ name: staff.name });
+    if (!who) return false;
+    if (skill !== before)
+      await record(
+        {
+          kind: 'work',
+          actor: 'owner',
+          title: skill ? `Set ${who.name}'s skill` : `Removed ${who.name}'s skill`
+        },
+        tx
+      );
+    return true;
+  });
+}
+
 /**
  * A working Odd. One that left the office is not found, so nothing runs it,
  * hands it work or changes it (`removeOdd` in leaving.ts).
