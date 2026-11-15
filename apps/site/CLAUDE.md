@@ -273,6 +273,8 @@ clipboard write is the only browser API they touch.
 
 ## Downloads and releases
 
+[Give an Odd the release-site review](release-review.md) has the recurring job and the checks for its Desk report.
+
 Oddboro ships for the Mac (`Oddboro.dmg`) and for Linux on x86_64 and arm64
 (`Oddboro-x86_64.AppImage`, `Oddboro-aarch64.AppImage`). Every release carries
 those names, so `releases/latest/download/<name>` is the newest one.
