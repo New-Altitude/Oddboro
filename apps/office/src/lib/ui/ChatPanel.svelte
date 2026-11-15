@@ -903,8 +903,29 @@
   const canSetGoal = $derived(profile.role === 'Office Manager' && !replyTo && decisionMode);
   /** `focuses`: the item puts the caret somewhere itself, so focus does not go back to the message box. */
   type MoreItem = { label: string; shown: () => boolean; run: () => void; focuses?: boolean };
+  const rehearsal =
+    'Help me rehearse my pitch. Use the audience brief to raise one plausible objection and wait for my reply. After I answer, tell me what I addressed and what evidence is still missing. Label the audience reaction as a simulation. Cite a source for any view you attribute to a real person.';
+  async function rehearse() {
+    const audience = '[Describe the customer or investor and the decision you want.]';
+    const pitch = draft.trim() ? draft : '[Write your pitch here.]';
+    draft = `${rehearsal}\n\n${audience}\n\n${pitch}`;
+    await tick();
+    box?.focus();
+    box?.setSelectionRange(draft.indexOf(audience), draft.indexOf(audience) + audience.length);
+  }
   const MORE: MoreItem[] = [
     { label: 'Attach files', shown: () => true, run: () => picker?.click() },
+    {
+      label: 'Rehearse a pitch',
+      shown: () =>
+        !!profile.persona &&
+        !profile.persona.quiet &&
+        !replyTo &&
+        !saving &&
+        !draft.startsWith(rehearsal),
+      focuses: true,
+      run: rehearse
+    },
     {
       label: 'Project sessions',
       shown: () => advanced.on,
