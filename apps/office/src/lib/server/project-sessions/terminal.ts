@@ -36,6 +36,9 @@ export class ProjectTerminal {
   get screen() {
     return this.history;
   }
+  get pid() {
+    return this.ended ? undefined : this.child.pid;
+  }
   get running() {
     return !this.ended;
   }

@@ -8,6 +8,7 @@
   import ProjectSessions from '#lib/ui/ProjectSessions.svelte';
   import ReportView from '#lib/ui/ReportView.svelte';
   import FileViewer from '#lib/ui/FileViewer.svelte';
+  import ComputerActivity from '#lib/ui/ComputerActivity.svelte';
   import WorkspaceSettings from '#lib/ui/WorkspaceSettings.svelte';
   import { call } from '#lib/ui/api.ts';
   import {
@@ -229,6 +230,9 @@
         <button class:chosen={tab === 'inbox'} onclick={() => view('inbox')}
           >Inbox <small>{count}</small></button
         >
+        <button class:chosen={tab === 'activity'} onclick={() => view('activity')}
+          >Computer activity</button
+        >
         {#if advanced.on}<button
             onclick={() => {
               openProject();
@@ -278,6 +282,15 @@
                 >{w.label}<small>{office.staff.find((p) => p.id === id)?.name}</small></button
               >{/each}{/each}
           {#if !Object.keys(office.working).length}<p>No active jobs.</p>{/if}
+        {:else if tab === 'activity'}
+          <ComputerActivity
+            staff={office.staff}
+            sessions={office.sessions}
+            desk={office.desk}
+            onproject={pickProject}
+            onstaff={pick}
+            ondesk={desk}
+          />
         {:else if tab === 'settings'}<h1>Settings</h1>
           <WorkspaceSettings />
         {:else if tab === 'hire'}<h1>Hire an Odd</h1>

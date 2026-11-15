@@ -128,6 +128,7 @@ export const ROUTE_IDS = {
   '/api/asks/[id]/reply': true,
   '/api/browser-link': true,
   '/api/client-log': true,
+  '/api/computer-activity': true,
   '/api/connectors': true,
   '/api/diagnostics': true,
   '/api/diagnostics/envelope': true,

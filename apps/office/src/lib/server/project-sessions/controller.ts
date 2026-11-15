@@ -118,6 +118,9 @@ export class ProjectController {
       market: c?.market
     };
   }
+  terminalPid(id: string) {
+    return this.sessions.get(id)?.terminal?.pid;
+  }
   /** A session's dot in the Projects list: the stored status, or what its live connection is doing now. */
   status(id: string, stored: ProjectStatus): ProjectStatus {
     const c = this.sessions.get(id);

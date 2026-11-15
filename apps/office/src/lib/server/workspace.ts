@@ -18,6 +18,8 @@ export async function workspace() {
   const sessions = advanced
     ? (await projectOverview()).map((s) => ({
         id: s.id,
+        nativeId: s.nativeId,
+        terminalPid: projectController().terminalPid(s.id),
         title: s.title,
         folder: s.folder,
         agent: s.agent,

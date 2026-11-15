@@ -4,6 +4,12 @@ On a fresh office, choose **Office** for the floor or **Workspace** for a list o
 
 In Workspace, **Needs you** shows open decisions. Choose a row to read the request and answer it. Choose an Odd to read its chat, send an assignment or steer an active reply. Use Alt+Down and Alt+Up to switch. Turn on Advanced in Settings to include native Codex and Claude project sessions. Select a session to inspect it; explicitly take terminal control to type. Closing a window or a terminal leaves the office running. **Stop office** ends the service, including running work.
 
+## Computer activity
+
+Choose **Computer activity** in Workspace to measure the computer running the office. **Refresh** takes another sample. The panel lists Claude Code, Codex, Gemini and Grok processes running under the office owner's account, including tools opened outside Oddboro. Sort by CPU or memory. CPU is measured over a short interval, with 100% equal to one occupied core. Memory is the sum of resident memory in each process tree and can include shared pages.
+
+A shared server has one CPU and memory reading. On Mac and Linux, expand its open Codex conversations to see names when available. Windows shows process totals. A connected project opens in Projects, and a run owned by an Odd opens its chat. **Ask Office Manager** prepares a chat message with the readings and waiting decisions. Review it and send it to get advice.
+
 ## Pair a client with your office
 
 Save the owner pairing code in your password manager when the app first opens. Starting from a terminal prints the code there. The desktop asks for it when it reconnects. The CLI takes it at a hidden prompt or from standard input for scripts. Keep the code out of command arguments, environment variables, and shell history.
