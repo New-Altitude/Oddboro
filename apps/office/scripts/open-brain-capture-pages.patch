@@ -1,0 +1,132 @@
+diff --git a/server/index.ts b/server/index.ts
+index d3265f9..0010383 100644
+--- a/server/index.ts
++++ b/server/index.ts
+@@ -28,8 +28,50 @@ type ThoughtRecord = {
+   metadata: Record<string, unknown>;
+   created_at: string;
+   updated_at?: string | null;
++  sensitivity_tier?: string;
++  source_type?: string;
+ };
+
++// Include enhanced privacy fields where installed, without reading embeddings.
++async function thoughtColumns<T>(read: (columns: string) => PromiseLike<{
++  data: T | null;
++  error: { code: string; message: string } | null;
++}>) {
++  const base = "id,content,metadata,created_at,updated_at";
++  const optional = new Set(["sensitivity_tier", "source_type"]);
++  for (;;) {
++    const response = await read([base, ...optional].join(","));
++    const missing = /column (?:thoughts\.)?(sensitivity_tier|source_type) does not exist/
++      .exec(response.error?.message ?? "");
++    if (response.error?.code !== "42703" || !missing || !optional.delete(missing[1])) {
++      return response;
++    }
++  }
++}
++
++// A cursor compares in database order, including sub-millisecond capture times.
++const captureCursor = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z\/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
++function capturePosition(row: ThoughtRecord): string {
++  const millis = new Date(row.created_at).toISOString().slice(0, -1);
++  const remainder = (/\.(\d+)/.exec(row.created_at)?.[1] || "").padEnd(6, "0").slice(3, 6);
++  return millis + remainder + "Z/" + row.id;
++}
++
++async function captureItem(row: ThoughtRecord) {
++  const position = capturePosition(row);
++  const m = row.metadata ?? {};
++  if (
++    row.sensitivity_tier === "restricted" || m.sensitivity_tier === "restricted" ||
++    row.source_type === "agent_memory" || m.source_type === "agent_memory" ||
++    m.source === "agent_memory"
++  ) {
++    return { position };
++  }
++  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(row.content));
++  const hash = Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
++  return { position, hash, text: row.content.slice(0, 4096), date: row.updated_at ?? row.created_at };
++}
++
+ const CITATION_BASE_URL =
+   Deno.env.get("OPEN_BRAIN_CITATION_BASE_URL") || "https://openbrain.local/thoughts";
+
+@@ -169,11 +211,9 @@ function buildServer(): McpServer {
+     },
+     async ({ id }) => {
+       try {
+-        const { data, error } = await supabase
+-          .from("thoughts")
+-          .select("id, content, metadata, created_at, updated_at")
+-          .eq("id", id)
+-          .single();
++        const { data, error } = await thoughtColumns((columns) =>
++          supabase.from("thoughts").select(columns).eq("id", id).single<ThoughtRecord>()
++        );
+
+         if (error) {
+           return {
+@@ -182,7 +222,8 @@ function buildServer(): McpServer {
+           };
+         }
+
+-        const thought = data as ThoughtRecord;
++        if (!data) throw new Error("Thought not found.");
++        const thought = data;
+         const document = {
+           id: thought.id,
+           title: thoughtTitle(thought.content, thought.created_at),
+@@ -190,6 +231,8 @@ function buildServer(): McpServer {
+           url: thoughtUrl(thought.id),
+           metadata: {
+             ...thought.metadata,
++            ...(thought.source_type === "agent_memory" ? { source_type: "agent_memory" } : {}),
++            ...(thought.sensitivity_tier === "restricted" ? { sensitivity_tier: "restricted" } : {}),
+             created_at: thought.created_at,
+             updated_at: thought.updated_at,
+           },
+@@ -285,6 +328,42 @@ function buildServer(): McpServer {
+     }
+   );
+
++  server.registerTool(
++    "list_thoughts_page",
++    {
++      title: "Page through captures",
++      description: "Read captures in creation order. Pass the last position back as the exclusive cursor. An empty page means the end. Each shareable row has a text preview (up to 4096 characters), a SHA-256 of the full text, and a revision date. Other rows carry a position only.",
++      annotations: { readOnlyHint: true },
++      inputSchema: {
++        order: z.enum(["asc", "desc"]).default("asc"),
++        cursor: z.string().regex(captureCursor).optional(),
++        limit: z.number().int().min(1).max(100).default(100),
++      },
++    },
++    async ({ order, cursor, limit }) => {
++      try {
++        const ascending = order === "asc";
++        const page = (columns: string) => {
++          let q = supabase.from("thoughts").select(columns)
++            .order("created_at", { ascending }).order("id", { ascending }).limit(limit);
++          if (cursor) {
++            const [at, id] = cursor.split("/");
++            const op = ascending ? "gt" : "lt";
++            q = q.or(`created_at.${op}.${at},and(created_at.eq.${at},id.${op}.${id})`);
++          }
++          return q.returns<ThoughtRecord[]>();
++        };
++        const response = await thoughtColumns(page);
++        if (response.error) throw response.error;
++        const rows = response.data ?? [];
++        const records = await Promise.all(rows.map(captureItem));
++        return { content: [{ type: "text" as const, text: JSON.stringify({ records }) }] };
++      } catch {
++        return { content: [{ type: "text" as const, text: "Could not read the requested capture page." }], isError: true };
++      }
++    },
++  );
++
+   // Tool 2: List Recent
+   server.registerTool(
+     "list_thoughts",

@@ -43,7 +43,7 @@ export async function recentCaptures(
       // source's total proves we saw everything when no previous marker remains.
       if (total && (await total()) === texts.length) return { head, added: texts };
       throw new Error(
-        'Open Brain did not reach the last checked capture. The office kept its place because it could not verify the gap.'
+        'Open Brain did not reach the last checked capture. The office kept its place because it could not verify the gap. It will resume when the Brain server offers paging.'
       );
     }
     limit = Math.min(limit * 2, MAX_LIST);

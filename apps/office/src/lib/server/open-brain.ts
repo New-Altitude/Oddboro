@@ -1,4 +1,5 @@
 // The office's opt-in Brain connection. No Odd receives the key or write access.
+import { capturePages, newestCapture } from './brain-pages.ts';
 import { recentCaptures, textHash } from './brain-recent.ts';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
@@ -34,11 +35,18 @@ import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 const dir = () => home('dreaming');
 const setup = () => join(dir(), 'connection.json');
 const receipts = () => join(dir(), 'captures');
-type Connection = { id: string; url: string; recentStart?: string[] };
+type Connection = { id: string; url: string; recentStart?: string[]; position?: string | null };
 function current(): Connection | undefined {
   return existsSync(setup()) ? JSON.parse(readFileSync(setup(), 'utf8')) : undefined;
 }
-type Checked = { id: string; at: number; review: DreamReview; jobs: string; recent?: string[] };
+type Checked = {
+  id: string;
+  at: number;
+  review: DreamReview;
+  jobs: string;
+  recent?: string[];
+  position?: string | null;
+};
 const reviewPath = () => join(dir(), 'review.json');
 let checked: Checked | undefined;
 function lastReview(): Checked | undefined {
@@ -67,7 +75,11 @@ export async function brainState() {
   return {
     url: connection?.url,
     checkedAt: checked?.at,
-    watchesCaptures: !!(checked?.recent ?? connection?.recentStart),
+    watchesCaptures:
+      checked?.position !== undefined ||
+      connection?.position !== undefined ||
+      !!(checked?.recent ?? connection?.recentStart),
+    catchingUp: checked?.position !== undefined && checked.at === 0,
     affected: Object.keys(checked?.review.byJob ?? {}).length,
     findings: Object.entries(checked?.review.byJob ?? {})
       .filter(([, sources]) => sources.length)
@@ -144,10 +156,17 @@ export async function connectBrain(address: string, key: string) {
     throw new Error('Enter the Brain access key.');
   const sameAccess = before?.id === row.id && (!key || key === getSecret(row.id, 'x-brain-key'));
   let recentStart = sameAccess ? (lastReview()?.recent ?? before?.recentStart) : undefined;
+  let position = sameAccess ? before?.position : undefined;
   const client = await upstream(row, false, key ? { 'x-brain-key': key } : undefined);
   try {
     const tools = await toolsFor(client);
-    if (!recentStart && tools.some((t) => t.name === 'list_thoughts' && readsOnly(t))) {
+    if (!sameAccess && tools.some((t) => t.name === 'list_thoughts_page' && readsOnly(t))) {
+      position = await newestCapture((args) => callText(client, 'list_thoughts_page', args));
+    } else if (
+      position === undefined &&
+      !recentStart &&
+      tools.some((t) => t.name === 'list_thoughts' && readsOnly(t))
+    ) {
       recentStart = (await recentCaptures((limit) => callText(client, 'list_thoughts', { limit })))
         .head;
     }
@@ -165,7 +184,7 @@ export async function connectBrain(address: string, key: string) {
     await client.close();
   }
   mkdirSync(dir(), { recursive: true, mode: 0o700 });
-  replace(setup(), JSON.stringify({ id: row.id, url: url.href, recentStart }));
+  replace(setup(), JSON.stringify({ id: row.id, url: url.href, recentStart, position }));
   if (!sameAccess) {
     if (existsSync(reviewPath())) unlinkSync(reviewPath());
     checked = undefined;
@@ -303,84 +322,133 @@ async function reviewConnection(c: ConnectorRow, work: DreamWork[], force: boole
       captured.push(found.id);
       unlinkSync(d.path);
     }
-    let recent = checked?.recent ?? current()?.recentStart;
+    const setup = current();
+    let recent = checked?.recent ?? setup?.recentStart;
+    const saved = checked?.position !== undefined ? checked.position : setup?.position;
+    const paged = tools.some((t) => t.name === 'list_thoughts_page' && readsOnly(t));
     const listsCaptures = tools.some((t) => t.name === 'list_thoughts' && readsOnly(t));
-    if (recent && !listsCaptures)
+    if (saved !== undefined && !paged)
+      throw new Error(
+        'Open Brain no longer offers capture pages. The office kept its saved position.'
+      );
+    if (recent && !paged && !listsCaptures)
       throw new Error('Open Brain no longer offers its read-only list of recent captures.');
 
-    const source = {
-      read: async (jobs: DreamWork[]) => {
-        const groups = [captured];
-        const prior = checked?.id === c.id ? checked.review.byJob : {};
-        for (const job of jobs) groups.push((prior[job.id] ?? []).map((r) => r.id));
-        for (const name of [...new Set(jobs.map((j) => j.name))].sort())
-          groups.push(await search(client, name));
-
-        const records = new Map<string, Evidence>();
-        const include = (r: Evidence) => {
-          const proof = proofs.get(r.id);
-          const ownerQuote = proof?.hash === textHash(r.text);
-          records.set(r.id, {
-            ...r,
-            text: r.text.slice(0, 2800),
-            date: (ownerQuote && proof?.at) || r.date,
-            ownerQuote
-          });
-        };
-        for (const id of new Set(groups.flat())) {
-          const record = (await read(id))?.record;
-          if (record) include(record);
-        }
-        if (listsCaptures) {
-          const incoming = await recentCaptures(
-            (limit) => callText(client, 'list_thoughts', { limit }),
-            recent,
-            tools.some((t) => t.name === 'thought_stats' && readsOnly(t))
-              ? async () => {
-                  const stats = await callText(client, 'thought_stats', {});
-                  const count = /^Total thoughts: (\d+)$/m.exec(stats);
-                  if (!count) throw new Error('Open Brain could not confirm its capture count.');
-                  return Number(count[1]);
-                }
-              : undefined
-          );
-          const ids: string[] = [];
-          for (const text of incoming.added) {
-            const match = await locate(text);
-            if (!match)
-              throw new Error(
-                'Open Brain listed a new capture but could not verify its exact record. The office will check again.'
-              );
-            if (match.record) {
-              ids.push(match.record.id);
-              include(match.record);
+    const searches: string[][] = [];
+    for (const name of [...new Set(work.map((j) => j.name))].sort())
+      searches.push(await search(client, name));
+    if (work.length && !paged && listsCaptures) {
+      const incoming = await recentCaptures(
+        (limit) => callText(client, 'list_thoughts', { limit }),
+        recent,
+        tools.some((t) => t.name === 'thought_stats' && readsOnly(t))
+          ? async () => {
+              const stats = await callText(client, 'thought_stats', {});
+              const count = /^Total thoughts: (\d+)$/m.exec(stats);
+              if (!count) throw new Error('Open Brain could not confirm its capture count.');
+              return Number(count[1]);
             }
-          }
-          groups.unshift(ids);
-          recent = incoming.head;
-        }
-        return groups.map((ids) => ids.flatMap((id) => records.get(id) ?? []));
+          : undefined
+      );
+      for (const text of incoming.added) {
+        const match = await locate(text);
+        if (!match)
+          throw new Error(
+            'Open Brain listed a new capture but could not verify its exact record. The office will check again.'
+          );
+        if (match.record) captured.push(match.record.id);
       }
-    };
-    const review = await reviewWork(
-      work,
-      source,
-      async (data) => {
-        const answer = await runAsOffice(data, {
-          system: DREAM_SYSTEM,
-          kind: 'office',
-          timeoutMs: 90000,
-          effort: 'low'
+      recent = incoming.head;
+    }
+    const pages =
+      paged && work.length
+        ? capturePages((args) => callText(client, 'list_thoughts_page', args), saved, recent)
+        : [{ records: [], position: saved, done: true }];
+    let review = checked?.id === c.id ? checked.review : undefined;
+    for await (const batch of pages) {
+      const incoming: string[] = [];
+      for (const row of batch.records) {
+        if (row.text === undefined || !row.hash || row.date === undefined) continue;
+        const id = row.position.split('/')[1];
+        fetched.set(id, { hash: row.hash, record: { id, text: row.text, date: row.date } });
+        incoming.push(id);
+      }
+      const prior = work.map((j) => (review?.byJob[j.id] ?? []).map((r) => r.id));
+      const groups = [incoming, captured, ...prior, ...searches];
+      const records = new Map<string, Evidence>();
+      for (const id of new Set(groups.flat())) {
+        const item = await read(id);
+        if (!item?.record) continue;
+        const proof = proofs.get(id);
+        const ownerQuote = proof?.hash === item.hash;
+        records.set(id, {
+          ...item.record,
+          text: item.record.text.slice(0, 2800),
+          date: (ownerQuote && proof?.at) || item.record.date,
+          ownerQuote
         });
-        if (!answer.ok)
-          throw new Error('The office could not review the Brain. Check the office AI sign-in.');
-        return answer.text;
-      },
-      checked?.id === c.id ? checked.review : undefined
-    );
-    const next = { id: c.id, at: Date.now(), review, jobs, recent };
-    replace(reviewPath(), JSON.stringify(next));
-    checked = next;
+      }
+      const source = {
+        read: async () => groups.map((ids) => ids.flatMap((id) => records.get(id) ?? []))
+      };
+      // A later page can add an unrelated fact. Keep established matches only
+      // for unchanged assignments and records that still pass the source read.
+      const retained: Record<string, Evidence[]> = {};
+      if (paged && checked?.id === c.id && review) {
+        const previousJobs: DreamWork[] = JSON.parse(checked.jobs);
+        for (const j of work) {
+          const previousJob = previousJobs.find((p) => p.id === j.id);
+          if (
+            !previousJob ||
+            previousJob.name !== j.name ||
+            previousJob.staffId !== j.staffId ||
+            previousJob.instructions !== j.instructions
+          )
+            continue;
+          const matches = (review.byJob[j.id] ?? []).filter((item) => {
+            const now = records.get(item.id);
+            return (
+              now &&
+              now.text === item.text &&
+              now.date === item.date &&
+              now.ownerQuote === item.ownerQuote
+            );
+          });
+          if (matches.length) retained[j.id] = matches;
+        }
+      }
+      review = await reviewWork(
+        work,
+        source,
+        async (data) => {
+          const answer = await runAsOffice(data, {
+            system: DREAM_SYSTEM,
+            kind: 'office',
+            timeoutMs: 90000,
+            effort: 'low'
+          });
+          if (!answer.ok)
+            throw new Error('The office could not review the Brain. Check the office AI sign-in.');
+          return answer.text;
+        },
+        review,
+        retained
+      );
+      const next = {
+        id: c.id,
+        at: batch.done ? Date.now() : 0,
+        review,
+        jobs,
+        recent: batch.position === undefined ? recent : undefined,
+        position: batch.position
+      };
+      replace(reviewPath(), JSON.stringify(next));
+      checked = next;
+      problem = '';
+      // Only records referenced by retained findings or the office searches can be needed again.
+      for (const id of incoming) fetched.delete(id);
+    }
+    if (!review) throw new Error('The office did not finish checking the Brain.');
     problem = '';
     return review;
   } finally {

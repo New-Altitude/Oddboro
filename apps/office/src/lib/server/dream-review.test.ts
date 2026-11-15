@@ -130,3 +130,21 @@ test('a prose reply repeats only the unfinished group and validates its replacem
   );
   assert.equal(attempts, 2);
 });
+
+test('an unrelated page keeps an established match and an explicit replacement retires it', async () => {
+  const next = { ...move, id: 'next', text: 'Rehearsal is now Friday.', date: '2026-11-15' };
+  const source = { read: async () => [move, next] };
+  const kept = { [prep.id]: [move] };
+  const review = (answer: unknown) =>
+    reviewWork([prep], source, async () => JSON.stringify([answer]), undefined, kept);
+  assert.deepEqual((await review({ job: prep.id, sources: [] })).byJob, kept);
+  assert.deepEqual(
+    (await review({ job: prep.id, sources: [next.id], replaces: [{ old: move.id, new: next.id }] }))
+      .byJob,
+    { [prep.id]: [next] }
+  );
+  await assert.rejects(
+    review({ job: prep.id, sources: [], replaces: [{ old: move.id, new: next.id }] }),
+    /cited replacement/
+  );
+});
