@@ -1150,7 +1150,9 @@ pieces under 3,900 bytes a line, so no value is on a command line.
     instructions. Save updates the same Odd through the description route.
     A hire from a Claude file keeps the original agent name. Importing that name
     again offers matching Odds and a separate new hire. For older staff rows
-    without a source name, Hire offers a same-name Odd for the owner to check. On the Odd's info page,
+    without a source name, Hire offers a same-name Odd for the owner to check.
+    Selecting several files opens that same form for each (`HireRoster.svelte`).
+    Each hire or update saves at once. Skipping a file leaves the others in the list. On the Odd's info page,
     Skill previews one SKILL.md. Saving copies its text into the staff row. A local Odd
     receives it with its job description on jobs and chats, including resumed chats.
     Choosing the file again previews an update. Tools and folders keep their grants. While an

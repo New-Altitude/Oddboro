@@ -28,7 +28,7 @@
   import LessonsLibrary from '#lib/ui/LessonsLibrary.svelte';
   import Welcome from '#lib/ui/Welcome.svelte';
   import ProjectSessions from '#lib/ui/ProjectSessions.svelte';
-  import HireDrawer from '#lib/ui/HireDrawer.svelte';
+  import HireRoster from '#lib/ui/HireRoster.svelte';
   import FileViewer from '#lib/ui/FileViewer.svelte';
   import ReportView from '#lib/ui/ReportView.svelte';
   import ActCheck from '#lib/ui/ActCheck.svelte';
@@ -1374,7 +1374,7 @@
                   />
                 {/await}
               {:else if w.kind === 'hire'}
-                <HireDrawer
+                <HireRoster
                   {staff}
                   {version}
                   id={w.id}

@@ -6,8 +6,14 @@
 
   // The staffer's job description, the text every run starts from, in the
   // document editor. Folded until the owner opens it.
-  type Props = { profile: StaffProfile; version: number; proposal?: string };
-  let { profile, version, proposal }: Props = $props();
+  type Props = {
+    profile: StaffProfile;
+    version: number;
+    proposal?: string;
+    saving?: boolean;
+    onupdated?: () => void;
+  };
+  let { profile, version, proposal, saving = $bindable(false), onupdated }: Props = $props();
 
   let shown = $state(untrack(() => proposal !== undefined));
   let text = $state<string | undefined>();
@@ -71,13 +77,19 @@
   }
 
   async function save(draft: string): Promise<string> {
-    const r = await call<{ text: string }>(
-      `/api/staff/${profile.id}/description`,
-      { text: draft, was: text },
-      'PUT'
-    );
-    text = r.text;
-    return r.text;
+    saving = true;
+    try {
+      const r = await call<{ text: string }>(
+        `/api/staff/${profile.id}/description`,
+        { text: draft, was: text },
+        'PUT'
+      );
+      text = r.text;
+      onupdated?.();
+      return r.text;
+    } finally {
+      saving = false;
+    }
   }
 </script>
 

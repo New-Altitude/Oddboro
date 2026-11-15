@@ -37,6 +37,10 @@
   import type { StaffProfile } from '../staff/roster.ts';
 
   type Props = {
+    file?: File;
+    onfiles: (files: File[]) => void;
+    onskip: () => void;
+    onupdated?: () => void;
     staff: StaffProfile[];
     version: number;
     /** Rooms on the floor a staffer can work in: template id and name. */
@@ -49,7 +53,19 @@
     /** A persona hired here joined, through its own sign-in: the window closes. */
     ondone: () => void;
   };
-  let { staff, version, rooms, from, id, onhired, ondone }: Props = $props();
+  let {
+    file,
+    onfiles,
+    onskip,
+    onupdated,
+    staff,
+    version,
+    rooms,
+    from,
+    id,
+    onhired,
+    ondone
+  }: Props = $props();
 
   // Hire opens on a choice: make an Odd, or hire a persona New Altitude offers
   // the owner's account. A proposal skips the choice: it opens on the builder,
@@ -178,6 +194,7 @@
   /** Office tools from the proposal. Without one, a hire gets the starters. */
   let tools = $state<string[] | undefined>();
   let busy = $state(false);
+  let saving = $state(false);
   let problem = $state('');
   let skipped = $state<string[]>([]);
 
@@ -214,6 +231,7 @@
   // Fill the window from the proposal. The job description is read from its
   // file now, so edits the owner made in the viewer are in it.
   onMount(() => {
+    if (file) void importAgent(file);
     if (!from) return;
     const p = from.proposal;
     name = p.name;
@@ -345,7 +363,14 @@
   </div>
 {/snippet}
 
-{#if path === 'choose'}
+{#if file}
+  <button class="px-3 py-1 text-xs text-muted" disabled={busy || saving} onclick={onskip}
+    >Skip file</button
+  >
+{/if}
+{#if file && path === 'choose'}
+  {#if problem}<p class="p-3 text-xs text-coral" role="alert">{problem}</p>{/if}
+{:else if path === 'choose'}
   <section class="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-3 text-sm" aria-label="Hire">
     {@render choice(
       'Hire an Odd',
@@ -362,16 +387,18 @@
     <label class="flex flex-col gap-2 rounded-xl bg-raise p-3">
       <span class="font-semibold text-ink">Import a Claude Code agent</span>
       <span class="text-xs text-muted"
-        >Choose its Markdown file. Review its instructions and access before hiring.</span
+        >Choose one or more agent Markdown files. Review each before hiring.</span
       >
       <input
         type="file"
         accept=".md,.markdown"
+        multiple
         disabled={busy}
         onchange={(e) => {
-          const file = e.currentTarget.files?.[0];
+          const picked = Array.from(e.currentTarget.files ?? []);
           e.currentTarget.value = '';
-          if (file) void importAgent(file);
+          if (picked.length > 1) onfiles(picked);
+          else if (picked[0]) void importAgent(picked[0]);
         }}
       />
     </label>
@@ -383,9 +410,11 @@
     aria-label="Review agent import"
   >
     {#if updating}
-      <JobDescription profile={updating} {version} proposal={desk} />
-      <button class="self-start text-xs text-muted" onclick={() => (updating = undefined)}
-        >Back to matches</button
+      <JobDescription profile={updating} {version} proposal={desk} bind:saving {onupdated} />
+      <button
+        class="self-start text-xs text-muted"
+        disabled={saving}
+        onclick={() => (updating = undefined)}>Back to matches</button
       >
     {:else}
       <p class="text-sm text-ink">
