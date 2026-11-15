@@ -14,7 +14,7 @@ import { db, sql, toolServer } from './tool-server.ts';
 const { asks, followUps, ledger, owner, staff } = await import('../src/schema.ts');
 const { eq } = await import('drizzle-orm');
 const O = await import('../src/office.ts');
-const { setPermission, setTool } = O;
+const { setActsOnHandOffs, setPermission, setTool } = O;
 const { GRANTABLE_TOOLS } = await import('../src/tools.ts');
 const { MANAGER_ROLE } = await import('../src/managers.ts');
 
@@ -46,7 +46,7 @@ beforeEach(async () => {
   await sql`delete from ledger`;
   await sql`delete from follow_ups`;
   await sql`delete from asks`;
-  await db.update(staff).set({ permission: 'draft', tools: [] });
+  await db.update(staff).set({ permission: 'draft', tools: [], actsOnHandOffs: false });
 });
 
 const lines = () =>
@@ -119,6 +119,61 @@ test("the Settings tab's level and tool changes still write their own access lin
   ]);
 });
 
+test('a move up to Act keeps the choice for work from colleagues the owner made with it, with its own line', async () => {
+  // Left out, the stored choice stays: off for every Odd to start with.
+  await setPermission('ada', 'act');
+  assert.equal((await ada()).actsOnHandOffs, false);
+  await setPermission('ada', 'draft');
+  await setPermission('ada', 'act', true);
+  assert.equal((await ada()).actsOnHandOffs, true);
+  // Below Act the choice stays as it was, and the next raise takes a new one.
+  await setPermission('ada', 'read');
+  assert.equal((await ada()).actsOnHandOffs, true);
+  await setPermission('ada', 'act', false);
+  assert.equal((await ada()).actsOnHandOffs, false);
+  // A move down never takes one.
+  await setPermission('ada', 'draft', true);
+  assert.equal((await ada()).actsOnHandOffs, false);
+  assert.deepEqual(await titles(), [
+    'Raised Ada from draft to act',
+    'Lowered Ada from act to draft',
+    'Raised Ada from draft to act',
+    'Let Ada act on its own on work from colleagues',
+    'Lowered Ada from act to read',
+    'Raised Ada from read to act',
+    'Set Ada to ask first on work from colleagues',
+    'Lowered Ada from act to draft'
+  ]);
+});
+
+test('the Settings tab changes the choice for work from colleagues only for an Odd at Act', async () => {
+  assert.deepEqual(await setActsOnHandOffs('ada', true), {
+    refused: 'Put Ada at Act first. Below Act, work from colleagues cannot pass its level anyway.'
+  });
+  assert.equal((await ada()).actsOnHandOffs, false);
+  await db.update(staff).set({ permission: 'act' }).where(eq(staff.id, 'ada'));
+  assert.equal(await setActsOnHandOffs('ada', true), undefined);
+  assert.equal((await ada()).actsOnHandOffs, true);
+  // The same choice again writes nothing.
+  await setActsOnHandOffs('ada', true);
+  await setActsOnHandOffs('ada', false);
+  assert.equal((await ada()).actsOnHandOffs, false);
+  assert.deepEqual(await lines(), [
+    {
+      kind: 'access',
+      actor: 'owner',
+      title: 'Let Ada act on its own on work from colleagues',
+      body: ''
+    },
+    {
+      kind: 'access',
+      actor: 'owner',
+      title: 'Set Ada to ask first on work from colleagues',
+      body: ''
+    }
+  ]);
+});
+
 test('a level or tool the Odd already has writes no line', async () => {
   await setPermission('ada', 'draft');
   await setTool('ada', 'office_report', false);
@@ -140,7 +195,7 @@ test('an Odd asks for a higher level in one call, and is refused one it already 
   assert.equal(a.title, 'Raise Sage from Draft to Act');
   assert.equal(
     a.ifApproved,
-    "The office raises Sage from Draft to Act, as the Settings tab does, and Sage picks up the work with it. At Act, Sage uses the tools you connected for Sage at read and write without asking you first, in chats with you, in Sage's jobs and in work you approve. Work a colleague hands Sage, and a thread Sage picks back up, still runs at Draft: each change there waits for your yes. Sage stays at Act until you lower it in the Settings tab."
+    "The office raises Sage from Draft to Act, as the Settings tab does, and Sage picks up the work with it. At Act, Sage uses the tools you connected for Sage at read and write without asking you first, in chats with you, in Sage's jobs and in work you approve. Right after you approve, you choose whether work another Odd hands Sage runs at Draft, where each change waits for your yes, or at Act. A thread Sage picks back up still runs at Draft. Sage stays at Act until you lower it in the Settings tab."
   );
   const held = await call(c, 'ask_for_level', { level: 'draft', why: 'Again.' });
   assert.equal(held.error, true);
@@ -165,7 +220,7 @@ test("a run serving a colleague's hand-off, held to Draft, is told why raising i
   for (const [env, said] of [
     [
       { CEILING: 'draft', HAND_OFF_ID: '7' },
-      "Nothing went on the owner's desk. Your level is Act already. Work a colleague hands you runs at Draft whatever your level, so raising it does not change this run."
+      "Nothing went on the owner's desk. Your level is Act already. Work another Odd hands you runs at Draft whatever your level, since the owner chose to be asked first there, so raising it does not change this run."
     ],
     [{ CEILING: 'draft' }, "Nothing went on the owner's desk. Your level is Act already."],
     [{ HAND_OFF_ID: '7' }, "Nothing went on the owner's desk. Your level is Act already."]
@@ -185,7 +240,7 @@ test("a level ask raised in a colleague's hand-off says the run after the yes wo
   const [a] = await db.select().from(asks).where(eq(asks.kind, 'level'));
   assert.equal(
     asked.text,
-    `Ask ${a.id} is on the owner's desk. When they say yes, your level is Act, and a new run of yours picks up the work; it serves a colleague's hand-off, so it works at Draft at most. Check my_asks later for their decision.`
+    `Ask ${a.id} is on the owner's desk. When they say yes, your level is Act, and a new run of yours picks up the work; it serves a colleague's hand-off, so it works at Draft at most, unless the owner lets you act on your own on work from colleagues when they say yes. Check my_asks later for their decision.`
   );
 });
 
@@ -245,6 +300,18 @@ test("a yes to a level ask sets exactly that level with the Settings tab's ledge
   assert.equal((await sage()).permission, 'act');
   assert.equal((await row(a.id)).status, 'approved');
   assert.deepEqual(await titles(), ['Raised Sage from draft to act']);
+  assert.deepEqual(await runsOf(a.id), ['carry_out']);
+});
+
+test('a yes to a level ask for Act takes the choice for work from colleagues with it, and writes its line', async () => {
+  const a = await level('sage', 'act');
+  await O.decideAsk(a.id, 'approve', null, false, false, true);
+  assert.equal((await sage()).permission, 'act');
+  assert.equal((await sage()).actsOnHandOffs, true);
+  assert.deepEqual(await titles(), [
+    'Raised Sage from draft to act',
+    'Let Sage act on its own on work from colleagues'
+  ]);
   assert.deepEqual(await runsOf(a.id), ['carry_out']);
 });
 

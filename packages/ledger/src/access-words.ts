@@ -34,8 +34,30 @@ export const AT_LEVEL: Record<Level, (name: string) => string> = {
   draft: (name) =>
     `At Draft, ${name} prepares changes outside the office, and each one waits for your yes.`,
   act: (name) =>
-    `At Act, ${name} uses the tools you connected for ${name} at read and write without asking you first, in chats with you, in ${name}'s jobs and in work you approve. Work a colleague hands ${name}, and a thread ${name} picks back up, still runs at Draft: each change there waits for your yes.`
+    `At Act, ${name} uses the tools you connected for ${name} at read and write without asking you first, in chats with you, in ${name}'s jobs and in work you approve. Right after you approve, you choose whether work another Odd hands ${name} runs at Draft, where each change waits for your yes, or at Act. A thread ${name} picks back up still runs at Draft.`
 };
+/**
+ * The owner's choice for work another Odd hands the Odd `name`, made each
+ * time they put it at Act and changed on its Settings tab while it is there
+ * (`staff.actsOnHandOffs`): the choice's title, each option's label and line,
+ * and the ledger line a change writes.
+ */
+export const HAND_OFF_CHOICE = {
+  title: (name: string) => `When another Odd hands ${name} work`,
+  ask: {
+    label: 'Ask me first',
+    line: (name: string) => `${name} works at Draft on it, and each change waits for your yes.`
+  },
+  acts: {
+    label: (name: string) => `${name} acts on its own`,
+    line: (name: string) =>
+      `${name} works at Act on it, without asking you. Another Odd's words can come from something it read, so they would reach your tools without your yes.`
+  },
+  ledger: (name: string, acts: boolean) =>
+    acts
+      ? `Let ${name} act on its own on work from colleagues`
+      : `Set ${name} to ask first on work from colleagues`
+} as const;
 /** A grant to an outside tool is read or act. */
 export type GrantLevel = Extract<Level, 'read' | 'act'>;
 /** What the owner reads for a grant level; the Odd reads the same words in lower case. */

@@ -4,11 +4,19 @@
 // loads `passed` (`actChecked`), so the check shows before the raise; a
 // refusal from the office (409, `ACT_CHECK_NEEDED`) shows it too, in case the
 // page was out of date. The office checks the answers and keeps the pass.
+// Right after the check, or at once when it was passed before, the owner
+// chooses what happens when another Odd hands that Odd work
+// (`HandOffChoice.svelte`), every time, and the raise carries the choice.
 import { ACT_CHECK_NEEDED } from '@oddboro/ledger/act-check';
 
-export const actCheck = $state({ passed: false, asking: false });
+/** `choosing`: the name of the Odd whose choice is open. */
+export const actCheck = $state<{ passed: boolean; asking: boolean; choosing?: string }>({
+  passed: false,
+  asking: false
+});
 
 let settle: ((passed: boolean) => void) | undefined;
+let chosen: ((acts: boolean | undefined) => void) | undefined;
 
 /** Open the check, or go straight on when it was passed. True once passed, false on Cancel. */
 function checkFirst(): Promise<boolean> {
@@ -26,18 +34,39 @@ export function actCheckClosed(passed: boolean): void {
   settle = undefined;
 }
 
+/** Open the choice for `name`. True lets it act on its own, false asks first, undefined on Cancel. */
+function chooseFor(name: string): Promise<boolean | undefined> {
+  chosen?.(undefined);
+  actCheck.choosing = name;
+  return new Promise((resolve) => (chosen = resolve));
+}
+
+/** The choice closed: what the owner picked, or undefined on Cancel. */
+export function handOffChoiceClosed(acts: boolean | undefined): void {
+  actCheck.choosing = undefined;
+  chosen?.(acts);
+  chosen = undefined;
+}
+
 /**
- * Put an Odd at Act with `raise`, after the check when it was never passed.
- * Cancel leaves everything as it was and returns undefined.
+ * Put the Odd `name` at Act with `raise`, after the check when it was never
+ * passed, and after the owner's choice for work another Odd hands it, which
+ * `raise` sends. Cancel at either leaves everything as it was and returns
+ * undefined.
  */
-export async function withActCheck<T>(raise: () => Promise<T>): Promise<T | undefined> {
+export async function withActCheck<T>(
+  name: string,
+  raise: (actsOnHandOffs: boolean) => Promise<T>
+): Promise<T | undefined> {
   if (!(await checkFirst())) return;
+  const acts = await chooseFor(name);
+  if (acts === undefined) return;
   try {
-    return await raise();
+    return await raise(acts);
   } catch (e) {
     if (!(e instanceof Error) || e.message !== ACT_CHECK_NEEDED) throw e;
     actCheck.passed = false;
     if (!(await checkFirst())) return;
-    return raise();
+    return raise(acts);
   }
 }

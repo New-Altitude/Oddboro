@@ -7,7 +7,7 @@
 // the floor and the usage records, and that what its shell left running in the
 // run's process tree stops with it. Run with `npm test -w @oddboro/office`.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -763,16 +763,24 @@ setInterval(() => {}, 1000);`
     ],
     { detached: true, stdio: 'ignore' }
   );
+  const state = (pid: number) =>
+    spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' }).stdout.trim();
+  // The command and the tool that started it stop together, so the command can
+  // sit a moment as a zombie, dead but not yet reaped, which kill(pid, 0)
+  // still answers for.
   const alive = (pid: number) => {
     try {
       process.kill(pid, 0);
-      return true;
     } catch {
       return false;
     }
+    const s = state(pid);
+    return s !== '' && !s.startsWith('Z');
   };
+  /** Until `done`, within 10 s on a busy runner; done ends the wait at once. */
   const wait = async (done: () => boolean) => {
-    for (let i = 0; i < 100 && !done(); i++) await new Promise((r) => setTimeout(r, 20));
+    const until = Date.now() + 10_000;
+    while (!done() && Date.now() < until) await new Promise((r) => setTimeout(r, 20));
   };
   await wait(() => existsSync(at));
   const command = Number(readFileSync(at, 'utf8'));
@@ -780,8 +788,8 @@ setInterval(() => {}, 1000);`
     assert.ok(tool.pid && alive(command), 'the stand-in did not start its command');
     stopGroups(tool.pid);
     await wait(() => !alive(command) && !alive(tool.pid!));
-    assert.equal(alive(command), false, 'the command outlived the run');
-    assert.equal(alive(tool.pid), false, 'the tool outlived the run');
+    assert.equal(alive(command), false, `the command outlived the run (ps: ${state(command)})`);
+    assert.equal(alive(tool.pid), false, `the tool outlived the run (ps: ${state(tool.pid)})`);
   } finally {
     for (const pid of [command, tool.pid]) if (pid && alive(pid)) process.kill(pid);
   }

@@ -19,6 +19,8 @@ import {
   accessOf,
   askAboveLevel,
   capped,
+  handedOver,
+  handOffsLine,
   levelLine,
   NETWORK_HELD_LINE,
   outsideLines,
@@ -29,6 +31,7 @@ import type { ConnectorRow, GrantRow } from '../src/office.ts';
 
 /** A Claude Code Odd on a Mac with both switches off and no folder. */
 const noOwnTools = {
+  actsOnHandOffs: false,
   agent: 'claude',
   own: {
     commands: false,
@@ -37,7 +40,7 @@ const noOwnTools = {
     network: false,
     granted: []
   }
-} as const satisfies Pick<Capabilities, 'agent' | 'own'>;
+} as const satisfies Pick<Capabilities, 'actsOnHandOffs' | 'agent' | 'own'>;
 
 function grant(
   level: Level,
@@ -212,6 +215,7 @@ test("my_access says a capped run's level and why, and an uncapped run's own lev
     [
       levelLine('draft', 'Sam'),
       "This run serves a colleague's hand-off or was started by the office, so it works at Draft at most, whatever Sam has approved.",
+      handOffsLine(false, 'Sam'),
       'Your runs go through Claude Code.',
       'Your own tools work on files only. No shell: ask Sam to turn on Run commands with ask_for_switch. No web: ask Sam to turn on Browse the web with ask_for_switch.',
       'Sam grants other office tools in your Settings tab, under Office; when a job needs one, ask for it with ask_for_office_tool.',
@@ -223,6 +227,7 @@ test("my_access says a capped run's level and why, and an uncapped run's own lev
     accessInRun(own, 'Sam', {}),
     [
       levelLine('act', 'Sam'),
+      handOffsLine(false, 'Sam'),
       'Your runs go through Claude Code.',
       'Your own tools work on files only. No shell: ask Sam to turn on Run commands with ask_for_switch. No web: ask Sam to turn on Browse the web with ask_for_switch.',
       'Sam grants other office tools in your Settings tab, under Office; when a job needs one, ask for it with ask_for_office_tool.',
@@ -236,12 +241,56 @@ test("my_access says a capped run's level and why, and an uncapped run's own lev
   );
 });
 
+test("a standing yes holds in a run a colleague's words reach only when the owner lets the Odd act on its own on their work", () => {
+  const standing = { ...grant('act'), standing: ['stage'] };
+  const own = (acts: boolean): Capabilities => ({
+    level: 'draft',
+    remit: '',
+    office: [],
+    outside: [accessOf(standing, 'draft')],
+    ...noOwnTools,
+    actsOnHandOffs: acts
+  });
+  // Off: no standing yes in the hand-off's run, so each change waits. On: as anywhere else.
+  assert.deepEqual(handedOver(own(false)).outside[0].standing, []);
+  assert.deepEqual(handedOver(own(true)).outside[0].standing, ['stage']);
+  const said =
+    'Except stage: Sam lets you use that one without asking, so a call goes straight through.';
+  // my_access says the same, from the run's environment.
+  assert.ok(accessInRun(own(false), 'Sam', {}).includes(said));
+  assert.ok(!accessInRun(own(false), 'Sam', { FROM_COLLEAGUE: '1' }).includes(said));
+  assert.ok(accessInRun(own(true), 'Sam', { FROM_COLLEAGUE: '1' }).includes(said));
+});
+
+test('an Odd at Act is told what the owner chose for work another Odd hands it', () => {
+  const own = (acts: boolean): Capabilities => ({
+    level: 'act',
+    remit: '',
+    office: [],
+    outside: [],
+    ...noOwnTools,
+    actsOnHandOffs: acts
+  });
+  assert.ok(accessInRun(own(false), 'Sam', {}).includes(handOffsLine(false, 'Sam')));
+  assert.ok(accessInRun(own(true), 'Sam', {}).includes(handOffsLine(true, 'Sam')));
+  assert.match(handOffsLine(false, 'Sam'), /^Work another Odd hands you runs at Draft at most/);
+  assert.match(
+    handOffsLine(true, 'Sam'),
+    /^Sam lets you act on your own on work another Odd hands you/
+  );
+  // Below Act it says nothing: a hand-off cannot pass the Odd's level.
+  assert.ok(
+    !accessInRun({ ...own(true), level: 'draft' }, 'Sam', {}).includes(handOffsLine(true, 'Sam'))
+  );
+});
+
 test('my_access says the tool, what its own tools reach and each folder, and a held network', () => {
   const own: Capabilities = {
     level: 'draft',
     remit: '',
     office: [],
     outside: [],
+    actsOnHandOffs: false,
     agent: 'claude',
     own: {
       commands: true,
