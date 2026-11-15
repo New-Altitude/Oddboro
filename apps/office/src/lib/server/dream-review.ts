@@ -39,10 +39,14 @@ function evidencePages(hits: (Evidence | Evidence[])[]) {
   return pages;
 }
 
-async function selectRecords(jobs: DreamWork[], items: Evidence[], judge: Judge) {
-  const data = JSON.stringify({ work: jobs, evidence: items });
-  const answer = (await judge(data)).trim().replace(/^```(?:json)?\s*|\s*```$/g, '');
-  const selected: unknown = JSON.parse(answer);
+function readSelections(reply: string, jobs: DreamWork[], items: Evidence[]) {
+  const answer = reply.trim().replace(/^```(?:json)?\s*|\s*```$/g, '');
+  let selected: unknown;
+  try {
+    selected = JSON.parse(answer);
+  } catch {
+    throw new Error('The office could not read its decision review.');
+  }
   if (!Array.isArray(selected)) throw new Error('The office could not read its decision review.');
   const remaining = new Set(jobs.map((j) => j.id));
   const ids = new Set(items.map((r) => r.id));
@@ -62,6 +66,18 @@ async function selectRecords(jobs: DreamWork[], items: Evidence[], judge: Judge)
   }
   if (remaining.size) throw new Error('The office did not finish reviewing each assignment.');
   return matches;
+}
+
+async function selectRecords(work: DreamWork[], evidence: Evidence[], judge: Judge) {
+  const data = { work, evidence };
+  const reply = await judge(JSON.stringify(data));
+  try {
+    return readSelections(reply, work, evidence);
+  } catch {
+    const formatReminder =
+      'Return only the JSON array. Include one row for every job ID even if all sources arrays are empty. Use only the supplied IDs.';
+    return readSelections(await judge(JSON.stringify({ ...data, formatReminder })), work, evidence);
+  }
 }
 
 export async function reviewWork(

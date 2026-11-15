@@ -104,3 +104,29 @@ test('a venue search reaches the member email at every pair of positions in a 12
     }
   }
 });
+
+test('a prose reply repeats only the unfinished group and validates its replacement', async () => {
+  const work = Array.from({ length: 5 }, (_, id) => ({ ...invoice, id }));
+  const calls: number[][] = [];
+  const review = await reviewWork(work, { read: async () => [move] }, async (data) => {
+    const input = JSON.parse(data);
+    const jobs = input.work.map((j: DreamWork) => j.id);
+    calls.push(jobs);
+    if (calls.length === 2) return 'None of these jobs changed.';
+    return JSON.stringify(
+      jobs.map((job: number) => ({ job, sources: job === 0 ? [move.id] : [] }))
+    );
+  });
+  assert.deepEqual(calls, [[0, 1, 2, 3], [4], [4]]);
+  assert.deepEqual(review.byJob, { 0: [move] });
+
+  let attempts = 0;
+  await assert.rejects(
+    reviewWork(work, { read: async () => [move] }, async () => {
+      attempts++;
+      return 'None.';
+    }),
+    /could not read its decision review/
+  );
+  assert.equal(attempts, 2);
+});
