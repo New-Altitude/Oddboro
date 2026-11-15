@@ -288,31 +288,25 @@ async function reviewConnection(c: ConnectorRow, work: DreamWork[], force: boole
     const newlyCaptured = [...records.keys()];
     const source = {
       read: async (jobs: DreamWork[]) => {
-        const prior =
-          checked?.id === c.id
-            ? jobs.flatMap((j) => checked!.review.byJob[j.id] ?? []).map((e) => e.id)
-            : [];
-        const ids = new Set<string>([...newlyCaptured, ...prior]);
-        for (const q of new Set(jobs.map((j) => j.name)))
-          for (const id of await search(client, q)) ids.add(id);
-        for (const id of ids)
-          if (!records.has(id)) {
-            const r = await fetchRecord(client, id);
-            if (r) records.set(id, r);
-          }
-        return [...ids]
-          .flatMap((id) => records.get(id) ?? [])
-          .map((r) => {
-            const proof = proofs.get(r.id);
-            const ownerQuote = proof?.hash === hashOf(r.text);
-            return {
-              ...r,
-              text: r.text.slice(0, 2800),
-              date: (ownerQuote && proof?.at) || r.date,
-              ownerQuote
-            };
-          })
-          .sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id));
+        const groups = [newlyCaptured];
+        const prior = checked?.id === c.id ? checked.review.byJob : {};
+        for (const job of jobs) groups.push((prior[job.id] ?? []).map((r) => r.id));
+        for (const name of [...new Set(jobs.map((j) => j.name))].sort())
+          groups.push(await search(client, name));
+
+        for (const id of new Set(groups.flat())) {
+          const record = records.get(id) ?? (await fetchRecord(client, id));
+          if (!record) continue;
+          const proof = proofs.get(id);
+          const ownerQuote = proof?.hash === hashOf(record.text);
+          records.set(id, {
+            ...record,
+            text: record.text.slice(0, 2800),
+            date: (ownerQuote && proof?.at) || record.date,
+            ownerQuote
+          });
+        }
+        return groups.map((ids) => ids.flatMap((id) => records.get(id) ?? []));
       }
     };
     const review = await reviewWork(

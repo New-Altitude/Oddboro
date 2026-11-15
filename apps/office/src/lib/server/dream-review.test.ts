@@ -61,3 +61,46 @@ test('a review cannot attach an unknown job or substitute a different record', a
     );
   }
 });
+
+test('a venue search reaches the member email at every pair of positions in a 12-job office', async () => {
+  const register = { id: 'register', text: 'Member pickup is booking C-17.', date: '2026-11-10' };
+  const amendment = { id: 'amend', text: 'C-17 moved to the Copper Room.', date: '2026-11-11' };
+  // Each group fits. Together they exceed one page. The search that finds the
+  // amendment also supplies the register that explains who uses the booking.
+  const old = { ...move, id: 'old', text: 'x'.repeat(2400) };
+  const archive = Array.from({ length: 13 }, (_, i) => ({ ...old, id: String(i) }));
+  const longRegister = { ...register, text: register.text.padEnd(2400) };
+  const venueHits = [amendment, longRegister];
+  const source: DreamSource = {
+    read: async (jobs) =>
+      jobs.some((j) => j.name === 'Venue') ? [archive, venueHits, venueHits] : [archive]
+  };
+  for (let email = 0; email < 12; email++) {
+    for (let venue = 0; venue < 12; venue++) {
+      if (email === venue) continue;
+      const jobs = Array.from({ length: 12 }, (_, id) => ({
+        ...invoice,
+        id,
+        name: id === email ? 'Member email' : id === venue ? 'Venue' : 'Accounts'
+      }));
+      const review = await reviewWork(jobs, source, async (data) => {
+        const input: { work: DreamWork[]; evidence: { id: string; text: string }[] } =
+          JSON.parse(data);
+        assert.ok(input.work.length <= 4);
+        assert.ok(input.evidence.reduce((size, item) => size + item.text.length, 0) <= 32000);
+        const ids = input.evidence.map((r) => r.id);
+        const linked = ids.includes(register.id) && ids.includes(amendment.id);
+        return JSON.stringify(
+          input.work.map((j) => ({
+            job: j.id,
+            sources: linked && j.name !== 'Accounts' ? [register.id, amendment.id] : []
+          }))
+        );
+      });
+      assert.deepEqual(review.byJob, {
+        [email]: [amendment, longRegister],
+        [venue]: [amendment, longRegister]
+      });
+    }
+  }
+});
