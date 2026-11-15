@@ -118,3 +118,29 @@ test('a hire at Act waits for the check; a hire at Draft never does', async () =
   await O.passActCheck(RIGHT);
   assert.equal((await hire('Rowan', 'act')).permission, 'act');
 });
+
+test('a hire at Act keeps the choice for work from colleagues, with its own line; a hire below Act never takes one', async () => {
+  await O.passActCheck(RIGHT);
+  const hire = (name: string, permission: 'draft' | 'act', actsOnHandOffs: boolean) =>
+    O.hire({
+      name,
+      role: 'Tester',
+      remit: 'Tests.',
+      desk: `You are ${name}.`,
+      room: 'workspace',
+      variant: 'a',
+      portrait: 'a',
+      permission,
+      actsOnHandOffs
+    });
+  await sql`delete from ledger`;
+  assert.equal((await hire('Iris', 'act', true)).actsOnHandOffs, true);
+  assert.equal((await hire('Ivo', 'act', false)).actsOnHandOffs, false);
+  assert.equal((await hire('Ines', 'draft', true)).actsOnHandOffs, false);
+  assert.deepEqual(await titles(), [
+    'Hired Iris, Tester',
+    'Let Iris act on its own on work from colleagues',
+    'Hired Ivo, Tester',
+    'Hired Ines, Tester'
+  ]);
+});

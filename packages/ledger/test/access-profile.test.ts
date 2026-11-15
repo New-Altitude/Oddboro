@@ -176,6 +176,7 @@ test('a handed-over run keeps its own commands, web and folders; a write grant w
     level: 'act',
     remit: '',
     office: [],
+    actsOnHandOffs: false,
     outside: [
       {
         connector: { id: 'notion', name: 'Notion', readTools: ['search'] } as ConnectorRow,

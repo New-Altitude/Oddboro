@@ -1,10 +1,10 @@
 import {
   actCheckPassed,
   advancedMode,
+  currentSystem,
   desk,
   goalThreads,
   guessesWaiting,
-  MAC,
   roomNamesFor,
   roster,
   serviceNames,
@@ -13,6 +13,7 @@ import {
   welcomed,
   zone
 } from '@oddboro/ledger';
+import { computerWord } from '@oddboro/ledger/system-words';
 import { accountStatus } from '#lib/server/account.ts';
 import { keepAddress } from '#lib/server/address.ts';
 import { diagnosticsState } from '#lib/server/diagnostics.ts';
@@ -44,7 +45,7 @@ export const load: PageServerLoad = async () => {
     services: await serviceNames(),
     zone: zone(),
     /** What the header calls this computer. */
-    computer: MAC ? 'Your Mac' : 'Your computer',
+    computer: `Your ${computerWord(currentSystem())}`,
     welcomed: !first,
     /** Whether the owner turned on Advanced mode, which shows Projects. */
     advanced: await advancedMode(),

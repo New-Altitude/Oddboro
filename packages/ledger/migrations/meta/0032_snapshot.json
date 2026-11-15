@@ -1,5 +1,5 @@
 {
-  "id": "dfbded0f-6cce-4123-85f6-0c42113c4fa6",
+  "id": "21e042cf-4d09-4fcc-9c5f-37527a6e383e",
   "prevId": "1a72c19c-7f21-4832-87db-1d3c2db46d52",
   "version": "7",
   "dialect": "postgresql",
@@ -2444,6 +2444,13 @@
           "notNull": true,
           "default": "'read'"
         },
+        "acts_on_hand_offs": {
+          "name": "acts_on_hand_offs",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "agent": {
           "name": "agent",
           "type": "text",
@@ -2508,12 +2515,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "skill": {
-          "name": "skill",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "look": {
           "name": "look",
