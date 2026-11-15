@@ -7,6 +7,7 @@
   import { GRANT_LABEL, type GrantLevel } from '@oddboro/ledger/access';
   import { call } from './api.ts';
   import Pixel from './Pixel.svelte';
+  import OpenBrain from './OpenBrain.svelte';
   import ServiceActions from './ServiceActions.svelte';
   import ServiceName from './ServiceName.svelte';
   import type { StaffProfile } from '../staff/roster.ts';
@@ -43,6 +44,7 @@
 
 <div class="flex h-full min-h-0 flex-col">
   <div class="flex-1 overflow-y-auto p-3">
+    <OpenBrain />
     <input
       class="mb-3 w-full rounded-lg bg-raise px-2.5 py-1.5 text-sm outline-none placeholder:text-faint"
       type="search"

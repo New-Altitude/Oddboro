@@ -44,7 +44,11 @@ export type ToolInfo = { name: string; description: string; readOnly: boolean };
  * Connect to an outside server with its keys and sign-in, which stay in the
  * office. `open` leaves the sign-in out, to see whether it needs one.
  */
-export async function upstream(c: ConnectorRow, open = false): Promise<Client> {
+export async function upstream(
+  c: ConnectorRow,
+  open = false,
+  testHeaders?: Record<string, string>
+): Promise<Client> {
   if (
     c.id === POSTAL_ID &&
     (c.kind !== 'http' || c.config.url !== POSTAL_URL || c.config.oauth !== true || open)
@@ -64,6 +68,7 @@ export async function upstream(c: ConnectorRow, open = false): Promise<Client> {
         requestInit: {
           headers: {
             ...headers,
+            ...testHeaders,
             ...(token ? { Authorization: `Bearer ${token}` } : {})
           }
         }

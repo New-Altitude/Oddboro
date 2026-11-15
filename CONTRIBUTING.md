@@ -34,6 +34,8 @@ Forgot one? `git commit --amend -s` fixes the last commit, and
 
 The rules behind them are in `CLAUDE.md`.
 
+For changes to Open Brain, follow the [Open Brain test guide](docs/testing-open-brain.md) to run the focused suite or test against a fresh Brain.
+
 ## The name
 
 The license covers the code, not the Oddboro name. A fork needs a name of

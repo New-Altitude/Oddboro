@@ -11,6 +11,7 @@ backlog. Read a doc's status before acting on it: **proposed** (not agreed),
 - `code-standard.md`. **Ratified.** The twelve rules, Q1 to Q12, that code is written to and a pull request is reviewed against.
 - `architecture.md`. **Built.** The picture: the parts, one function per job, and where each new kind of thing starts and which check catches a missed place.
 - `project-sessions.md`. **Built.** Native Codex and Claude Code sessions: start or attach, permissions, and recovery.
+- [testing-open-brain.md](testing-open-brain.md). **Built.** Run the Open Brain tests and check decision delivery with a developer-owned Brain.
 
 ## Later
 

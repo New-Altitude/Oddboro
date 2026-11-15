@@ -13,6 +13,7 @@ import {
 } from '@oddboro/ledger';
 import { workName } from '@oddboro/ledger/work-paths';
 import { grokHome } from './grok.ts';
+import { reviewBrain } from './open-brain.ts';
 import { jobBrief, jobWork } from './job-brief.ts';
 import { scheduledFiles } from './scheduled-files.ts';
 import { slot } from './run-state.ts';
@@ -54,7 +55,7 @@ export async function runJob(
         runId,
         onEvent,
         timeoutMs: JOB_TIMEOUT_MS,
-        extra: jobBrief(job, trigger, times)
+        extra: jobBrief(job, trigger, times) + (await reviewBrain(job))
       };
       if (!job.files) return run(who, job.instructions, opts);
       const current = await jobById(job.id);
