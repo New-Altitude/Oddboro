@@ -29,7 +29,11 @@ errors came in (`src/lib/server/health.ts`). The page reports its boot and
 every error it hits to `POST /api/client-log` (`src/hooks.client.ts`, as
 JSON like every action), which writes one `page:` line each, cut to 600
 characters, at most 30 a minute, with `oddboro:` defused so a page never
-speaks to the shell.
+speaks to the shell. A run that fails or is stopped writes one line to stderr
+(`run` in `staff.ts`, `runEndLine`): `office: <Odd>'s <kind> run failed: ` or
+`stopped: `, then the first line of why, cut to 200 characters, defused the
+same way. Never the owner's message or the reply. The shell puts the time on
+every line.
 
 The keychain is the system's own secret store (`@oddboro/ledger/secrets`,
 through `src/lib/server/keychain.ts`). In the Mac app the shell keeps it:
@@ -173,8 +177,11 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    while it walks in, and it says hello there in the session later chats
    resume. What the hello says, and whether a first day follows, come from
    `firstDayOf` in `src/lib/server/first-day.ts`. A hire with a job then gets a
-   `first_day` follow-up that starts its work at once: questions the intake left open go on the desk as a
-   task, missing tools as an access ask, otherwise the first real piece of
+   `first_day` follow-up that starts its work at once: it checks its intake,
+   relevant Ledger entries, shared work and colleagues before asking the owner.
+   A colleague's work goes through a hand-off when allowed; only what still
+   needs the owner goes on the desk as a task, missing tools as an access ask,
+   otherwise the first real piece of
    work, whose result goes on the desk. A hire with no job starts nothing: it
    runs only when handed work. One serving a goal joins the goal's thread as a
    colleague, and the hire route links it to the goal before it approves the
@@ -1873,8 +1880,9 @@ the persona's voice.
    sends the owner's words and the hands' report, cut to fit 4,000
    characters, to `<issuer>/<slug>/stream`. A chat sends its earlier answered
    exchanges and keeps the door's session in the Odd's folder. Any answer but
-   `answered` fails the run with a one-line note and the report, so no work
-   is lost and nothing counts as done without the persona: a follow-up drops
+   `answered` fails the run with a note and the report. An interrupted answer
+   shows the words the persona returned above the report. Nothing counts as done
+   without the complete answer: a follow-up drops
    the hands' Outcome line, and a chat shows no sign-in card (the persona's
    access is its own, item 5). Stop cancels the call to the door. An answered
    follow-up keeps the hands' Outcome line after the voice. Every other

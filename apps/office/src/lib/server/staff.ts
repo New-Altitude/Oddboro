@@ -165,6 +165,7 @@ import { deniedEdits, denyRules, readStaffFile } from './files.ts';
 import { firstDayOf } from './first-day.ts';
 import { followUpBrief, waitEnded } from './follow-up-brief.ts';
 import { closeGateway, openGateway } from './gateway.ts';
+import { runEndLine } from './health.ts';
 import { ACT_WRITE, house, managerWork, stillOnDeskSection, whoIsHereSection } from './house.ts';
 import {
   configServers,
@@ -544,7 +545,13 @@ async function prompt(
       ? whoIsHereSection(
           (await roster())
             .filter((o) => o.id !== who.id)
-            .map((o) => ({ id: o.id, name: o.name, role: o.role, persona: !!o.package })),
+            .map((o) => ({
+              id: o.id,
+              name: o.name,
+              role: o.role,
+              remit: o.remit,
+              persona: !!o.package
+            })),
           hands.tool
         )
       : '') +
@@ -576,7 +583,7 @@ async function prompt(
       : '') +
     stillOnDeskSection(await stillOnDesk(who.id)) +
     house({
-      has: (t) => hasTool(who.tools, t),
+      has: (t) => (t === 'hand_off' ? hands.tool : hasTool(who.tools, t)),
       now,
       zone: zoneName(),
       updatesAt: updating === undefined ? undefined : clockTime(updating)
@@ -857,12 +864,15 @@ export async function run(who: StaffRow, message: string, opts: RunOpts): Promis
   };
   live.stop.signal.addEventListener('abort', interrupted, { once: true });
   try {
-    return await Promise.race([
+    const r = await Promise.race([
       who.package && voiced(kind) && !opts.lessonRun
         ? personaRun(who, message, { ...input, kind }, runTool)
         : runTool(who, message, input),
       ended.promise
     ]);
+    // stderr: the shell routes only stdout, so an error's words can never reach it as a request.
+    if (!r.ok) console.error(runEndLine(who.name, kind, r));
+    return r;
   } finally {
     clearTimeout(timer);
     live.stop.signal.removeEventListener('abort', interrupted);
