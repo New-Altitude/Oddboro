@@ -31,7 +31,9 @@ import {
   startProblem,
   useAwsSecret
 } from '#lib/server/aws.ts';
-import { setSecret } from '#lib/server/keychain.ts';
+import { deleteSecret, setSecret } from '#lib/server/keychain.ts';
+import { forgetFieldReference, keepFieldReference } from '@oddboro/ledger/one-password';
+import { readOnePasswordField } from '#lib/server/one-password.ts';
 import type { TaskOp } from '#lib/server/owner-actions.ts';
 import type { RequestHandler } from './$types';
 
@@ -137,8 +139,29 @@ export const POST: RequestHandler = async ({ params, request }) => {
       return json(await hostedSignIn(action.connector));
     else if (b.op === 'secret' && action?.kind === 'secret' && b.value?.trim()) {
       setSecret(action.connector, action.name, b.value.trim());
+      forgetFieldReference(action.connector, action.name);
       await forgetAwsSecret(action.connector, action.name);
       await tickStep(id, b.index!);
+    } else if (b.op === 'one-password' && action?.kind === 'secret') {
+      if (t.status !== 'open' || step.done) error(400, 'Open the current key setup step.');
+      const reference = text(b.value);
+      await readOnePasswordField(reference);
+      // The Desk may have closed while the owner approved the CLI request.
+      const current = await task(id);
+      const currentStep = current?.steps[b.index!];
+      if (
+        current?.status !== 'open' ||
+        !currentStep ||
+        currentStep.done ||
+        currentStep.action?.kind !== 'secret' ||
+        currentStep.action.connector !== action.connector ||
+        currentStep.action.name !== action.name
+      )
+        error(400, 'Open the current key setup step.');
+      keepFieldReference(action.connector, action.name, reference);
+      await forgetAwsSecret(action.connector, action.name);
+      deleteSecret(action.connector, action.name);
+      await tickStep(id, b.index!, 'From 1Password');
     } else if (b.op === 'aws-current' && action?.kind === 'aws')
       // Where the office signed in, whether that still works, and this tool's
       // role so far. None of it is secret.

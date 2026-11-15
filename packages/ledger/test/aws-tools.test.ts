@@ -107,6 +107,17 @@ test("Secrets Manager keeps its role while another tool's key comes from AWS", a
   await revoke('cole', AWS_SECRETS_ID);
   assert.deepEqual((await configOf(AWS_SECRETS_ID)).aws, role(AWS_SECRETS_ID));
   assert.deepEqual(deleted, []);
+
+  const [cole] = await db.select().from(staff).where(eq(staff.id, 'cole'));
+  await db.insert(staff).values({ ...cole, id: 'river', name: 'River' });
+  await grantAccess('cole', { connector: 'stripe', level: 'read' });
+  await grantAccess('river', { connector: 'stripe', level: 'read' });
+  await revoke('cole', 'stripe');
+  assert.ok((await configOf('stripe')).fromAws?.STRIPE_KEY, 'River still uses the tool');
+  await revoke('river', 'stripe');
+  assert.equal((await configOf('stripe')).fromAws, undefined);
+  assert.equal((await configOf(AWS_SECRETS_ID)).aws, undefined);
+  assert.deepEqual(deleted, ['aws/sso']);
 });
 
 test("Change puts an AWS tool's one step on the desk again, once", async () => {

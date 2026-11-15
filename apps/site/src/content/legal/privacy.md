@@ -214,6 +214,8 @@ An Odd may ask to read your LegalZoom physical mailbox, through LegalZoom's own 
 
 ### Other tools you connect
 
+If you choose a 1Password field for a tool, the office keeps its reference in this computer's secret store. It asks 1Password CLI for that field when you select it and when the office opens a connection to the tool. The office passes the value to that tool as its credential. Removing the tool's last grant removes the saved reference.
+
 An Odd may ask for a hosted tool (a service reached over the network). You approve or deny every connection, and you sign in to the service yourself. The office keeps the sign-in tokens in your system's secret store and refreshes them before each run. Data the Odd reads from or writes to that service goes to that service under its own terms. Each Odd gets only the access you give it: a tool connects read only, or with write from the Draft level. At Draft, each change through a write grant waits for your yes. At Act, a write-level grant to one Odd for one tool is your standing permission for that Odd to use that tool without asking each time. You can lower the Odd's level, which pauses the grant, or revoke the grant from the Odd's Settings, under Services, at any time.
 
 ## 6. Data retention and deletion

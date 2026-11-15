@@ -43,6 +43,7 @@ export const TASK_OPS = [
   'choose',
   'oauth',
   'secret',
+  'one-password',
   'aws-current',
   'aws-sign-in',
   'aws-roles',
@@ -246,6 +247,9 @@ export const OWNER_ACTIONS = {
   },
   'POST /api/tasks/[id]#secret': {
     none: "Keeps the owner's key in the secret store, drops any AWS secret named for it, and ticks the step."
+  },
+  'POST /api/tasks/[id]#one-password': {
+    none: "Keeps the owner's 1Password reference for this tool and ticks the key step."
   },
   'POST /api/tasks/[id]#aws-current': {
     notAnAction: "Reads where the office signed in to AWS, and this tool's role so far."

@@ -15,6 +15,7 @@
     "./goals": "./src/goal-words.ts",
     "./checks": "./src/checks.ts",
     "./platform": "./src/platform.ts",
+    "./one-password": "./src/one-password.ts",
     "./system-words": "./src/system-words.ts",
     "./secrets": "./src/secrets.ts",
     "./env": "./src/env.ts",
