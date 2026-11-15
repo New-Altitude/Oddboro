@@ -697,6 +697,7 @@ export async function drawOffice(
     if (parsed.spec && req.previous?.mainStreet) {
       parsed.spec.mainStreet = true;
       for (const room of Array.isArray(parsed.spec.rooms) ? parsed.spec.rooms : []) {
+        if (!room || typeof room !== 'object') continue;
         const before = req.previous.rooms.find((r) => r.name === room.name && r.kind === room.kind);
         if (before?.starterRoom) room.starterRoom = before.starterRoom;
       }

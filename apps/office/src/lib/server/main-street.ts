@@ -115,10 +115,11 @@ export function buildMainStreet(
     const built = generateOffice(spec, catalog, staff);
     if (built.problems.length) return built;
     for (const [i, room] of additions.entries()) {
-      const stamp = Object.values(built.templates).find(
+      const matches = Object.values(built.templates).filter(
         (t) => t.name === room.name && built.kinds[t.id] === room.kind
       );
-      if (!stamp || room.row || room.side) return redraw();
+      if (matches.length !== 1 || room.row || room.side) return redraw();
+      const [stamp] = matches;
       const id = 'addition-' + (i + 1);
       const x = hall.at[0] + hall.size[0] - 1;
       const y = hall.at[1] + 1 - stamp.map.length;
