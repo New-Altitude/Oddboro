@@ -146,6 +146,22 @@ test('a level the owner raised tells the Odd its run has it, and that hand-offs 
   assert.ok(lines.includes('- The level you asked for: Act'), lines.join('\n'));
 });
 
+test('a level raised to Act, when the owner lets the Odd act on its own on work from colleagues, says hand-offs run at Act too', () => {
+  const lines = followUpBrief(
+    followUp('carry_out'),
+    { ...ask, kind: 'level', level: 'act' },
+    undefined,
+    undefined,
+    undefined,
+    { actsOnHandOffs: true }
+  );
+  assert.equal(lines[0], '{owner} approved your ask #7 for the Act level, and this run has it.');
+  assert.equal(
+    lines[1],
+    '{owner} lets you act on your own on work a colleague hands you, so it runs at Act too. A thread you pick back up still runs at Draft at most.'
+  );
+});
+
 test("a level raised to Act, carried out for a colleague's hand-off, tells the Odd this run stays at Draft", () => {
   const lines = followUpBrief(
     followUp('carry_out'),

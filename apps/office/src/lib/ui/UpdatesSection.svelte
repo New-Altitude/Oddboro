@@ -90,7 +90,7 @@
   {:else}
     <p class="text-xs text-muted">
       {update.current === 'development'
-        ? 'This is a development build. Only the Mac app updates itself.'
+        ? 'This is a development build. Only the Oddboro app updates itself.'
         : `This is Oddboro ${update.current}. Every update installs, in the window below.`}
     </p>
     {#if update.ready}

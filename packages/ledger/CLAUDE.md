@@ -6,7 +6,7 @@ pokes (one-time chat messages an Odd sets for later), reports, connectors and gr
 windows, the names the owner gives the rooms, the owner's goals and who serves
 them, the lessons the owner teaches the Odds, the app's updates, and the ledger itself.
 Drizzle ORM over the `postgres` driver. Server only, except `./time`,
-`./tools`, `./agents`, `./access`, `./grantable`, `./goals`, `./update-window`, `./work-paths`, `./desk-answers`, `./live-tables` and `./filters`, which the page may import.
+`./tools`, `./agents`, `./access`, `./grantable`, `./goals`, `./update-window`, `./work-paths`, `./desk-answers`, `./live-tables`, `./filters` and `./system-words`, which the page may import.
 
 `src/run-registry.ts` holds each live run, its stop handle and its work in
 progress. `reserveRun` and `releaseRun` own its lifetime; the office derives
@@ -31,6 +31,16 @@ Under `node --test` (`NODE_TEST_CONTEXT`), with no `ODDBORO_HOME`, `home()` is
 a folder under the system's temp folder, made on first use and removed at
 exit, and with no `ODDBORO_DB_PORT`, `DATABASE_PORT` is 54399: a test never
 reaches the owner's real office (`test/home.test.ts`).
+Both packages' test scripts also load `test/test-defaults.ts` with `--import`,
+before any test module: each test process gets a temp `HOME` and `USERPROFILE`
+and a `PATH` of node plus the system's own folders, so no test finds the
+developer's AI tools or settings unless it stands one in. It imports only
+Node's own modules, so it cannot load a module a test means to mock.
+`test/tools-on-path.ts` lists which of some commands a process could start
+from its `PATH`, for the tests that hold that. Under test `src/secrets.ts`
+starts with a store whose every use throws, naming the stand-in to load,
+until a test stands one in (or sets `ODDBORO_SECRETS=system` to test the
+system's own store with its command stubbed).
 
 1. With no `DATABASE_URL` in `.env`, the office keeps its own Postgres:
    PGlite inside the office server, files in `~/.oddboro/db`, with
@@ -83,11 +93,15 @@ office sets on that server what it needs from `.env` (`DATABASE_URL`,
 `OFFICE_TIME_ZONE`, `OFFICE_AGENT`; `access` in the office's `staff.ts`), and
 the server never depends on reading it.
 
-`npm test -w @oddboro/ledger` runs `test/` with `node --test`, and fails any
-test that runs past 15 seconds (`--test-timeout=15000`), or 45 seconds for the
-one test that sets its own limit (the three-server `propose_filter` test in
-`test/filters.test.ts`, 15 seconds per server), so a test past its timeout
-fails. A run that never exits, from a handle a test left open, CI ends at the
+`npm test -w @oddboro/ledger` runs `test/` with `node --test`. First
+`test/global-setup.ts` makes one database with every migration, and each file
+opens a copy (`tool-server.ts`, `pglite.ts`) instead of making and migrating
+its own; a file run on its own makes its own. It fails any
+test that runs past 15 seconds (`--test-timeout=15000`), or past its own
+limit for the two tests that start several tool servers, at 15 seconds per
+server: 45 for the `propose_filter` test in `test/filters.test.ts`, 60 for
+the shared-project test in `test/project-tools.test.ts`. So a test past its
+timeout fails. A run that never exits, from a handle a test left open, CI ends at the
 test step's timeout (`timeout-minutes: 10` on each test step in
 `.github/workflows/ci.yml`). The
 script never passes `--test-force-exit`: under it a run once reported 1,015 of
@@ -440,7 +454,10 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   (`Unreturned`). Results that land while the hub
   runs on the thread wait, and the next pick-up takes them all
   (`resultsToJoin`, named in its brief); they end with it. Both runs work at
-  Draft at most.
+  Draft at most, but the colleague's own run keeps its level when the owner
+  lets it act on its own on work from colleagues (`staff.acts_on_hand_offs`,
+  chosen with each raise to Act, `0032_colleague_hand_offs`). Its brief then
+  says so (`handOffBrief`'s `acts`). The hub's pick-up stays at Draft.
 - Every hand-off is a step in a thread (`src/threads.ts`, the `threads`
   table). An Odd's `hand_off` with no goal opens one with that Odd as the hub; with a goal it goes on the goal's thread. One goal is
   one thread (`goalThread`): led by the manager, or by the Odd opening it when
@@ -701,7 +718,13 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   most, and so does every run that serves a colleague's hand-off, such as the
   carry-out of a level, office tool or outside tool ask raised in one. The one
   exception is the carry-out of an approval ask, the owner's yes to that exact
-  action, which runs at the Odd's level so one yes stays one yes.
+  action, which runs at the Odd's level so one yes stays one yes. A raise to
+  Act also takes the owner's choice for work from colleagues
+  (`actsOnHandOffs`, passed to `decideAsk`, `setPermission` and `hire`, and
+  changed alone by `setActsOnHandOffs`): on, the hand-off and every run that
+  serves it keep the Odd's level, and a change writes its own access line
+  (`HAND_OFF_CHOICE` in `access-words.ts`). Left out, the stored choice
+  stays; a move down never changes it.
   `test/setting-asks.test.ts` holds it, the tools included.
 - A `call` ask carries one held call in `asks.call` (`HeldCall`: the
   connector, the tool and its exact arguments), raised by the office's gateway
@@ -716,8 +739,12 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   `apps/office/src/lib/server/gateway.test.ts` holds it.
 - A standing yes is a list of a write grant's tools the Odd uses without
   asking (`grants.standing`, `src/standing.ts`): at Draft the gateway passes a
-  call to one of them on instead of holding it, in any run with a place, so a
-  hand-off's too, never a lesson run. A `standing` ask carries the tools in
+  call to one of them on instead of holding it, in any run with a place,
+  never a lesson run, and in a run that serves a colleague's hand-off, or a
+  lead's pick-up of a colleague's result (`FROM_COLLEAGUE`), only
+  when the owner lets that Odd act on its own on work from colleagues
+  (`staff.acts_on_hand_offs`; `handedOver` in `capabilities.ts` empties the
+  list otherwise, so each call waits for the owner's yes). A `standing` ask carries the tools in
   `asks.standing` (`StandingRequest`), raised by `ask_for_standing_yes`, which
   every Odd has (`always`) and is offered only while it holds a grant at
   write (`withWrite` in `tools.ts`). The tool refuses an Odd at Act, whose calls go through already, a service not held at write, a tool the
@@ -957,6 +984,12 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
 - On Windows, reach the system through `powershell()` or `powershellSync()`
   with values passed as `env`, never pasted into the script, so nothing needs
   quoting.
+- Start an asynchronous one-shot command through `probe()` in
+  `src/platform.ts`, never `execFile`. It says `ok`, `failed`, `missing` or
+  `timeout`, and each caller handles all four, so "not there" never reads as
+  an empty answer and no raw error reaches the owner. It hides the command's
+  window on Windows unless `showWindow`, which only certutil's trust step and
+  `openUrl` use. `test/one-shot-commands.test.ts` holds both.
 
 ## Later
 

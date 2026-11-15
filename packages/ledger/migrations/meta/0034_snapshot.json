@@ -1,6 +1,6 @@
 {
-  "id": "6f53e1a5-0eb3-4b41-aeeb-957019b11579",
-  "prevId": "1f6ddc4d-e516-464f-ae0b-e9ff1b3ccfbb",
+  "id": "08366b3a-48e5-5d73-a063-0147c269c05a",
+  "prevId": "1f1958c4-f8ea-54d2-b8e4-ca6e991ff16e",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2398,9 +2398,9 @@
           "primaryKey": false,
           "notNull": true
         },
-        "agent_source": {
-          "name": "agent_source",
-          "type": "jsonb",
+        "claude_agent_name": {
+          "name": "claude_agent_name",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -2557,6 +2557,13 @@
           "type": "integer[]",
           "primaryKey": false,
           "notNull": false
+        },
+        "acts_on_hand_offs": {
+          "name": "acts_on_hand_offs",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         }
       },
       "indexes": {},
