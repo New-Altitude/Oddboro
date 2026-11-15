@@ -25,6 +25,8 @@ export type HudItem = {
   url?: string;
   hint?: string;
 };
+export const codexChatUrl = (id: string) => 'codex://threads/' + encodeURIComponent(id);
+
 export function hudItems(
   office: HudOffice,
   sample: ComputerActivity | undefined,
@@ -52,8 +54,7 @@ export function hudItems(
     };
     if (session)
       return { ...item, action: 'Open project', open: () => links.onproject(session.id) };
-    if (r.agent === 'codex')
-      return { ...item, action: 'Open chat', url: 'codex://threads/' + encodeURIComponent(r.id) };
+    if (r.agent === 'codex') return { ...item, action: 'Open chat', url: codexChatUrl(r.id) };
     return {
       ...item,
       action: 'Find session',

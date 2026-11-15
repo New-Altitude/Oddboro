@@ -18,6 +18,12 @@ Office work updates when it changes. Opening the HUD, returning to the window or
 
 **Ready to review** holds unread replies and reports. Expand **Computer activity** for CPU, memory and processes under the owner’s account. 100% run CPU uses one core. Each process includes child memory and can include shared pages. On Mac and Linux, a shared server can list its open Codex conversations. Windows shows process totals.
 
+While the office is running, your Office Manager checks the computer every 15 seconds, even with the HUD closed. Two consecutive CPU intervals at 90% or higher, or two memory-pressure readings, trigger a recommendation on the floor, in Workspace and in the HUD. The manager also sends one desktop notification per episode through Oddboro’s regular notification service. System notification settings determine whether it appears.
+
+The manager checks the leading agent process for the resource under pressure and suggests what to review. **Review agent processes** opens the HUD sorted by that resource. A shared server gets one reading across its chats. Expand a Codex process to open one of its identified chats in Codex. If agents account for little usage or the process list is unavailable, the manager points you to the system monitor. You choose whether to pause or close any work in its own app. During a long episode the manager rechecks the leading process about once a minute. The recommendation clears after two checks without confirmed pressure.
+
+On Mac the memory signal comes from the kernel’s warning or critical level. On Linux the manager checks whether tasks have been stalled for memory at least 10% of the past ten seconds. On Windows it checks for less than both 5% of physical memory and 512 MiB available. The detailed process scan runs when pressure is confirmed or you open or refresh the HUD.
+
 ## Pair a client with your office
 
 Save the owner pairing code in your password manager when the app first opens. Starting from a terminal prints the code there. The desktop asks for it when it reconnects. The CLI takes it at a hidden prompt or from standard input for scripts. Keep the code out of command arguments, environment variables, and shell history.

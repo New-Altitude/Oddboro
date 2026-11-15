@@ -32,6 +32,7 @@ import { pairService, readKey } from '#lib/server/app-key.ts';
 import { startFollowUps } from '#lib/server/follow-ups.ts';
 import { markReady, timed } from '#lib/server/health.ts';
 import { stopRuns } from '#lib/server/staff.ts';
+import { startPressureWatch } from '#lib/server/pressure-watch.ts';
 import { startClock } from '#lib/server/jobs.ts';
 import { guardOffice } from '#lib/server/owner-page.ts';
 import { syncPersonas } from '#lib/server/persona.ts';
@@ -72,6 +73,7 @@ export const init: ServerInit = async () => {
   await timed('update row', loadUpdate);
   startClock();
   startFollowUps();
+  startPressureWatch();
   // An Odd that leaves the office stops what it is running at once.
   whenOddLeaves(stopRuns);
   // Never awaited: an office offline or signed out starts as fast as any.

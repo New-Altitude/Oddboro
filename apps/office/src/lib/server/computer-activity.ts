@@ -1,5 +1,6 @@
 import { cpus, totalmem, freemem } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
+import { runsGoing } from '@oddboro/ledger/run-registry';
 import type { Agent } from '@oddboro/ledger/agents';
 import { activityTitles, openCodexTurns } from './activity-titles.ts';
 import { processRows, processFiles, type ProcessRow } from './activity-processes.ts';
@@ -26,7 +27,7 @@ export type ComputerActivity = {
   runs: ActivityRun[];
 };
 
-function hostTicks() {
+export function hostTicks() {
   let total = 0,
     idle = 0;
   for (const core of cpus()) {
@@ -34,6 +35,13 @@ function hostTicks() {
     total += Object.values(core.times).reduce((a, b) => a + b, 0);
   }
   return { idle, total };
+}
+
+export function hostCpu(before: ReturnType<typeof hostTicks>, after: ReturnType<typeof hostTicks>) {
+  const ticks = after.total - before.total;
+  return ticks > 0
+    ? Math.max(0, Math.min(100, 100 * (1 - (after.idle - before.idle) / ticks)))
+    : null;
 }
 
 /** Charge each descendant to its nearest run. An npm shim and the native program it launches are one run. */
@@ -94,7 +102,6 @@ export async function computerActivity(
   const last = await processRows(true);
   const end = hostTicks(),
     elapsed = performance.now() - begin;
-  const ticks = end.total - host.total;
   const { groups, agentPids } = groupProcesses(first, last, elapsed, officeProcesses());
   const files = await processFiles([...agentPids.keys()]);
   for (const [pid, root] of agentPids) {
@@ -110,11 +117,34 @@ export async function computerActivity(
   const ids = new Set([...groups.values()].flatMap((r) => r.sessions));
   return {
     measured: new Date().toISOString(),
-    cpu: ticks > 0 ? Math.max(0, Math.min(100, 100 * (1 - (end.idle - host.idle) / ticks))) : null,
+    cpu: hostCpu(host, end),
     used: total - freemem(),
     total,
     openTurns: openCodexTurns(ids),
     titles: await activityTitles(ids),
     runs: [...groups.values()].sort((a, b) => (b.cpu ?? -1) - (a.cpu ?? -1) || b.bytes - a.bytes)
   };
+}
+
+// The HUD and the pressure check share an in-flight process scan.
+let sampling: Promise<ComputerActivity> | undefined;
+export function readComputerActivity() {
+  sampling ??= computerActivity(
+    () =>
+      new Map(
+        [...runsGoing.values()].flatMap((r) =>
+          r.process
+            ? [
+                [
+                  r.process.pid,
+                  { agent: r.process.agent, staffId: r.staffId, task: r.work?.label ?? r.kind }
+                ] as const
+              ]
+            : []
+        )
+      )
+  ).finally(() => {
+    sampling = undefined;
+  });
+  return sampling;
 }

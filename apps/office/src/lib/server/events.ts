@@ -4,6 +4,7 @@
 // its result back, the New Altitude sign-in changed, or a persona was signed
 // in to or joined the office. /api/events streams it to the page. Nothing
 // polls.
+import type { ManagerAdvice } from './pressure-watch.ts';
 import { EventEmitter } from 'node:events';
 import {
   LOCAL,
@@ -27,6 +28,7 @@ export type HandOffEvent = { type: 'hand-off' } & HandOffNews;
 
 export type OfficeEvent =
   | { type: 'change'; table: string }
+  | { type: 'pressure'; advice: ManagerAdvice | null }
   | { type: 'working'; working: Record<string, string>; inProgress: Record<string, Work[]> }
   | { type: 'persona'; slug: string; joined: Offer['joined']; problem?: string }
   | LessonEvent

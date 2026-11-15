@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { formatMemory } from '../format-memory.ts';
+  import PressureNotice from '#lib/ui/PressureNotice.svelte';
+  import type { ManagerAdvice } from '#lib/server/pressure-watch.ts';
   import { onMount, tick } from 'svelte';
   import { AGENT_NAMES } from '@oddboro/ledger/agents';
   import type { ComputerActivity, ActivityRun } from '#lib/server/computer-activity.ts';
@@ -8,7 +11,13 @@
   import { LOGOS } from './tool-logos.ts';
 
   import type { agentAttention } from '#lib/server/agent-attention.ts';
-  import { hudItems, type HudOffice, type HudLinks, type HudItem } from './hud-items.ts';
+  import {
+    codexChatUrl,
+    hudItems,
+    type HudOffice,
+    type HudLinks,
+    type HudItem
+  } from './hud-items.ts';
   import { chord, type HudKeys } from './hud-keys.ts';
   import HudQueue from './HudQueue.svelte';
   import HudCapacity from './HudCapacity.svelte';
@@ -19,6 +28,8 @@
     links,
     onrefresh,
     onexit,
+    pressure,
+    initialResource,
     keys,
     onkeys,
     position = $bindable()
@@ -27,6 +38,8 @@
     links: HudLinks;
     onrefresh: () => Promise<void>;
     onexit: () => void;
+    pressure: ManagerAdvice | null;
+    initialResource?: ManagerAdvice['resource'];
     keys: HudKeys;
     onkeys: (keys: HudKeys) => void;
     position: { id: string; index: number };
@@ -38,6 +51,12 @@
     busy = $state(true),
     problem = $state('');
   let order = $state<'cpu' | 'bytes'>('cpu');
+  let processes: HTMLDetailsElement;
+  function reviewProcesses(resource: ManagerAdvice['resource']) {
+    order = resource === 'memory' ? 'bytes' : 'cpu';
+    processes.open = true;
+    processes.querySelector('summary')?.focus();
+  }
   let request: AbortController | undefined;
   let attention = $state<Awaited<ReturnType<typeof agentAttention>>>();
   let noticeError = $state('');
@@ -70,7 +89,10 @@
   onMount(() => {
     dialog.showModal();
     closeButton.focus();
-    if (!queue.focusSelected())
+    if (initialResource) {
+      reviewProcesses(initialResource);
+      void refresh();
+    } else if (!queue.focusSelected())
       void refresh().then(async () => {
         await tick();
         if (document.activeElement === closeButton) queue?.focusSelected();
@@ -107,11 +129,6 @@
         : [])
     ].join(' ')
   );
-  function memory(n: number) {
-    return n >= 1024 ** 3
-      ? (n / 1024 ** 3).toFixed(1) + ' GiB'
-      : Math.round(n / 1024 ** 2) + ' MiB';
-  }
   const percent = (n: number | null) =>
     n === null ? 'Unavailable' : (n < 1 && n > 0 ? '<1' : Math.round(n)) + '%';
   function linked(run: ActivityRun) {
@@ -145,9 +162,9 @@
           '. Computer CPU ' +
           percent(sample.cpu) +
           ', memory ' +
-          memory(sample.used) +
+          formatMemory(sample.used) +
           ' of ' +
-          memory(sample.total) +
+          formatMemory(sample.total) +
           '. Run CPU is per core. Memory includes child processes.'
         : 'Computer readings unavailable.'
     ];
@@ -175,7 +192,7 @@
           title(r),
           AGENT_NAMES[r.agent] + ' PID ' + r.pid,
           percent(r.cpu) + ' CPU',
-          memory(r.bytes),
+          formatMemory(r.bytes),
           odd?.name,
           r.project,
           ...projects.slice(0, 5).map((s) => s.title + ' (' + s.status + ')'),
@@ -238,6 +255,10 @@
         {@render action(n)}
       </div>
     {/snippet}
+    {#if pressure}<PressureNotice
+        advice={pressure}
+        onreview={() => pressure && reviewProcesses(pressure.resource)}
+      />{/if}
     <HudCapacity {needs} {running} {attention} {row} />
     <HudQueue bind:this={queue} items={needs} {keys} bind:position {busy} {action} />
     {#if noticeError}<p role="alert">
@@ -255,10 +276,10 @@
         >{/each}
     </details>
     <div class="key-settings"><HudShortcuts {keys} onchange={onkeys} /></div>
-    <details class="computer">
+    <details class="computer" bind:this={processes}>
       <summary
         >Computer activity {#if sample}<span
-            >CPU {percent(sample.cpu)} · Memory {memory(sample.used)} of {memory(
+            >CPU {percent(sample.cpu)} · Memory {formatMemory(sample.used)} of {formatMemory(
               sample.total
             )}</span
           >{/if}</summary
@@ -294,7 +315,9 @@
                   >
                 </div>
                 <div class="reading"><strong>{percent(r.cpu)}</strong><small>CPU</small></div>
-                <div class="reading"><strong>{memory(r.bytes)}</strong><small>Memory</small></div>
+                <div class="reading">
+                  <strong>{formatMemory(r.bytes)}</strong><small>Memory</small>
+                </div>
               </div>
               {#if r.sessions.length}<details>
                   <summary
@@ -306,9 +329,11 @@
                   >
                   <ul>
                     {#each r.sessions as id}<li>
-                        {sample.titles[id] ??
-                          projects.find((s) => s.nativeId === id)?.title ??
-                          'Conversation ' + id.slice(-8)}
+                        <a class="jump" href={codexChatUrl(id)}
+                          >{sample.titles[id] ??
+                            projects.find((s) => s.nativeId === id)?.title ??
+                            'Conversation ' + id.slice(-8)} ↗</a
+                        >
                       </li>{/each}
                   </ul>
                 </details>

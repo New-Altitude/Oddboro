@@ -1,4 +1,6 @@
 <script lang="ts">
+  import PressureNotice from '#lib/ui/PressureNotice.svelte';
+  import type { ManagerAdvice } from '#lib/server/pressure-watch.ts';
   import { onMount, setContext, tick, untrack } from 'svelte';
   import type { PageData } from './$types';
   import type { AskRow } from '@oddboro/ledger';
@@ -30,6 +32,7 @@
     type Win
   } from '#lib/ui/windows.svelte.ts';
   import { chatRequest, type Delivered } from '#lib/ui/chat-about.svelte.ts';
+  let pressure = $state<ManagerAdvice | null>(null);
   let { data }: { data: PageData } = $props();
   setContext('text-only-office', true);
   let office = $state<Omit<PageData, 'actChecked'>>(untrack(() => data));
@@ -45,7 +48,9 @@
     position = $state({ id: '', index: 0 });
   let launcher = $state<HTMLButtonElement>(),
     opener: HTMLElement | null = null;
+  let initialResource = $state<ManagerAdvice['resource']>();
   function openHud() {
+    initialResource = undefined;
     if (!fromHud)
       opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     hudOpen = true;
@@ -156,9 +161,16 @@
     } catch {
       /* This browser may disable local storage. */
     }
-    if (office.welcomed && location.hash === '#agent-hud') {
+    const resource =
+      location.hash === '#pressure-memory'
+        ? 'memory'
+        : location.hash === '#pressure-cpu'
+          ? 'cpu'
+          : undefined;
+    if (office.welcomed && (location.hash === '#agent-hud' || resource)) {
       fromFloor = new URL(location.href).searchParams.get('from') === 'office';
       openHud();
+      initialResource = resource;
     }
     const events = new EventSource('/api/events');
     let pending = false,
@@ -183,6 +195,10 @@
     };
     events.onmessage = (m) => {
       const e: OfficeEvent = JSON.parse(m.data);
+      if (e.type === 'pressure') {
+        pressure = e.advice;
+        return;
+      }
       if (e.type === 'working') {
         office.working = e.working;
         office.inProgress = e.inProgress;
@@ -277,6 +293,13 @@
       >Open Office</a
     >
   </header>
+  {#if pressure && !hudOpen}<PressureNotice
+      advice={pressure}
+      onreview={() => {
+        openHud();
+        initialResource = pressure?.resource;
+      }}
+    />{/if}
   {#if !connected}<p role="status">Reconnecting to the office…</p>{/if}
   {#if problem}<p role="alert">
       {problem} <button onclick={() => (problem = '')}>Dismiss</button>
@@ -435,6 +458,8 @@
   {/if}
   {#if hudOpen}
     <ComputerActivity
+      {pressure}
+      {initialResource}
       {office}
       {keys}
       bind:position
