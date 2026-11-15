@@ -208,7 +208,7 @@ export function runClaimed(
       ? { at: lifted.at }
       : undefined;
   const joined =
-    f.kind === 'handed_back' && t
+    f.kind === 'handed_back' && f.handOff?.station === undefined && t
       ? [...rows.followUps.values()]
           .filter(
             (g) =>
@@ -216,6 +216,7 @@ export function runClaimed(
               g.staffId === f.staffId &&
               g.threadId === t.id &&
               g.kind === 'handed_back' &&
+              g.handOff?.station === undefined &&
               g.run.is === 'queued'
           )
           .sort((a, b) => a.id - b.id)

@@ -31,6 +31,8 @@ export const LIVE_TABLES: Record<TableName, LiveTable> = {
   // Once the office is up, every change is the owner's own call on the page, and
   // the list that made it reads the accounts again (agent-tools.svelte.ts).
   accounts: { trigger: 'all', page: [] },
+  station_workflows: { trigger: 'all', page: ['version'] },
+  station_jobs: { trigger: 'all', page: ['version'] },
   goals: { trigger: 'all', page: ['version'] },
   staff_goals: { trigger: 'all', page: ['version'] },
   goal_progress: { trigger: 'all', page: ['version'] },

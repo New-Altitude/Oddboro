@@ -264,7 +264,7 @@ export async function servesHandOff(f: FollowUpRow): Promise<FollowUpRow | undef
  * end with it (`finishFollowUp`).
  */
 export async function resultsToJoin(f: FollowUpRow): Promise<FollowUpRow[]> {
-  if (f.kind !== 'handed_back' || !f.threadId) return [];
+  if (f.kind !== 'handed_back' || f.handOff?.station !== undefined || !f.threadId) return [];
   return db
     .select()
     .from(followUps)
@@ -274,6 +274,7 @@ export async function resultsToJoin(f: FollowUpRow): Promise<FollowUpRow[]> {
         eq(followUps.threadId, f.threadId),
         eq(followUps.kind, 'handed_back'),
         isNull(followUps.startedAt),
+        sql`${followUps.handOff}->'station' is null`,
         ne(followUps.id, f.id)
       )
     )

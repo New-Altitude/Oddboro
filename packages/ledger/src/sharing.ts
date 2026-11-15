@@ -130,11 +130,15 @@ export async function fileReaders(t: { id: number; hubId: string; goalId: number
  */
 export async function sharing(q: Db, h: HeldHandOff & { threadId: number }): Promise<HandOff> {
   const others = (await onThread(q, h.from, h.threadId)).filter((id) => id !== h.to);
-  const rows = await heldTools([...others, h.to], q);
+  // A workflow already knows who will see the output of this station. Keep
+  // their restricted tools out of files before the next hand-off takes place.
+  const readers = [...new Set([...others, ...(h.readers ?? [])])].filter((id) => id !== h.to);
+  const rows = await heldTools([...readers, h.to], q);
   const withheld = lacking(rows, h.to, others).map((t) => t.name);
-  const kept = new Map(others.flatMap((o) => lacking(rows, o, [h.to])).map((t) => [t.id, t.name]));
+  const kept = new Map(readers.flatMap((o) => lacking(rows, o, [h.to])).map((t) => [t.id, t.name]));
   return {
     from: h.from,
+    ...(h.station !== undefined ? { station: h.station } : {}),
     title: h.title,
     brief: h.brief,
     ...(h.files?.length ? { files: h.files } : {}),

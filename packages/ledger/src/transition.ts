@@ -77,7 +77,7 @@ const DEADLOCK_TRIES = 3;
  * each copy the same file and leaves it; into new work, the copy stays in the
  * folder of work never written, as after any rollback.
  */
-async function ownTransaction<T>(inTx: (tx: Tx) => Promise<T>): Promise<T> {
+export async function ownTransaction<T>(inTx: (tx: Tx) => Promise<T>): Promise<T> {
   for (let tries = 1; ; tries++) {
     try {
       return await db.transaction(inTx);
