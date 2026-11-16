@@ -313,11 +313,22 @@
    * is wide, the panel steps back to its edge, so every Odd stays in view.
    */
   const projectsReach = $derived.by(() => {
-    if (!wide || !leftOpen || front?.kind !== 'projects') return undefined;
+    if (!leftOpen || front?.kind !== 'projects') return undefined;
+    // On a narrow screen the open rail and an Odd's card come and go over the
+    // panel, as they do over the floor, so only the closed rail is kept clear.
+    if (!wide) return showRail && !cardOpen ? ODDS_RAIL + 24 : undefined;
     if (cardOpen) return rightWidth + 24;
     if (showRail) return (railOpen ? ODDS_RAIL_OPEN : ODDS_RAIL) + 24;
     return 16;
   });
+  /**
+   * The office panel's narrowest width. At phone width the room beside the
+   * closed rail is under 340 px, and SidePanel never reaches below its min, so
+   * the min drops to that room or the panel would slide under the rail.
+   */
+  const officeMin = $derived(
+    !wide && projectsReach !== undefined ? Math.min(340, innerWidth - 16 - projectsReach) : 340
+  );
   /** The Odd's panel slides in from the screen's edge (the left in a right-to-left page). */
   const fromEdge = (far = 48) => ({
     x: (getComputedStyle(document.documentElement).direction === 'rtl' ? -1 : 1) * far,
@@ -1317,7 +1328,7 @@
       side="start"
       label="Office panel"
       bind:width={leftWidth}
-      min={340}
+      min={officeMin}
       max={Math.max(760, Math.round(innerWidth * 0.4))}
       storageKey="oddboro.panel.start"
       onTop={wins.raised}
