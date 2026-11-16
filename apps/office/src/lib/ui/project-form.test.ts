@@ -1,9 +1,10 @@
-// The Projects window's New session form: which fields show on each path.
+// The Projects window's New session form: which fields show on each path, and
+// which conversations the filter keeps.
 // Run with `npm test -w @oddboro/office`.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { ProjectAgent } from '@oddboro/ledger';
-import { newSessionFields, type SessionPath } from './project-form.ts';
+import { matchesFilter, newSessionFields, type SessionPath } from './project-form.ts';
 
 const AGENTS: ProjectAgent[] = ['claude', 'codex'];
 const PATHS: (SessionPath | undefined)[] = [undefined, 'start', 'continue'];
@@ -91,4 +92,51 @@ test("a running Codex server's socket shows for Codex on either path, and never 
   for (const form of forms.filter((f) => f.agent === 'claude')) {
     assert.equal(newSessionFields(form).socket, false, JSON.stringify(form));
   }
+});
+
+/** Conversations as Find existing lists them, with marks shaped as `claudeFolderMark` makes them. */
+const FOUND = [
+  {
+    id: '3f2a9c71-0b1e-4d2a-9f00-111111111111',
+    title: 'Fix the checkout page',
+    mark: '~/.claude-personal · owner@example.com'
+  },
+  {
+    id: 'a81d04be-77c2-4e55-8a00-222222222222',
+    title: 'Draft the release notes',
+    mark: '~/.claude · work@example.org'
+  },
+  { id: 'c0dex000-1111-2222-3333-444444444444', title: 'Codex refactor', mark: null }
+];
+const kept = (typed: string) => FOUND.filter((c) => matchesFilter(c, typed)).map((c) => c.title);
+
+test('the filter keeps conversations whose title holds the words, in any case', () => {
+  assert.deepEqual(kept('CHECKOUT'), ['Fix the checkout page']);
+});
+
+test("the filter keeps conversations by their account's Claude folder", () => {
+  assert.deepEqual(kept('~/.claude-personal'), ['Fix the checkout page']);
+});
+
+test("the filter keeps conversations by their account's login", () => {
+  assert.deepEqual(kept('work@example'), ['Draft the release notes']);
+});
+
+test('the filter keeps a conversation by the first 8 characters of its id', () => {
+  assert.deepEqual(kept('A81D04BE'), ['Draft the release notes']);
+  assert.deepEqual(kept('3f2a9c71'), ['Fix the checkout page']);
+});
+
+test('the filter matches an id only from its start', () => {
+  assert.deepEqual(kept('9c71'), []);
+});
+
+test('the filter keeps nothing when nothing matches', () => {
+  assert.deepEqual(kept('invoice'), []);
+});
+
+test('an empty or blank filter keeps every conversation', () => {
+  const all = FOUND.map((c) => c.title);
+  assert.deepEqual(kept(''), all);
+  assert.deepEqual(kept('   '), all);
 });

@@ -9,7 +9,7 @@
   import type { StaffProfile } from '../staff/roster.ts';
   import Pixel from './Pixel.svelte';
   import { projectApi } from './project-api.ts';
-  import { newSessionFields, type SessionPath } from './project-form.ts';
+  import { matchesFilter, newSessionFields, type SessionPath } from './project-form.ts';
   import ProjectTerminal from './ProjectTerminal.svelte';
   import { LOGOS } from './tool-logos.ts';
   import { advanced, type ProjectAsk } from './windows.svelte.ts';
@@ -68,7 +68,9 @@
     /** The Claude folder Start uses. */
     startIn = $state(''),
     /** The owner's answer to "What would you like to do?" on the New session form. */
-    path = $state<SessionPath>();
+    path = $state<SessionPath>(),
+    /** What the owner typed to narrow the conversations found. */
+    filter = $state('');
   let socket = $state(''),
     folder = $state(''),
     agent = $state<ProjectAgent>('claude'),
@@ -94,6 +96,7 @@
   let termView = $state(crypto.randomUUID());
   const selected = $derived(connections.find((s) => s.id === currentId));
   const terminalVisible = $derived(!!view?.connected && !!view.terminal);
+  const shownCandidates = $derived(candidates.filter((c) => matchesFilter(c, filter)));
   const fields = $derived(
     newSessionFields({ path, agent, claudeFolders: folders.length, handingOver: !!handover })
   );
@@ -235,6 +238,7 @@
       agent,
       socket: (agent === 'codex' && socket.trim()) || undefined
     });
+    filter = '';
     found = true;
   }
   async function pick() {
@@ -536,10 +540,19 @@
             <button class="btn self-start" disabled={busy || !folder} onclick={() => run(search)}
               >Find existing</button
             >
+            {#if candidates.length}<input
+                class="field w-full"
+                type="search"
+                aria-label="Filter conversations"
+                placeholder="Title, account or ID"
+                bind:value={filter}
+              />{/if}
             {#if found && !candidates.length}<p class="text-muted">
                 No conversations found in this folder.
+              </p>{:else if candidates.length && !shownCandidates.length}<p class="text-muted">
+                No conversations match.
               </p>{/if}
-            {#each candidates as c (c.id)}<button
+            {#each shownCandidates as c (c.id)}<button
                 class="btn text-start"
                 disabled={busy}
                 onclick={() => choose(c)}

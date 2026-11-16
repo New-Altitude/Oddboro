@@ -1,6 +1,7 @@
 import type { ProjectAgent } from '@oddboro/ledger';
 
-// What the Projects window's New session form shows.
+// What the Projects window's New session form shows, and which conversations
+// its filter keeps.
 // The component only calls these, so each rule lives here once and its test
 // drives it. Nothing here fetches.
 
@@ -38,4 +39,22 @@ export function newSessionFields(form: {
     handover,
     socket: form.agent === 'codex'
   };
+}
+
+/** A conversation Find existing lists, as far as the filter reads it. */
+export type Findable = { id: string; title: string; mark?: string | null };
+
+/**
+ * Whether a conversation stays in the list for what the owner typed: the
+ * title or the account (folder and login) holding the words, or the id
+ * starting with them, in any case. An empty box keeps every one.
+ */
+export function matchesFilter(c: Findable, typed: string): boolean {
+  const q = typed.trim().toLowerCase();
+  if (!q) return true;
+  return (
+    c.title.toLowerCase().includes(q) ||
+    !!c.mark?.toLowerCase().includes(q) ||
+    c.id.toLowerCase().startsWith(q)
+  );
 }
