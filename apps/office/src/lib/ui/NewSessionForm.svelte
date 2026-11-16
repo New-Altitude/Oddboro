@@ -31,6 +31,10 @@
     /** The last error's words, and the place it shows. */
     problem: string | undefined;
     place: ErrorPlace | undefined;
+    /** The id of the conversation whose row the error shows under. */
+    problemRow: string | undefined;
+    /** The owner typed in the filter. */
+    onfilter: () => void;
     /** A change that may list the folder's conversations: typed, committed, the tool, or Refresh list. */
     onchange: (change: FormChange) => void;
     onpick: () => void;
@@ -54,6 +58,8 @@
     busy,
     problem,
     place,
+    problemRow,
+    onfilter,
     onchange,
     onpick,
     onpath,
@@ -151,13 +157,14 @@
             aria-label="Filter conversations"
             placeholder="Title, account or ID"
             bind:value={filter}
+            oninput={onfilter}
           />{/if}
         <button class="link ms-auto shrink-0" onclick={() => onchange('refresh')}
           >Refresh list</button
         >
       </div>
     {:else}<p class="text-muted">{NO_FOLDER}</p>{/if}
-    <!-- Above the rows, so an error from a row near the bottom of a long list is seen. -->
+    <!-- An error from the list itself; a row's own error shows right under that row. -->
     {@render alert('list')}
     {#if found && !candidates.length}<p class="text-muted">
         No conversations found in this folder.
@@ -171,7 +178,7 @@
         >{c.title}{#if c.mark}{' · '}{c.mark}{/if} · {c.live ? 'Running' : 'Saved'} · {new Date(
           c.updated
         ).toLocaleString()} · {c.id.slice(0, 8)}</button
-      >{/each}
+      >{#if c.id === problemRow}{@render alert('row')}{/if}{/each}
   {/if}
   {#if fields.handover}{@render alert('list')}
     <p>

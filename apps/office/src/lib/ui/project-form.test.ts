@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import type { ProjectAgent } from '@oddboro/ledger';
 import {
   errorPlace,
+  filterClears,
   listAsk,
   listFor,
   lists,
@@ -13,6 +14,7 @@ import {
   newSessionFields,
   rowsFor,
   type Choice,
+  type ErrorPlace,
   type ErrorSource,
   type FormChange,
   type Found,
@@ -180,10 +182,14 @@ test('an empty or blank filter keeps every conversation', () => {
   assert.deepEqual(kept('   '), all);
 });
 
-const SOURCES: ErrorSource[] = ['pick', 'start', 'continue', 'connect', 'load', 'session'];
+const SOURCES: ErrorSource[] = ['pick', 'start', 'continue', 'row', 'handover', 'load', 'session'];
 
-test('an error opening a conversation from the list shows above the rows, not after them', () => {
-  assert.equal(errorPlace('connect', false), 'list');
+test('an error opening a conversation from the list shows under its row', () => {
+  assert.equal(errorPlace('row', false), 'row');
+});
+
+test('an error handing a conversation over, which has no row, shows above the rows', () => {
+  assert.equal(errorPlace('handover', false), 'list');
 });
 
 test('an error listing the conversations shows above the rows', () => {
@@ -358,4 +364,13 @@ test('a failed list for a folder or tool no longer chosen drops its error', asyn
     const done = await listed(inA.ask, () => Promise.reject(refusal), then);
     assert.equal(done.error, undefined, then.folder + then.agent);
   }
+});
+
+test('typing in the filter clears an error under a row, and no other', () => {
+  const PLACES: ErrorPlace[] = ['folder', 'start', 'list', 'row', 'top', 'session'];
+  assert.deepEqual(
+    PLACES.filter((place) => filterClears(place)),
+    ['row']
+  );
+  assert.equal(filterClears(undefined), false);
 });

@@ -177,8 +177,10 @@ export type ErrorSource =
   | 'start'
   /** Listing the folder's conversations, on the continue path. */
   | 'continue'
-  /** Opening a conversation from the list, or handing one over. */
-  | 'connect'
+  /** Opening a conversation from its row in the list. */
+  | 'row'
+  /** Handing a Codex conversation over, which has no row. */
+  | 'handover'
   /** Reading the sessions and Claude folders. */
   | 'load'
   /** Anything done on an open session. */
@@ -192,15 +194,19 @@ export type ErrorPlace =
   | 'start'
   /** Above the conversations found, under the filter. */
   | 'list'
+  /** Directly under the row that was clicked, in the list. */
+  | 'row'
   /** At the top of the form. */
   | 'top'
   /** Over the open session's terminal. */
   | 'session';
 
 /**
- * Where an error shows: beside the control that caused it, so the owner never
- * has to scroll past a long list to find it. With a session open, the session
- * pane is all the owner sees, so every error shows there.
+ * Where an error shows: beside the control that caused it. A conversation that
+ * would not open shows its error directly under its row, so it is in view
+ * wherever that row sits in a long list; an error with no row (the list itself,
+ * or a hand-over) shows above the rows. With a session open, the session pane
+ * is all the owner sees, so every error shows there.
  */
 export function errorPlace(source: ErrorSource, sessionOpen: boolean): ErrorPlace {
   if (sessionOpen) return 'session';
@@ -209,11 +215,22 @@ export function errorPlace(source: ErrorSource, sessionOpen: boolean): ErrorPlac
       return 'folder';
     case 'start':
       return 'start';
+    case 'row':
+      return 'row';
     case 'continue':
-    case 'connect':
+    case 'handover':
       return 'list';
     case 'load':
     case 'session':
       return 'top';
   }
+}
+
+/**
+ * Whether typing in the filter clears the error shown: an error under a row
+ * goes, as when any next action starts, so a row filtered out never takes its
+ * error out of sight.
+ */
+export function filterClears(place: ErrorPlace | undefined): boolean {
+  return place === 'row';
 }

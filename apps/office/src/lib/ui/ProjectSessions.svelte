@@ -13,6 +13,7 @@
   import './project-sessions.css';
   import {
     errorPlace,
+    filterClears,
     listAsk,
     listFor,
     lists,
@@ -82,8 +83,8 @@
     name = $state(''),
     replies = $state<Record<string, string>>({});
   let busy = $state(false),
-    /** The last error, and what raised it, which says where it shows. */
-    problem = $state<{ text: string; from: ErrorSource }>(),
+    /** The last error, what raised it, which says where it shows, and the row it came from. */
+    problem = $state<{ text: string; from: ErrorSource; row?: string }>(),
     handover = $state<Choice>(),
     /** The conversations the last list found, with the folder and tool it asked about. */
     found = $state<Found>(),
@@ -178,15 +179,18 @@
     // would be refused as not in Setup, so the choice goes back to the first.
     if (!known.some((f) => f.path === startIn)) startIn = known[0]?.path ?? '';
   }
-  /** Runs one owner action, its error shown by what raised it. Most come from the open session. */
-  async function run(fn: () => Promise<unknown>, from: ErrorSource = 'session') {
+  /**
+   * Runs one owner action, its error shown by what raised it, under `row` when a
+   * conversation's row raised it. Most come from the open session.
+   */
+  async function run(fn: () => Promise<unknown>, from: ErrorSource = 'session', row?: string) {
     if (busy) return;
     busy = true;
     problem = undefined;
     try {
       await fn();
     } catch (e) {
-      problem = { text: describe(e), from };
+      problem = { text: describe(e), from, row };
     } finally {
       busy = false;
     }
@@ -343,14 +347,14 @@
   }
   function handOver() {
     const c = handover;
-    if (c) void run(() => connect(c, true), 'connect');
+    if (c) void run(() => connect(c, true), 'handover');
   }
   function choose(c: Choice) {
     if (agent === 'codex' && !c.live) {
       handover = c;
       return;
     }
-    void run(() => connect(c), 'connect');
+    void run(() => connect(c), 'row', c.id);
   }
   async function copyId() {
     if (!selected) return;
@@ -501,6 +505,10 @@
           {busy}
           problem={problem?.text}
           {place}
+          problemRow={problem?.row}
+          onfilter={() => {
+            if (filterClears(place)) problem = undefined;
+          }}
           onchange={changed}
           onpick={() => run(pick, 'pick')}
           onpath={choosePath}

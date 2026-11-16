@@ -41,6 +41,7 @@ function shown(form: {
   found?: boolean;
   problem?: string;
   place?: ErrorPlace;
+  problemRow?: string;
 }) {
   const { path, folder = '~/my-project', agent = 'claude', folders = TWO_FOLDERS } = form;
   const fields = newSessionFields({
@@ -66,6 +67,8 @@ function shown(form: {
       busy: false,
       problem: form.problem,
       place: form.place,
+      problemRow: form.problemRow,
+      onfilter: () => {},
       onchange: () => {},
       onpick: () => {},
       onpath: () => {},
@@ -121,4 +124,78 @@ test('no Find existing button renders on either path', () => {
   for (const path of ['start', 'continue', undefined] as const) {
     assert.doesNotMatch(shown({ path }), /Find existing/, path);
   }
+});
+
+const REFUSED = 'That conversation is no longer in ~/.claude-second · second@example.com.';
+const ALERT = `<p role="alert" class="text-coral">${REFUSED}</p>`;
+/** The end of a conversation's row: the first 8 characters of its id close the button. */
+const rowEnd = (c: Choice) => `${c.id.slice(0, 8)}</button>`;
+const alerts = (body: string) => body.split('role="alert"').length - 1;
+
+test('an error opening the last of a long list shows right under that row, and only there', () => {
+  for (const n of [12, 13, 20, 40]) {
+    const rows = conversations(n);
+    const last = rows[n - 1];
+    const body = shown({
+      path: 'continue',
+      candidates: rows,
+      found: true,
+      problem: REFUSED,
+      place: 'row',
+      problemRow: last.id
+    });
+    assert.ok(new RegExp(`${rowEnd(last)}${GAP}${ALERT}`).test(body), `${n} rows`);
+    assert.equal(alerts(body), 1, `${n} rows`);
+  }
+});
+
+test('an error opening the first row shows between it and the second row', () => {
+  const rows = conversations(40);
+  const body = shown({
+    path: 'continue',
+    candidates: rows,
+    found: true,
+    problem: REFUSED,
+    place: 'row',
+    problemRow: rows[0].id
+  });
+  const at = body.indexOf(ALERT);
+  assert.ok(at > body.indexOf(rowEnd(rows[0])));
+  assert.ok(at < body.indexOf(rowEnd(rows[1])));
+  assert.equal(alerts(body), 1);
+});
+
+test('an error listing the conversations shows above the rows', () => {
+  const rows = conversations(40);
+  const body = shown({
+    path: 'continue',
+    candidates: rows,
+    found: true,
+    problem: REFUSED,
+    place: 'list'
+  });
+  const at = body.indexOf(ALERT);
+  assert.ok(at > -1, 'the list error renders');
+  assert.ok(at < body.indexOf(rowEnd(rows[0])));
+  assert.equal(alerts(body), 1);
+});
+
+test('an error starting a conversation shows under Start', () => {
+  const body = shown({ path: 'start', problem: REFUSED, place: 'start' });
+  assert.match(body, new RegExp(`>Start</button>${GAP}${ALERT}`));
+});
+
+test('Account and Session name never render on the continue path', () => {
+  for (const folders of [ONE_FOLDER, TWO_FOLDERS]) {
+    const body = shown({ path: 'continue', folders, candidates: conversations(3), found: true });
+    assert.doesNotMatch(body, /aria-label="Account"/);
+    assert.doesNotMatch(body, /Session name/);
+  }
+});
+
+test('Account renders on the start path with two Claude folders, and not with one', () => {
+  assert.match(shown({ path: 'start', folders: TWO_FOLDERS }), /aria-label="Account"/);
+  const one = shown({ path: 'start', folders: ONE_FOLDER });
+  assert.doesNotMatch(one, /aria-label="Account"/);
+  assert.match(one, /Session name/);
 });
