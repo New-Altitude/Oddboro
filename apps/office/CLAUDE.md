@@ -2226,7 +2226,7 @@ Projects. Off, `/api/project-sessions` and its event stream answer 403
 (`ADVANCED_OFF`), and turning it off ends every open stream
 (`detachProjectViews`). Setup's folder list (`PUT /api/setup/claude-folders`,
 `advanced.folders` on the page) names the owner's other Claude folders. Setup keeps
-each as the owner typed it, not by its real path. Find existing reads Claude Code's
+each as the owner typed it, not by its real path. The continue path's list reads Claude Code's
 own session files in every known Claude folder (`claude-sessions.ts`,
 `claudeProjects` in `claude-project.ts`); a session keeps the folder it runs in
 (`config_dir`), and Remove hides a disconnected one (`hidden_at`). The terminal loads `node-pty` only when it opens. See

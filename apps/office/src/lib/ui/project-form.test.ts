@@ -7,22 +7,29 @@ import type { ProjectAgent } from '@oddboro/ledger';
 import {
   errorPlace,
   listAsk,
+  listFor,
+  lists,
   matchesFilter,
   newSessionFields,
   rowsFor,
   type Choice,
   type ErrorSource,
+  type FormChange,
+  type Found,
+  type ListAsk,
   type SessionPath
 } from './project-form.ts';
 
 const AGENTS: ProjectAgent[] = ['claude', 'codex'];
 const PATHS: (SessionPath | undefined)[] = [undefined, 'start', 'continue'];
 
-/** Every form the owner can reach: each path, tool, folder count and hand-over. */
+/** Every form the owner can reach: each path, folder or none, tool, folder count and hand-over. */
 const forms = PATHS.flatMap((path) =>
-  AGENTS.flatMap((agent) =>
-    [1, 2, 3].flatMap((claudeFolders) =>
-      [false, true].map((handingOver) => ({ path, agent, claudeFolders, handingOver }))
+  ['', '~/my-project'].flatMap((folder) =>
+    AGENTS.flatMap((agent) =>
+      [1, 2, 3].flatMap((claudeFolders) =>
+        [false, true].map((handingOver) => ({ path, folder, agent, claudeFolders, handingOver }))
+      )
     )
   )
 );
@@ -31,8 +38,8 @@ test('nothing that belongs to a path shows before the owner picks one', () => {
   for (const form of forms.filter((f) => !f.path)) {
     const shown = newSessionFields(form);
     assert.deepEqual(
-      [shown.account, shown.start, shown.list, shown.handover],
-      [false, false, false, false],
+      [shown.account, shown.start, shown.list, shown.refresh, shown.handover],
+      [false, false, false, false, false],
       JSON.stringify(form)
     );
   }
@@ -54,19 +61,40 @@ test('Account never shows with one Claude folder known', () => {
 
 test('Account shows on the start path for Claude Code with two or more Claude folders', () => {
   for (const claudeFolders of [2, 3]) {
-    const form = { path: 'start', agent: 'claude', claudeFolders, handingOver: false } as const;
+    const form = {
+      path: 'start',
+      folder: '~/my-project',
+      agent: 'claude',
+      claudeFolders,
+      handingOver: false
+    } as const;
     assert.equal(newSessionFields(form).account, true);
   }
-  const codex = { path: 'start', agent: 'codex', claudeFolders: 3, handingOver: false } as const;
+  const codex = {
+    path: 'start',
+    folder: '~/my-project',
+    agent: 'codex',
+    claudeFolders: 3,
+    handingOver: false
+  } as const;
   assert.equal(newSessionFields(codex).account, false);
 });
 
-test('the start path shows Session name and Start, and no list', () => {
+test('the start path shows Session name and Start, and no list or Refresh list', () => {
   for (const form of forms.filter((f) => f.path === 'start')) {
     const shown = newSessionFields(form);
     assert.equal(shown.start, true, JSON.stringify(form));
     assert.equal(shown.list, false, JSON.stringify(form));
+    assert.equal(shown.refresh, false, JSON.stringify(form));
   }
+});
+
+test('Refresh list shows on the continue path once a folder is set, and never without one', () => {
+  for (const form of forms.filter((f) => f.path === 'continue' && !f.handingOver)) {
+    assert.equal(newSessionFields(form).refresh, !!form.folder, JSON.stringify(form));
+  }
+  const blank = { path: 'continue', folder: '  ', agent: 'claude', claudeFolders: 1 } as const;
+  assert.equal(newSessionFields({ ...blank, handingOver: false }).refresh, false);
 });
 
 test('the hand-over never shows on the start path', () => {
@@ -79,6 +107,7 @@ test('on the continue path the hand-over takes the place of the list', () => {
   for (const agent of AGENTS) {
     const listing = newSessionFields({
       path: 'continue',
+      folder: '~/my-project',
       agent,
       claudeFolders: 2,
       handingOver: false
@@ -86,6 +115,7 @@ test('on the continue path the hand-over takes the place of the list', () => {
     assert.deepEqual([listing.list, listing.handover], [true, false]);
     const handing = newSessionFields({
       path: 'continue',
+      folder: '~/my-project',
       agent,
       claudeFolders: 2,
       handingOver: true
@@ -103,7 +133,7 @@ test("a running Codex server's socket shows for Codex on either path, and never 
   }
 });
 
-/** Conversations as Find existing lists them, with marks shaped as `claudeFolderMark` makes them. */
+/** Conversations as the continue path lists them, with marks shaped as `claudeFolderMark` makes them. */
 const FOUND = [
   {
     id: '3f2a9c71-0b1e-4d2a-9f00-111111111111',
@@ -212,4 +242,120 @@ test("a Codex list's rows never show for another socket, and Claude Code sends n
 
 test('a folder with nothing listed yet shows no rows', () => {
   assert.equal(rowsFor(undefined, asking('~/project-a')), undefined);
+});
+
+/** Whether `change` lists, on a form at `path` asking `now`, with what the last lists found and asked. */
+const listsOn = (
+  change: FormChange,
+  form: { path?: SessionPath; now: ListAsk; found?: Found; loading?: ListAsk }
+) => lists(change, { path: form.path, now: form.now, found: form.found, loading: form.loading });
+const CHANGES: FormChange[] = ['path', 'typed', 'folder', 'tool', 'refresh'];
+const inB = asking('~/project-b');
+
+test('choosing Continue with a folder lists once, and again only for a changed ask', () => {
+  assert.equal(listsOn('path', { path: 'continue', now: inA.ask }), true);
+  assert.equal(listsOn('path', { path: 'continue', now: inA.ask, found: inA }), false);
+  assert.equal(listsOn('path', { path: 'continue', now: inA.ask, loading: inA.ask }), false);
+  assert.equal(listsOn('path', { path: 'continue', now: inB, found: inA }), true);
+});
+
+test('with no folder, nothing lists, whatever the change', () => {
+  for (const change of CHANGES) {
+    for (const folder of ['', '   ']) {
+      assert.equal(listsOn(change, { path: 'continue', now: asking(folder) }), false, change);
+    }
+  }
+});
+
+test('typing in the folder or socket field never lists until the field is left', () => {
+  assert.equal(listsOn('typed', { path: 'continue', now: inB, found: inA }), false);
+  assert.equal(listsOn('folder', { path: 'continue', now: inB, found: inA }), true);
+});
+
+test('Choose folder lists a different folder once, and the same folder not at all', () => {
+  assert.equal(listsOn('folder', { path: 'continue', now: inB, found: inA }), true);
+  assert.equal(listsOn('folder', { path: 'continue', now: inA.ask, found: inA }), false);
+});
+
+test('switching the coding tool lists once', () => {
+  const codex = asking('~/project-a', 'codex');
+  assert.equal(listsOn('tool', { path: 'continue', now: codex, found: inA }), true);
+});
+
+test('Refresh list lists on every press, even with the rows shown or a list loading', () => {
+  assert.equal(listsOn('refresh', { path: 'continue', now: inA.ask, found: inA }), true);
+  assert.equal(listsOn('refresh', { path: 'continue', now: inA.ask, loading: inA.ask }), true);
+});
+
+test('a change while a list loads lists its own ask, not swallowed by that list', () => {
+  assert.equal(listsOn('folder', { path: 'continue', now: inB, loading: inA.ask }), true);
+  const codex = asking('~/project-a', 'codex');
+  assert.equal(listsOn('tool', { path: 'continue', now: codex, loading: inA.ask }), true);
+});
+
+test('nothing lists on the start path or before a path is chosen', () => {
+  for (const path of [undefined, 'start'] as const) {
+    for (const change of CHANGES) {
+      assert.equal(listsOn(change, { path, now: inB, found: inA }), false, `${path} ${change}`);
+    }
+  }
+});
+
+/** A list run against a fake request: how often it asked, and what reached the form. */
+async function listed(
+  ask: ListAsk,
+  answer: () => Promise<Choice[]>,
+  /** What the form asks once the request is out. */
+  then: ListAsk
+) {
+  let now = ask;
+  const seen: string[] = [];
+  let asked = 0;
+  const shown: { found?: Found; error?: unknown } = {};
+  await listFor(ask, {
+    find: (a) => {
+      asked++;
+      assert.deepEqual(a, ask);
+      now = then;
+      return answer();
+    },
+    start: () => seen.push('start'),
+    now: () => now,
+    found: (f) => (shown.found = f),
+    failed: (e) => (shown.error = e)
+  });
+  return { asked, seen, ...shown };
+}
+
+test('a list asks once, clears an earlier error as it starts, and lands its rows', async () => {
+  const done = await listed(inA.ask, async () => ROWS, inA.ask);
+  assert.equal(done.asked, 1);
+  assert.deepEqual(done.seen, ['start']);
+  assert.deepEqual(done.found, inA);
+  assert.equal(done.error, undefined);
+});
+
+test('a list for a folder no longer chosen drops its rows', async () => {
+  const done = await listed(inA.ask, async () => ROWS, inB);
+  assert.equal(done.found, undefined);
+});
+
+test('a list for a tool no longer chosen drops its rows', async () => {
+  const done = await listed(inA.ask, async () => ROWS, asking('~/project-a', 'codex'));
+  assert.equal(done.found, undefined);
+});
+
+test('a failed list reports its error while its folder is still chosen', async () => {
+  const refusal = new Error('That folder is not there.');
+  const done = await listed(inA.ask, () => Promise.reject(refusal), inA.ask);
+  assert.equal(done.error, refusal);
+  assert.equal(done.found, undefined);
+});
+
+test('a failed list for a folder or tool no longer chosen drops its error', async () => {
+  const refusal = new Error('That folder is not there.');
+  for (const then of [inB, asking('~/project-a', 'codex')]) {
+    const done = await listed(inA.ask, () => Promise.reject(refusal), then);
+    assert.equal(done.error, undefined, then.folder + then.agent);
+  }
 });

@@ -2,9 +2,11 @@
   import type { ProjectAgent } from '@oddboro/ledger';
   import {
     matchesFilter,
+    NO_FOLDER,
     type Choice,
     type ErrorPlace,
     type Folder,
+    type FormChange,
     type NewSessionFields,
     type SessionPath
   } from './project-form.ts';
@@ -29,12 +31,11 @@
     /** The last error's words, and the place it shows. */
     problem: string | undefined;
     place: ErrorPlace | undefined;
-    /** The folder, tool or socket changed, so what was found no longer applies. */
-    onedit: () => void;
+    /** A change that may list the folder's conversations: typed, committed, the tool, or Refresh list. */
+    onchange: (change: FormChange) => void;
     onpick: () => void;
     onpath: (p: SessionPath) => void;
     onstart: () => void;
-    onsearch: () => void;
     onchoose: (c: Choice) => void;
     onhandover: () => void;
   };
@@ -53,11 +54,10 @@
     busy,
     problem,
     place,
-    onedit,
+    onchange,
     onpick,
     onpath,
     onstart,
-    onsearch,
     onchoose,
     onhandover
   }: Props = $props();
@@ -77,13 +77,18 @@
     >Project folder <input
       class="field w-full"
       bind:value={folder}
-      oninput={onedit}
+      oninput={() => onchange('typed')}
+      onchange={() => onchange('folder')}
       placeholder="Folder path, such as ~/my-project"
     /></label
   >
   <div class="flex flex-wrap gap-2">
     <button class="btn" onclick={onpick}>Choose folder</button>
-    <select class="field" aria-label="Coding tool" bind:value={agent} onchange={onedit}
+    <select
+      class="field"
+      aria-label="Coding tool"
+      bind:value={agent}
+      onchange={() => onchange('tool')}
       ><option value="claude">Claude Code</option><option value="codex">Codex</option></select
     >
   </div>
@@ -94,7 +99,7 @@
           class="field w-full"
           bind:value={socket}
           placeholder="/path/to/private/codex.sock"
-          oninput={onedit}
+          oninput={() => onchange('typed')}
         /></label
       >
       <p class="text-xs text-muted">
@@ -137,16 +142,21 @@
     {@render alert('start')}
   {/if}
   {#if fields.list}
-    <button class="btn self-start" disabled={busy || !folder} onclick={onsearch}
-      >Find existing</button
-    >
-    {#if candidates.length}<input
-        class="field w-full"
-        type="search"
-        aria-label="Filter conversations"
-        placeholder="Title, account or ID"
-        bind:value={filter}
-      />{/if}
+    {#if fields.refresh}
+      <!-- Refresh list sits at the end even while the list is empty, as after /bg. -->
+      <div class="flex items-center gap-2">
+        {#if candidates.length}<input
+            class="field min-w-0 flex-1"
+            type="search"
+            aria-label="Filter conversations"
+            placeholder="Title, account or ID"
+            bind:value={filter}
+          />{/if}
+        <button class="link ms-auto shrink-0" onclick={() => onchange('refresh')}
+          >Refresh list</button
+        >
+      </div>
+    {:else}<p class="text-muted">{NO_FOLDER}</p>{/if}
     <!-- Above the rows, so an error from a row near the bottom of a long list is seen. -->
     {@render alert('list')}
     {#if found && !candidates.length}<p class="text-muted">

@@ -14,12 +14,16 @@
   import {
     errorPlace,
     listAsk,
+    listFor,
+    lists,
     newSessionFields,
     rowsFor,
     type Choice,
     type ErrorSource,
     type Folder,
+    type FormChange,
     type Found,
+    type ListAsk,
     type SessionPath
   } from './project-form.ts';
   import ProjectTerminal from './ProjectTerminal.svelte';
@@ -83,6 +87,9 @@
     handover = $state<Choice>(),
     /** The conversations the last list found, with the folder and tool it asked about. */
     found = $state<Found>(),
+    /** What the newest list still loading asked about. A list never holds `busy`, so Choose
+     * folder and the other actions still work while it loads. */
+    loading = $state.raw<ListAsk>(),
     /** The details drawer, open over the terminal. */
     details = $state(false),
     /** The Odd waiting on the owner's second yes to send without asking. */
@@ -102,7 +109,13 @@
   const listNow = $derived(listAsk({ folder, agent, socket }));
   const listed = $derived(rowsFor(found, listNow));
   const fields = $derived(
-    newSessionFields({ path, agent, claudeFolders: folders.length, handingOver: !!handover })
+    newSessionFields({
+      path,
+      folder,
+      agent,
+      claudeFolders: folders.length,
+      handingOver: !!handover
+    })
   );
   const TOOL: Record<ProjectAgent, string> = { claude: 'Claude Code', codex: 'Codex' };
   const STATUS: Record<ProjectStatus, string> = {
@@ -210,15 +223,42 @@
     view = undefined;
     work = [];
     found = undefined;
+    loading = undefined;
     handover = undefined;
     problem = undefined;
     path = undefined;
   }
-  /** Picking Continue lists the folder's conversations at once. */
   function choosePath(p: SessionPath) {
     path = p;
-    handover = undefined;
-    if (p === 'continue' && folder && !listed) void run(search, 'continue');
+    changed('path');
+  }
+  /**
+   * Every change on the New session form that may list goes through here: the
+   * path, the folder typed or chosen, the tool, the socket and Refresh list.
+   * `lists` decides, so a list starts once per committed change.
+   */
+  function changed(change: FormChange) {
+    // A hand-over waits for the folder and tool it was found in.
+    if (change !== 'refresh') handover = undefined;
+    if (lists(change, { path, now: listNow, found, loading })) list();
+  }
+  function list() {
+    const ask = listNow;
+    void listFor(ask, {
+      find: (a) => projectApi<Choice[]>('find', a),
+      start: () => {
+        loading = ask;
+        problem = undefined;
+      },
+      now: () => listNow,
+      found: (f) => {
+        found = f;
+        filter = '';
+      },
+      failed: (e) => (problem = { text: describe(e), from: 'continue' })
+    }).finally(() => {
+      if (loading === ask) loading = undefined;
+    });
   }
   async function connect(choice?: Choice, handedOver = false) {
     // One source each: a conversation goes with its own folder, or none, so the
@@ -237,11 +277,6 @@
     await select(s.id);
     if (agent === 'claude') await action('terminal');
   }
-  async function search() {
-    const ask = listNow;
-    found = { ask, rows: await projectApi<Choice[]>('find', ask) };
-    filter = '';
-  }
   async function pick() {
     const r = await fetch('/api/folders/pick', {
       method: 'POST',
@@ -249,8 +284,10 @@
       body: JSON.stringify({ for: 'your project session' })
     });
     const b = await r.json();
-    if (b.path) folder = b.path;
-    else if (b.unavailable) throw new Error(b.unavailable);
+    if (b.path) {
+      folder = b.path;
+      changed('folder');
+    } else if (b.unavailable) throw new Error(b.unavailable);
   }
   async function action(op: string, fields: Record<string, unknown> = {}) {
     const id = currentId;
@@ -303,10 +340,6 @@
     await action('remove');
     // Off the hidden id, so connecting the same conversation again selects it.
     startNew();
-  }
-  /** The folder, tool or socket changed, so a hand-over waiting for the old one no longer applies. */
-  function forgetHandover() {
-    handover = undefined;
   }
   function handOver() {
     const c = handover;
@@ -468,11 +501,10 @@
           {busy}
           problem={problem?.text}
           {place}
-          onedit={forgetHandover}
+          onchange={changed}
           onpick={() => run(pick, 'pick')}
           onpath={choosePath}
           onstart={() => run(() => connect(), 'start')}
-          onsearch={() => run(search, 'continue')}
           onchoose={choose}
           onhandover={handOver}
         />

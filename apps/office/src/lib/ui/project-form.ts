@@ -14,8 +14,10 @@ export type NewSessionFields = {
   account: boolean;
   /** Session name and the Start button. */
   start: boolean;
-  /** Find existing, the filter and the conversations found. */
+  /** The filter, the conversations found and Refresh list, or the line asking for a folder. */
   list: boolean;
+  /** Refresh list at the end of the filter row, once a folder is set; without one, the form asks for it. */
+  refresh: boolean;
   /** The Codex hand-over notice and its button, in place of the list. */
   handover: boolean;
   /** The running Codex server's socket. Start sends it too, so it serves both paths. */
@@ -24,6 +26,8 @@ export type NewSessionFields = {
 
 export function newSessionFields(form: {
   path: SessionPath | undefined;
+  /** The Project folder as typed or chosen. */
+  folder: string;
   agent: ProjectAgent;
   /** How many Claude folders are known, `~/.claude` included. */
   claudeFolders: number;
@@ -32,16 +36,18 @@ export function newSessionFields(form: {
 }): NewSessionFields {
   const start = form.path === 'start';
   const handover = form.path === 'continue' && form.handingOver;
+  const list = form.path === 'continue' && !handover;
   return {
     account: start && form.agent === 'claude' && form.claudeFolders > 1,
     start,
-    list: form.path === 'continue' && !handover,
+    list,
+    refresh: list && !!form.folder.trim(),
     handover,
     socket: form.agent === 'codex'
   };
 }
 
-/** A conversation Find existing lists. Only Claude's carry a folder and its mark. */
+/** A conversation the continue path lists. Only Claude's carry a folder and its mark. */
 export type Choice = {
   id: string;
   title: string;
@@ -83,6 +89,71 @@ export function rowsFor(found: Found | undefined, now: ListAsk): Choice[] | unde
   return sameAsk(found?.ask, now) ? found?.rows : undefined;
 }
 
+/** The continue path's line while no folder is set, in place of the list. */
+export const NO_FOLDER = 'Choose a project folder to see its conversations.';
+
+/** What the owner did on the New session form that may list the folder's conversations. */
+export type FormChange =
+  /** Chose "Start a new conversation" or "Continue an earlier one". */
+  | 'path'
+  /** Typed in the Project folder or socket field, still in it. */
+  | 'typed'
+  /** Left the Project folder field after changing it, or picked a folder with Choose folder. */
+  | 'folder'
+  /** Switched the coding tool. */
+  | 'tool'
+  /** Pressed Refresh list. */
+  | 'refresh';
+
+/**
+ * Whether a change lists the folder's conversations: only on the continue path
+ * with a folder set, once per committed change, never per keystroke and never
+ * on a timer. A change that leaves the ask as the newest list had it (the same
+ * folder chosen again, Continue chosen with those rows shown or loading) lists
+ * nothing. Refresh list lists on every press.
+ */
+export function lists(
+  change: FormChange,
+  form: {
+    path: SessionPath | undefined;
+    now: ListAsk;
+    found: Found | undefined;
+    /** What the newest list still loading asked about. */
+    loading: ListAsk | undefined;
+  }
+): boolean {
+  if (change === 'typed' || form.path !== 'continue' || !form.now.folder.trim()) return false;
+  return change === 'refresh' || !sameAsk(form.loading ?? form.found?.ask, form.now);
+}
+
+/**
+ * Lists the folder's conversations for `ask`. The answer lands only while the
+ * form still asks the same: rows or an error for a folder, tool or socket no
+ * longer chosen are dropped, so a slow list never lands over a newer choice.
+ */
+export async function listFor(
+  ask: ListAsk,
+  on: {
+    find: (ask: ListAsk) => Promise<Choice[]>;
+    /** The list starts: an earlier error clears, as when any other action starts. */
+    start: () => void;
+    /** What the form asks when the answer comes. */
+    now: () => ListAsk;
+    found: (found: Found) => void;
+    failed: (error: unknown) => void;
+  }
+): Promise<void> {
+  on.start();
+  let rows: Choice[];
+  try {
+    rows = await on.find(ask);
+  } catch (e) {
+    if (sameAsk(ask, on.now())) on.failed(e);
+    return;
+  }
+  if (sameAsk(ask, on.now())) on.found({ ask, rows });
+}
+
 /**
  * Whether a conversation stays in the list for what the owner typed: the
  * title or the account (folder and login) holding the words, or the id
@@ -104,7 +175,7 @@ export type ErrorSource =
   | 'pick'
   /** Start, on the start path. */
   | 'start'
-  /** Find existing, on the continue path. */
+  /** Listing the folder's conversations, on the continue path. */
   | 'continue'
   /** Opening a conversation from the list, or handing one over. */
   | 'connect'

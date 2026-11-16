@@ -41,3 +41,9 @@
 .projects-window option {
   background: var(--color-panel-solid);
 }
+.projects-window .link {
+  font-size: 0.75rem;
+  color: var(--color-sea);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
