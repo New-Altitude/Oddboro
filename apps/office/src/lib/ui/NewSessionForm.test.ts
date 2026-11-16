@@ -23,12 +23,10 @@ const NewSessionForm = await compiledForServer<typeof NewSessionFormComponent>(
   join(dirname(fileURLToPath(import.meta.url)), 'NewSessionForm.svelte')
 );
 
-const ONE_FOLDER: Folder[] = [
-  { path: '/home/owner/.claude', mark: '~/.claude · owner@example.com' }
-];
+const ONE_FOLDER: Folder[] = [{ path: '/work/.claude', mark: '~/.claude · owner@example.com' }];
 const TWO_FOLDERS: Folder[] = [
   ...ONE_FOLDER,
-  { path: '/home/owner/.claude-second', mark: '~/.claude-second · second@example.com' }
+  { path: '/work/.claude-second', mark: '~/.claude-second · second@example.com' }
 ];
 
 /** The form as the page renders it, for a path and what the owner has so far. */
