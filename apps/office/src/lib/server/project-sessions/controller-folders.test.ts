@@ -3,6 +3,7 @@
 // would read, and the terminal library is a stand-in that keeps what each
 // terminal was opened with.
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
   chmodSync,
@@ -44,24 +45,46 @@ mock.module('@oddboro/ledger/project-terminal', {
 const { L, chatOf, folder, plain, refusal, request, withEnv } =
   await import('../office-under-test.ts');
 const { FOLDER_NOTICE, PICK_LACKS_IT, projectController } = await import('./controller.ts');
+const { PROJECT_WORDS } = await import('../../project-words.ts');
 const { devReads } = await import('../sandbox.ts');
 // The office's own stand-ins, before this file's claude goes first: an Odd's chat runs on them.
 const officePath = process.env.PATH ?? '';
 
 // The stand-in claude: it reads `$HOME/.claude` when CLAUDE_CONFIG_DIR is
 // unset, as Claude Code does, and logs each call with the folder it got. What
-// runs in a folder is that folder's `agents.json`, else nothing.
+// runs in a folder is that folder's `agents.json`, else nothing. A background
+// resume answers with the conversation's short id, its first 8 characters, as
+// Claude Code does for a conversation no background session holds. A
+// background start adds its session to `agents.json` and answers likewise.
 const calls = join(folder, 'folder-calls.log');
 const bin = join(folder, 'folder-bin');
 mkdirSync(bin);
+const startedBy = join(bin, 'start-in-background.mjs');
+writeFileSync(
+  startedBy,
+  `import { randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+const dir = process.argv[2];
+mkdirSync(dir, { recursive: true });
+const file = dir + '/agents.json';
+const sessionId = randomUUID();
+const list = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : [];
+list.push({ sessionId, id: sessionId.slice(0, 8), kind: 'background', pid: process.pid, status: 'idle', cwd: process.cwd() });
+writeFileSync(file, JSON.stringify(list));
+console.log('backgrounded · ' + sessionId.slice(0, 8));
+`
+);
 writeFileSync(
   join(bin, 'claude'),
   `#!/bin/sh
 dir="\${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 echo "\${CLAUDE_CONFIG_DIR:-default} $1 $2" >> "${calls}"
 case "$1 $2" in
+  "--version ") echo '2.1.325 (Claude Code)' ;;
   "auth status") cat "$dir/auth.json" 2>/dev/null || echo '{"loggedIn":false}' ;;
   "agents --json") cat "$dir/agents.json" 2>/dev/null || echo '[]' ;;
+  "--bg --resume") echo "backgrounded · \${3%%-*}" ;;
+  "--bg -n") "${process.execPath}" "${startedBy}" "$dir" ;;
 esac
 `
 );
@@ -87,6 +110,12 @@ function save(dir: string, id: string, at?: number) {
   );
   if (at !== undefined) utimesSync(file, Date.now() / 1000 + at, Date.now() / 1000 + at);
 }
+/**
+ * A process standing in for a Claude terminal session's, so a connect that
+ * wrongly ended one would interrupt it and fail its test, never the test run.
+ * The caller kills it.
+ */
+const terminalProcess = () => spawn('sleep', ['600'], { stdio: 'ignore' });
 const named = (name: string) => {
   const dir = join(homedir(), name);
   mkdirSync(dir, { recursive: true });
@@ -146,7 +175,7 @@ test(
       opened.push(one.id);
       assert.equal(one.configDir, b);
       await c.terminal(one.id);
-      assert.deepEqual(lastTerminal().args.slice(-2), ['--resume', inB]);
+      assert.deepEqual(lastTerminal().args.slice(-2), ['attach', inB.slice(0, 8)]);
       assert.equal(lastTerminal().env.CLAUDE_CONFIG_DIR, b);
 
       // ~/.claude runs with no CLAUDE_CONFIG_DIR, even when the office has one.
@@ -158,7 +187,7 @@ test(
         assert.equal(two.configDir, own);
         await c.terminal(two.id);
       });
-      assert.deepEqual(lastTerminal().args.slice(-2), ['--resume', inOwn]);
+      assert.deepEqual(lastTerminal().args.slice(-2), ['attach', inOwn.slice(0, 8)]);
       assert.ok(
         !('CLAUDE_CONFIG_DIR' in lastTerminal().env),
         'CLAUDE_CONFIG_DIR reached ~/.claude'
@@ -175,14 +204,14 @@ test(
       assert.equal(again.configDir, b);
       assert.equal((await L.connection(first.id)).configDir, b);
       await c.terminal(again.id);
-      assert.deepEqual(lastTerminal().args.slice(-2), ['--resume', late]);
+      assert.deepEqual(lastTerminal().args.slice(-2), ['attach', late.slice(0, 8)]);
       assert.equal(lastTerminal().env.CLAUDE_CONFIG_DIR, b);
 
       // A new conversation is not in its folder yet.
       const fresh = await c.connect('claude', app, { configDir: b });
       opened.push(fresh.id);
       await c.terminal(fresh.id);
-      assert.deepEqual(lastTerminal().args.slice(-2), ['--session-id', fresh.nativeId]);
+      assert.deepEqual(lastTerminal().args.slice(-2), ['attach', fresh.nativeId.slice(0, 8)]);
       assert.equal(lastTerminal().env.CLAUDE_CONFIG_DIR, b);
     } finally {
       for (const id of opened) await c.disconnect(id);
@@ -210,7 +239,7 @@ test(
         assert.equal(s.configDir, null);
         await c.terminal(s.id);
       });
-      assert.deepEqual(lastTerminal().args.slice(-2), ['--resume', inEnv]);
+      assert.deepEqual(lastTerminal().args.slice(-2), ['attach', inEnv.slice(0, 8)]);
       assert.equal(lastTerminal().env.CLAUDE_CONFIG_DIR, env);
 
       // Set, with an older copy in ~/.claude: it still resumes in the office's folder.
@@ -225,7 +254,7 @@ test(
         assert.equal((await L.connection(s.id)).configDir, null);
         await c.terminal(s.id);
       });
-      assert.deepEqual(lastTerminal().args.slice(-2), ['--resume', both]);
+      assert.deepEqual(lastTerminal().args.slice(-2), ['attach', both.slice(0, 8)]);
       assert.equal(lastTerminal().env.CLAUDE_CONFIG_DIR, env);
 
       // Unset: it resumes in ~/.claude, which runs with no CLAUDE_CONFIG_DIR.
@@ -236,7 +265,7 @@ test(
       opened.push(t.id);
       assert.equal(t.configDir, null);
       await c.terminal(t.id);
-      assert.deepEqual(lastTerminal().args.slice(-2), ['--resume', inOwn]);
+      assert.deepEqual(lastTerminal().args.slice(-2), ['attach', inOwn.slice(0, 8)]);
       assert.ok(
         !('CLAUDE_CONFIG_DIR' in lastTerminal().env),
         'CLAUDE_CONFIG_DIR reached ~/.claude'
@@ -288,7 +317,7 @@ test(
       // Its next terminal opens in the new folder.
       first.close();
       await c.terminal(s.id);
-      assert.deepEqual(lastTerminal().args.slice(-2), ['--resume', id]);
+      assert.deepEqual(lastTerminal().args.slice(-2), ['attach', id.slice(0, 8)]);
       assert.equal(lastTerminal().env.CLAUDE_CONFIG_DIR, q);
 
       // Reconnect, with no copy picked, stays in its own folder, a newer copy elsewhere or not.
@@ -297,7 +326,7 @@ test(
       const again = await c.connect('claude', app, { nativeId: id });
       assert.equal(again.configDir, q);
       await c.terminal(s.id);
-      assert.deepEqual(lastTerminal().args.slice(-2), ['--resume', id]);
+      assert.deepEqual(lastTerminal().args.slice(-2), ['attach', id.slice(0, 8)]);
       assert.equal(lastTerminal().env.CLAUDE_CONFIG_DIR, q);
 
       // A folder not in Setup is refused, and the session stays where it was.
@@ -330,11 +359,21 @@ test(
       return told;
     };
     const stored = (id: string) => L.connectProject('claude', id, app, 'Work', p);
+    const term = terminalProcess();
     /** Claude Code lists `id` as running in `dir`: in a terminal, or as the background job `job`. */
     const running = (dir: string, id: string, job?: string) =>
       writeFileSync(
         join(dir, 'agents.json'),
-        JSON.stringify([{ sessionId: id, id: job, kind: 'interactive', cwd: app }])
+        JSON.stringify([
+          {
+            sessionId: id,
+            id: job,
+            kind: job ? 'background' : 'interactive',
+            pid: term.pid,
+            status: 'idle',
+            cwd: app
+          }
+        ])
       );
     try {
       // The newest copy is in its own folder, an older one elsewhere: no notice.
@@ -351,7 +390,7 @@ test(
       assert.equal(await reconnect(s), notice('~/.claude-newer · signed out'));
       assert.equal((await L.connection(s.id)).configDir, p);
       await c.terminal(s.id);
-      assert.deepEqual(lastTerminal().args.slice(-2), ['--resume', elsewhere]);
+      assert.deepEqual(lastTerminal().args.slice(-2), ['attach', elsewhere.slice(0, 8)]);
       assert.equal(lastTerminal().env.CLAUDE_CONFIG_DIR, p);
       // The page's Reconnect sends its own folder back: the same notice, and it stays.
       assert.equal(await reconnect(s, p), notice('~/.claude-newer · signed out'));
@@ -360,15 +399,13 @@ test(
       save(p, elsewhere, 0);
       assert.equal(await reconnect(s), null);
 
-      // A newer copy elsewhere running in a Claude terminal: the /bg refusal, no notice.
+      // A newer copy elsewhere open in a Claude terminal: refused, no notice.
       const live = randomUUID();
       save(p, live, -120);
       save(q, live, -60);
       running(q, live);
       const t = await stored(live);
-      await assert.rejects(reconnect(t), {
-        message: 'In that Claude terminal, enter /bg, then choose Connect again.'
-      });
+      await assert.rejects(reconnect(t), { message: PROJECT_WORDS.useMove });
       assert.equal(c.view(t.id).folderNotice, null);
 
       // The same copy running as a background job: the notice.
@@ -390,9 +427,10 @@ test(
         assert.equal((await L.connection(u.id)).configDir, null);
         await c.terminal(u.id);
       });
-      assert.deepEqual(lastTerminal().args.slice(-2), ['--resume', unstored]);
+      assert.deepEqual(lastTerminal().args.slice(-2), ['attach', unstored.slice(0, 8)]);
       assert.equal(lastTerminal().env.CLAUDE_CONFIG_DIR, office);
     } finally {
+      term.kill();
       for (const id of opened) await c.disconnect(id);
       L.setClaudeFolders([]);
     }
@@ -427,12 +465,12 @@ test(
       );
       assert.equal((await L.connection(s.id)).configDir, q);
       await c.terminal(s.id);
-      assert.deepEqual(lastTerminal().args.slice(-2), ['--resume', id]);
+      assert.deepEqual(lastTerminal().args.slice(-2), ['attach', id.slice(0, 8)]);
       assert.equal(lastTerminal().env.CLAUDE_CONFIG_DIR, q);
       // Its folder holds it now: the next Reconnect stays there and clears it.
       assert.equal(await folderNoticeOf(s), null);
 
-      // A folder picked in Find existing is where it goes, so nothing moved by
+      // A folder picked in the continue path's list is where it goes, so nothing moved by
       // itself. It holds the newest copy, so no newer copy is named either.
       await c.disconnect(s.id);
       save(q, id, -120);
@@ -503,7 +541,7 @@ test(
       );
       assert.equal((await L.connection(s.id)).configDir, q);
       await c.terminal(s.id);
-      assert.deepEqual(lastTerminal().args.slice(-2), ['--resume', id]);
+      assert.deepEqual(lastTerminal().args.slice(-2), ['attach', id.slice(0, 8)]);
       assert.equal(lastTerminal().env.CLAUDE_CONFIG_DIR, q);
     } finally {
       if (s) await c.disconnect(s.id);
@@ -520,6 +558,7 @@ test(
     const a = named('.claude-has-it');
     L.setClaudeFolders([a, b]);
     const opened: string[] = [];
+    const term = terminalProcess();
     try {
       const id = randomUUID();
       save(a, id);
@@ -531,37 +570,38 @@ test(
       );
       assert.equal((await L.connection(s.id)).configDir, a);
       await c.terminal(s.id);
-      assert.deepEqual(lastTerminal().args.slice(-2), ['--resume', id]);
+      assert.deepEqual(lastTerminal().args.slice(-2), ['attach', id.slice(0, 8)]);
       assert.equal(lastTerminal().env.CLAUDE_CONFIG_DIR, a);
       // The page now holds the moved row and sends its new folder: it stays, told nothing.
       assert.equal(await folderNoticeOf(s, a), null);
       assert.equal((await L.connection(s.id)).configDir, a);
 
-      // Its copy running in a Claude terminal: the /bg refusal, no notice, no move.
+      // Its copy open in a Claude terminal: refused, no notice, no move.
       const live = randomUUID();
       save(a, live);
       writeFileSync(
         join(a, 'agents.json'),
-        JSON.stringify([{ sessionId: live, kind: 'interactive', cwd: app }])
+        JSON.stringify([
+          { sessionId: live, kind: 'interactive', pid: term.pid, status: 'idle', cwd: app }
+        ])
       );
       const t = await L.connectProject('claude', live, app, 'Work', b);
-      await assert.rejects(folderNoticeOf(t, b), {
-        message: 'In that Claude terminal, enter /bg, then choose Connect again.'
-      });
+      await assert.rejects(folderNoticeOf(t, b), { message: PROJECT_WORDS.useMove });
       assert.equal(c.view(t.id).folderNotice, null);
       assert.equal((await L.connection(t.id)).configDir, b);
       rmSync(join(a, 'agents.json'));
 
-      // No folder has it: nowhere to move, so it stays and starts that id afresh.
+      // No folder has it: nowhere to move, so it stays and resumes that id there.
       const nowhere = randomUUID();
       const n = await L.connectProject('claude', nowhere, app, 'Work', b);
       opened.push(n.id);
       assert.equal(await folderNoticeOf(n, b), null);
       assert.equal((await L.connection(n.id)).configDir, b);
       await c.terminal(n.id);
-      assert.deepEqual(lastTerminal().args.slice(-2), ['--session-id', nowhere]);
+      assert.deepEqual(lastTerminal().args.slice(-2), ['attach', nowhere.slice(0, 8)]);
       assert.equal(lastTerminal().env.CLAUDE_CONFIG_DIR, b);
     } finally {
+      term.kill();
       for (const id of opened) await c.disconnect(id);
       L.setClaudeFolders([]);
     }
@@ -597,7 +637,7 @@ test(
 );
 
 test(
-  'Find existing through the route refuses a new conversation picked in a folder that lacks it, and stores nothing',
+  "the continue path's list, through the route, refuses a new conversation picked in a folder that lacks it, and stores nothing",
   { skip: process.platform === 'win32' && 'the stand-in is a shell script' },
   async () => {
     // The route answers only with advanced mode on, which needs an owner.
@@ -625,7 +665,7 @@ test(
 );
 
 test(
-  'a folder picked for a conversation no folder holds is not refused: a new id is not found, and a known one starts afresh in the pick',
+  'a folder picked for a conversation no folder holds is not refused: a new id is not found, and a known one resumes in the pick',
   { skip: process.platform === 'win32' && 'the stand-in is a shell script' },
   async () => {
     const p = named('.claude-none-stored');
@@ -643,7 +683,7 @@ test(
       assert.equal((await L.connection(s.id)).configDir, q);
       assert.equal(c.view(s.id).folderNotice, null);
       await c.terminal(s.id);
-      assert.deepEqual(lastTerminal().args.slice(-2), ['--session-id', id]);
+      assert.deepEqual(lastTerminal().args.slice(-2), ['attach', id.slice(0, 8)]);
       assert.equal(lastTerminal().env.CLAUDE_CONFIG_DIR, q);
     } finally {
       if (s) await c.disconnect(s.id);
@@ -653,7 +693,7 @@ test(
 );
 
 test(
-  "a copy picked in Find existing is stored when the session's own folder left Setup, and when the session had none",
+  "a copy picked in the continue path's list is stored when the session's own folder left Setup, and when the session had none",
   { skip: process.platform === 'win32' && 'the stand-in is a shell script' },
   async () => {
     const x = named('.claude-left-setup');
@@ -669,7 +709,7 @@ test(
       assert.equal((await L.connection(s.id)).configDir, y);
       assert.equal(c.view(s.id).folderNotice, null);
       await c.terminal(s.id);
-      assert.deepEqual(lastTerminal().args.slice(-2), ['--resume', id]);
+      assert.deepEqual(lastTerminal().args.slice(-2), ['attach', id.slice(0, 8)]);
       assert.equal(lastTerminal().env.CLAUDE_CONFIG_DIR, y);
 
       // The office's default folder, picked for a session with no folder, is stored.
@@ -876,8 +916,11 @@ test(
         const s = (await answer.json()) as ProjectSession;
         opened.push(s.id);
         assert.equal((await L.connection(s.id)).configDir, stored, `picked ${picked}`);
+        // Its terminal attaches to the background session Start began, with no resume.
+        const since = logged().length;
         await c.terminal(s.id);
-        assert.deepEqual(lastTerminal().args.slice(-2), ['--session-id', s.nativeId]);
+        assert.deepEqual(lastTerminal().args.slice(-2), ['attach', s.nativeId.slice(0, 8)]);
+        assert.ok(!logged().slice(since).includes('--bg --resume'), logged());
         // ~/.claude runs with no CLAUDE_CONFIG_DIR.
         assert.equal(lastTerminal().env.CLAUDE_CONFIG_DIR, stored === own ? undefined : stored);
       }
