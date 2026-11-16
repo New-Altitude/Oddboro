@@ -1,10 +1,12 @@
 // The owner's Claude Code folders: `~/.claude`, always, and each one they name
 // in Setup, under Advanced (such as `~/.claude-personal`). Projects lists
-// conversations from each, and no Odd reads any of them. The office never looks
-// for others: `claude auth status` writes into the folder it reads, so the
-// office runs Claude Code only in a folder on this list, or, for a project
-// session that has no folder of its own, in the office's own default folder
-// (the office's `CLAUDE_CONFIG_DIR`, else `~/.claude`).
+// conversations from each, and no Odd reads any of them. Setup also suggests
+// each Claude account folder at the top of the home folder that is not on
+// this list yet, reading folder entries only. It never runs `claude` there:
+// `claude auth status` writes into the folder it reads, so the office runs
+// Claude Code only in a folder on this list, or, for a project session that
+// has no folder of its own, in the office's own default folder (the office's
+// `CLAUDE_CONFIG_DIR`, else `~/.claude`).
 import { existsSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';

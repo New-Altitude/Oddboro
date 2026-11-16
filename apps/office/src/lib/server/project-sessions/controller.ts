@@ -148,8 +148,10 @@ function foundClaudeFolder(dir: string): string {
 /**
  * The Claude folder the office's own `claude` would use: the one the office's
  * `CLAUDE_CONFIG_DIR` names, else `~/.claude`. Read at each call, as the native
- * client reads it. Not a known folder: Setup, the Account list and the Odds' deny
- * lists never see it.
+ * client reads it. Being the office's folder does not make it known: the
+ * Account list and the Odds' deny lists hold only known folders, and Setup
+ * suggests it only when it is an account folder at the top of the home folder,
+ * as it suggests any such folder.
  */
 const officeClaudeFolder = () => nativeEnv().CLAUDE_CONFIG_DIR || defaultClaudeFolder();
 
