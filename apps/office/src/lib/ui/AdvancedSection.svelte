@@ -17,6 +17,11 @@
   let folders = $state<ClaudeFolder[]>([]);
   let suggested = $state<string[]>([]);
   let typed = $state('');
+  /**
+   * One row style for a known folder and a suggestion, so a suggestion reads
+   * as found, not as a box to fill in.
+   */
+  const folderRow = 'flex items-center justify-between gap-2 rounded-lg bg-raise px-3 py-2';
 
   const said = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -84,7 +89,7 @@
     </p>
     <ul class="flex flex-col gap-1" aria-labelledby="claude-folders">
       {#each folders as f (f.path)}
-        <li class="flex items-center justify-between gap-2 rounded-lg bg-raise px-3 py-2">
+        <li class={folderRow}>
           <span class="min-w-0 truncate" title={f.path}>{f.mark}</span>
           {#if !f.isDefault}
             <button
@@ -101,7 +106,7 @@
       <p id="claude-found" class="text-muted">Found in your home folder:</p>
       <ul class="flex flex-col gap-1" aria-labelledby="claude-found">
         {#each suggested as s (s)}
-          <li class="flex items-center justify-between gap-2 rounded-lg bg-night/60 px-3 py-2">
+          <li class={folderRow}>
             <span class="min-w-0 truncate">{s}</span>
             <button
               class="shrink-0 text-muted hover:text-ink disabled:opacity-40"
