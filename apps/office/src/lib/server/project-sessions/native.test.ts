@@ -1,9 +1,22 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { projectInput } from './native.ts';
+import { homedir, tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
+import { projectFolder, projectInput } from './native.ts';
+
+test('a project folder typed from ~ opens in the home folder, and ~other is refused', async () => {
+  const folder = await mkdtemp(join(homedir(), 'project-'));
+  try {
+    const real = await realpath(folder);
+    assert.equal(await projectFolder(`~/${basename(folder)}`), real);
+    assert.equal(await projectFolder('~'), await realpath(homedir()));
+    assert.equal(await projectFolder(real), real);
+    await assert.rejects(projectFolder('~other'), /Choose an absolute project folder\./);
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
+});
 
 test('a file reference stays in its worktree and a native image gets a local image input', async () => {
   const root = await mkdtemp(join(tmpdir(), 'office-project-'));

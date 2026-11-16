@@ -5,6 +5,7 @@ import {
   asksFor,
   catalog,
   checkFolder,
+  expandHome,
   folderAskRefused,
   FOLDER_REFUSED,
   shownFolder,
@@ -270,7 +271,7 @@ tool(
   async ({ path, level, why, revises }) => {
     const on = await placed({});
     if ('problem' in on) return refused(on.problem);
-    if (!isAbsolute(path) && !/^~(?=$|[\\/])/.test(path))
+    if (!isAbsolute(expandHome(path)))
       return refused("Give the folder's full path, starting with /, ~ or a drive letter.");
     const checked = checkFolder(path);
     if ('refused' in checked) return refused(checked.refused);

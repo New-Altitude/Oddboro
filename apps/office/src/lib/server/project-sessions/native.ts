@@ -2,6 +2,7 @@
 // Pass the desktop environment it needs, without the office database or run credentials.
 import { realpath, stat } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep, extname } from 'node:path';
+import { expandHome } from '@oddboro/ledger';
 import { claudeCommand, npmCommand, currentPlatform } from '@oddboro/ledger/platform';
 
 export const nativeCommand = (agent: 'claude' | 'codex'): [string, string[]] =>
@@ -11,7 +12,9 @@ export const nativeCommand = (agent: 'claude' | 'codex'): [string, string[]] =>
       ? (npmCommand('codex', ['@openai', 'codex']) ?? ['codex', []])
       : ['codex', []];
 export { nativeProjectEnv as nativeEnv } from '../run-env-allow.ts';
-export async function projectFolder(path: string) {
+/** The real path of the project folder the owner typed, `~` read as the home folder. */
+export async function projectFolder(typed: string) {
+  const path = expandHome(typed);
   if (!isAbsolute(path)) throw new Error('Choose an absolute project folder.');
   const folder = await realpath(path);
   if (!(await stat(folder)).isDirectory()) throw new Error('Choose a folder.');

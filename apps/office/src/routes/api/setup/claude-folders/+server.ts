@@ -16,6 +16,7 @@ import {
   claudeConfigDir,
   claudeFolderFound,
   claudeFolders,
+  expandHome,
   folderDelimiter,
   holdsTooMuch,
   home,
@@ -68,7 +69,7 @@ async function listed() {
 function folderToName(typed: string): { path: string } | { refused: string } {
   if (/[#\r\n]/.test(typed) || typed.includes(folderDelimiter()))
     return { refused: REFUSED.characters(folderDelimiter()) };
-  const expanded = /^~(?=$|[\\/])/.test(typed) ? join(homedir(), typed.slice(1)) : typed;
+  const expanded = expandHome(typed);
   if (!isAbsolute(expanded)) return { refused: REFUSED.typed };
   const p = resolve(expanded);
   if (!claudeFolderFound(p)) return { refused: REFUSED.missing };

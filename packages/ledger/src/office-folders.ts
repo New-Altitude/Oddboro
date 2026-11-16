@@ -372,6 +372,14 @@ export function touchesSecretStore(path: string): boolean {
 }
 
 /**
+ * `typed` with a leading `~` read as the home folder, as a shell reads it: `~`
+ * alone or followed by a slash of either kind. Any other path, `~other`
+ * included, comes back as typed, so the absolute-path check after it refuses it.
+ */
+export const expandHome = (typed: string): string =>
+  /^~(?=$|[\\/])/.test(typed) ? join(homedir(), typed.slice(1)) : typed;
+
+/**
  * Whether `path`, as the owner typed it, may be given to an Odd, and its real
  * path when it may. Any folder on the computer but the home itself, and one
  * that holds or sits in a secret store (`touchesSecretStore`), the office's
@@ -390,7 +398,7 @@ export function checkFolder(
   accept = false
 ): { real: string } | { refused: string } | { warning: string } {
   const typed = path.trim();
-  const expanded = /^~(?=$|[\\/])/.test(typed) ? join(homedir(), typed.slice(1)) : typed;
+  const expanded = expandHome(typed);
   if (!isAbsolute(expanded) || !existsSync(expanded)) return { refused: FOLDER_REFUSED.missing };
   const p = real(expanded);
   if (!statSync(p).isDirectory()) return { refused: FOLDER_REFUSED.missing };
