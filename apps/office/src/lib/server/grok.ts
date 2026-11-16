@@ -1,5 +1,5 @@
 // How a staffer's run starts on Grok instead of Claude Code: the arguments and
-// the environment, which run() in staff.ts spawns the grok `grokCommand`
+// the environment, which run() in run-tool.ts spawns the grok `grokCommand`
 // finds with. Server only.
 //
 // Grok keeps its sign-in, sessions and sandbox profiles in the office's own

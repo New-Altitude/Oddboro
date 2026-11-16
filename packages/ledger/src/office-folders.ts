@@ -224,7 +224,7 @@ export const STORE_MARKS: Record<string, string[]> = {
  * including those other apps on this computer keep there, like the Google
  * Workspace MCP server's, Docker's registry sign-ins and Kubernetes' cluster
  * keys, and each coding tool's own home. AppData is where Windows apps keep
- * theirs. No run reads them (`unreadable` in the office's staff.ts), and no
+ * theirs. No run reads them (`unreadable` in the office's run-folders.ts), and no
  * folder given to an Odd holds or sits in one (`checkFolder`).
  */
 export const SECRET_STORES: string[] = Object.keys(STORE_MARKS);

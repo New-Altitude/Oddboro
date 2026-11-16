@@ -30,7 +30,7 @@ every error it hits to `POST /api/client-log` (`src/hooks.client.ts`, as
 JSON like every action), which writes one `page:` line each, cut to 600
 characters, at most 30 a minute, with `oddboro:` defused so a page never
 speaks to the shell. A run that fails or is stopped writes one line to stderr
-(`run` in `staff.ts`, `runEndLine`): `office: <Odd>'s <kind> run failed: ` or
+(`run` in `run-tool.ts`, `runEndLine`): `office: <Odd>'s <kind> run failed: ` or
 `stopped: `, then the first line of why, cut to 200 characters, defused the
 same way. Never the owner's message or the reply. The shell puts the time on
 every line.
@@ -70,7 +70,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    and so does a thread of its own a colleague holds (its tag reads "Waiting on
    <colleague>"; `floorMode` in `src/lib/staff/odd-now.ts`), and otherwise it wanders between work and breaks. A free Odd's own
    clock starts when it arrives, for a random stay that depends on the
-   activity (`STAY` in the page), so Odds never all get up at once. An
+   activity (`STAY` in `src/lib/staff/wander.ts`), so Odds never all get up at once. An
    Odd on a job stays at it until the job ends. While an Odd walks, its
    tag reads "→ Room", or "→ <colleague>" on a visit: handing work on, or
    bringing a result back, it walks over, stays about 2 s and goes back to
@@ -105,7 +105,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    one the owner opened last sits on top, picking an Odd
    puts that Odd on top, and closing the Odd or clicking the window's tab
    brings the window back on top (`raised` in `windows.svelte.ts`, passed to
-   `SidePanel.svelte` as `onTop` in `+page.svelte`).
+   `SidePanel.svelte` as `onTop` in `OfficePanel.svelte`).
    The start side is the office plate (name,
    the clock, Setup, and the Desk, Goals, Lessons, Ledger, Services, Hire and Office
    buttons), which opens into a bar of windows
@@ -357,7 +357,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    Odd go (`removeOdd` in the ledger's `leaving.ts`). The Office Manager's page
    has no Remove (`manager` on the profile). The next office load drops the
    Odd from the roster, so it leaves the floor and its panel closes; any run
-   of it stops (`stopRuns` in `staff.ts`, registered in `hooks.server.ts`).
+   of it stops (`stopRuns` in `run-state.ts`, registered in `hooks.server.ts`).
    While it has work in progress, a count in a turning
    ring sits beside the name (CSS only, still under reduced motion, and gone
    with nothing in progress); it opens the info page at In progress, as
@@ -413,7 +413,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    answer as the owner's message. An answer outside the choices runs
    the manager at once. Each of the first two suggested choices gets a
    short acknowledgment and the next question from the office (`chat` in
-   `staff.ts`, a `told` line, no run); the third runs the manager, whose new
+   `chat-run.ts`, a `told` line, no run); the third runs the manager, whose new
    session hears all three in its replay. Any Odd offers choices the same
    way: a chat reply that ends with `[choice] ...` lines (every run's
    "How the office works" says so) loses them from its text
@@ -437,7 +437,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    progress. The owner can type while the Odd replies; a message sent then
    shows as waiting under the reply, with Cancel to take it back to the box,
    and goes when the reply ends. A second Send while one waits joins it, so
-   the Odd answers both in one turn (`waiting` in `ChatPanel.svelte`). A chat
+   the Odd answers both in one turn (`waiting` in `chat-session.svelte.ts`). A chat
    whose run fails, or throws on the way to a reply, keeps
    the owner's line, and the error in place of the reply, marked `failed`
    (`ChatEntry`), so a reload shows both as the chat showed them live; the
@@ -515,7 +515,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    Its input grows with the text
    up to 60% of the chat, and the bar above it drags it taller; that height is
    remembered per viewer. Every run's system prompt opens with "Who you work
-   for" (`whoFor` in `staff.ts`): the owner, the Odd's own `notes/intake.md` when it has one, and the active
+   for" (`whoFor` in `run-prompt.ts`): the owner, the Odd's own `notes/intake.md` when it has one, and the active
    goals it serves with its part and the latest progress. An Odd sees only
    the goals it serves. Every run's "How the office works" (`house` in
    `src/lib/server/house.ts`) holds the rules every run keeps, whatever it is
@@ -530,7 +530,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    of the rest, a reply as "Reply to <subject>", and is left out when there
    are none; a resumed chat hears it when it changes. The rules say to read
    it first and to revise an item rather than raise it again. After it comes "What {owner} has taught you"
-   (`taught` in `staff.ts`): the live lessons for this Odd and for every
+   (`taught` in `run-prompt.ts`): the live lessons for this Odd and for every
    Odd, each with where it applies when it says (`lessonLine`), and the rules:
    how the whole office should work (how much to do without checking, how
    the owner wants to hear how things go) is a lesson for every Odd, a vague
@@ -548,8 +548,8 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    reloaded with `/api/office` on a `lessons` change). A guess not kept within
    7 days is dropped: it leaves the tab and the count, and its chat line says
    so, with Keep after all. Prompts never name the owner: they say `{owner}`, and
-   `run()` in `staff.ts` and `runAsOffice` fill in `ownerName()` for this
-   install. `src/lib/server/staff.ts` runs `claude -p` on the owner's login for chats,
+   `run()` in `run-tool.ts` and `runAsOffice` fill in `ownerName()` for this
+   install. `src/lib/server/run-tool.ts` runs `claude -p` on the owner's login for chats,
    job runs, follow-ups and drafts, or `grok -p` for an Odd that runs on Grok,
    `codex exec` for one on Codex, or `gemini` for one on Gemini (`staff.agent`;
    each gets ready through `LAUNCHES` in `src/lib/server/cli.ts`). The owner picks it in the hire
@@ -866,7 +866,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    owner gave it. A lead's chat reads
    the folder of each live (active or paused) goal it leads and of its latest
    other work, and a colleague's chat the folder of each piece of work it is on;
-   each is told where the work stands, as its pick-ups there are (`readable` in `staff.ts`; Read rules cover Glob and Grep,
+   each is told where the work stands, as its pick-ups there are (`readable` in `run-folders.ts`; Read rules cover Glob and Grep,
    and `dontAsk` turns down every other path). Deny rules beat any allow,
    the owner's own Claude Code settings included, so `unreadable` names what
    stays shut whatever else allows it: the secret stores in `SECRET_STORES`
@@ -1269,7 +1269,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
     proposer's file at that moment. Hiring writes a `staff` row, and the
     hire comes by bus, an Odd or a persona alike: the bus pulls up at the
     stop, the hire steps off and walks to work, and the bus drives on
-    (`ride` in `src/routes/+page.svelte`). The camera shows the whole office
+    (`#ride` in `src/lib/ui/floor-crew.svelte.ts`). The camera shows the whole office
     while the bus comes, then steps in on the hire as it gets off and follows
     it to its spot, as on the first run, unless the owner drags or zooms. Nothing waits on it: it can be
     tapped from the moment it steps off. Only the first run's manager is
@@ -1405,8 +1405,8 @@ pieces under 3,900 bytes a line, so no value is on a command line.
     pixels) can be switched: lamps, desk screens, fires, the shop windows.
     A tap on the floor (a press that does not drag) switches the prop drawn
     on top there, and the cursor shows a hand over one. A tap on a library
-    shelf no switch covers opens the Lessons on All (`onShelf`, `tapAt` in
-    `engine.ts`), so the library's lamps and fire still switch. The page
+    shelf no switch covers opens the Lessons on All (`onShelf` in
+    `engine.ts`, `tapAt` in `hits.ts`), so the library's lamps and fire still switch. The page
     flips a switch at once and `PUT /api/switches` keeps it in the ledger's
     `switched_off` table, whose trigger brings every open page along. Off, the prop shows
     its `off` frame (drawn, like the cold fireplace, or compiled with each
@@ -1971,8 +1971,8 @@ the persona's voice.
    shares the store and a reset leaves it. That persona's card shows Add,
    which uses the kept sign-in with no page. The page
    keeps it off the floor until the manager has walked in, then it walks on
-   (`firstRun` in `+page.svelte`).
-4. Hands, then voice. `run()` in `staff.ts` hands a persona Odd's chat, job
+   (`firstRun` in `src/lib/ui/floor-crew.svelte.ts`).
+4. Hands, then voice. `run()` in `run-tool.ts` hands a persona Odd's chat, job
    or follow-up to `personaRun` (`persona-run.ts`). Its own coding tool runs
    first, as its hands, with `personaDesk` as its job description, and only
    its tool steps reach the page. Then the door answers: `persona-door.ts`
@@ -2119,11 +2119,14 @@ the persona's voice.
   none of PixiJS, layerchart or markdown-it. Import a floor module's values only through `index.ts`; a
   type import is free.
 - Panels and dialogs that open on a click load when they open, with
-  `{#await import('…') then { default: X }}` at the render site in
-  `src/routes/+page.svelte`. Only what shows at start (the plate, the top bar,
-  the floor controls, the Odds rail, the side panel frame) is imported at the
-  top. The first run's guide loads beside the floor, and the Odd's card and the
-  Desk are fetched once after the floor draws, so they open at once.
+  `{#await import('…') then { default: X }}` at the render site: the windows
+  in `src/lib/ui/OfficePanel.svelte`, the Odd's card in
+  `src/lib/ui/CardColumn.svelte`, and the first run's guide and the Act
+  check's dialogs in `src/routes/+page.svelte`. Only what shows at start (the
+  plate, the top bar, the floor controls, the Odds rail, the side panel frame)
+  is imported at the top. The first run's guide loads beside the floor, and the
+  Odd's card and the Desk are fetched once after the floor draws, so they open
+  at once.
 - Third-party packages go under `devDependencies` in `package.json`, even
   the ones the office runs: the build bundles those, and the app ships only
   what the workspace packages load (`apps/desktop/scripts/stage.ts`).
@@ -2157,7 +2160,7 @@ the persona's voice.
   Odd, a swap to another world) glides through `glideTo` in
   `src/lib/floor/engine.ts`; only the first frame and a resize place it at
   once. A swap keeps the owner's view on the street and glides out only if the
-  new building would not fit. Dragging or zooming takes the camera back. Past the grounds the floor lays a meadow (`MEADOW` tiles a side) with the street and the river carried out to its edges and trees scattered over it (`countryside` in `engine.ts`), so the camera can pull back far enough to fit the whole office between open panels (`viewCover`).
+  new building would not fit. Dragging or zooming takes the camera back. Past the grounds the floor lays a meadow (`MEADOW` tiles a side) with the street and the river carried out to its edges and trees scattered over it (`countryside` in `src/lib/floor/countryside.ts`), so the camera can pull back far enough to fit the whole office between open panels (`viewCover`).
 - No CSS animation loops forever. Play it once, or only while something is
   happening, like the dots while a reply loads.
 - The office keeps the owner's time zone (`zone()` from `@oddboro/ledger/time`),

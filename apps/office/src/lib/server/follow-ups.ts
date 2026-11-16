@@ -73,7 +73,7 @@ export async function endFollowUp(
 
 /**
  * Each Odd's follow-ups yet to start, as In progress lists them beside its
- * runs (`inProgress` in staff.ts): what each is about, by the one name the
+ * runs (`inProgress` in run-state.ts): what each is about, by the one name the
  * Ledger gives it (`workTitle`), and what it will do. Most wait for the Odd's
  * run on the same work to end, such as a pick-up after a task the owner
  * finished while the chat that gave it still goes. The page reads them with

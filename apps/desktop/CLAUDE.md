@@ -272,6 +272,8 @@ Every update is required. `src-tauri/src/update.rs` runs them with
 - `src-tauri/src/diagnostics.rs`. The shell's error reports: the address,
   the owner's answer, the New Altitude sign-in, the allow list and the
   sending.
+- `src-tauri/src/diagnostics/tests.rs`. Its tests: what a report keeps,
+  the owner's yes and the New Altitude sign-in, against a local listener.
 - `src-tauri/src/server.rs`. Starting, watching, restarting and stopping Node.
 - `src-tauri/src/env.rs`. Port, home, log path and the login-shell PATH.
 - `src-tauri/src/key.rs`. The app's key: a new one per start of Node, the

@@ -45,7 +45,7 @@ the ledger, and change with it.
 service whose setup is not obvious, such as Open Brain's key in the
 `x-brain-key` header. It is the one place the site names tabs and buttons,
 so its steps quote the office's labels exactly (`AccessTab.svelte`,
-`DeskDrawer.svelte`, `connectSteps` in the ledger) and change with them.
+`DeskTask.svelte`, `connectSteps` in the ledger) and change with them.
 Building the service itself stays in its own docs, which the page links to.
 
 Every guide renders through `Guide.svelte`: wide, with each step's box
@@ -66,14 +66,14 @@ access its job needs, and every claim rests on the office's real rules:
 | Claim on the site                                                     | Where it is true                                                                |
 | --------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | One level per Odd (read, draft, act), only the owner raises it        | `setPermission` in `packages/ledger/src/office-staff.ts`; the 2026-10-29 ruling |
-| A new Odd starts at read with no outside tools                        | `staff.permission` defaults to read in `schema.ts`; grants start empty          |
+| A new Odd starts at read with no outside tools                        | `staff.permission` defaults to read in `schema-staff.ts`; grants start empty    |
 | An Odd asks, the owner approves and connects it                       | `grantAccess` and the 2026-10-30 access ruling                                  |
-| A tool connects read only, or with write from draft                   | `grantAccess` and `grantWorks`; `access()` in `staff.ts`                        |
+| A tool connects read only, or with write from draft                   | `grantAccess` and `grantWorks`; `access()` in `run-tool.ts`                     |
 | At draft, each change through a write grant waits for the owner's yes | `writesWait`; the gateway's `raiseCall`, and `makeCall` on the yes              |
 | A lowered level makes a grant above it wait                           | `access()` skips it; `setPermission`'s comment                                  |
 | At act, a write grant uses that one tool without asking; revocable    | `revoke` in `office-access.ts`; the Odd's Settings › Services in `apps/office`  |
 | An Odd pokes the owner in chat at a time it sets                      | `poke_owner` in `packages/ledger/src/mcp-people.ts`                             |
-| Every Odd reads the owner's data folder, on the owner's computer      | `readable` in `staff.ts`                                                        |
+| Every Odd reads the owner's data folder, on the owner's computer      | `readable` in `run-folders.ts`                                                  |
 
 An Odd has web search only when the owner turns on Browse the web for it,
 through its tool's own search and fetch; otherwise it has file tools only.
@@ -299,7 +299,7 @@ looping GIF from `scripts/release-art.ts`, with a still of the last frame.
 `static/art/releases/`, day in `static/art/day/releases/`. `releases.ts`
 names the art, and the page shows the pair for the visitor's theme, the
 still under reduced motion (the 2026-11-03 site ruling). A new animation goes
-in `release-art.ts`, so it gets both themes with no extra work.
+in its own `release-art-<name>.ts`, listed in `release-art.ts`, so it gets both themes with no extra work.
 
 The newest release's art is also `/releases/`'s link preview:
 `<name>-share.png`, one frame at 1200 by 630 on ink, in `static/art/releases/`.
@@ -321,11 +321,18 @@ changed since the frame before (`encodeGifChanges`).
 ## Layout
 
 ```
-scripts/art.ts               The art generator. hero-office.json, vignette-office.json, manager-looks.json and persona-looks.json are its specs.
+scripts/art.ts               The art generator, which loads the five stage files below, each importing the one before it. hero-office.json, vignette-office.json, manager-looks.json and persona-looks.json are its specs.
+scripts/art-office.ts        The first stage: the hero office, its crop and the helper that writes each file.
+scripts/art-layers.ts        A stage: the walk rows, the bus, the doors, the hall, the gym, the entrance, the personas' looks, the hunters and the rack.
+scripts/art-vignettes.ts     A stage: the desk vignettes, cut from a second office that has a mail room.
+scripts/art-render.ts        A stage: each set of renders, drawn and written.
+scripts/art-scene.ts         A stage: the hero's scene file, with its walkers and errands.
 scripts/paint.ts             Paints and lights the office's sprites for an hour of the day, for art.ts and office-gif.ts.
 scripts/office-gif.ts        The README's office: Main Street by day with eight Odds at work, as docs/office.gif.
 scripts/share.ts             The link preview, static/share.png, called by art.ts.
-scripts/release-art.ts       The releases page's GIFs, on the desk vignette. gif.ts encodes them.
+scripts/release-art.ts       The releases page's GIFs, on the desk vignette: the list of animations and the writer. gif.ts encodes them.
+scripts/release-art-kit.ts   What every animation draws with: the palette, sprites, the screen's glyphs, the speech bubble, a frame's timing and the front door's leaves.
+scripts/release-art-<name>.ts  One release's animation each: hello-world, stuck-sign-in, linux, locked-door, windows, hand-off, loop, gym, personas, bug-hunters and advanced.
 src/app.css                  The tokens (night, and the day overrides), the --art-* variables, the fonts, the motion classes.
 src/lib/theme.svelte.ts      The theme: the pick, localStorage, data-theme on <html>, following the system on Auto.
 src/lib/site.ts              The site's facts: address, titles, GitHub, the tagline, the section list.

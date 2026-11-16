@@ -54,7 +54,7 @@ export function followUpBrief(
   }: {
     /** Twins answered with `a` whose work this carry-out does too (`standsFor`). */
     also?: AskRow[];
-    /** This run works at Draft at most, whatever the Odd's level (`draftOnly` in staff.ts). */
+    /** This run works at Draft at most, whatever the Odd's level (`draftOnly` in follow-through.ts). */
     draftOnly?: boolean;
     /** The Odd's level: only at Draft is it offered a standing yes after a call. */
     level?: Level;
@@ -80,7 +80,7 @@ export function followUpBrief(
     case 'answered':
       return answeredBrief(f);
     // A hand-off and a hand-back reach here only with their row or thread
-    // missing, and an edit never does (`editBrief` comes first in staff.ts):
+    // missing, and an edit never does (`editBrief` comes first in follow-through.ts):
     // with nothing else to go on, each reads its note as the owner's feedback.
     case 'hand_off':
     case 'handed_back':
@@ -348,7 +348,7 @@ function carryOutBrief(
         // A yes to Draft reaches a run held to Draft anyway, so only a yes to Act
         // carried out in one says the run does not have it. A level carry-out is
         // held to Draft only when it serves a colleague's hand-off and the owner
-        // chose to be asked first on such work (staff.ts), as the line says.
+        // chose to be asked first on such work (follow-through.ts), as the line says.
         ...(a.level !== 'act'
           ? [`${said}, and this run has it.`]
           : draftOnly

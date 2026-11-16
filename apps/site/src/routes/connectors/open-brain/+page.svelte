@@ -3,7 +3,7 @@
   // own GitHub guide; this page starts once the owner has one, and walks the
   // office's own steps: the Services tab, Takes a key with x-brain-key, then
   // the connect task on the desk. Keep each label in step with the office
-  // (AccessTab.svelte, DeskDrawer.svelte, connectSteps in the ledger).
+  // (AccessTab.svelte, DeskTask.svelte, connectSteps in the ledger).
   import Guide from '#lib/components/Guide.svelte';
   import Meta from '#lib/components/Meta.svelte';
   import type { Part, Trouble } from '#lib/guides/types.ts';

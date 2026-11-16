@@ -42,7 +42,7 @@ export type Launch = {
   ownGroup?: true;
 };
 
-/** What a run needs, whatever its tool: an Odd's from run() in staff.ts, the office's own from runAsOffice. */
+/** What a run needs, whatever its tool: an Odd's from run() in run-tool.ts, the office's own from runAsOffice. */
 export type CliRun = {
   /** The run's key (`runsGoing`). */
   key: string;

@@ -1,5 +1,5 @@
 // How a staffer's run starts on Codex instead of Claude Code: the arguments,
-// the environment and the input `codex exec` gets, and how run() in staff.ts
+// the environment and the input `codex exec` gets, and how run() in run-tool.ts
 // reads what it prints. Server only.
 //
 // Codex keeps its sign-in and sessions in the office's own Codex home

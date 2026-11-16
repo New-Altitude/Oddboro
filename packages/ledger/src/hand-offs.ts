@@ -4,7 +4,7 @@
 // follow-ups, so the office starts them the moment they are written and nothing
 // polls. Every hand-off is a step in a thread (threads.ts): the colleague's run
 // cannot hand off (mcp-run.ts), the hub's pick-up may hand on in the same thread,
-// and both work at Draft at most (staff.ts in the office app), as does every
+// and both work at Draft at most (follow-through.ts in the office app), as does every
 // later run that serves the hand-off, but an approval ask's carry-out. The
 // owner can let an Odd at Act act on its own on work handed to it
 // (`staff.actsOnHandOffs`): then every run that serves the hand-off works at

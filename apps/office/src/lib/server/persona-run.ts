@@ -77,7 +77,7 @@ function note(name: string, a: Unanswered): string {
 /**
  * Run a persona Odd: a quiet one answers its quiet line and runs nothing.
  * Otherwise the hands run (`runTool`, passed in so this module needs nothing
- * of staff.ts's at load), and only their tool steps reach `onEvent`; then the
+ * of run-tool.ts's at load), and only their tool steps reach `onEvent`; then the
  * door answers. A follow-up keeps the hands' Outcome line, after the voice. A
  * door that does not answer fails the run, with the hands' report under a
  * note: the work waited on the persona's judgment, so a follow-up's Outcome

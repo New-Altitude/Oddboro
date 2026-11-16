@@ -75,7 +75,3 @@ Each line says what to do when its trigger comes.
 
 - Building NEW-1651 or NEW-1654, whichever comes first: give each run one
   row of its own, with `runs.jobId` optional and usage pointing at the run.
-- When a feature changes `staff.ts` substantially (it adds to or rewrites a
-  group of functions, not a line or two): first move the piece it touches into
-  a module of its own, then make the change there. Do not split the file in
-  one go while pull requests are open.

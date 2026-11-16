@@ -1,40 +1,25 @@
 <script lang="ts">
+  // The Desk: everything waiting on the owner, listed, with the open item
+  // beside it. This keeps the state and the actions. DeskAsk.svelte draws an
+  // open ask and DeskTask.svelte an open task; a report is drawn here.
   import type { AskRow, Desk, LedgerRow, ReportRow, Step, TaskRow } from '@oddboro/ledger';
   import Pixel from './Pixel.svelte';
   import Markdown from './Markdown.svelte';
-  import TaskResponse from './TaskResponse.svelte';
-  import {
-    current,
-    drafts,
-    finishWithResponse,
-    writing,
-    staleDraft
-  } from './task-response.svelte.ts';
-  import Attachments from './Attachments.svelte';
-  import PostalMailbox from './PostalMailbox.svelte';
-  import AwsSignIn from './AwsSignIn.svelte';
-  import AwsSecretPick from './AwsSecretPick.svelte';
+  import { finishWithResponse } from './task-response.svelte.ts';
   import SelectToChat from './SelectToChat.svelte';
   import ReplyReview from './ReplyReview.svelte';
   import FilterReview from './FilterReview.svelte';
-  import FolderAsk from './FolderAsk.svelte';
-  import FolderWarning from './FolderWarning.svelte';
+  import DeskAsk from './DeskAsk.svelte';
+  import DeskTask from './DeskTask.svelte';
   import { call } from './api.ts';
   import { withActCheck } from './act-check.svelte.ts';
-  import { AWS_GUIDES, siteLink } from '../site.ts';
   import { ago, when } from './format.ts';
-  import { openFile, openProject, wins } from './windows.svelte.ts';
+  import { openProject, wins } from './windows.svelte.ts';
   import { chatAbout, replyAbout, showInChat } from './chat-about.svelte.ts';
-  import { OFFICE_TOOLS } from '@oddboro/ledger/tools';
-  import { describe } from '@oddboro/ledger/time';
-  import { tickable, yesOrNo } from '@oddboro/ledger/tools';
   import type { DeskItem } from '@oddboro/ledger/desk-answers';
   import { untrack } from 'svelte';
-  import GoalProposal from './GoalProposal.svelte';
-  import { LEVEL_LABEL, type FolderAccess } from '@oddboro/ledger/access';
+  import type { FolderAccess } from '@oddboro/ledger/access';
   import type { StaffProfile } from '../staff/roster.ts';
-  import { chatAnswer, stepText, stepsToGo } from './task-steps.ts';
-  import { yesSaid } from './yes-said.ts';
 
   type Props = {
     desk: Desk;
@@ -233,8 +218,6 @@
       await call(`/api/asks/${a.id}/call`, {});
       show(undefined);
     });
-  /** A held call's inputs, as the tool takes them, for the owner to read. */
-  const inputs = (args: Record<string, unknown>) => JSON.stringify(args, null, 2);
   /**
    * Give the folder as it stands on the card: the server gives it, then
    * approves the ask. A whole drive or system files comes back as a warning
@@ -251,8 +234,6 @@
       folderWarning = r.warning ?? '';
       if (!r.warning) show(undefined);
     });
-  const picked = (a: AskRow) => a.plan?.items.filter((_, i) => !skip[i]).length ?? 0;
-  const toolName = (id: string) => OFFICE_TOOLS.find((t) => t.id === id)?.name ?? id;
   const step = (t: TaskRow, index: number, body: Record<string, unknown>) =>
     act(() => call(`/api/tasks/${t.id}`, { index, ...body }));
   async function saveSecret(t: TaskRow, index: number) {
@@ -524,464 +505,45 @@
       <h2 class="mt-1 text-base leading-snug font-medium">{open.row.title}</h2>
 
       {#if open.kind === 'ask'}
-        {@const a = open.row}
-        <dl class="mt-3 flex flex-col gap-3 text-sm">
-          {#if reworks}
-            <div class="rounded-lg bg-sea/10 px-2.5 py-2 text-xs">
-              <div class="text-muted">Reworks “{reworks.title}”</div>
-              {#if reworks.reason}<div class="mt-0.5">You asked: {reworks.reason}</div>{/if}
-            </div>
-          {/if}
-          <div>
-            <dt class="text-xs text-muted">Why</dt>
-            <dd class="mt-0.5"><Markdown text={a.why} staff={a.staffId} /></dd>
-          </div>
-          {#if a.hire}
-            {@const h = a.hire}
-            <div>
-              <dt class="text-xs text-muted">The hire</dt>
-              <dd class="mt-1 flex flex-col gap-1 rounded-lg bg-raise px-2.5 py-2 text-xs">
-                <div><span class="text-muted">Who:</span> {h.name}, {h.role}</div>
-                <div><span class="text-muted">For:</span> {h.remit}</div>
-                <div><span class="text-muted">Permission:</span> {LEVEL_LABEL[h.permission]}</div>
-                {#if h.room}<div><span class="text-muted">Room:</span> {h.room}</div>{/if}
-                {#if h.tools?.length}
-                  <div>
-                    <span class="text-muted">Office tools:</span>
-                    {h.tools.map(toolName).join(', ')}
-                  </div>
-                {/if}
-                {#if h.job}
-                  <div>
-                    <span class="text-muted">First job:</span>
-                    {h.job.name}, {describe(h.job.schedule)}
-                  </div>
-                {/if}
-                <div>
-                  <span class="text-muted">Job description:</span>
-                  <button
-                    class="text-sea underline underline-offset-2"
-                    onclick={() => openFile({ staff: a.staffId, path: h.jobDescriptionFile })}
-                    >{h.jobDescriptionFile}</button
-                  >
-                </div>
-              </dd>
-            </div>
-          {:else if a.goal || a.plan}
-            <GoalProposal {a} {staff} {skip} onskip={(i, skipped) => (skip[i] = skipped)} />
-          {:else if a.call}
-            {@const c = a.call}
-            {#snippet exact()}
-              <dd class="mt-1 flex flex-col gap-1 rounded-lg bg-raise px-2.5 py-2 text-xs">
-                <div><span class="text-muted">Tool:</span> {c.tool}</div>
-                <div class="text-muted">Inputs:</div>
-                <pre
-                  class="max-h-72 overflow-auto rounded-md bg-night/50 px-2 py-1.5 font-mono text-[11px] whitespace-pre-wrap">{inputs(
-                    c.arguments
-                  )}</pre>
-              </dd>
-            {/snippet}
-            <div>
-              {#if c.said && c.shown?.length}
-                <!-- What it does in words, and each email it does it to, as Gmail showed them when it was held. -->
-                <dt class="text-xs text-muted">{c.said}</dt>
-                <dd class="mt-1 rounded-lg bg-raise px-2.5 py-2 text-xs">
-                  <ul class="flex max-h-72 flex-col gap-1 overflow-y-auto">
-                    {#each c.shown as item, n (n)}
-                      <li class="break-words">{item}</li>
-                    {/each}
-                  </ul>
-                </dd>
-                <details class="mt-2">
-                  <summary class="cursor-pointer text-xs text-muted hover:text-ink"
-                    >The call, exactly as the office makes it</summary
-                  >
-                  {@render exact()}
-                </details>
-              {:else}
-                <dt class="text-xs text-muted">The call, exactly as the office makes it</dt>
-                {@render exact()}
-              {/if}
-              {#if c.before?.length}
-                <!-- What this call may apply: the run's calls to the same service its standing yes let through. -->
-                <details class="mt-2" open>
-                  <summary class="cursor-pointer text-xs text-muted hover:text-ink"
-                    >Made without asking before this call ({c.before.length})</summary
-                  >
-                  <ul class="mt-1 flex flex-col gap-1">
-                    {#each c.before as b, n (n)}
-                      <li class="rounded-lg bg-raise px-2.5 py-2 text-xs">
-                        <div><span class="text-muted">Tool:</span> {b.tool}</div>
-                        <pre
-                          class="mt-1 max-h-48 overflow-auto rounded-md bg-night/50 px-2 py-1.5 font-mono text-[11px] whitespace-pre-wrap">{inputs(
-                            b.arguments
-                          )}</pre>
-                      </li>
-                    {/each}
-                  </ul>
-                </details>
-              {/if}
-              <p class="mt-1.5 text-[11px] text-faint">
-                Nothing has changed yet. Approve, and the office makes this call once, then {who(
-                  a.staffId
-                )?.name ?? 'the Odd'} carries on with what it returns.
-              </p>
-            </div>
-          {:else if a.folder}
-            <FolderAsk
-              name={who(a.staffId)?.name ?? 'the Odd'}
-              bind:path={folderPath}
-              bind:level={folderLevel}
-              bind:changing
-            />
-            {#if folderWarning}
-              <FolderWarning
-                folder={folderPath}
-                warning={folderWarning}
-                {busy}
-                onaccept={() => giveFolder(a, true)}
-                oncancel={() => (folderWarning = '')}
-              />
-            {/if}
-          {:else}
-            <div>
-              <dt class="text-xs text-muted">If you approve</dt>
-              <dd class="mt-0.5"><Markdown text={a.ifApproved} staff={a.staffId} /></dd>
-            </div>
-          {/if}
-          {#if precedent.length}
-            <div>
-              <dt class="text-xs text-muted">Like this before</dt>
-              <dd class="mt-1 flex flex-col gap-1">
-                {#each precedent as p (p.id)}
-                  <div class="rounded-lg bg-raise px-2.5 py-1.5 text-xs">
-                    <div>{p.title}</div>
-                    <div class="mt-0.5 text-faint">
-                      {when(p.createdAt)} · {p.reason
-                        ? `Your reason: ${p.reason}`
-                        : 'No reason given'}
-                    </div>
-                  </div>
-                {/each}
-              </dd>
-            </div>
-          {/if}
-        </dl>
-        {#key open.key}
-          <Attachments items={attached('ask', a.id)} ondirty={(d) => (unsaved = d)} />
-        {/key}
-        <label class="mt-4 block text-xs text-muted" for="reason"
-          >{yesOrNo(a.kind) ? 'Reason' : 'Reason, or what to change'}</label
-        >
-        <textarea
-          id="reason"
-          rows="3"
-          class="mt-1 w-full resize-y rounded-lg bg-raise px-3 py-2 text-sm outline-none placeholder:text-faint"
-          placeholder={yesOrNo(a.kind)
-            ? 'Optional to approve or deny.'
-            : 'Optional to approve or deny. Needed to iterate: say what to change.'}
-          bind:value={reason}></textarea>
-        {#if a.kind === 'approval'}
-          <label class="mt-2 flex items-center gap-2 text-xs text-muted">
-            <input type="checkbox" bind:checked={reportWhenDone} /> Report when done
-          </label>
-          <p class="mt-1 text-[11px] text-faint">
-            {who(a.staffId)?.name ?? 'The Odd'} starts as soon as you approve. You hear back if it fails
-            or needs you{reportWhenDone ? ', and when it is done' : ''}.
-          </p>
-        {/if}
-        <div class="mt-3 flex gap-2">
-          <button
-            class="flex-1 rounded-lg bg-raise px-3 py-2 text-sm font-medium hover:bg-coral/25 disabled:opacity-40"
-            disabled={busy || unsaved}
-            onclick={() => decide(a, 'deny')}>{a.kind === 'window' ? 'Pause it' : 'Deny'}</button
-          >
-          {#if !yesOrNo(a.kind)}
-            <button
-              class="flex-1 rounded-lg bg-raise px-3 py-2 text-sm font-medium hover:bg-sea/25 disabled:opacity-40"
-              disabled={busy || unsaved || !reason.trim()}
-              title={reason.trim() ? '' : 'Say what to change in the box above first'}
-              onclick={() => decide(a, 'iterate')}>{a.folder ? 'Send back' : 'Iterate'}</button
-            >
-          {/if}
-          {#if a.folder}
-            {#if !changing}
-              <button
-                class="flex-1 rounded-lg bg-raise px-3 py-2 text-sm font-medium hover:bg-sea/25 disabled:opacity-40"
-                disabled={busy || unsaved}
-                onclick={() => (changing = true)}>Change</button
-              >
-            {/if}
-            <button
-              class="flex-[1.4] rounded-lg bg-sea px-3 py-2 text-sm font-medium text-night disabled:opacity-40"
-              disabled={busy || unsaved || !folderPath.trim() || !!folderWarning}
-              onclick={() => giveFolder(a)}>Give access</button
-            >
-          {:else if a.kind === 'hire'}
-            <button
-              class="flex-[1.4] rounded-lg bg-sea px-3 py-2 text-sm font-medium text-night disabled:opacity-40"
-              disabled={busy || unsaved}
-              onclick={() => onhire(a)}>Open hire window</button
-            >
-          {:else}
-            <button
-              class="flex-1 rounded-lg bg-sea px-3 py-2 text-sm font-medium text-night disabled:opacity-40"
-              disabled={busy || unsaved || (a.kind === 'plan' && !picked(a))}
-              onclick={() => (a.kind === 'call' ? makeCall(a) : decide(a, 'approve'))}
-              >{yesSaid(a, { picked: picked(a), busy })}</button
-            >
-          {/if}
-        </div>
-        {#if a.access}
-          <p class="mt-1.5 text-[11px] text-faint">
-            Connect gives {who(a.staffId)?.name ?? 'the Odd'} access. Any steps to connect it open right
-            here.
-          </p>
-        {/if}
-        {#if a.folder}
-          <p class="mt-1.5 text-[11px] text-faint">
-            Give access gives {who(a.staffId)?.name ?? 'the Odd'} this folder, and it starts on the work
-            that waited for it. Change lets you pick a smaller folder or Can read first.
-          </p>
-        {/if}
-        {#if !yesOrNo(a.kind)}
-          <p class="mt-1.5 text-[11px] text-faint">
-            {a.folder ? 'Send back' : 'Iterate'} sends it back to {who(a.staffId)?.name ??
-              'the Odd'} with your words, and the new version comes back to your desk.
-          </p>
-        {/if}
+        <DeskAsk
+          {open}
+          {staff}
+          {reworks}
+          {precedent}
+          {busy}
+          {who}
+          {attached}
+          {decide}
+          {makeCall}
+          {giveFolder}
+          {onhire}
+          bind:skip
+          bind:folderPath
+          bind:folderLevel
+          bind:changing
+          bind:folderWarning
+          bind:unsaved
+          bind:reason
+          bind:reportWhenDone
+        />
       {:else if open.kind === 'task'}
-        {@const t = open.row}
-        <p class="mt-2 text-sm leading-relaxed text-muted">{t.why}</p>
-        {@const toGo = stepsToGo(t.steps)}
-        {@const response = current(t)}
-        {@const draft = drafts[t.id]}
-        {@const needsSave = !!draft || (response.response !== null && !response.responseVersion)}
-        {@const blockedResponse =
-          writing[t.id] ||
-          staleDraft(draft, response) ||
-          (needsSave && !(draft?.text ?? response.response)?.trim())}
-        {@const how = chatAnswer(
-          { ...t, response: response.response },
-          attached('task', t.id).length > 0
-        )}
-        <!-- A question with one answer has no steps: its answer goes in the response below. -->
-        <ol class="mt-3 flex flex-col gap-2" class:hidden={!t.steps.length}>
-          {#each t.steps as s, index (index)}
-            <li
-              class="flex gap-2.5 rounded-xl bg-raise px-3 py-2.5 text-sm"
-              class:opacity-60={s.done}
-            >
-              <span class="font-pixel text-faint">{index + 1}.</span>
-              <div class="min-w-0 flex-1">
-                <div class="flex items-start gap-2">
-                  {#if tickable(s)}
-                    <input
-                      type="checkbox"
-                      class="mt-1"
-                      checked={s.done}
-                      disabled={busy}
-                      aria-label={s.done ? `Undo step ${index + 1}` : `Mark step ${index + 1} done`}
-                      onchange={() => step(t, index, { op: s.done ? 'untick' : 'tick' })}
-                    />
-                  {/if}
-                  <div class="min-w-0 flex-1">
-                    <Markdown
-                      text={stepText(s.text)}
-                      staff={t.staffId ?? undefined}
-                      copyCode
-                      class={s.done ? 'line-through' : ''}
-                    />
-                    {#if s.action?.kind === 'aws' && !s.done && AWS_GUIDES[s.action.connector]}
-                      {@const guide = AWS_GUIDES[s.action.connector]}
-                      <p class="mt-1 leading-relaxed">
-                        New to this?
-                        <a
-                          class="text-sea underline hover:text-ink"
-                          href={siteLink(guide.path)}
-                          target="_blank"
-                          rel="noopener">{guide.label}, step by step</a
-                        >: the role, and where to find each of these.
-                      </p>
-                    {/if}
-                  </div>
-                  <!-- A chosen mailbox changes only by revoking its grants, so its step has no Undo. -->
-                  {#if s.done && !tickable(s) && s.action?.kind !== 'postal'}
-                    <button
-                      class="ms-auto shrink-0 text-xs text-muted underline hover:text-ink disabled:opacity-40"
-                      disabled={busy}
-                      onclick={() => step(t, index, { op: 'untick' })}>Undo</button
-                    >
-                  {/if}
-                </div>
-                {#if s.action?.kind === 'oauth' && !s.done}
-                  <button
-                    class="mt-2 rounded-lg bg-sea px-3 py-1.5 text-xs font-medium text-night disabled:opacity-40"
-                    disabled={busy}
-                    onclick={() => hostedSignIn(t, index)}>Sign in</button
-                  >
-                  <details class="mt-2 text-xs text-muted">
-                    <summary class="cursor-pointer">The service won't let me sign in</summary>
-                    <p class="mt-2">
-                      If your organization blocks the app, check with the person who manages the
-                      account. Once they approve it, return here and click Sign in.
-                    </p>
-                    {#if s.action.google}
-                      <p class="mt-2">
-                        If Google says Oddboro is limited to test users or has reached its user
-                        limit, open an Odd's chat and choose More, then Report a bug. Include the
-                        error message only. The report is public.
-                      </p>
-                    {/if}
-                  </details>
-                {:else if s.action?.kind === 'postal'}
-                  {#if s.done}
-                    {#if s.answer}<p class="mt-1.5 text-xs text-muted">{s.answer}</p>{/if}
-                  {:else}
-                    {#key t.id}<PostalMailbox
-                        taskId={t.id}
-                        {index}
-                        odd={who(t.staffId)?.name ?? 'the Odd'}
-                      />{/key}
-                  {/if}
-                {:else if s.action?.kind === 'aws'}
-                  {#if s.done}
-                    {#if s.answer}<p class="mt-1.5 text-xs text-muted">{s.answer}</p>{/if}
-                  {:else}
-                    <AwsSignIn taskId={t.id} {index} connector={s.action.connector} />
-                  {/if}
-                {:else if s.action?.kind === 'secret' && !s.done}
-                  <div class="mt-2 flex gap-2">
-                    <input
-                      type="password"
-                      class="min-w-0 flex-1 rounded-lg bg-night/60 px-2.5 py-1.5 text-xs outline-none"
-                      placeholder={s.action.name === 'Authorization' ? 'API key' : s.action.name}
-                      bind:value={secret[index]}
-                    />
-                    <button
-                      class="rounded-lg bg-sea px-3 py-1.5 text-xs font-medium text-night disabled:opacity-40"
-                      disabled={busy || !secret[index]?.trim()}
-                      onclick={() => saveSecret(t, index)}>Save</button
-                    >
-                  </div>
-                  <AwsSecretPick taskId={t.id} {index} />
-                {:else if s.action?.kind === 'secret' && s.answer}
-                  <p class="mt-1.5 text-xs text-muted">{s.answer}</p>
-                {:else if s.action?.kind === 'tools' && !s.done}
-                  {#if !toolList[index]}
-                    <button
-                      class="mt-2 rounded-lg bg-sea px-3 py-1.5 text-xs font-medium text-night disabled:opacity-40"
-                      disabled={busy}
-                      onclick={() => loadTools(t, index)}>{busy ? 'Connecting' : 'Connect'}</button
-                    >
-                  {:else}
-                    {@const list = toolList[index]}
-                    <p class="mt-2 text-xs text-muted">
-                      {#if list.some((tool) => tool.readOnly)}
-                        Read only reaches the tools marked reads only: the ones the service says
-                        only read, less any whose name says it changes something. Read and write
-                        reaches every tool.
-                      {:else if list.length}
-                        None of these tools only read, so a Read only grant reaches none of them.
-                        Read and write reaches every tool. To share a saved result instead,
-                        <a
-                          class="text-sea underline"
-                          href={siteLink('/info/folder-sharing/')}
-                          target="_blank"
-                          rel="noreferrer">give the Odd a folder it can read</a
-                        >.
-                      {:else}
-                        The service returned no tools. Check the account and its access, then
-                        reconnect.
-                      {/if}
-                    </p>
-                    <ul class="mt-1.5 flex max-h-48 flex-col gap-1 overflow-y-auto">
-                      {#each list as tool (tool.name)}
-                        <li class="text-xs">
-                          <code class="text-sea">{tool.name}</code>
-                          {#if tool.readOnly}<span class="text-moss"> reads only</span>{:else}<span
-                              class="text-faint"
-                            >
-                              Read and write only</span
-                            >{/if}
-                          <span class="block text-faint">{tool.description.slice(0, 120)}</span>
-                        </li>
-                      {/each}
-                    </ul>
-                    <button
-                      class="mt-2 rounded-lg bg-sea px-3 py-1.5 text-xs font-medium text-night disabled:opacity-40"
-                      disabled={busy}
-                      onclick={() => step(t, index, { op: 'confirm-tools' })}>Confirm</button
-                    >
-                  {/if}
-                {:else if s.action?.kind === 'choice'}
-                  {#if s.answer}
-                    <div class="mt-1.5 text-xs text-sea">You chose: {s.answer}</div>
-                  {:else}
-                    <div class="mt-2 flex flex-col gap-1.5" role="group" aria-label="Choices">
-                      {#each s.action.options as option (option)}
-                        <button
-                          class="choice"
-                          disabled={busy}
-                          onclick={() => step(t, index, { op: 'choose', answer: option })}
-                          >{option}</button
-                        >
-                      {/each}
-                    </div>
-                  {/if}
-                {/if}
-              </div>
-            </li>
-          {/each}
-        </ol>
-        {#key open.key}
-          {#if t.staffId && !t.askId}
-            <TaskResponse
-              task={t}
-              odd={who(t.staffId)?.name}
-              files={attached('task', t.id)}
-              open={!!how && !how.choice}
-            />
-          {/if}
-          <Attachments
-            items={attached('task', t.id)}
-            reference={response.response !== null}
-            start="edit"
-            ondirty={(d) => (unsaved = d)}
-          />
-        {/key}
-        <label class="mt-4 block text-xs text-muted" for="note">Note (optional)</label>
-        <textarea
-          id="note"
-          rows="2"
-          class="mt-1 w-full resize-none rounded-lg bg-raise px-3 py-2 text-sm outline-none placeholder:text-faint"
-          placeholder="Anything your Odds should know"
-          bind:value={note}></textarea>
-        <!-- A connect-only ask's task starts no work of its own: the proposal it serves does. -->
-        {#if from && !desk.connectOnly.includes(t.id)}
-          <p class="mt-2 text-[11px] text-faint">
-            {from.name} picks up from here as soon as you mark it done.
-          </p>
-        {/if}
-        <div class="mt-3 flex gap-2">
-          <button
-            class="rounded-lg bg-raise px-3 py-2 text-sm text-muted hover:text-ink disabled:opacity-40"
-            disabled={busy || unsaved}
-            onclick={() => finish(t, false)}>Drop it</button
-          >
-          <button
-            class="flex-1 rounded-lg bg-sea px-3 py-2 text-sm font-medium text-night disabled:opacity-40"
-            disabled={busy || unsaved || blockedResponse || toGo > 0}
-            onclick={() => finish(t, true)}
-            >{unsaved
-              ? 'Save the attached file first'
-              : toGo
-                ? `${toGo} ${toGo === 1 ? 'step' : 'steps'} to go`
-                : needsSave
-                  ? 'Save and finish'
-                  : 'Mark done'}</button
-          >
-        </div>
+        <DeskTask
+          {open}
+          {desk}
+          {from}
+          {busy}
+          {toolList}
+          {who}
+          {attached}
+          {step}
+          {saveSecret}
+          {hostedSignIn}
+          {loadTools}
+          {finish}
+          bind:unsaved
+          bind:note
+          bind:secret
+        />
       {:else}
         {@const r = open.row}
         <SelectToChat {staff} author={r.staffId} what={`report "${r.title}"`}>
