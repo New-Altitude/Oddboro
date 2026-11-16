@@ -41,15 +41,25 @@ export function newSessionFields(form: {
   };
 }
 
-/** A conversation Find existing lists, as far as the filter reads it. */
-export type Findable = { id: string; title: string; mark?: string | null };
+/** A conversation Find existing lists. Only Claude's carry a folder and its mark. */
+export type Choice = {
+  id: string;
+  title: string;
+  live: boolean;
+  updated: number;
+  job?: string;
+  configDir?: string | null;
+  mark?: string | null;
+};
+/** A Claude folder on the disk now, that a new conversation can start in. */
+export type Folder = { path: string; mark: string };
 
 /**
  * Whether a conversation stays in the list for what the owner typed: the
  * title or the account (folder and login) holding the words, or the id
  * starting with them, in any case. An empty box keeps every one.
  */
-export function matchesFilter(c: Findable, typed: string): boolean {
+export function matchesFilter(c: Pick<Choice, 'id' | 'title' | 'mark'>, typed: string): boolean {
   const q = typed.trim().toLowerCase();
   if (!q) return true;
   return (

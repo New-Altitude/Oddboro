@@ -1,0 +1,43 @@
+/* The Projects window's form controls, shared by ProjectSessions.svelte and
+   NewSessionForm.svelte, which renders inside it. Each rule sits under the
+   window's root class, so it reaches nothing outside the window. */
+.projects-window label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--color-muted);
+}
+.projects-window label.tick {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
+.projects-window .btn {
+  border-radius: 0.5rem;
+  background: var(--color-raise);
+  padding: 0.25rem 0.625rem;
+  font-size: 0.75rem;
+  color: var(--color-ink);
+}
+.projects-window .btn:hover:not(:disabled),
+.projects-window .btn.on {
+  background: color-mix(in srgb, var(--color-sea) 25%, transparent);
+}
+.projects-window .btn:disabled {
+  opacity: 0.4;
+}
+.projects-window .field {
+  border-radius: 0.5rem;
+  background: var(--color-raise);
+  padding: 0.375rem 0.625rem;
+  font-size: 0.875rem;
+  color: var(--color-ink);
+  outline: none;
+}
+.projects-window .field::placeholder {
+  color: var(--color-faint);
+}
+.projects-window option {
+  background: var(--color-panel-solid);
+}

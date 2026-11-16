@@ -9,12 +9,14 @@
   import type { StaffProfile } from '../staff/roster.ts';
   import Pixel from './Pixel.svelte';
   import { projectApi } from './project-api.ts';
+  import NewSessionForm from './NewSessionForm.svelte';
+  import './project-sessions.css';
   import {
     errorPlace,
-    matchesFilter,
     newSessionFields,
-    type ErrorPlace,
+    type Choice,
     type ErrorSource,
+    type Folder,
     type SessionPath
   } from './project-form.ts';
   import ProjectTerminal from './ProjectTerminal.svelte';
@@ -45,18 +47,6 @@
   };
   /** `mark` names a Claude session's folder and its login now; null for Codex, or a folder not known yet. */
   type Row = ProjectSession & { status: ProjectStatus; connected: boolean; mark: string | null };
-  /** A conversation Find existing lists. Only Claude's carry a folder and its mark. */
-  type Choice = {
-    id: string;
-    title: string;
-    live: boolean;
-    updated: number;
-    job?: string;
-    configDir?: string | null;
-    mark?: string | null;
-  };
-  /** A Claude folder on the disk now, that a new conversation can start in. */
-  type Folder = { path: string; mark: string };
   type Props = {
     staff: StaffProfile[];
     /** Bumps when the office's records change, so the list reads again. */
@@ -104,7 +94,6 @@
   let termView = $state(crypto.randomUUID());
   const selected = $derived(connections.find((s) => s.id === currentId));
   const terminalVisible = $derived(!!view?.connected && !!view.terminal);
-  const shownCandidates = $derived(candidates.filter((c) => matchesFilter(c, filter)));
   const place = $derived(problem && errorPlace(problem.from, !!selected));
   const fields = $derived(
     newSessionFields({ path, agent, claudeFolders: folders.length, handingOver: !!handover })
@@ -317,6 +306,16 @@
     // Off the hidden id, so connecting the same conversation again selects it.
     startNew();
   }
+  /** The folder, tool or socket changed, so what was found no longer applies. */
+  function forgetFound() {
+    found = false;
+    candidates = [];
+    handover = undefined;
+  }
+  function handOver() {
+    const c = handover;
+    if (c) void run(() => connect(c, true), 'connect');
+  }
   function choose(c: Choice) {
     if (agent === 'codex' && !c.live) {
       handover = c;
@@ -375,17 +374,13 @@
   }
 </script>
 
-<!-- An error on the New session form, shown only at the place errorPlace gives it. -->
-{#snippet alert(at: ErrorPlace)}
-  {#if problem && place === at}<p role="alert" class="text-coral">{problem.text}</p>{/if}
-{/snippet}
 {#snippet logo(a: ProjectAgent, cls: string)}
   <svg class={cls} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
     ><path fill-rule="evenodd" d={LOGOS[a]} /></svg
   >
 {/snippet}
 
-<section class="flex h-full min-h-0 flex-col text-sm" aria-label="Projects">
+<section class="projects-window flex h-full min-h-0 flex-col text-sm" aria-label="Projects">
   <header class="flex items-center gap-3 border-b border-hairline px-3 py-2">
     <h2 class="font-pixel text-lg leading-none">Projects</h2>
     <span class="min-w-0 flex-1 truncate text-xs text-muted"
@@ -462,139 +457,29 @@
     <!-- The selected session, or the start form. -->
     <div class="relative flex min-w-0 flex-1 flex-col">
       {#if !selected}
-        <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
-          <h3 class="text-xs tracking-[0.16em] text-sea uppercase">New session</h3>
-          {@render alert('top')}
-          <label
-            >Project folder <input
-              class="field w-full"
-              bind:value={folder}
-              oninput={() => {
-                found = false;
-                candidates = [];
-                handover = undefined;
-              }}
-              placeholder="Absolute folder path"
-            /></label
-          >
-          <div class="flex flex-wrap gap-2">
-            <button class="btn" onclick={() => run(pick, 'pick')}>Choose folder</button>
-            <select
-              class="field"
-              aria-label="Coding tool"
-              bind:value={agent}
-              onchange={() => {
-                found = false;
-                candidates = [];
-                handover = undefined;
-              }}
-              ><option value="claude">Claude Code</option><option value="codex">Codex</option
-              ></select
-            >
-          </div>
-          {@render alert('folder')}
-          {#if fields.socket}<details>
-              <summary class="cursor-pointer text-muted">Connect to a running Codex server</summary
-              ><label
-                >Private local socket <input
-                  class="field w-full"
-                  bind:value={socket}
-                  placeholder="/path/to/private/codex.sock"
-                  oninput={() => {
-                    found = false;
-                    candidates = [];
-                    handover = undefined;
-                  }}
-                /></label
-              >
-              <p class="text-xs text-muted">
-                Choose the socket used by the original Codex window. Leave it empty to use the
-                office server.
-              </p>
-            </details>{/if}
-          <fieldset>
-            <legend class="mb-2 text-xs text-muted">What would you like to do?</legend>
-            <div class="flex flex-wrap gap-2">
-              <button
-                class="btn"
-                class:on={path === 'start'}
-                aria-pressed={path === 'start'}
-                onclick={() => choosePath('start')}>Start a new conversation</button
-              ><button
-                class="btn"
-                class:on={path === 'continue'}
-                aria-pressed={path === 'continue'}
-                onclick={() => choosePath('continue')}>Continue an earlier one</button
-              >
-            </div>
-          </fieldset>
-          {#if fields.start}
-            <!-- The account sits on the start path only: a conversation found goes with its own. -->
-            {#if fields.account}<label class="max-w-full min-w-0"
-                >Account <select
-                  class="field max-w-full min-w-0"
-                  aria-label="Account"
-                  bind:value={startIn}
-                  >{#each folders as f (f.path)}<option value={f.path}>{f.mark}</option
-                    >{/each}</select
-                ></label
-              >{/if}
-            <label
-              >Session name <input
-                class="field w-full"
-                bind:value={name}
-                placeholder="Optional"
-                maxlength="200"
-              /></label
-            >
-            <button
-              class="btn self-start"
-              disabled={busy || !folder}
-              onclick={() => run(() => connect(), 'start')}>Start</button
-            >
-            {@render alert('start')}
-          {/if}
-          {#if fields.list}
-            <button
-              class="btn self-start"
-              disabled={busy || !folder}
-              onclick={() => run(search, 'continue')}>Find existing</button
-            >
-            {#if candidates.length}<input
-                class="field w-full"
-                type="search"
-                aria-label="Filter conversations"
-                placeholder="Title, account or ID"
-                bind:value={filter}
-              />{/if}
-            <!-- Above the rows, so an error from a row near the bottom of a long list is seen. -->
-            {@render alert('list')}
-            {#if found && !candidates.length}<p class="text-muted">
-                No conversations found in this folder.
-              </p>{:else if candidates.length && !shownCandidates.length}<p class="text-muted">
-                No conversations match.
-              </p>{/if}
-            {#each shownCandidates as c (c.id)}<button
-                class="btn text-start"
-                disabled={busy}
-                onclick={() => choose(c)}
-                >{c.title}{#if c.mark}{' · '}{c.mark}{/if} · {c.live ? 'Running' : 'Saved'} · {new Date(
-                  c.updated
-                ).toLocaleString()} · {c.id.slice(0, 8)}</button
-              >{/each}
-          {/if}
-          {#if fields.handover && handover}{@render alert('list')}
-            <p>
-              Finish or stop work in the previous Codex window before continuing this conversation
-              here.
-            </p>
-            <button
-              class="btn self-start"
-              disabled={busy}
-              onclick={() => run(() => connect(handover, true), 'connect')}
-              >Hand over this conversation</button
-            >{/if}
-        </div>
+        <NewSessionForm
+          bind:folder
+          bind:agent
+          bind:socket
+          bind:name
+          bind:startIn
+          bind:filter
+          {path}
+          {fields}
+          {folders}
+          {candidates}
+          {found}
+          {busy}
+          problem={problem?.text}
+          {place}
+          onedit={forgetFound}
+          onpick={() => run(pick, 'pick')}
+          onpath={choosePath}
+          onstart={() => run(() => connect(), 'start')}
+          onsearch={() => run(search, 'continue')}
+          onchoose={choose}
+          onhandover={handOver}
+        />
       {:else}
         <!-- A slim header: what this is, and the few controls that act on it. -->
         <div class="flex items-center gap-2 border-b border-hairline px-3 py-1.5 text-xs">
@@ -957,46 +842,6 @@
 </section>
 
 <style>
-  label {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    font-size: 0.75rem;
-    color: var(--color-muted);
-  }
-  label.tick {
-    flex-direction: row;
-    align-items: center;
-    gap: 0.5rem;
-  }
-  .btn {
-    border-radius: 0.5rem;
-    background: var(--color-raise);
-    padding: 0.25rem 0.625rem;
-    font-size: 0.75rem;
-    color: var(--color-ink);
-  }
-  .btn:hover:not(:disabled),
-  .btn.on {
-    background: color-mix(in srgb, var(--color-sea) 25%, transparent);
-  }
-  .btn:disabled {
-    opacity: 0.4;
-  }
-  .field {
-    border-radius: 0.5rem;
-    background: var(--color-raise);
-    padding: 0.375rem 0.625rem;
-    font-size: 0.875rem;
-    color: var(--color-ink);
-    outline: none;
-  }
-  .field::placeholder {
-    color: var(--color-faint);
-  }
-  option {
-    background: var(--color-panel-solid);
-  }
   pre {
     border-radius: 0.5rem;
     background: var(--color-night);
