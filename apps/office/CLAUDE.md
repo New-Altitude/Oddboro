@@ -2206,8 +2206,10 @@ The Projects window and its local controller live in
 `src/lib/server/project-sessions/`.
 Projects is a window in the start panel (`openProject` in
 `windows.svelte.ts`). While it is in front on a wide screen, the panel
-stretches to 8 px short of the Odd's panel, else of the Odds rail
-(`projectsReach` in `+page.svelte`, `reach` on `SidePanel.svelte`), the desk
+stretches to 8 px short of the Odd's panel, else of the Odds rail. On a
+narrow screen it stretches to 8 px short of the closed rail, and an Odd's card
+or the opened rail overlays it (`projectsReach` in `+page.svelte`, `reach` on
+`SidePanel.svelte`). The desk
 pill hides, and the music keeps its usual width. Its handle still drags: the
 width it leaves is Projects' own (`reachWidth`, kept beside the panel's usual
 width), from `min` up to that reach, and dragged all the way it follows the
@@ -2229,6 +2231,7 @@ Projects. Off, `/api/project-sessions` and its event stream answer 403
 each as the owner typed it, not by its real path. The continue path's list reads Claude Code's
 own session files in every known Claude folder (`claude-sessions.ts`,
 `claudeProjects` in `claude-project.ts`); a session keeps the folder it runs in
-(`config_dir`), and Remove hides a disconnected one (`hidden_at`). The terminal loads `node-pty` only when it opens. See
+(`config_dir`), and Remove hides a disconnected one (`hidden_at`). Claude sessions run in Claude Code's background service and the terminal
+attaches to them (`claude-background.ts`). The terminal loads `node-pty` only when it opens. See
 [project sessions](../../docs/project-sessions.md) for native clients,
 handover and recovery.
