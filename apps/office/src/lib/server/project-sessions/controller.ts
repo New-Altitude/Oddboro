@@ -148,7 +148,7 @@ function foundClaudeFolder(dir: string): string {
 /**
  * The Claude folder the office's own `claude` would use: the one the office's
  * `CLAUDE_CONFIG_DIR` names, else `~/.claude`. Read at each call, as the native
- * client reads it. Not a known folder: Setup, Start new and the Odds' deny
+ * client reads it. Not a known folder: Setup, the Account list and the Odds' deny
  * lists never see it.
  */
 const officeClaudeFolder = () => nativeEnv().CLAUDE_CONFIG_DIR || defaultClaudeFolder();
@@ -283,7 +283,7 @@ export class ProjectController {
   /**
    * Connect a session of the project at `path`: the conversation `nativeId`,
    * else a new one. `configDir` is the Claude folder the page picked, in Find
-   * existing or beside Start new. For a known session, its own stored folder
+   * existing or in Account when starting one. For a known session, its own stored folder
    * is no pick: Reconnect sends it back.
    */
   async connect(

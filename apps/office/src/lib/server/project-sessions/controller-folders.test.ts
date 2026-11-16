@@ -853,7 +853,7 @@ test(
 );
 
 test(
-  'Start new through the route stores and runs the Claude folder picked, and ~/.claude when none is',
+  'Starting a new conversation through the route stores and runs the Claude folder picked, and ~/.claude when none is',
   { skip: process.platform === 'win32' && 'the stand-in is a shell script' },
   async () => {
     // The route answers only with advanced mode on, which needs an owner.
