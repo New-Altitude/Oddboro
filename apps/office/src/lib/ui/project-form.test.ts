@@ -4,8 +4,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { ProjectAgent } from '@oddboro/ledger';
+import { PROJECT_WORDS } from '../project-words.ts';
 import {
+  CHOICE_LABEL,
+  choiceState,
   errorPlace,
+  errorShows,
   filterClears,
   listAsk,
   listFor,
@@ -19,6 +23,7 @@ import {
   type FormChange,
   type Found,
   type ListAsk,
+  type ListCount,
   type SessionPath
 } from './project-form.ts';
 
@@ -288,9 +293,10 @@ test('switching the coding tool lists once', () => {
   assert.equal(listsOn('tool', { path: 'continue', now: codex, found: inA }), true);
 });
 
-test('Refresh list lists on every press, even with the rows shown or a list loading', () => {
+test('Refresh list lists on every press, but not while a list for the same ask loads', () => {
   assert.equal(listsOn('refresh', { path: 'continue', now: inA.ask, found: inA }), true);
-  assert.equal(listsOn('refresh', { path: 'continue', now: inA.ask, loading: inA.ask }), true);
+  assert.equal(listsOn('refresh', { path: 'continue', now: inA.ask, loading: inA.ask }), false);
+  assert.equal(listsOn('refresh', { path: 'continue', now: inB, loading: inA.ask }), true);
 });
 
 test('a change while a list loads lists its own ask, not swallowed by that list', () => {
@@ -308,62 +314,135 @@ test('nothing lists on the start path or before a path is chosen', () => {
 });
 
 /** A list run against a fake request: how often it asked, and what reached the form. */
-async function listed(
-  ask: ListAsk,
-  answer: () => Promise<Choice[]>,
-  /** What the form asks once the request is out. */
-  then: ListAsk
-) {
-  let now = ask;
+async function listed(ask: ListAsk, answer: () => Promise<Choice[]>) {
   const seen: string[] = [];
   let asked = 0;
-  const shown: { found?: Found; error?: unknown } = {};
+  const shown: { found?: Found; error?: unknown; errorAsk?: ListAsk } = {};
   await listFor(ask, {
+    count: { started: 0 },
     find: (a) => {
       asked++;
       assert.deepEqual(a, ask);
-      now = then;
       return answer();
     },
     start: () => seen.push('start'),
-    now: () => now,
     found: (f) => (shown.found = f),
-    failed: (e) => (shown.error = e)
+    failed: (e, a) => {
+      shown.error = e;
+      shown.errorAsk = a;
+    }
   });
   return { asked, seen, ...shown };
 }
 
 test('a list asks once, clears an earlier error as it starts, and lands its rows', async () => {
-  const done = await listed(inA.ask, async () => ROWS, inA.ask);
+  const done = await listed(inA.ask, async () => ROWS);
   assert.equal(done.asked, 1);
   assert.deepEqual(done.seen, ['start']);
   assert.deepEqual(done.found, inA);
   assert.equal(done.error, undefined);
 });
 
-test('a list for a folder no longer chosen drops its rows', async () => {
-  const done = await listed(inA.ask, async () => ROWS, inB);
-  assert.equal(done.found, undefined);
-});
-
-test('a list for a tool no longer chosen drops its rows', async () => {
-  const done = await listed(inA.ask, async () => ROWS, asking('~/project-a', 'codex'));
-  assert.equal(done.found, undefined);
-});
-
-test('a failed list reports its error while its folder is still chosen', async () => {
+test('a failed list reports its error with the folder, tool and socket it asked about', async () => {
   const refusal = new Error('That folder is not there.');
-  const done = await listed(inA.ask, () => Promise.reject(refusal), inA.ask);
+  const done = await listed(inA.ask, () => Promise.reject(refusal));
   assert.equal(done.error, refusal);
+  assert.deepEqual(done.errorAsk, inA.ask);
   assert.equal(done.found, undefined);
 });
 
-test('a failed list for a folder or tool no longer chosen drops its error', async () => {
-  const refusal = new Error('That folder is not there.');
-  for (const then of [inB, asking('~/project-a', 'codex')]) {
-    const done = await listed(inA.ask, () => Promise.reject(refusal), then);
-    assert.equal(done.error, undefined, then.folder + then.agent);
+test('an error listing one folder or tool never shows for another, and shows again for its own', async () => {
+  const done = await listed(inB, () => Promise.reject(new Error('That folder is not there.')));
+  const error = { ask: done.errorAsk };
+  assert.equal(errorShows(error, inA.ask), false);
+  assert.equal(errorShows(error, asking('~/project-b', 'codex')), false);
+  assert.equal(errorShows(error, inB), true);
+});
+
+test('an error that asked about no list shows whatever the form asks, and no error shows nothing', () => {
+  assert.equal(errorShows({}, inA.ask), true);
+  assert.equal(errorShows(undefined, inA.ask), false);
+});
+
+/** A request whose answer the test gives when it likes, and how many were sent. */
+function heldFind() {
+  const answers = new Map<string, { rows: (rows: Choice[]) => void; refuse: (e: Error) => void }>();
+  return {
+    answers,
+    find: (a: ListAsk) =>
+      new Promise<Choice[]>((rows, refuse) => answers.set(a.folder, { rows, refuse }))
+  };
+}
+
+test('a list that answers while the owner edits the folder lands, so going back to that folder shows its rows with no new request', async () => {
+  const app = asking('~/app');
+  const held = heldFind();
+  let found: Found | undefined;
+  let loading: ListAsk | undefined;
+  // Tab out of the folder field: the change lists ~/app.
+  assert.equal(listsOn('folder', { path: 'continue', now: app }), true);
+  const out = listFor(app, {
+    count: { started: 0 },
+    find: held.find,
+    start: () => (loading = app),
+    found: (f) => (found = f),
+    failed: () => assert.fail('the list answers')
+  });
+  // Back in the field, type x: the form asks about ~/appx, and typing lists nothing.
+  const typed = asking('~/appx');
+  assert.equal(listsOn('typed', { path: 'continue', now: typed, found, loading }), false);
+  held.answers.get('~/app')?.rows(ROWS);
+  await out;
+  loading = undefined;
+  assert.equal(rowsFor(found, typed), undefined);
+  // Backspace, then Tab out: the field reads ~/app again.
+  assert.equal(listsOn('folder', { path: 'continue', now: app, found, loading }), false);
+  assert.deepEqual(rowsFor(found, app), ROWS);
+  assert.equal(held.answers.size, 1);
+});
+
+test("a slow list overtaken by a list for another folder never lands, and the newer list's rows show", async () => {
+  const rowsB: Choice[] = [{ ...ROWS[0], id: 'b7c1d2e3-0000-4000-8000-222222222222', title: 'B' }];
+  for (const slow of ['answers', 'fails'] as const) {
+    const held = heldFind();
+    const count: ListCount = { started: 0 };
+    const landed: Found[] = [];
+    const errors: unknown[] = [];
+    const on = {
+      count,
+      find: held.find,
+      start: () => {},
+      found: (f: Found) => landed.push(f),
+      failed: (e: unknown) => errors.push(e)
+    };
+    const a = listFor(inA.ask, on);
+    const b = listFor(inB, on);
+    held.answers.get('~/project-b')?.rows(rowsB);
+    await b;
+    if (slow === 'answers') held.answers.get('~/project-a')?.rows(ROWS);
+    else held.answers.get('~/project-a')?.refuse(new Error('That folder is not there.'));
+    await a;
+    assert.deepEqual(landed, [{ ask: inB, rows: rowsB }], slow);
+    assert.deepEqual(errors, [], slow);
+    assert.deepEqual(rowsFor(landed.at(-1), inB), rowsB, slow);
   }
+});
+
+test('A conversation open in a terminal reads as such', () => {
+  const JOB = 'a1b2c3d4';
+  assert.equal(choiceState({ live: true, job: '' }, 'claude'), 'terminal');
+  assert.equal(choiceState({ live: true }, 'claude'), 'terminal');
+  assert.equal(choiceState({ live: true, job: JOB }, 'claude'), 'running');
+  assert.equal(choiceState({ live: false, job: JOB }, 'claude'), 'saved');
+  assert.equal(choiceState({ live: false, job: '' }, 'claude'), 'saved');
+  // Codex lists no background jobs: running is running, as before.
+  assert.equal(choiceState({ live: true }, 'codex'), 'running');
+  assert.equal(choiceState({ live: false }, 'codex'), 'saved');
+  assert.deepEqual(CHOICE_LABEL, {
+    terminal: PROJECT_WORDS.inTerminal,
+    running: 'Running',
+    saved: 'Saved'
+  });
 });
 
 test('typing in the filter clears an error under a row, and no other', () => {

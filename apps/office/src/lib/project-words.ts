@@ -21,5 +21,6 @@ export const PROJECT_WORDS = {
   startFailed: 'Claude Code could not start this conversation. Try again.',
   waiting: 'Claude is waiting for your answer in that terminal. Answer it there, then try again.',
   focus: 'Focus',
-  focusName: 'Fill the window with the terminal'
+  focusName: 'Fill the window with the terminal',
+  looking: 'Looking for conversations.'
 } as const;

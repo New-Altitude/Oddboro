@@ -1,4 +1,5 @@
 import type { ProjectAgent } from '@oddboro/ledger';
+import { PROJECT_WORDS } from '../project-words.ts';
 
 // What the Projects window's New session form shows, which conversations its
 // filter keeps, and where an error shows.
@@ -56,6 +57,31 @@ export type Choice = {
   job?: string;
   configDir?: string | null;
   mark?: string | null;
+  /** The office can end it in its terminal and open it here (`PROJECT_WORDS.moveButton`). */
+  movable?: boolean;
+};
+
+/**
+ * Where a listed conversation is now: open in a terminal on this computer,
+ * running, or saved and not running.
+ */
+export type ChoiceState = 'terminal' | 'running' | 'saved';
+
+/**
+ * A running Claude Code conversation with no background job is open in a
+ * terminal; one with a job runs in Claude Code's background service. Codex
+ * lists no jobs, so a running Codex conversation reads as running.
+ */
+export function choiceState(c: Pick<Choice, 'live' | 'job'>, agent: ProjectAgent): ChoiceState {
+  if (!c.live) return 'saved';
+  return agent === 'claude' && !c.job ? 'terminal' : 'running';
+}
+
+/** What a row says about where its conversation is. */
+export const CHOICE_LABEL: Record<ChoiceState, string> = {
+  terminal: PROJECT_WORDS.inTerminal,
+  running: 'Running',
+  saved: 'Saved'
 };
 /** A Claude folder on the disk now, that a new conversation can start in. */
 export type Folder = { path: string; mark: string };
@@ -78,6 +104,16 @@ export function sameAsk(a: ListAsk | undefined, b: ListAsk): boolean {
 
 /** Conversations a list found, with the ask they answer. */
 export type Found = { ask: ListAsk; rows: Choice[] };
+
+/**
+ * Whether an error shows for what the form asks now. A list's error carries
+ * the folder, tool and socket it asked about, and shows only while the form
+ * asks the same, as the list's rows do (`rowsFor`). An error with no ask shows
+ * whatever the form asks.
+ */
+export function errorShows(error: { ask?: ListAsk } | undefined, now: ListAsk): boolean {
+  return !!error && (!error.ask || sameAsk(error.ask, now));
+}
 
 /**
  * The conversations to show for what the form asks now. Rows found for another
@@ -110,7 +146,8 @@ export type FormChange =
  * with a folder set, once per committed change, never per keystroke and never
  * on a timer. A change that leaves the ask as the newest list had it (the same
  * folder chosen again, Continue chosen with those rows shown or loading) lists
- * nothing. Refresh list lists on every press.
+ * nothing. Refresh list lists on every press, except while a list for the same
+ * ask still loads: the answer on its way is already the fresh one.
  */
 export function lists(
   change: FormChange,
@@ -123,35 +160,43 @@ export function lists(
   }
 ): boolean {
   if (change === 'typed' || form.path !== 'continue' || !form.now.folder.trim()) return false;
-  return change === 'refresh' || !sameAsk(form.loading ?? form.found?.ask, form.now);
+  if (form.loading) return !sameAsk(form.loading, form.now);
+  return change === 'refresh' || !sameAsk(form.found?.ask, form.now);
 }
 
+/** How many lists the form has started, kept across lists. */
+export type ListCount = { started: number };
+
 /**
- * Lists the folder's conversations for `ask`. The answer lands only while the
- * form still asks the same: rows or an error for a folder, tool or socket no
- * longer chosen are dropped, so a slow list never lands over a newer choice.
+ * Lists the folder's conversations for `ask`. Its answer, rows or an error,
+ * lands unless a newer list started after it, whatever the form asks by then.
+ * The answer keeps the ask it answers, and `rowsFor` and `errorShows` show it
+ * only while the form asks the same. So a slow list never lands over a newer
+ * one, and an owner who edits the folder and comes back to it sees its rows
+ * again with no new request.
  */
 export async function listFor(
   ask: ListAsk,
   on: {
+    /** The form's count of lists; this list takes the next number. */
+    count: ListCount;
     find: (ask: ListAsk) => Promise<Choice[]>;
     /** The list starts: an earlier error clears, as when any other action starts. */
     start: () => void;
-    /** What the form asks when the answer comes. */
-    now: () => ListAsk;
     found: (found: Found) => void;
-    failed: (error: unknown) => void;
+    failed: (error: unknown, ask: ListAsk) => void;
   }
 ): Promise<void> {
+  const n = ++on.count.started;
   on.start();
   let rows: Choice[];
   try {
     rows = await on.find(ask);
   } catch (e) {
-    if (sameAsk(ask, on.now())) on.failed(e);
+    if (n === on.count.started) on.failed(e, ask);
     return;
   }
-  if (sameAsk(ask, on.now())) on.found({ ask, rows });
+  if (n === on.count.started) on.found({ ask, rows });
 }
 
 /**

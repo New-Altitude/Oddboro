@@ -25,6 +25,7 @@
     type FormChange,
     type Found,
     type ListAsk,
+    type ListCount,
     type SessionPath
   } from './project-form.ts';
   import ProjectTerminal from './ProjectTerminal.svelte';
@@ -246,15 +247,17 @@
     if (change !== 'refresh') handover = undefined;
     if (lists(change, { path, now: listNow, found, loading })) list();
   }
+  /** Every list this window started, so only the newest one's answer lands. */
+  const listCount: ListCount = { started: 0 };
   function list() {
     const ask = listNow;
     void listFor(ask, {
+      count: listCount,
       find: (a) => projectApi<Choice[]>('find', a),
       start: () => {
         loading = ask;
         problem = undefined;
       },
-      now: () => listNow,
       found: (f) => {
         found = f;
         filter = '';
