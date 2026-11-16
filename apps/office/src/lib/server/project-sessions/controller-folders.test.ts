@@ -322,7 +322,7 @@ test(
     const q = named('.claude-newer');
     L.setClaudeFolders([p, q]);
     const notice = (mark: string) =>
-      `A newer copy of this conversation is in ${mark}. To switch to it, choose it in Find existing.`;
+      `A newer copy of this conversation is in ${mark}. To switch to it, choose it under Continue an earlier one.`;
     const opened: string[] = [];
     const reconnect = async (s: ProjectSession, configDir?: string) => {
       const told = await folderNoticeOf(s, configDir);
@@ -569,7 +569,7 @@ test(
 );
 
 test(
-  'a folder picked from a stale list that lacks the conversation is refused, and the session stays where it was',
+  'a folder picked from a stale list that lacks the conversation is refused, pointing to Refresh list, and the session stays where it was',
   { skip: process.platform === 'win32' && 'the stand-in is a shell script' },
   async () => {
     const p = named('.claude-stale-has');
@@ -583,7 +583,8 @@ test(
       await c.disconnect(s.id);
       const count = spawned.length;
       await assert.rejects(c.connect('claude', app, { nativeId: id, configDir: q }), {
-        message: PICK_LACKS_IT('~/.claude-stale-lacks · signed out')
+        message:
+          'That conversation is no longer in ~/.claude-stale-lacks · signed out. Choose Refresh list to see where it is now.'
       });
       assert.equal((await L.connection(s.id)).configDir, p);
       assert.equal(spawned.length, count);

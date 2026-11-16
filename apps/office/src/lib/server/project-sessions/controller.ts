@@ -114,7 +114,7 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
  */
 export const FOLDER_NOTICE = {
   newer: (mark: string) =>
-    `A newer copy of this conversation is in ${mark}. To switch to it, choose it in Find existing.`,
+    `A newer copy of this conversation is in ${mark}. To switch to it, choose it under Continue an earlier one.`,
   moved: ({ from, to }: { from: string; to: string }) =>
     `This conversation is no longer in ${from}, so the session moved to ${to}, which has its newest copy.`
 };
@@ -125,7 +125,7 @@ export const FOLDER_NOTICE = {
  * moved or went after the list was read.
  */
 export const PICK_LACKS_IT = (mark: string) =>
-  `That conversation is no longer in ${mark}. Open Find existing again to see where it is now.`;
+  `That conversation is no longer in ${mark}. Choose Refresh list to see where it is now.`;
 
 /**
  * `dir`, when the office may run Claude Code in it: a folder in Setup, and, for
