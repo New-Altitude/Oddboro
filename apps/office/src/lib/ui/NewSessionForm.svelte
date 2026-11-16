@@ -71,9 +71,17 @@
   const shownCandidates = $derived(candidates.filter((c) => matchesFilter(c, filter)));
 </script>
 
-<!-- An error on the form, shown only at the place errorPlace gives it. -->
+<!-- An error on the form, shown only at the place errorPlace gives it. It
+     scrolls itself into view as it appears: under a row at the pane's bottom
+     edge it would otherwise sit just below what the owner sees. -->
 {#snippet alert(at: ErrorPlace)}
-  {#if problem && place === at}<p role="alert" class="text-coral">{problem}</p>{/if}
+  {#if problem && place === at}<p
+      role="alert"
+      class="text-coral"
+      {@attach (n) => n.scrollIntoView({ block: 'nearest' })}
+    >
+      {problem}
+    </p>{/if}
 {/snippet}
 
 <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
