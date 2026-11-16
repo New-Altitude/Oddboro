@@ -312,6 +312,19 @@ test('connecting a removed conversation again shows it again with the same id', 
   assert.ok((await projectOverview()).some((row) => row.id === s.id));
 });
 
+test('A session row takes the id it is given', async () => {
+  const id = randomUUID(),
+    nativeId = randomUUID();
+  const s = await connectProject('claude', nativeId, '/one', 'One', undefined, { id });
+  assert.equal(s.id, id);
+  assert.equal((await connection(id))?.nativeId, nativeId);
+  // Connecting the same conversation again keeps the row it has.
+  const again = await connectProject('claude', nativeId, '/one', 'One', undefined, {
+    id: randomUUID()
+  });
+  assert.equal(again.id, id);
+});
+
 test('connecting again with a Claude folder moves the row there, and another project is refused', async () => {
   const nativeId = randomUUID();
   const s = await connectProject('claude', nativeId, '/one', 'One');

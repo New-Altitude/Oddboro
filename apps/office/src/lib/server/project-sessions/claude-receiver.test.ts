@@ -14,21 +14,27 @@ const { prepareClaude, checkClaudeReceiver, postClaude } = await import('./claud
 await L.setOwnerName('Tester');
 await L.setAdvancedMode(true);
 
-async function fixture() {
+/** A connected session, with its plugin written to pair with `pairWith`, by default its own id. */
+async function fixture(pairWith?: string) {
   const project = join(folder, randomUUID());
   mkdirSync(project);
   const s = await L.connectProject('claude', randomUUID(), project, 'Receiver check');
-  return { s, ...prepareClaude(s) };
+  return { s, ...prepareClaude(pairWith ? { ...s, nativeId: pairWith } : s) };
 }
+type Fixture = Awaited<ReturnType<typeof fixture>>;
 
-async function tools(t: TestContext, f: Awaited<ReturnType<typeof fixture>>) {
+async function tools(
+  t: TestContext,
+  f: Fixture,
+  env: Record<string, string> = { CLAUDE_CODE_SESSION_ID: f.s.nativeId }
+) {
   const config = JSON.parse(readFileSync(join(f.plugin, '.mcp.json'), 'utf8'));
   const client = new Client({ name: 'receiver-test', version: '1.0.0' });
   await client.connect(
     new StdioClientTransport({
       ...config.mcpServers.oddboro_project,
       cwd: f.s.folder,
-      env: { CLAUDE_CODE_SESSION_ID: f.s.nativeId },
+      env,
       stderr: 'pipe'
     })
   );
@@ -37,6 +43,31 @@ async function tools(t: TestContext, f: Awaited<ReturnType<typeof fixture>>) {
     return client.close();
   });
   return client;
+}
+
+/** The plugin's monitor as Claude Code starts it in the project, stopped when the test ends. */
+function monitor(t: TestContext, f: Fixture, env: Record<string, string>) {
+  const child = spawn(process.execPath, [join(f.plugin, 'start-watch.mjs')], {
+    cwd: f.s.folder,
+    env,
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  t.after(async () => {
+    if (child.exitCode === null) {
+      const ended = once(child, 'exit');
+      child.kill();
+      await ended;
+    }
+  });
+  return child;
+}
+
+/** A probe already waiting, which a paired receiver answers as it starts. */
+function probe(f: Fixture) {
+  const key = randomUUID();
+  writeFileSync(join(f.box, 'probe.json'), JSON.stringify({ key }));
+  return (receiver: (typeof L.PROJECT_RECEIVERS)[number]) =>
+    existsSync(join(f.box, key + '.' + receiver));
 }
 
 /** Filesystem notices keep running while the one delivery timer is mocked. */
@@ -49,23 +80,12 @@ async function until(fn: () => boolean) {
 test('both live receivers answer a fresh probe, then the exact assignment returns through the paired tools', async (t) => {
   const f = await fixture();
   const client = await tools(t, f);
-  const monitor = spawn(process.execPath, [join(f.plugin, 'start-watch.mjs')], {
-    cwd: f.s.folder,
-    env: { CLAUDE_CODE_SESSION_ID: f.s.nativeId },
-    stdio: ['ignore', 'pipe', 'pipe']
-  });
+  const watcher = monitor(t, f, { CLAUDE_CODE_SESSION_ID: f.s.nativeId });
   let notices = '';
   let errors = '';
-  monitor.stdout.on('data', (bytes) => (notices += bytes));
-  monitor.stderr.on('data', (bytes) => (errors += bytes));
-  t.after(async () => {
-    if (monitor.exitCode === null) {
-      const ended = once(monitor, 'exit');
-      monitor.kill();
-      await ended;
-    }
-    assert.equal(errors, '');
-  });
+  watcher.stdout.on('data', (bytes) => (notices += bytes));
+  watcher.stderr.on('data', (bytes) => (errors += bytes));
+  t.after(() => assert.equal(errors, ''));
 
   await checkClaudeReceiver(f.s);
   assert.equal(existsSync(join(f.box, 'offer.json')), false);
@@ -148,4 +168,39 @@ test('a tool server in an unpaired conversation starts, refuses its tools and ne
   // Still running after the check: the server did not throw at start.
   assert.equal((await client.callTool({ name: 'take_work', arguments: {} })).isError, true);
   assert.equal(errors, '');
+});
+
+test('A plugin written for the session itself pairs with its own conversation, and a real id still refuses another one', async (t) => {
+  // Claude Code gives a background session its id; the plugin takes it from there.
+  const own = await fixture(L.PAIR_SELF);
+  const sessionId = { CLAUDE_CODE_SESSION_ID: randomUUID() };
+  await tools(t, own, sessionId);
+  monitor(t, own, sessionId);
+  await checkClaudeReceiver(own.s);
+
+  // Outside a Claude session, with the id unset or empty, neither pairs.
+  const outside: Record<string, string>[] = [{}, { CLAUDE_CODE_SESSION_ID: '' }];
+  for (const env of outside) {
+    const f = await fixture(L.PAIR_SELF);
+    const answered = probe(f);
+    const watcher = monitor(t, f, env);
+    await until(() => watcher.exitCode !== null);
+    assert.equal(watcher.exitCode, 0);
+    const client = await tools(t, f, env);
+    const taken = await client.callTool({ name: 'take_work', arguments: {} });
+    assert.equal(taken.isError, true);
+    assert.match(JSON.stringify(taken.content), /not paired/);
+    assert.equal(answered('tools'), false);
+    assert.equal(answered('monitor'), false);
+  }
+
+  // A plugin for a real id: its monitor still answers with no session id set,
+  // and leaves another conversation.
+  const real = await fixture();
+  const answered = probe(real);
+  monitor(t, real, {});
+  await until(() => answered('monitor'));
+  const other = monitor(t, real, { CLAUDE_CODE_SESSION_ID: randomUUID() });
+  await until(() => other.exitCode !== null);
+  assert.equal(other.exitCode, 0);
 });

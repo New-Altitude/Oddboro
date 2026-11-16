@@ -2,9 +2,13 @@
 // Claude reads the work through the MCP tool, which checks the conversation ID.
 import { readFileSync, realpathSync, watch } from 'node:fs';
 import { join } from 'node:path';
-import { answerProjectProbes } from './project-receiver.ts';
-const [box, expected, folder] = process.argv.slice(2);
+import { answerProjectProbes, pairedSessionId } from './project-receiver.ts';
+const [box, named, folder] = process.argv.slice(2);
+const expected = pairedSessionId(named);
+// A plugin written for a real id keeps its monitor with no session id set,
+// as before. One written for the session itself has nothing to pair with then.
 if (
+  expected === undefined ||
   (process.env.CLAUDE_CODE_SESSION_ID && process.env.CLAUDE_CODE_SESSION_ID !== expected) ||
   realpathSync(process.cwd()) !== realpathSync(folder)
 )
