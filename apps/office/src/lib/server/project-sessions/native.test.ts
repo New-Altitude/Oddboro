@@ -12,7 +12,9 @@ test('a project folder typed from ~ opens in the home folder, and ~other is refu
     assert.equal(await projectFolder(`~/${basename(folder)}`), real);
     assert.equal(await projectFolder('~'), await realpath(homedir()));
     assert.equal(await projectFolder(real), real);
-    await assert.rejects(projectFolder('~other'), /Choose an absolute project folder\./);
+    await assert.rejects(projectFolder('~other'), {
+      message: 'Choose a folder by its full path, such as ~/my-project.'
+    });
   } finally {
     await rm(folder, { recursive: true, force: true });
   }

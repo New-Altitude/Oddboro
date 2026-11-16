@@ -78,7 +78,7 @@
       class="field w-full"
       bind:value={folder}
       oninput={onedit}
-      placeholder="Absolute folder path"
+      placeholder="Folder path, such as ~/my-project"
     /></label
   >
   <div class="flex flex-wrap gap-2">

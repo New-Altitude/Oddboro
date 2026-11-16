@@ -15,7 +15,7 @@ export { nativeProjectEnv as nativeEnv } from '../run-env-allow.ts';
 /** The real path of the project folder the owner typed, `~` read as the home folder. */
 export async function projectFolder(typed: string) {
   const path = expandHome(typed);
-  if (!isAbsolute(path)) throw new Error('Choose an absolute project folder.');
+  if (!isAbsolute(path)) throw new Error('Choose a folder by its full path, such as ~/my-project.');
   const folder = await realpath(path);
   if (!(await stat(folder)).isDirectory()) throw new Error('Choose a folder.');
   return folder;
