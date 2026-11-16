@@ -1,7 +1,7 @@
 import type { ProjectAgent } from '@oddboro/ledger';
 
-// What the Projects window's New session form shows, and which conversations
-// its filter keeps.
+// What the Projects window's New session form shows, which conversations its
+// filter keeps, and where an error shows.
 // The component only calls these, so each rule lives here once and its test
 // drives it. Nothing here fetches.
 
@@ -57,4 +57,53 @@ export function matchesFilter(c: Findable, typed: string): boolean {
     !!c.mark?.toLowerCase().includes(q) ||
     c.id.toLowerCase().startsWith(q)
   );
+}
+
+/** What raised an error in the Projects window. */
+export type ErrorSource =
+  /** Choose folder. */
+  | 'pick'
+  /** Start, on the start path. */
+  | 'start'
+  /** Find existing, on the continue path. */
+  | 'continue'
+  /** Opening a conversation from the list, or handing one over. */
+  | 'connect'
+  /** Reading the sessions and Claude folders. */
+  | 'load'
+  /** Anything done on an open session. */
+  | 'session';
+
+/** Where an error shows. */
+export type ErrorPlace =
+  /** Under the Project folder field. */
+  | 'folder'
+  /** Under the Start button. */
+  | 'start'
+  /** Above the conversations found, under the filter. */
+  | 'list'
+  /** At the top of the form. */
+  | 'top'
+  /** Over the open session's terminal. */
+  | 'session';
+
+/**
+ * Where an error shows: beside the control that caused it, so the owner never
+ * has to scroll past a long list to find it. With a session open, the session
+ * pane is all the owner sees, so every error shows there.
+ */
+export function errorPlace(source: ErrorSource, sessionOpen: boolean): ErrorPlace {
+  if (sessionOpen) return 'session';
+  switch (source) {
+    case 'pick':
+      return 'folder';
+    case 'start':
+      return 'start';
+    case 'continue':
+    case 'connect':
+      return 'list';
+    case 'load':
+    case 'session':
+      return 'top';
+  }
 }

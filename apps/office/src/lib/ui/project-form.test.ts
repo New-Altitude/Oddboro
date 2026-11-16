@@ -1,10 +1,16 @@
 // The Projects window's New session form: which fields show on each path, and
-// which conversations the filter keeps.
+// which conversations the filter keeps, and where an error shows.
 // Run with `npm test -w @oddboro/office`.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { ProjectAgent } from '@oddboro/ledger';
-import { matchesFilter, newSessionFields, type SessionPath } from './project-form.ts';
+import {
+  errorPlace,
+  matchesFilter,
+  newSessionFields,
+  type ErrorSource,
+  type SessionPath
+} from './project-form.ts';
 
 const AGENTS: ProjectAgent[] = ['claude', 'codex'];
 const PATHS: (SessionPath | undefined)[] = [undefined, 'start', 'continue'];
@@ -139,4 +145,30 @@ test('an empty or blank filter keeps every conversation', () => {
   const all = FOUND.map((c) => c.title);
   assert.deepEqual(kept(''), all);
   assert.deepEqual(kept('   '), all);
+});
+
+const SOURCES: ErrorSource[] = ['pick', 'start', 'continue', 'connect', 'load', 'session'];
+
+test('an error opening a conversation from the list shows above the rows, not after them', () => {
+  assert.equal(errorPlace('connect', false), 'list');
+});
+
+test('an error listing the conversations shows above the rows', () => {
+  assert.equal(errorPlace('continue', false), 'list');
+});
+
+test('an error starting a conversation shows under Start', () => {
+  assert.equal(errorPlace('start', false), 'start');
+});
+
+test('an error choosing a folder shows under the Project folder field', () => {
+  assert.equal(errorPlace('pick', false), 'folder');
+});
+
+test('an error reading the sessions shows at the top of the form', () => {
+  assert.equal(errorPlace('load', false), 'top');
+});
+
+test('with a session open, every error shows in its pane', () => {
+  for (const source of SOURCES) assert.equal(errorPlace(source, true), 'session', source);
 });

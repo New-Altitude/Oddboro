@@ -9,7 +9,14 @@
   import type { StaffProfile } from '../staff/roster.ts';
   import Pixel from './Pixel.svelte';
   import { projectApi } from './project-api.ts';
-  import { matchesFilter, newSessionFields, type SessionPath } from './project-form.ts';
+  import {
+    errorPlace,
+    matchesFilter,
+    newSessionFields,
+    type ErrorPlace,
+    type ErrorSource,
+    type SessionPath
+  } from './project-form.ts';
   import ProjectTerminal from './ProjectTerminal.svelte';
   import { LOGOS } from './tool-logos.ts';
   import { advanced, type ProjectAsk } from './windows.svelte.ts';
@@ -79,7 +86,8 @@
     name = $state(''),
     replies = $state<Record<string, string>>({});
   let busy = $state(false),
-    problem = $state(''),
+    /** The last error, and what raised it, which says where it shows. */
+    problem = $state<{ text: string; from: ErrorSource }>(),
     handover = $state<Choice>(),
     found = $state(false),
     /** The details drawer, open over the terminal. */
@@ -97,6 +105,7 @@
   const selected = $derived(connections.find((s) => s.id === currentId));
   const terminalVisible = $derived(!!view?.connected && !!view.terminal);
   const shownCandidates = $derived(candidates.filter((c) => matchesFilter(c, filter)));
+  const place = $derived(problem && errorPlace(problem.from, !!selected));
   const fields = $derived(
     newSessionFields({ path, agent, claudeFolders: folders.length, handingOver: !!handover })
   );
@@ -138,7 +147,8 @@
       view = next;
     });
     stream.addEventListener('work', () => {
-      if (currentId === id) void history(id).catch((e) => (problem = describe(e)));
+      if (currentId === id)
+        void history(id).catch((e) => (problem = { text: describe(e), from: 'session' }));
     });
   }
   // The session's own updates, while no terminal view carries them.
@@ -160,14 +170,15 @@
     // would be refused as not in Setup, so the choice goes back to the first.
     if (!found.some((f) => f.path === startIn)) startIn = found[0]?.path ?? '';
   }
-  async function run(fn: () => Promise<unknown>) {
+  /** Runs one owner action, its error shown by what raised it. Most come from the open session. */
+  async function run(fn: () => Promise<unknown>, from: ErrorSource = 'session') {
     if (busy) return;
     busy = true;
-    problem = '';
+    problem = undefined;
     try {
       await fn();
     } catch (e) {
-      problem = describe(e);
+      problem = { text: describe(e), from };
     } finally {
       busy = false;
     }
@@ -206,14 +217,14 @@
     found = false;
     candidates = [];
     handover = undefined;
-    problem = '';
+    problem = undefined;
     path = undefined;
   }
   /** Picking Continue lists the folder's conversations at once. */
   function choosePath(p: SessionPath) {
     path = p;
     handover = undefined;
-    if (p === 'continue' && folder && !found) void run(search);
+    if (p === 'continue' && folder && !found) void run(search, 'continue');
   }
   async function connect(choice?: Choice, handedOver = false) {
     // One source each: a conversation goes with its own folder, or none, so the
@@ -311,7 +322,7 @@
       handover = c;
       return;
     }
-    void run(() => connect(c));
+    void run(() => connect(c), 'connect');
   }
   async function copyId() {
     if (!selected) return;
@@ -328,7 +339,7 @@
     untrack(() =>
       load()
         .then(() => (loaded = true))
-        .catch((e) => (problem = describe(e)))
+        .catch((e) => (problem = { text: describe(e), from: 'load' }))
     );
   });
   // The session asked for, else the newest, else the start form.
@@ -364,6 +375,10 @@
   }
 </script>
 
+<!-- An error on the New session form, shown only at the place errorPlace gives it. -->
+{#snippet alert(at: ErrorPlace)}
+  {#if problem && place === at}<p role="alert" class="text-coral">{problem.text}</p>{/if}
+{/snippet}
 {#snippet logo(a: ProjectAgent, cls: string)}
   <svg class={cls} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
     ><path fill-rule="evenodd" d={LOGOS[a]} /></svg
@@ -449,6 +464,7 @@
       {#if !selected}
         <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
           <h3 class="text-xs tracking-[0.16em] text-sea uppercase">New session</h3>
+          {@render alert('top')}
           <label
             >Project folder <input
               class="field w-full"
@@ -462,7 +478,7 @@
             /></label
           >
           <div class="flex flex-wrap gap-2">
-            <button class="btn" onclick={() => run(pick)}>Choose folder</button>
+            <button class="btn" onclick={() => run(pick, 'pick')}>Choose folder</button>
             <select
               class="field"
               aria-label="Coding tool"
@@ -476,6 +492,7 @@
               ></select
             >
           </div>
+          {@render alert('folder')}
           {#if fields.socket}<details>
               <summary class="cursor-pointer text-muted">Connect to a running Codex server</summary
               ><label
@@ -533,12 +550,15 @@
             <button
               class="btn self-start"
               disabled={busy || !folder}
-              onclick={() => run(() => connect())}>Start</button
+              onclick={() => run(() => connect(), 'start')}>Start</button
             >
+            {@render alert('start')}
           {/if}
           {#if fields.list}
-            <button class="btn self-start" disabled={busy || !folder} onclick={() => run(search)}
-              >Find existing</button
+            <button
+              class="btn self-start"
+              disabled={busy || !folder}
+              onclick={() => run(search, 'continue')}>Find existing</button
             >
             {#if candidates.length}<input
                 class="field w-full"
@@ -547,6 +567,8 @@
                 placeholder="Title, account or ID"
                 bind:value={filter}
               />{/if}
+            <!-- Above the rows, so an error from a row near the bottom of a long list is seen. -->
+            {@render alert('list')}
             {#if found && !candidates.length}<p class="text-muted">
                 No conversations found in this folder.
               </p>{:else if candidates.length && !shownCandidates.length}<p class="text-muted">
@@ -561,16 +583,17 @@
                 ).toLocaleString()} · {c.id.slice(0, 8)}</button
               >{/each}
           {/if}
-          {#if fields.handover && handover}<p>
+          {#if fields.handover && handover}{@render alert('list')}
+            <p>
               Finish or stop work in the previous Codex window before continuing this conversation
               here.
             </p>
             <button
               class="btn self-start"
               disabled={busy}
-              onclick={() => run(() => connect(handover, true))}>Hand over this conversation</button
+              onclick={() => run(() => connect(handover, true), 'connect')}
+              >Hand over this conversation</button
             >{/if}
-          {#if problem}<p role="alert" class="text-coral">{problem}</p>{/if}
         </div>
       {:else}
         <!-- A slim header: what this is, and the few controls that act on it. -->
@@ -634,7 +657,7 @@
                 id={selected.id}
                 view={termView}
                 bind:writable
-                onerror={(s) => (problem = s)}
+                onerror={(s) => (problem = { text: s, from: 'session' })}
               />{/key}
           {:else}
             <div class="grid flex-1 place-items-center p-6 text-center" class:beside={details}>
@@ -683,16 +706,16 @@
               </div>
             </div>
           {/if}
-          {#if problem}
+          {#if problem && place === 'session'}
             <div
               role="alert"
               class="absolute inset-x-3 bottom-3 flex items-start gap-2 rounded-lg bg-panel-solid px-3 py-2 text-xs text-coral shadow-float"
             >
-              <p class="flex-1">{problem}</p>
+              <p class="flex-1">{problem.text}</p>
               <button
                 class="text-muted hover:text-ink"
                 aria-label="Dismiss"
-                onclick={() => (problem = '')}>✕</button
+                onclick={() => (problem = undefined)}>✕</button
               >
             </div>
           {/if}
