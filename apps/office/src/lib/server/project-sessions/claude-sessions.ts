@@ -3,9 +3,8 @@
 // Only what Find existing shows: each conversation's ID, title, folder and
 // last change. A large file is read at its two ends only.
 import { access, open, readdir, stat } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { nativeEnv, UUID } from './native.ts';
+import { UUID } from './native.ts';
 
 export type SavedClaude = {
   sessionId: string;
@@ -30,10 +29,6 @@ type Entry = {
   continuedInSessionId?: string;
   message?: { content?: unknown };
 };
-
-/** Claude Code's own folder, as the native client the office opens finds it. */
-export const claudeHome = (env: Record<string, string | undefined> = nativeEnv()) =>
-  env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
 
 /**
  * Claude Code's key for a project folder: each character but a letter or digit
@@ -130,11 +125,8 @@ async function readSession(file: string, sessionId: string): Promise<SavedClaude
   return { sessionId, title, cwd, lastModified: Math.trunc(info.mtimeMs) };
 }
 
-/** Every saved Claude Code conversation for `folder`, newest first. */
-export async function savedClaudeSessions(
-  folder: string,
-  home = claudeHome()
-): Promise<SavedClaude[]> {
+/** Every saved Claude Code conversation for `folder` in the Claude folder `home`, newest first. */
+export async function savedClaudeSessions(folder: string, home: string): Promise<SavedClaude[]> {
   const projects = join(home, 'projects');
   const key = projectKey(folder);
   const names = await readdir(projects).catch(() => [] as string[]);

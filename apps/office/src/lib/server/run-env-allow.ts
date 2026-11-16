@@ -146,8 +146,11 @@ function allowedEnv(extra: Names): Record<string, string> {
  * owner added, since the server reaches the MCP Registry and Google over
  * HTTPS (`NODE_CERTIFICATES`). The office passes
  * the ones it has on the server's entry, so the server never depends on what
- * the AI tool between them passes on, and never on opening .env, which
- * Grok's sandbox will not. `LOCALAPPDATA` is set on Windows only.
+ * the AI tool between them passes on, and does not depend on opening .env,
+ * which Grok's sandbox will not. The one .env read it makes is the Claude
+ * folders the owner named in Setup (`touchesSecretStore`); where .env cannot
+ * be opened that finds none, and a Grok run is still covered by Grok's own
+ * profile. `LOCALAPPDATA` is set on Windows only.
  */
 export const TOOL_SERVER_ENV = [
   'ODDBORO_HOME',

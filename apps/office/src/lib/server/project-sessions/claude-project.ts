@@ -12,6 +12,9 @@ import {
 } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import {
+  claudeFolderEnv,
+  claudeFolderFound,
+  claudeFolders,
   home,
   STAFF_SERVER,
   PROJECT_RECEIVERS,
@@ -23,7 +26,8 @@ import { AGENT_NAMES } from '@oddboro/ledger/agents';
 import { currentSystem, probe } from '@oddboro/ledger/platform';
 import { computerWord } from '@oddboro/ledger/system-words';
 import { nativeCommand, nativeEnv } from './native.ts';
-import { savedClaudeSessions } from './claude-sessions.ts';
+import { savedClaudeSessions, type SavedClaude } from './claude-sessions.ts';
+import { claudeFolderMark } from '../claude.ts';
 type Active = {
   sessionId?: string;
   id?: string;
@@ -62,11 +66,11 @@ function agentList(out: string): Active[] | undefined {
   return list.filter((a): a is Active => typeof a === 'object' && a !== null);
 }
 
-/** The Claude Code sessions running in `folder`, from `claude agents --json`. */
-async function claudeAgents(folder: string): Promise<Active[]> {
+/** The Claude Code sessions running in `folder`, from `claude agents --json` in the Claude folder `dir`. */
+async function claudeAgents(folder: string, dir: string): Promise<Active[]> {
   const [exe, prefix] = nativeCommand('claude');
   const r = await probe(exe, [...prefix, 'agents', '--json', '--cwd', folder], {
-    env: nativeEnv(),
+    env: claudeFolderEnv(dir, nativeEnv()),
     cwd: folder,
     timeout: 10000,
     maxBuffer: 4_000_000
@@ -89,36 +93,130 @@ async function claudeAgents(folder: string): Promise<Active[]> {
   }
 }
 
-export async function claudeProjects(folder: string) {
-  const [history, processes] = await Promise.all([
-    savedClaudeSessions(folder),
-    claudeAgents(folder)
-  ]);
-  const active = processes.filter((a) => a.cwd === folder && a.sessionId);
-  const rows = new Map(
-    history
-      .filter((h) => !h.cwd || h.cwd === folder)
-      .map((h) => [
-        h.sessionId,
-        {
-          id: h.sessionId,
-          title: h.title,
-          updated: h.lastModified,
-          live: false,
-          job: ''
-        }
-      ])
-  );
-  for (const a of active)
-    rows.set(a.sessionId!, {
-      id: a.sessionId!,
-      title: a.name || rows.get(a.sessionId!)?.title || 'Claude Code',
-      updated: rows.get(a.sessionId!)?.updated || Date.now(),
+/**
+ * One conversation Find existing lists. `configDir` is the Claude folder that
+ * holds it, or null when that is not known yet (connect finds it later).
+ */
+export type ClaudeConversation = {
+  id: string;
+  title: string;
+  updated: number;
+  live: boolean;
+  job: string;
+  configDir: string | null;
+};
+
+/** What one Claude folder says about `folder`: its saved conversations, and those running, if it could say. */
+type FolderAnswer = { dir: string; saved: SavedClaude[]; running?: Active[] };
+
+/**
+ * The conversations of `folder` across the Claude folders answered, newest
+ * first. A saved one belongs to the folder whose file holds it, the newest file
+ * when two do. A running one with no saved file yet belongs to a folder only
+ * when that one folder alone listed it.
+ */
+function conversations(folder: string, answers: FolderAnswer[]): ClaudeConversation[] {
+  const rows = new Map<string, ClaudeConversation>();
+  for (const { dir, saved } of answers)
+    for (const h of saved) {
+      if (h.cwd && h.cwd !== folder) continue;
+      const had = rows.get(h.sessionId);
+      if (had && had.updated >= h.lastModified) continue;
+      rows.set(h.sessionId, {
+        id: h.sessionId,
+        title: h.title,
+        updated: h.lastModified,
+        live: false,
+        job: '',
+        configDir: dir
+      });
+    }
+  const listedBy = new Map<string, { a: Active; dirs: string[] }>();
+  for (const { dir, running } of answers)
+    for (const a of running ?? []) {
+      if (a.cwd !== folder || !a.sessionId) continue;
+      const seen = listedBy.get(a.sessionId);
+      if (seen) seen.dirs.push(dir);
+      else listedBy.set(a.sessionId, { a, dirs: [dir] });
+    }
+  for (const [id, { a, dirs }] of listedBy) {
+    const had = rows.get(id);
+    rows.set(id, {
+      id,
+      title: a.name || had?.title || 'Claude Code',
+      updated: had?.updated || Date.now(),
       live: true,
-      job: a.id || ''
+      job: a.id || '',
+      configDir: had?.configDir ?? (dirs.length === 1 ? dirs[0] : null)
     });
+  }
   return [...rows.values()].sort((a, b) => b.updated - a.updated);
 }
+
+/** What the Claude folder `dir` holds for `folder`, with what `running` found running there. */
+const folderAnswer = (folder: string, dir: string, running: Promise<Active[] | undefined>) =>
+  Promise.all([savedClaudeSessions(folder, dir), running]).then(([saved, live]): FolderAnswer => ({
+    dir,
+    saved,
+    running: live
+  }));
+
+/** The conversations of `folder` in the one Claude folder `dir`. A failure to list them is thrown. */
+export async function claudeProjectsIn(folder: string, dir: string) {
+  return conversations(folder, [await folderAnswer(folder, dir, claudeAgents(folder, dir))]);
+}
+
+/**
+ * The conversations of `folder` in every Claude folder named in Setup. A named
+ * folder not on the disk is skipped, since a `claude` command could create it;
+ * `~/.claude` is always tried, so a computer without Claude Code still hears
+ * so. A named folder whose `claude agents` fails is logged and left out of the
+ * running ones, so one bad folder never fails the list for the others.
+ */
+export async function claudeProjects(folder: string): Promise<ClaudeConversation[]> {
+  const [own, ...named] = claudeFolders();
+  const leftOut = (dir: string) => (e: unknown) => {
+    console.error(`Claude Code could not list what runs in the Claude folder ${dir}:`, e);
+    return undefined;
+  };
+  return conversations(
+    folder,
+    await Promise.all([
+      folderAnswer(folder, own, claudeAgents(folder, own)),
+      ...named
+        .filter(claudeFolderFound)
+        .map((dir) => folderAnswer(folder, dir, claudeAgents(folder, dir).catch(leftOut(dir))))
+    ])
+  );
+}
+
+/**
+ * Each Claude folder's mark, one `claudeFolderMark` per distinct folder however
+ * many rows share it, so a list reads each login once.
+ */
+export async function folderMarks(
+  dirs: (string | null)[],
+  { fresh }: { fresh: boolean }
+): Promise<Map<string, string>> {
+  const distinct = [...new Set(dirs.filter((d): d is string => d !== null))];
+  return new Map(
+    await Promise.all(distinct.map(async (d) => [d, await claudeFolderMark(d, { fresh })] as const))
+  );
+}
+
+/** Find existing's list: `claudeProjects`, each row with its folder's mark, its login read fresh. */
+export async function markedClaudeProjects(folder: string) {
+  const rows = await claudeProjects(folder);
+  const marks = await folderMarks(
+    rows.map((r) => r.configDir),
+    { fresh: true }
+  );
+  return rows.map((r) => ({
+    ...r,
+    mark: r.configDir === null ? null : (marks.get(r.configDir) ?? null)
+  }));
+}
+
 const jsonFile = (p: string, data: unknown) => {
   const tmp = p + '.' + randomUUID() + '.tmp';
   writeFileSync(tmp, JSON.stringify(data), { mode: 0o600 });

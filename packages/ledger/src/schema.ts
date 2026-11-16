@@ -1229,6 +1229,18 @@ export const projectSessions = pgTable(
      * for the owner's Take over and send.
      */
     sendsUnasked: text(),
+    /**
+     * When the owner removed the session from the list. Null means listed.
+     * Removing hides the row rather than deleting it, so its requests stay,
+     * and connecting the same conversation again clears it.
+     */
+    hiddenAt: at('hidden_at'),
+    /**
+     * The absolute Claude folder the conversation lives in. Null means not
+     * yet known, as for rows connected before sessions kept their folder,
+     * and always for Codex.
+     */
+    configDir: text('config_dir'),
     createdAt: created()
   },
   (t) => [

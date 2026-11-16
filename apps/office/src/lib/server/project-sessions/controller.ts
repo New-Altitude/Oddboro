@@ -4,7 +4,12 @@ import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import type { FSWatcher } from 'node:fs';
 import {
+  claudeConfigDir,
+  claudeFolderFound,
+  defaultClaudeFolder,
+  isClaudeFolder,
   connectProject,
+  hideProject,
   claimProject,
   nextProjectRequest,
   changeProjectRequest,
@@ -18,9 +23,11 @@ import {
 } from '@oddboro/ledger';
 import { ProjectTerminal } from './terminal.ts';
 import { startCodex, joinCodex, type CodexRpc, type RpcMessage } from './codex-rpc.ts';
-import { projectFolder, projectInput, UUID } from './native.ts';
+import { nativeEnv, projectFolder, projectInput, UUID } from './native.ts';
 import {
   claudeProjects,
+  claudeProjectsIn,
+  markedClaudeProjects,
   prepareClaude,
   checkClaudeReceiver,
   postClaude,
@@ -28,6 +35,7 @@ import {
   correctClaude,
   hearClaude
 } from './claude-project.ts';
+import { claudeFolderMark } from '../claude.ts';
 import { bus, listen } from '../events.ts';
 
 type Thread = {
@@ -56,6 +64,11 @@ type Runtime = {
   reply: string;
   questions: Map<number | string, Question>;
   note: string;
+  /**
+   * What the last connect told the owner about the session's Claude folder
+   * (`FOLDER_NOTICE`), or null. Its own field, since later events overwrite `note`.
+   */
+  folderNotice: string | null;
   socket?: string;
   market?: string;
   plugin?: string;
@@ -73,14 +86,83 @@ type View = {
   question?: Question;
   account?: string;
   note: string;
+  folderNotice: string | null;
   reply: string;
   market?: string;
 };
-type Listed = { id: string; title: string; updated: number; live: boolean; job?: string };
+type Listed = {
+  id: string;
+  title: string;
+  updated: number;
+  live: boolean;
+  job?: string;
+  /** Claude only: the Claude folder that holds it, null while not known. */
+  configDir?: string | null;
+  /** Claude only, Find existing only: that folder's name and login. */
+  mark?: string | null;
+};
 /** What every project route answers while Advanced mode is off. */
 export const ADVANCED_OFF =
   'Project sessions need advanced mode. Turn it on in Setup, under Advanced.';
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/**
+ * What Reconnect tells the owner about a Claude session's folder, by folder
+ * marks (`claudeFolderMark`): `newer` and `to` name the folder holding the
+ * conversation's newest copy, `from` the one the session left. A session
+ * moves only when its own folder lacks the conversation, so at most one applies.
+ */
+export const FOLDER_NOTICE = {
+  newer: (mark: string) =>
+    `A newer copy of this conversation is in ${mark}. To switch to it, choose it in Find existing.`,
+  moved: ({ from, to }: { from: string; to: string }) =>
+    `This conversation is no longer in ${from}, so the session moved to ${to}, which has its newest copy.`
+};
+
+/**
+ * Connect's refusal of a Claude folder picked in Find existing that no longer
+ * holds the conversation, by that folder's mark: a stale list, since the copy
+ * moved or went after the list was read.
+ */
+export const PICK_LACKS_IT = (mark: string) =>
+  `That conversation is no longer in ${mark}. Open Find existing again to see where it is now.`;
+
+/**
+ * `dir`, when the office may run Claude Code in it: a folder in Setup, and, for
+ * a named one, on the disk now. Checked before any `claude` command, since
+ * `claude agents`, `claude auth status` or `--session-id` write into the folder
+ * they run in, and could create it.
+ */
+function runnableClaudeFolder(dir: string): string {
+  if (!isClaudeFolder(dir)) throw new Error('That Claude folder is not in Setup.');
+  return foundClaudeFolder(dir);
+}
+
+/** `dir`, unless it is a folder other than `~/.claude` that is not on the disk now. */
+function foundClaudeFolder(dir: string): string {
+  if (claudeConfigDir(dir) !== undefined && !claudeFolderFound(dir))
+    throw new Error('That Claude folder is not found.');
+  return dir;
+}
+
+/**
+ * The Claude folder the office's own `claude` would use: the one the office's
+ * `CLAUDE_CONFIG_DIR` names, else `~/.claude`. Read at each call, as the native
+ * client reads it. Not a known folder: Setup, Start new and the Odds' deny
+ * lists never see it.
+ */
+const officeClaudeFolder = () => nativeEnv().CLAUDE_CONFIG_DIR || defaultClaudeFolder();
+
+/**
+ * The Claude folder a session runs in: its own, checked and never replaced, or
+ * the office's default folder while it has none, as before sessions kept one.
+ * Connect is the one place a folder is found and stored, so nothing here
+ * stores one.
+ */
+const sessionFolder = (s: ProjectSession) =>
+  s.configDir === null
+    ? foundClaudeFolder(officeClaudeFolder())
+    : runnableClaudeFolder(s.configDir);
 
 export class ProjectController {
   readonly events = new EventEmitter().setMaxListeners(100);
@@ -117,6 +199,7 @@ export class ProjectController {
       reply: c?.reply ?? '',
       question: c?.questions.values().next().value,
       note: c?.note ?? 'Disconnected',
+      folderNotice: c?.folderNotice ?? null,
       account: c?.account,
       market: c?.market
     };
@@ -154,7 +237,7 @@ export class ProjectController {
   }
   async list(agent: ProjectAgent, path: string, socket?: string): Promise<Listed[]> {
     const cwd = await projectFolder(path);
-    if (agent === 'claude') return claudeProjects(cwd);
+    if (agent === 'claude') return markedClaudeProjects(cwd);
     const rpc = await this.codex(socket);
     const live = new Set((await rpc.request<{ data: string[] }>('thread/loaded/list')).data);
     const rows: Listed[] = [];
@@ -197,20 +280,38 @@ export class ProjectController {
     }
     return rows;
   }
+  /**
+   * Connect a session of the project at `path`: the conversation `nativeId`,
+   * else a new one. `configDir` is the Claude folder the page picked, in Find
+   * existing or beside Start new. For a known session, its own stored folder
+   * is no pick: Reconnect sends it back.
+   */
   async connect(
     agent: ProjectAgent,
     path: string,
-    id?: string,
-    title?: string,
-    handedOver = false,
-    socket?: string
+    options: {
+      nativeId?: string;
+      title?: string;
+      handedOver?: boolean;
+      socket?: string;
+      configDir?: string;
+    } = {}
   ) {
+    const { handedOver = false, socket } = options;
+    let { nativeId: id, title, configDir } = options;
     const folder = await projectFolder(path);
     let started: Thread | undefined;
+    let folderNotice: string | null = null;
+    // Codex keeps no Claude folder: the one sent is neither checked nor used.
+    if (agent === 'codex') configDir = undefined;
+    else if (configDir !== undefined) runnableClaudeFolder(configDir);
 
     if (id && !UUID.test(id)) throw new Error('Choose a valid conversation ID.');
     if (id) {
       let saved: Listed | undefined;
+      const known = (await projectConnections()).find(
+        (s) => s.agent === agent && s.folder === folder && s.nativeId === id
+      );
       if (agent === 'codex') {
         const rpc = await this.codex(socket);
         const [{ thread }, loaded] = await Promise.all([
@@ -225,18 +326,65 @@ export class ProjectController {
           updated: thread.updatedAt * 1000,
           live: loaded.data.includes(id)
         };
-      } else saved = (await claudeProjects(folder)).find((row) => row.id === id);
-      const known = (await projectConnections()).find(
-        (s) => s.agent === agent && s.folder === folder && s.nativeId === id
-      );
+      } else {
+        // Reconnect sends the session's stored folder back, so that folder is no
+        // pick, and one that lost the conversation still moves below. Checked
+        // above as sent, so a stored folder out of Setup is still refused.
+        if (configDir === known?.configDir) configDir = undefined;
+        // The folder a known session resumes in: the one picked in Find
+        // existing, which moves it there, else its own (`sessionFolder`).
+        const ownDir = known && (configDir ?? sessionFolder(known));
+        const find = (rows: Listed[]) => rows.find((row) => row.id === id);
+        const [own, newest, newIdPick] = await Promise.all([
+          ownDir ? claudeProjectsIn(folder, ownDir).then(find) : undefined,
+          claudeProjects(folder).then(find),
+          // A new id's pick is looked up only for the refusal below, so it
+          // never gets a notice; a known session's pick is its `ownDir`.
+          !known && configDir !== undefined
+            ? claudeProjectsIn(folder, configDir).then(find)
+            : undefined
+        ]);
+        // A pick that lacks a conversation some folder holds is a stale list.
+        // Refused before anything is stored or spawned, so no terminal starts
+        // that id afresh while a copy of it exists.
+        if (configDir !== undefined && !(known ? own : newIdPick) && newest)
+          throw new Error(PICK_LACKS_IT(await claudeFolderMark(configDir, { fresh: true })));
+        // Only a session whose own folder lacks the conversation takes the
+        // folder holding its newest copy, so one connected before its folder
+        // was known gets it now, and one with no folder found in the office's
+        // default folder keeps none. Reconnect moves a session to another
+        // folder only then, and tells the owner.
+        const movedTo = known && !own && configDir === undefined ? newest?.configDir : undefined;
+        if (!own) configDir ??= newest?.configDir ?? undefined;
+        saved = own ?? newest;
+        // Resuming a copy beside one running in a Claude terminal, in any
+        // folder, would fork the conversation.
+        if (
+          [own, newest].some((row) => row?.live && !row.job) &&
+          !this.sessions.get(known?.id ?? '')?.terminal?.running
+        )
+          throw new Error('In that Claude terminal, enter /bg, then choose Connect again.');
+        // Told after that refusal, so a refused Reconnect reads no folder's
+        // login. A copy running in two folders has no folder to name.
+        if (movedTo && ownDir) {
+          const [from, to] = await Promise.all(
+            [ownDir, movedTo].map((dir) => claudeFolderMark(dir, { fresh: true }))
+          );
+          folderNotice = FOLDER_NOTICE.moved({ from, to });
+        }
+        // A session with its own copy still opens it, so the owner never
+        // lands in an older one without being told.
+        else if (
+          own &&
+          newest?.configDir &&
+          newest.configDir !== ownDir &&
+          newest.updated > own.updated
+        )
+          folderNotice = FOLDER_NOTICE.newer(
+            await claudeFolderMark(newest.configDir, { fresh: true })
+          );
+      }
       if (!saved && !known) throw new Error('That conversation was not found in this project.');
-      if (
-        agent === 'claude' &&
-        saved?.live &&
-        !saved.job &&
-        !this.sessions.get(known?.id ?? '')?.terminal?.running
-      )
-        throw new Error('In that Claude terminal, enter /bg, then choose Connect again.');
       if (agent === 'codex' && !saved?.live && !handedOver)
         throw new Error(
           'Finish or stop the turn in its original window, then choose Hand over this conversation.'
@@ -248,14 +396,22 @@ export class ProjectController {
       ).request<{ thread: Thread }>('thread/start', { cwd: folder });
       id = thread.id;
       started = thread;
-    } else id = randomUUID();
+    } else {
+      id = randomUUID();
+      configDir ??= defaultClaudeFolder();
+    }
     const s = await connectProject(
       agent,
       id,
       folder,
-      (title || 'New ' + (agent === 'codex' ? 'Codex' : 'Claude Code') + ' session').slice(0, 200)
+      (title || 'New ' + (agent === 'codex' ? 'Codex' : 'Claude Code') + ' session').slice(0, 200),
+      configDir
     );
-    await this.attach(s, socket, started);
+    const c = await this.attach(s, socket, started);
+    // Opening emitted its view before this was known, and connecting again
+    // emits none: emit it now. The next connect replaces or clears it.
+    c.folderNotice = folderNotice;
+    this.changed(c);
     return s;
   }
   private attach(s: ProjectSession, socket?: string, started?: Thread) {
@@ -263,6 +419,8 @@ export class ProjectController {
     if (existing?.connected) {
       if (existing.socket !== socket)
         throw new Error('Disconnect the previous Codex server first.');
+      // Connect may have just stored the session's Claude folder: the terminal reads this row.
+      existing.session = s;
       return Promise.resolve(existing);
     }
     const inflight = this.creating.get(s.id);
@@ -277,6 +435,7 @@ export class ProjectController {
       connected: false,
       reply: '',
       note: 'Connected',
+      folderNotice: null,
       tail: Promise.resolve(),
       questions: new Map(),
       socket
@@ -285,6 +444,7 @@ export class ProjectController {
     try {
       c.request = await activeProjectRequest(s.id);
       if (s.agent === 'claude') {
+        const dir = sessionFolder(s);
         const p = prepareClaude(s);
         c.market = p.market;
         c.plugin = p.plugin;
@@ -317,7 +477,7 @@ export class ProjectController {
           (e) => this.warn(c, e)
         );
         if (c.request) {
-          const active = (await claudeProjects(s.folder)).find(
+          const active = (await claudeProjectsIn(s.folder, dir)).find(
             (row) => row.id === s.nativeId && row.live
           );
           if (!active)
@@ -400,8 +560,8 @@ export class ProjectController {
       const start = (await this.codex(c.socket)).terminal(s.nativeId);
       c.terminal = await ProjectTerminal.open('codex', start.args, s.folder, start.env);
     } else {
-      const saved = await claudeProjects(s.folder);
-      const row = saved.find((r) => r.id === s.nativeId);
+      const dir = sessionFolder(s);
+      const row = (await claudeProjectsIn(s.folder, dir)).find((r) => r.id === s.nativeId);
       if (row?.live && !row.job)
         throw new Error('In the current Claude terminal enter /bg, then reconnect.');
       const args = row?.job
@@ -411,7 +571,9 @@ export class ProjectController {
             c.plugin!,
             ...(row ? ['--resume', s.nativeId] : ['--session-id', s.nativeId])
           ];
-      c.terminal = await ProjectTerminal.open('claude', args, s.folder);
+      c.terminal = await ProjectTerminal.open('claude', args, s.folder, {
+        CLAUDE_CONFIG_DIR: claudeConfigDir(dir)
+      });
     }
     c.terminal.events.on('exit', () => {
       c.note = 'Terminal closed. You can reopen the conversation.';
@@ -669,11 +831,26 @@ export class ProjectController {
     if (!c) return;
     if (c.request || c.turn)
       throw new Error('Finish or stop the active work before disconnecting.');
+    await this.release(c);
+  }
+  /**
+   * Remove a disconnected session from the owner's list (`hideProject`). A
+   * runtime kept after its Codex server closed is let go first, active work or
+   * not: with the server gone, the owner has no way to stop that turn.
+   */
+  async remove(id: string) {
+    if (this.creating.has(id) || this.sessions.get(id)?.connected)
+      throw new Error('Disconnect it first.');
+    const c = this.sessions.get(id);
+    if (c) await this.release(c);
+    await hideProject(id);
+  }
+  private async release(c: Runtime) {
     c.connected = false;
     clearTimeout(c.arrival);
     c.watch?.close();
     await c.terminal?.releaseProcess();
-    this.sessions.delete(id);
+    this.sessions.delete(c.session.id);
     this.changed(c);
   }
 }

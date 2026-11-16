@@ -1,5 +1,5 @@
 // Every test process starts away from the developer's own world: a home of
-// its own, and a PATH that holds node and the system's own folders only. So no
+// its own, no Claude folder named by CLAUDE_CONFIG_DIR, and a PATH that holds node and the system's own folders only. So no
 // test finds the developer's claude, grok, codex or gemini, or their settings,
 // unless it puts a stand-in there itself. Both test scripts load this with
 // `--import`, so it runs in the runner and in each test process before any
@@ -27,6 +27,10 @@ const tempFolder = (prefix: string): string => {
 const home = tempFolder('oddboro-test-home-');
 process.env.HOME = home;
 process.env.USERPROFILE = home;
+// Projects runs a session with no folder of its own in the Claude folder this
+// variable names, so a test never inherits the developer's. One that needs it
+// sets a folder under its own temp home.
+delete process.env.CLAUDE_CONFIG_DIR;
 
 /** Node's own folder may hold npm-installed tools, so on a Mac and Linux PATH gets node alone. */
 function nodeOnly(): string {

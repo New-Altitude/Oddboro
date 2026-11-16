@@ -6,15 +6,41 @@ import { randomUUID } from 'node:crypto';
 import { EventEmitter, once } from 'node:events';
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { mock, test } from 'node:test';
+import { afterEach, mock, test } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { L, folder, request } from '../office-under-test.ts';
 
 const claude = await import('./claude-project.ts');
 let running: Awaited<ReturnType<typeof claude.claudeProjects>> = [];
+// A connected session watches its folder until it disconnects, and that watch
+// keeps the file running. A failed check skips the disconnect, and active work
+// refuses one, so each test closes every session watch it opened, pass or fail.
+// The readiness check's own watch closes when the check ends (see the first test).
+const watches = new Set<ReturnType<typeof claude.hearClaude>>();
+afterEach(() => {
+  for (const w of watches) w.close();
+  watches.clear();
+});
+// Settled once a readiness check has set its timer, so a test ticks the mocked
+// clock past that timer only once it exists, however late the check starts.
+let checking = Promise.withResolvers<void>();
 mock.module('./claude-project.ts', {
-  namedExports: { ...claude, claudeProjects: async () => running }
+  namedExports: {
+    ...claude,
+    hearClaude: (...args: Parameters<typeof claude.hearClaude>) => {
+      const w = claude.hearClaude(...args);
+      watches.add(w);
+      return w;
+    },
+    checkClaudeReceiver: (...args: Parameters<typeof claude.checkClaudeReceiver>) => {
+      const check = claude.checkClaudeReceiver(...args);
+      checking.resolve();
+      return check;
+    },
+    claudeProjects: async () => running,
+    claudeProjectsIn: async () => running
+  }
 });
 mock.module('./terminal.ts', {
   namedExports: {
@@ -56,9 +82,20 @@ test('a missing receiver fails visibly, and the owner retries the same assignmen
   });
   const { box, plugin } = claude.prepareClaude(s);
   t.mock.timers.enable({ apis: ['setTimeout'] });
+  checking = Promise.withResolvers<void>();
   const send = action({ action: 'decide', id: s.id, key: r.id, approve: true });
-  await until(() => existsSync(join(box, 'probe.json')));
-  t.mock.timers.tick(30_000);
+  try {
+    await until(() => existsSync(join(box, 'probe.json')));
+  } finally {
+    // The readiness check watches the folder until its 30 s timer fires, and
+    // resetting the mocked clock drops that timer, so fire it, pass or fail:
+    // once the check has started, or not at all when the send ended without one.
+    const ended = send.then(
+      () => false,
+      () => false
+    );
+    if (await Promise.race([checking.promise.then(() => true), ended])) t.mock.timers.tick(30_000);
+  }
   assert.equal((await send).status, 200);
   assert.equal((await state(s.id)).state, 'failed');
   assert.match((await state(s.id)).answer!, /plugin is not ready.*Nothing was sent/);
@@ -116,7 +153,7 @@ test('an offered request survives a restart as uncertain and cannot be retried b
   assert.equal((await L.claimProject(s.id))?.id, r.id);
   const { box } = claude.prepareClaude(s);
   claude.postClaude(s, r);
-  await c.connect('claude', project, s.nativeId);
+  await c.connect('claude', project, { nativeId: s.nativeId });
   assert.equal((await state(s.id)).state, 'uncertain');
   await assert.rejects(action({ action: 'decide', id: s.id, key: r.id, approve: true }));
   assert.equal(JSON.parse(readFileSync(join(box, 'offer.json'), 'utf8')).id, r.id);
@@ -135,14 +172,21 @@ test('a live session that never takes its offered work becomes uncertain, and a 
   const { box } = claude.prepareClaude(s);
   claude.postClaude(s, r);
   running = [
-    { id: s.nativeId, title: s.title, updated: Date.now(), live: true, job: 'native-job' }
+    {
+      id: s.nativeId,
+      title: s.title,
+      updated: Date.now(),
+      live: true,
+      job: 'native-job',
+      configDir: null
+    }
   ];
   t.mock.timers.enable({ apis: ['setTimeout'] });
   t.after(() => {
     t.mock.timers.reset();
     running = [];
   });
-  await c.connect('claude', project, s.nativeId);
+  await c.connect('claude', project, { nativeId: s.nativeId });
   t.mock.timers.tick(60_000);
   await until(async () => (await state(s.id)).state === 'uncertain');
   assert.match((await state(s.id)).answer!, /has not acknowledged/);

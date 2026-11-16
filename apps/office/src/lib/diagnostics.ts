@@ -172,6 +172,7 @@ export const ROUTE_IDS = {
   '/api/setup/address': true,
   '/api/setup/advanced': true,
   '/api/setup/claude': true,
+  '/api/setup/claude-folders': true,
   '/api/setup/notify': true,
   '/api/setup/search': true,
   '/api/staff': true,

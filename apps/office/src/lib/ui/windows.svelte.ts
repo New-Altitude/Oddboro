@@ -47,9 +47,11 @@ export const wins = $state<{
 
 /**
  * Advanced mode, as this page last heard it (`+page.server.ts`, then Setup).
- * While it is off, nothing on the page offers Projects.
+ * While it is off, nothing on the page offers Projects. `folders` counts the
+ * changes Setup made to the owner's Claude folders, so an open Projects window
+ * lists them again: they live in .env, whose changes reach the page no other way.
  */
-export const advanced = $state({ on: false });
+export const advanced = $state({ on: false, folders: 0 });
 
 /**
  * An item a window wants opened on the desk, such as the task a service's

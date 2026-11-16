@@ -874,9 +874,10 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    `~/.aws`, `~/.gnupg`, `~/.config`, `~/Library`, `~/AppData`,
    `~/.claude.json`, `~/.google_workspace_mcp` (where
    that MCP server keeps its sign-ins for other apps on the Mac), `~/.grok`,
-   `~/.codex`, `~/.gemini`, `~/.docker` and `~/.kube`, and the Linux
-   browsers' and keyrings' folders `~/.mozilla`, `~/.local/share/keyrings`,
-   `~/.pki`, `~/snap` and `~/.var/app`, everything
+   `~/.codex`, `~/.gemini`, `~/.docker` and `~/.kube`, and each Claude folder
+   the owner named in Setup (`claudeFolders()` in the ledger, beside
+   `~/.claude`), and the Linux browsers' and keyrings' folders `~/.mozilla`,
+   `~/.local/share/keyrings`, `~/.pki`, `~/snap` and `~/.var/app`, everything
    in `~/.oddboro` besides `staff/` and `data/` (and `threads/<id>/` for a
    run on that thread), every other
    Odd's folder, and everything in `~/.claude` besides this run's sessions.
@@ -923,7 +924,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    commands can still read an env file or a project's git config there, and
    an entry made during the run. Whether Codex shuts a whole folder
    (`init.d`) was not measured, so each script in it is listed by name too. A
-   credential file that is on no list is read. A folder or link target in or holding a secret store, the
+   credential file that is on no list is read. A folder or link target in or holding a secret store, a named Claude folder, the
    office's home or Oddboro's code is left out, as `checkFolder` refuses one,
    and so is one whose real path holds a glob character (`GLOB`); a link
    that leads outside the home adds nothing, so one into `/Users`, `/Volumes`
@@ -2221,7 +2222,11 @@ in Setup's Advanced section (`AdvancedSection.svelte`, `PUT
 `windows.svelte.ts`: off, the top bar and the chat's plus menu offer no
 Projects. Off, `/api/project-sessions` and its event stream answer 403
 (`ADVANCED_OFF`), and turning it off ends every open stream
-(`detachProjectViews`). Find existing reads Claude Code's own session files
-(`claude-sessions.ts`); the terminal loads `node-pty` only when it opens. See
+(`detachProjectViews`). Setup's folder list (`PUT /api/setup/claude-folders`,
+`advanced.folders` on the page) names the owner's other Claude folders. Setup keeps
+each as the owner typed it, not by its real path. Find existing reads Claude Code's
+own session files in every known Claude folder (`claude-sessions.ts`,
+`claudeProjects` in `claude-project.ts`); a session keeps the folder it runs in
+(`config_dir`), and Remove hides a disconnected one (`hidden_at`). The terminal loads `node-pty` only when it opens. See
 [project sessions](../../docs/project-sessions.md) for native clients,
 handover and recovery.

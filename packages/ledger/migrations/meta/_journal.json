@@ -253,6 +253,13 @@
       "when": 1794818214134,
       "tag": "0035_staff_skills",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1794823557532,
+      "tag": "0036_project_session_folders",
+      "breakpoints": true
     }
   ]
 }

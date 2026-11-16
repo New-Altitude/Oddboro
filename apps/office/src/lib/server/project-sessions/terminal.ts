@@ -39,18 +39,27 @@ export class ProjectTerminal {
   get running() {
     return !this.ended;
   }
-  /** Open the native client in a terminal. The terminal library loads here, the first time. */
+  /**
+   * Open the native client in a terminal. The terminal library loads here, the
+   * first time. A key `extra` sets to undefined is taken out of the office's
+   * own environment, so the client never sees it.
+   */
   static async open(
     agent: 'codex' | 'claude',
     args: string[],
     cwd: string,
-    extra: Record<string, string> = {}
+    extra: Record<string, string | undefined> = {}
   ) {
     const [exe, prefix] = nativeCommand(agent);
+    const env = Object.fromEntries(
+      Object.entries({ ...nativeEnv(), ...extra, TERM: 'xterm-256color' }).filter(
+        (e): e is [string, string] => e[1] !== undefined
+      )
+    );
     return new ProjectTerminal(
       await openProjectTerminal(exe, [...prefix, ...args], {
         cwd,
-        env: { ...nativeEnv(), ...extra, TERM: 'xterm-256color' },
+        env,
         cols: 100,
         rows: 30,
         name: 'xterm-256color'

@@ -4,6 +4,8 @@ import { z } from 'zod';
 // refuse while Advanced mode is off.
 import {
   advancedMode,
+  claudeFolderFound,
+  claudeFolders,
   connection,
   letSendUnasked,
   projectOverview,
@@ -13,6 +15,8 @@ import {
   changeProjectRequest
 } from '@oddboro/ledger';
 import { ADVANCED_OFF, projectController } from '#lib/server/project-sessions/controller.ts';
+import { folderMarks } from '#lib/server/project-sessions/claude-project.ts';
+import { claudeFolderMark } from '#lib/server/claude.ts';
 import type { RequestHandler } from './$types';
 const id = z.string().uuid(),
   agent = z.enum(['codex', 'claude']),
@@ -22,6 +26,7 @@ const file = z.string().min(1).max(4096).optional();
 const prompt = z.string().trim().min(1).max(64000);
 const command = z.discriminatedUnion('action', [
   z.object({ action: z.literal('connections') }),
+  z.object({ action: z.literal('folders') }),
   z.object({ action: z.literal('find'), agent, folder, socket }),
   z.object({
     action: z.literal('connect'),
@@ -30,7 +35,8 @@ const command = z.discriminatedUnion('action', [
     socket,
     nativeId: id.optional(),
     title: z.string().max(200).optional(),
-    handedOver: z.boolean().optional()
+    handedOver: z.boolean().optional(),
+    configDir: z.string().min(1).max(4096).optional()
   }),
   z.object({ action: z.literal('history'), id }),
   z.object({ action: z.literal('send'), id, key: id, prompt, file }),
@@ -58,7 +64,8 @@ const command = z.discriminatedUnion('action', [
     pick: z.enum(['accept', 'decline']),
     answers: z.record(z.string(), z.array(z.string())).optional()
   }),
-  z.object({ action: z.literal('disconnect'), id })
+  z.object({ action: z.literal('disconnect'), id }),
+  z.object({ action: z.literal('remove'), id })
 ]);
 export const POST: RequestHandler = async ({ request }) => {
   if (!(await advancedMode())) error(403, ADVANCED_OFF);
@@ -68,19 +75,42 @@ export const POST: RequestHandler = async ({ request }) => {
     c = projectController();
   try {
     switch (a.action) {
-      case 'connections':
+      case 'connections': {
+        const sessions = await projectOverview();
+        // Through the login cache: this view reloads on every change to the office's records.
+        const marks = await folderMarks(
+          sessions.map((s) => s.configDir),
+          { fresh: false }
+        );
         return json(
-          (await projectOverview()).map((s) => ({
+          sessions.map((s) => ({
             ...s,
             status: c.status(s.id, s.status),
-            connected: c.view(s.id).connected
+            connected: c.view(s.id).connected,
+            mark: s.configDir === null ? null : (marks.get(s.configDir) ?? null)
           }))
+        );
+      }
+      case 'folders':
+        // The folders a new conversation can start in: those on the disk now.
+        return json(
+          await Promise.all(
+            claudeFolders()
+              .filter(claudeFolderFound)
+              .map(async (path) => ({ path, mark: await claudeFolderMark(path) }))
+          )
         );
       case 'find':
         return json(await c.list(a.agent, a.folder, a.socket));
       case 'connect':
         return json(
-          await c.connect(a.agent, a.folder, a.nativeId, a.title, a.handedOver, a.socket)
+          await c.connect(a.agent, a.folder, {
+            nativeId: a.nativeId,
+            title: a.title,
+            handedOver: a.handedOver,
+            socket: a.socket,
+            configDir: a.configDir
+          })
         );
       case 'history':
         return json({
@@ -139,6 +169,13 @@ export const POST: RequestHandler = async ({ request }) => {
       case 'disconnect':
         await c.disconnect(a.id);
         break;
+      case 'remove':
+        await c.remove(a.id);
+        break;
+      default: {
+        const missed: never = a;
+        throw new Error(`No project action ${JSON.stringify(missed)}`);
+      }
     }
     return json({ ok: true });
   } catch (e) {

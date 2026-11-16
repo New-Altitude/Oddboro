@@ -85,34 +85,67 @@ export const projectConnections = (staffId?: string) =>
 export async function connection(id: string) {
   return (await db.select().from(projectSessions).where(eq(projectSessions.id, id)))[0];
 }
+/**
+ * Connect a native conversation, or connect the same one again, which shows a
+ * removed session again with its id. `configDir` is the Claude folder the
+ * conversation lives in: given, the row moves there, so a copy the owner
+ * picks in Find existing is the one it resumes; left out, the row keeps the
+ * folder it has. A different project is refused, and the row stays as it was.
+ */
 export async function connectProject(
   agent: ProjectAgent,
   nativeId: string,
   folder: string,
-  title: string
+  title: string,
+  configDir?: string
 ) {
+  // Only a Claude conversation lives in a Claude folder.
+  const claudeFolder = agent === 'claude' ? (configDir ?? null) : null;
   const [session] = await db
     .insert(projectSessions)
-    .values({ id: randomUUID(), agent, nativeId, folder, title })
+    .values({ id: randomUUID(), agent, nativeId, folder, title, configDir: claudeFolder })
     .onConflictDoNothing()
     .returning();
   if (session) return session;
+  // One statement, so the runtime gets the row as it is now, never as first read.
   const [existing] = await db
-    .select()
-    .from(projectSessions)
-    .where(and(eq(projectSessions.agent, agent), eq(projectSessions.nativeId, nativeId)));
-  if (!existing || existing.folder !== folder)
-    throw new Error('This conversation belongs to a different project.');
+    .update(projectSessions)
+    .set(claudeFolder ? { hiddenAt: null, configDir: claudeFolder } : { hiddenAt: null })
+    .where(
+      and(
+        eq(projectSessions.agent, agent),
+        eq(projectSessions.nativeId, nativeId),
+        eq(projectSessions.folder, folder)
+      )
+    )
+    .returning();
+  if (!existing) throw new Error('This conversation belongs to a different project.');
   return existing;
 }
+/** The session `id`, locked until the transaction ends. */
+const lockSession = async (tx: Db, id: string): Promise<ProjectSession | undefined> =>
+  (await tx.select().from(projectSessions).where(eq(projectSessions.id, id)).for('update'))[0];
+
+/** What an action that would let an Odd into a removed session answers. */
+export const SESSION_REMOVED = 'This session was removed from Projects.';
+
+/**
+ * Refuses a removed session `s`, locked, for an action that lets an Odd in:
+ * sharing it, letting its Odd send without asking, or new work. A removed
+ * session takes none of them, so a page left open from before the Remove
+ * cannot reach it; connecting it again brings it back, unshared. Taking access
+ * away is not one of them, so it still works on a removed session and changes
+ * nothing there.
+ */
+function refuseRemoved(s: ProjectSession | undefined): void {
+  if (s?.hiddenAt) throw new Error(SESSION_REMOVED);
+}
+
 export async function shareProject(id: string, staffId: string | null) {
   return db.transaction(async (tx) => {
-    const [previous] = await tx
-      .select()
-      .from(projectSessions)
-      .where(eq(projectSessions.id, id))
-      .for('update');
+    const previous = await lockSession(tx, id);
     if (!previous) throw new Error('Session not found.');
+    if (staffId) refuseRemoved(previous);
     if (previous.staffId === staffId) return;
     if (previous.staffId)
       await tx
@@ -134,11 +167,13 @@ export async function shareProject(id: string, staffId: string | null) {
 }
 
 /**
- * Let the Odd this session is shared with send work into it without the
- * owner's Take over and send, or (`null`) take that back. Only an Odd at Act
- * uses it; every other assignment still waits for the owner.
+ * Remove a session from the owner's list. The row and its requests stay, so
+ * connecting the same conversation again shows it with the same id. Removing
+ * also unshares it, so no Odd can send it work, and stops every request that
+ * could still go later, the owner's own included. Work that may already have
+ * reached the conversation is left as it is. Removing twice changes nothing.
  */
-export async function letSendUnasked(id: string, staffId: string | null) {
+export async function hideProject(id: string): Promise<void> {
   await db.transaction(async (tx) => {
     const [s] = await tx
       .select()
@@ -146,6 +181,33 @@ export async function letSendUnasked(id: string, staffId: string | null) {
       .where(eq(projectSessions.id, id))
       .for('update');
     if (!s) throw new Error('Session not found.');
+    await tx
+      .update(projectSessions)
+      .set({ staffId: null, sendsUnasked: null, hiddenAt: s.hiddenAt ?? new Date() })
+      .where(eq(projectSessions.id, id));
+    // A failed request counts too: the owner could retry it later.
+    await tx
+      .update(projectRequests)
+      .set({ state: 'stopped', answer: 'The owner removed the session before delivery.' })
+      .where(
+        and(
+          eq(projectRequests.sessionId, id),
+          inArray(projectRequests.state, [...WAITING, 'failed'])
+        )
+      );
+  });
+}
+
+/**
+ * Let the Odd this session is shared with send work into it without the
+ * owner's Take over and send, or (`null`) take that back. Only an Odd at Act
+ * uses it; every other assignment still waits for the owner.
+ */
+export async function letSendUnasked(id: string, staffId: string | null) {
+  await db.transaction(async (tx) => {
+    const s = await lockSession(tx, id);
+    if (!s) throw new Error('Session not found.');
+    if (staffId) refuseRemoved(s);
     if (staffId && s.staffId !== staffId)
       throw new Error('Choose this Odd under Odd allowed to send work first.');
     await tx
@@ -161,9 +223,12 @@ const sendsUnasked = (s: ProjectSession, odd: { id: string; permission: string }
 /** What a session's work is doing, for its dot in the Projects list. */
 export type ProjectStatus = 'waiting' | 'working' | 'done' | 'idle';
 
-/** Every session with its status: waiting for the owner, working, its last work done, or idle. */
+/**
+ * Every session the owner has not removed, with its status: waiting for the
+ * owner, working, its last work done, or idle.
+ */
 export async function projectOverview() {
-  const [sessions, open, last] = await Promise.all([
+  const [all, open, last] = await Promise.all([
     projectConnections(),
     db
       .select({ sessionId: projectRequests.sessionId, state: projectRequests.state })
@@ -179,6 +244,7 @@ export async function projectOverview() {
       .from(projectRequests)
       .orderBy(projectRequests.sessionId, desc(projectRequests.createdAt))
   ]);
+  const sessions = all.filter((s) => !s.hiddenAt);
   return sessions.map((s) => {
     const states = open.filter((r) => r.sessionId === s.id).map((r) => r.state);
     const status: ProjectStatus = states.some(
@@ -211,13 +277,11 @@ export async function requestProject(input: {
   draft?: boolean;
 }) {
   return db.transaction(async (tx) => {
-    const [s] = await tx
-      .select()
-      .from(projectSessions)
-      .where(eq(projectSessions.id, input.sessionId))
-      .for('update');
+    // Locked before Advanced mode is read, so this waits for a turn-off under way.
+    const s = await lockSession(tx, input.sessionId);
     if (!(await advancedMode(tx)))
       throw fixedError('Advanced mode is off. Turn it on in Setup to use project sessions.');
+    refuseRemoved(s);
     if (!s || (input.staffId && s.staffId !== input.staffId))
       throw new Error('This session has not been shared with you.');
     let state: ProjectRequestState = 'queued';

@@ -34,6 +34,23 @@ export const LINUX = SYSTEM === 'linux';
 export const WINDOWS = SYSTEM === 'windows';
 
 /**
+ * What joins a list of folders kept in one value, such as a `.env` key: `;` on
+ * Windows, where `:` is in every drive's path, and `:` elsewhere. Read per
+ * call, not `path.delimiter`, which is fixed at load, so a test can switch the
+ * system.
+ */
+export const folderDelimiter = (): string => (currentPlatform() === 'win32' ? ';' : ':');
+
+/**
+ * A path in the case its system compares paths by, read per call: lower case
+ * on Windows, whose disks ignore case, and as given elsewhere. A Mac's disk
+ * ignores case too, but there the disk's own spelling (`realpathSync.native`)
+ * does that job.
+ */
+export const foldPathCase = (p: string): string =>
+  currentPlatform() === 'win32' ? p.toLowerCase() : p;
+
+/**
  * Where the office's logs go. XDG_STATE_HOME wins wherever it is set;
  * otherwise each system's own place for them.
  */

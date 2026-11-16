@@ -104,7 +104,10 @@ A `.env` a process may not read is skipped (`db.ts`, `readEnv`): Grok's
 sandbox shows it to the staff tool server but will not open it. So the
 office sets on that server what it needs from `.env` (`DATABASE_URL`,
 `OFFICE_TIME_ZONE`, `OFFICE_AGENT`; `access` in the office's `staff.ts`), and
-the server never depends on reading it.
+the server does not depend on reading it. The one read it makes is the
+Claude folders the owner named in Setup (`claudeFolders()`, which
+`touchesSecretStore` reads); where `.env` cannot be opened that is no folder,
+and a Grok run's own profile still shuts those folders.
 
 `npm test -w @oddboro/ledger` runs `test/` with `node --test`. First
 `test/global-setup.ts` makes one database with every migration, and each file
@@ -214,7 +217,10 @@ office offers work. `src/project-terminal.ts` opens the native terminal
 through node-pty, an optional dependency loaded on the first open. Migration
 `0027_project_sessions` adds `project_sessions` and `project_requests` with
 their change triggers; `0028_advanced_mode` adds `owner.advanced_at` and
-`project_sessions.sends_unasked`. See `docs/project-sessions.md`.
+`project_sessions.sends_unasked`; `0036_project_session_folders` adds
+`project_sessions.hidden_at` (Remove) and `project_sessions.config_dir` (the
+Claude folder a session runs in). `src/claude-folders.ts` holds the known Claude
+folders: `~/.claude` and each one named in Setup. See `docs/project-sessions.md`.
 
 ## Rules
 
@@ -328,7 +334,9 @@ their change triggers; `0028_advanced_mode` adds `owner.advanced_at` and
   else, in the home or outside it, the same list (`STORE_MARKS`), by name, or
   for a name a project or an ordinary folder may share by what marks the real
   store, in the folder, the folders above it and one level down, and no
-  deeper; a store under another name is not found, and a `.ssh` with only
+  deeper; a store under another name is not found, except that each named
+  Claude folder (`claudeFolders()`) is found and refused wherever it sits, and
+  a `.ssh` with only
   custom-named keys and no `known_hosts` is given below the home's top), the
   office's home or its code, and one
   whose real path holds `*`, `?`, `[` or `]`, which Codex cannot take

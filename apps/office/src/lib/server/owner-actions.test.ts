@@ -739,6 +739,8 @@ const UNDRIVEN: Partial<Record<Key, string>> = {
   'DELETE /api/setup/claude': 'Signs Claude Code out.',
   'POST /api/setup/notify': 'Shows a system notification.',
   'POST /api/setup/search': "Downloads the search model from Oddboro's GitHub release.",
+  'PUT /api/setup/claude-folders':
+    "Writes the owner's Claude folders to .env, which this file keeps absent; claude-folders.test.ts drives it.",
   'POST /api/backup':
     "Removes a file in the office's home and touches no table; no driver is written yet.",
   'POST /api/backup/restore':

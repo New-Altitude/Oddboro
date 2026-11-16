@@ -76,6 +76,7 @@ export {
   FOLDER_REFUSED,
   FOLDER_WARNING,
   broadFolder,
+  holdsTooMuch,
   GLOB,
   within,
   shownFolder,

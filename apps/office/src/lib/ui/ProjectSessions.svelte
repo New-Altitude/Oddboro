@@ -11,7 +11,7 @@
   import { projectApi } from './project-api.ts';
   import ProjectTerminal from './ProjectTerminal.svelte';
   import { LOGOS } from './tool-logos.ts';
-  import type { ProjectAsk } from './windows.svelte.ts';
+  import { advanced, type ProjectAsk } from './windows.svelte.ts';
 
   // The Projects window, which widens the side panel while it is in front:
   // every session down the start side as a tab list, and the selected one
@@ -23,6 +23,8 @@
     turn?: string;
     requestId?: string;
     note: string;
+    /** The whole sentence telling the owner about this session's Claude folder: a newer copy in another, or a move there. */
+    folderNotice: string | null;
     reply: string;
     market?: string;
     account?: string;
@@ -33,8 +35,20 @@
       params: Record<string, unknown>;
     };
   };
-  type Row = ProjectSession & { status: ProjectStatus; connected: boolean };
-  type Choice = { id: string; title: string; live: boolean; updated: number; job?: string };
+  /** `mark` names a Claude session's folder and its login now; null for Codex, or a folder not known yet. */
+  type Row = ProjectSession & { status: ProjectStatus; connected: boolean; mark: string | null };
+  /** A conversation Find existing lists. Only Claude's carry a folder and its mark. */
+  type Choice = {
+    id: string;
+    title: string;
+    live: boolean;
+    updated: number;
+    job?: string;
+    configDir?: string | null;
+    mark?: string | null;
+  };
+  /** A Claude folder on the disk now, that a new conversation can start in. */
+  type Folder = { path: string; mark: string };
   type Props = {
     staff: StaffProfile[];
     /** Bumps when the office's records change, so the list reads again. */
@@ -48,7 +62,10 @@
     currentId = $state<string>(),
     candidates = $state<Choice[]>([]),
     work = $state<ProjectRequest[]>([]),
-    view = $state<View>();
+    view = $state<View>(),
+    folders = $state<Folder[]>([]),
+    /** The Claude folder Start new uses. */
+    startIn = $state('');
   let socket = $state(''),
     folder = $state(''),
     agent = $state<ProjectAgent>('claude'),
@@ -67,7 +84,9 @@
     /** Whether this window's terminal view takes the typing. */
     writable = $state(false),
     copied = $state(false),
-    loaded = $state(false);
+    loaded = $state(false),
+    /** Remove asks once in place, under the session's Reconnect. */
+    removing = $state(false);
   /** This window's terminal view. A new one per session opened. */
   let termView = $state(crypto.randomUUID());
   const selected = $derived(connections.find((s) => s.id === currentId));
@@ -122,7 +141,15 @@
     return () => stream.close();
   });
   async function load() {
-    connections = await projectApi<Row[]>('connections');
+    const [rows, found] = await Promise.all([
+      projectApi<Row[]>('connections'),
+      projectApi<Folder[]>('folders')
+    ]);
+    connections = rows;
+    folders = found;
+    // The first is ~/.claude while it is on the disk. A folder no longer listed
+    // would be refused as not in Setup, so the choice goes back to the first.
+    if (!found.some((f) => f.path === startIn)) startIn = found[0]?.path ?? '';
   }
   async function run(fn: () => Promise<unknown>) {
     if (busy) return;
@@ -154,6 +181,7 @@
     replies = {};
     handover = undefined;
     unasked = undefined;
+    removing = false;
     writable = false;
     termView = crypto.randomUUID();
     await history(id);
@@ -172,13 +200,17 @@
     problem = '';
   }
   async function connect(choice?: Choice, handedOver = false) {
+    // One source each: a conversation goes with its own folder, or none, so the
+    // office finds it; only Start new takes the folder chosen for it.
+    const configDir = choice ? choice.configDir || undefined : startIn || undefined;
     const s = await projectApi<ProjectSession>('connect', {
       folder,
       agent,
       socket: (agent === 'codex' && socket.trim()) || undefined,
       nativeId: choice?.id,
       handedOver,
-      title: choice?.title || name || undefined
+      title: choice?.title || name || undefined,
+      configDir: agent === 'claude' ? configDir : undefined
     });
     await load();
     await select(s.id);
@@ -224,6 +256,9 @@
   }
   async function reconnect() {
     if (!selected) return;
+    // Connecting keeps this session selected, so a Remove asked before would show again
+    // the next time it is disconnected.
+    removing = false;
     folder = selected.folder;
     agent = selected.agent;
     const rows = await projectApi<Choice[]>('find', {
@@ -231,17 +266,27 @@
       agent,
       socket: (agent === 'codex' && socket.trim()) || undefined
     });
-    const choice = rows.find((x) => x.id === selected?.nativeId) ?? {
-      id: selected.nativeId,
-      title: selected.title,
-      live: false,
-      updated: 0
+    // The session's own folder, never another: one taken out of Setup is refused,
+    // and one not known yet is found by the office.
+    const choice = {
+      ...(rows.find((x) => x.id === selected?.nativeId) ?? {
+        id: selected.nativeId,
+        title: selected.title,
+        live: false,
+        updated: 0
+      }),
+      configDir: selected.configDir
     };
     if (agent === 'codex' && !choice.live) {
       // Back to the start form, on this folder, to hand the conversation over.
       startNew();
       handover = choice;
     } else await connect(choice);
+  }
+  async function remove() {
+    await action('remove');
+    // Off the hidden id, so connecting the same conversation again selects it.
+    startNew();
   }
   function choose(c: Choice) {
     if (agent === 'codex' && !c.live) {
@@ -257,9 +302,11 @@
     setTimeout(() => (copied = false), 1500);
   }
 
-  // The list reads again whenever the office's records change.
+  // The list reads again whenever the office's records change, or Setup changes
+  // the Claude folders, which live in .env and reach the page no other way.
   $effect(() => {
     void version;
+    void advanced.folders;
     untrack(() =>
       load()
         .then(() => (loaded = true))
@@ -350,6 +397,9 @@
                 >{folderName(s.folder)}</span
               >
               <span class="block truncate text-[11px] text-muted">{s.title}</span>
+              {#if s.mark}<span class="block truncate text-[10px] text-muted" title={s.mark}
+                  >{s.mark}</span
+                >{/if}
               <span class="sr-only">{TOOL[s.agent]}, {STATUS[s.status]}</span>
             </span>
             {#if odd}
@@ -435,7 +485,15 @@
               maxlength="200"
             /></label
           >
-          <div class="flex gap-2">
+          <!-- The folder sits beside Start new, the one button that uses it. Find existing
+               does not: each conversation it lists goes with its own folder, or none. -->
+          <div class="flex flex-wrap items-end gap-2">
+            {#if agent === 'claude' && folders.length > 1}<label class="max-w-full min-w-0"
+                >Claude folder <select class="field max-w-full min-w-0" bind:value={startIn}
+                  >{#each folders as f (f.path)}<option value={f.path}>{f.mark}</option
+                    >{/each}</select
+                ></label
+              >{/if}
             <button class="btn" disabled={busy || !folder} onclick={() => run(() => connect())}
               >Start new</button
             ><button class="btn" disabled={busy || !folder} onclick={() => run(search)}
@@ -449,10 +507,9 @@
               class="btn text-start"
               disabled={busy}
               onclick={() => choose(c)}
-              >{c.title} · {c.live ? 'Running' : 'Saved'} · {new Date(c.updated).toLocaleString()} · {c.id.slice(
-                0,
-                8
-              )}</button
+              >{c.title}{#if c.mark}{' · '}{c.mark}{/if} · {c.live ? 'Running' : 'Saved'} · {new Date(
+                c.updated
+              ).toLocaleString()} · {c.id.slice(0, 8)}</button
             >{/each}
           {#if handover}<p>
               Finish or stop work in the previous Codex window before continuing this conversation
@@ -511,8 +568,16 @@
           {/if}
         </div>
 
+        <!-- Above the terminal area, outside it, so the drawer never covers it. It wraps
+             whole, a long folder mark too, never cut short like the header's note. -->
+        {#if view?.folderNotice}
+          <p class="mx-3 mt-2 rounded-lg bg-raise p-2 break-words text-ink" role="status">
+            {view.folderNotice}
+          </p>
+        {/if}
+
         <!-- The terminal fills what is left. The drawer opens over it. -->
-        <div class="relative flex min-h-0 flex-1 flex-col">
+        <div class="term relative flex min-h-0 flex-1 flex-col">
           {#if terminalVisible}
             {#key termView}<ProjectTerminal
                 onstream={updates}
@@ -522,7 +587,7 @@
                 onerror={(s) => (problem = s)}
               />{/key}
           {:else}
-            <div class="grid flex-1 place-items-center p-6 text-center">
+            <div class="grid flex-1 place-items-center p-6 text-center" class:beside={details}>
               <div class="flex flex-col items-center gap-2">
                 {#if view?.connected}
                   <p class="text-muted">The terminal is closed.</p>
@@ -531,9 +596,37 @@
                   >
                 {:else if view}
                   <p class="text-muted">This session is not connected to the office.</p>
-                  <button class="btn" disabled={busy} onclick={() => run(reconnect)}
-                    >Reconnect</button
-                  >
+                  <!-- Only while Details is shut: more than one path opens the drawer
+                       over this spot, and a confirmation under it cannot be read or pressed. -->
+                  {#if removing && !details}<div
+                      class="flex max-w-80 flex-col items-center gap-2 rounded-lg bg-ember/10 p-2"
+                      role="alertdialog"
+                      aria-labelledby="remove-warning"
+                    >
+                      <p id="remove-warning" class="text-ink">
+                        Remove this session from Projects? Work still waiting for it stops, and no
+                        Odd can send it more work. The conversation itself is kept: connect it again
+                        to bring the session back, then share it again with any Odd that should have
+                        it.
+                      </p>
+                      <div class="flex gap-2">
+                        <button class="btn" disabled={busy} onclick={() => run(remove)}
+                          >Remove</button
+                        ><button class="btn" onclick={() => (removing = false)}>Cancel</button>
+                      </div>
+                    </div>
+                  {:else}<div class="flex flex-wrap justify-center gap-2">
+                      <button class="btn" disabled={busy} onclick={() => run(reconnect)}
+                        >Reconnect</button
+                      ><button
+                        class="btn"
+                        disabled={busy}
+                        onclick={() => {
+                          details = false;
+                          removing = true;
+                        }}>Remove</button
+                      >
+                    </div>{/if}
                 {:else}
                   <p class="text-muted">Loading session</p>
                 {/if}
@@ -557,7 +650,7 @@
           {#if details}
             <aside
               id="project-details"
-              class="drawer absolute inset-y-0 end-0 flex w-[min(26rem,100%)] flex-col gap-3 overflow-y-auto border-s border-hairline p-3"
+              class="drawer absolute inset-y-0 end-0 flex flex-col gap-3 overflow-y-auto border-s border-hairline p-3"
               aria-label="Session details"
             >
               <div class="flex items-center">
@@ -573,6 +666,9 @@
               </p>
               {#if view?.account}<p class="text-xs text-muted">
                   Codex sign-in at connection: {view.account}
+                </p>{/if}
+              {#if selected.mark}<p class="text-xs text-muted">
+                  Claude folder: {selected.mark}
                 </p>{/if}
 
               {#if view?.question}<div class="flex flex-col gap-2 rounded-lg bg-ember/10 p-2">
@@ -834,8 +930,26 @@
     padding: 0.5rem;
     font-size: 0.75rem;
   }
+  /* The terminal area is a container, so the body follows the pane's width, which the
+     panel's drag and an open Odd's card change at any window size. */
+  .term {
+    container-type: inline-size;
+    --drawer: 26rem;
+  }
+  /* A container query cannot read --drawer, so its width is written out: 39rem is the
+     drawer, the body's padding both sides (3rem) and Reconnect with Remove on one line
+     (154px in Chromium and WebKit on a Mac), rounded up to a whole rem. A font that draws
+     the pair too wide for one line wraps Remove under Reconnect, so the body stays beside
+     the drawer while the wider button alone fits. Narrower, the body stays centred in the
+     whole pane and the drawer covers part or all of it; ✕ shuts it. */
+  @container (min-width: 39rem) {
+    .beside {
+      margin-inline-end: var(--drawer);
+    }
+  }
   /* Over the terminal, solid, so the terminal's text never shows through. */
   .drawer {
+    inline-size: min(var(--drawer), 100%);
     background: var(--color-panel-solid);
     box-shadow: var(--shadow-float);
   }
