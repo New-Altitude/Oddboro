@@ -6,8 +6,11 @@ import { test } from 'node:test';
 import type { ProjectAgent } from '@oddboro/ledger';
 import {
   errorPlace,
+  listAsk,
   matchesFilter,
   newSessionFields,
+  rowsFor,
+  type Choice,
   type ErrorSource,
   type SessionPath
 } from './project-form.ts';
@@ -171,4 +174,42 @@ test('an error reading the sessions shows at the top of the form', () => {
 
 test('with a session open, every error shows in its pane', () => {
   for (const source of SOURCES) assert.equal(errorPlace(source, true), 'session', source);
+});
+
+/** What the form asks a list about, for a folder, a tool and the socket typed. */
+const asking = (folder: string, agent: ProjectAgent = 'claude', socket = '') =>
+  listAsk({ folder, agent, socket });
+const ROWS: Choice[] = [
+  {
+    id: '3f2a9c71-0b1e-4d2a-9f00-111111111111',
+    title: 'Fix the checkout page',
+    live: false,
+    updated: 0
+  }
+];
+const inA = { ask: asking('~/project-a'), rows: ROWS };
+
+test('rows listed for one folder never show once the folder changes, typed or chosen', () => {
+  assert.equal(rowsFor(inA, asking('~/project-b')), undefined);
+  assert.equal(rowsFor(inA, asking('~/project-a/sub')), undefined);
+});
+
+test('choosing the same folder again keeps its rows', () => {
+  assert.deepEqual(rowsFor(inA, asking('~/project-a')), ROWS);
+});
+
+test('rows listed for one coding tool never show for the other', () => {
+  assert.equal(rowsFor(inA, asking('~/project-a', 'codex')), undefined);
+});
+
+test("a Codex list's rows never show for another socket, and Claude Code sends none", () => {
+  const codex = { ask: asking('~/project-a', 'codex', '/tmp/a.sock'), rows: ROWS };
+  assert.equal(rowsFor(codex, asking('~/project-a', 'codex', '/tmp/b.sock')), undefined);
+  assert.deepEqual(rowsFor(codex, asking('~/project-a', 'codex', ' /tmp/a.sock ')), ROWS);
+  assert.equal(asking('~/project-a', 'claude', '/tmp/a.sock').socket, undefined);
+  assert.equal(asking('~/project-a', 'codex', '  ').socket, undefined);
+});
+
+test('a folder with nothing listed yet shows no rows', () => {
+  assert.equal(rowsFor(undefined, asking('~/project-a')), undefined);
 });

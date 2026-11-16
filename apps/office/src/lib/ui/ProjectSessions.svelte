@@ -13,10 +13,13 @@
   import './project-sessions.css';
   import {
     errorPlace,
+    listAsk,
     newSessionFields,
+    rowsFor,
     type Choice,
     type ErrorSource,
     type Folder,
+    type Found,
     type SessionPath
   } from './project-form.ts';
   import ProjectTerminal from './ProjectTerminal.svelte';
@@ -58,7 +61,6 @@
 
   let connections = $state<Row[]>([]),
     currentId = $state<string>(),
-    candidates = $state<Choice[]>([]),
     work = $state<ProjectRequest[]>([]),
     view = $state<View>(),
     folders = $state<Folder[]>([]),
@@ -79,7 +81,8 @@
     /** The last error, and what raised it, which says where it shows. */
     problem = $state<{ text: string; from: ErrorSource }>(),
     handover = $state<Choice>(),
-    found = $state(false),
+    /** The conversations the last list found, with the folder and tool it asked about. */
+    found = $state<Found>(),
     /** The details drawer, open over the terminal. */
     details = $state(false),
     /** The Odd waiting on the owner's second yes to send without asking. */
@@ -95,6 +98,9 @@
   const selected = $derived(connections.find((s) => s.id === currentId));
   const terminalVisible = $derived(!!view?.connected && !!view.terminal);
   const place = $derived(problem && errorPlace(problem.from, !!selected));
+  /** What a list asks about now, and the rows found for exactly that. */
+  const listNow = $derived(listAsk({ folder, agent, socket }));
+  const listed = $derived(rowsFor(found, listNow));
   const fields = $derived(
     newSessionFields({ path, agent, claudeFolders: folders.length, handingOver: !!handover })
   );
@@ -149,15 +155,15 @@
     return () => stream.close();
   });
   async function load() {
-    const [rows, found] = await Promise.all([
+    const [sessions, known] = await Promise.all([
       projectApi<Row[]>('connections'),
       projectApi<Folder[]>('folders')
     ]);
-    connections = rows;
-    folders = found;
+    connections = sessions;
+    folders = known;
     // The first is ~/.claude while it is on the disk. A folder no longer listed
     // would be refused as not in Setup, so the choice goes back to the first.
-    if (!found.some((f) => f.path === startIn)) startIn = found[0]?.path ?? '';
+    if (!known.some((f) => f.path === startIn)) startIn = known[0]?.path ?? '';
   }
   /** Runs one owner action, its error shown by what raised it. Most come from the open session. */
   async function run(fn: () => Promise<unknown>, from: ErrorSource = 'session') {
@@ -203,8 +209,7 @@
     currentId = undefined;
     view = undefined;
     work = [];
-    found = false;
-    candidates = [];
+    found = undefined;
     handover = undefined;
     problem = undefined;
     path = undefined;
@@ -213,7 +218,7 @@
   function choosePath(p: SessionPath) {
     path = p;
     handover = undefined;
-    if (p === 'continue' && folder && !found) void run(search, 'continue');
+    if (p === 'continue' && folder && !listed) void run(search, 'continue');
   }
   async function connect(choice?: Choice, handedOver = false) {
     // One source each: a conversation goes with its own folder, or none, so the
@@ -233,13 +238,9 @@
     if (agent === 'claude') await action('terminal');
   }
   async function search() {
-    candidates = await projectApi<Choice[]>('find', {
-      folder,
-      agent,
-      socket: (agent === 'codex' && socket.trim()) || undefined
-    });
+    const ask = listNow;
+    found = { ask, rows: await projectApi<Choice[]>('find', ask) };
     filter = '';
-    found = true;
   }
   async function pick() {
     const r = await fetch('/api/folders/pick', {
@@ -278,15 +279,12 @@
     removing = false;
     folder = selected.folder;
     agent = selected.agent;
-    const rows = await projectApi<Choice[]>('find', {
-      folder,
-      agent,
-      socket: (agent === 'codex' && socket.trim()) || undefined
-    });
+    // A Reconnect lookup, not the form's list: it finds this one conversation.
+    const copies = await projectApi<Choice[]>('find', listAsk({ folder, agent, socket }));
     // The session's own folder, never another: one taken out of Setup is refused,
     // and one not known yet is found by the office.
     const choice = {
-      ...(rows.find((x) => x.id === selected?.nativeId) ?? {
+      ...(copies.find((x) => x.id === selected?.nativeId) ?? {
         id: selected.nativeId,
         title: selected.title,
         live: false,
@@ -306,10 +304,8 @@
     // Off the hidden id, so connecting the same conversation again selects it.
     startNew();
   }
-  /** The folder, tool or socket changed, so what was found no longer applies. */
-  function forgetFound() {
-    found = false;
-    candidates = [];
+  /** The folder, tool or socket changed, so a hand-over waiting for the old one no longer applies. */
+  function forgetHandover() {
     handover = undefined;
   }
   function handOver() {
@@ -467,12 +463,12 @@
           {path}
           {fields}
           {folders}
-          {candidates}
-          {found}
+          candidates={listed ?? []}
+          found={!!listed}
           {busy}
           problem={problem?.text}
           {place}
-          onedit={forgetFound}
+          onedit={forgetHandover}
           onpick={() => run(pick, 'pick')}
           onpath={choosePath}
           onstart={() => run(() => connect(), 'start')}

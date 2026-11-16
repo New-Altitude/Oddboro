@@ -54,6 +54,35 @@ export type Choice = {
 /** A Claude folder on the disk now, that a new conversation can start in. */
 export type Folder = { path: string; mark: string };
 
+/** What a list of conversations asks about: the folder, the tool and, for Codex, its socket. */
+export type ListAsk = { folder: string; agent: ProjectAgent; socket: string | undefined };
+
+/** The ask the form makes now. Only Codex sends a socket, and an empty one is none. */
+export function listAsk(form: { folder: string; agent: ProjectAgent; socket: string }): ListAsk {
+  return {
+    folder: form.folder,
+    agent: form.agent,
+    socket: (form.agent === 'codex' && form.socket.trim()) || undefined
+  };
+}
+
+export function sameAsk(a: ListAsk | undefined, b: ListAsk): boolean {
+  return !!a && a.folder === b.folder && a.agent === b.agent && a.socket === b.socket;
+}
+
+/** Conversations a list found, with the ask they answer. */
+export type Found = { ask: ListAsk; rows: Choice[] };
+
+/**
+ * The conversations to show for what the form asks now. Rows found for another
+ * folder, tool or socket never show, however the folder changed (typed, Choose
+ * folder or Reconnect), so a row never pairs one folder with another folder's
+ * conversation. Undefined when nothing was listed for this ask.
+ */
+export function rowsFor(found: Found | undefined, now: ListAsk): Choice[] | undefined {
+  return sameAsk(found?.ask, now) ? found?.rows : undefined;
+}
+
 /**
  * Whether a conversation stays in the list for what the owner typed: the
  * title or the account (folder and login) holding the words, or the id
