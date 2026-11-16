@@ -117,7 +117,7 @@ type Listed = {
   /** Claude only: the process of a running one, and what it is doing. */
   pid?: number;
   status?: string;
-  /** Claude only: open in a terminal, and Move here can bring it in on this computer. */
+  /** Claude only: open in a terminal, and connect's `move` can bring it in on this computer. */
   movable?: boolean;
 };
 /** What every project route answers while Advanced mode is off. */
@@ -186,7 +186,7 @@ const sessionFolder = (s: ProjectSession) =>
     : runnableClaudeFolder(s.configDir);
 
 /**
- * The refusal of a Claude conversation open in a terminal: where Move here
+ * The refusal of a Claude conversation open in a terminal: where `move`
  * works, the owner can choose it; elsewhere, the steps to end it there.
  */
 const openInTerminal = () =>

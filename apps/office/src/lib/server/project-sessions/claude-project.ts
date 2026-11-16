@@ -122,7 +122,7 @@ export async function claudeAgents(
  * folder that holds it, or null when that is not known yet (connect finds it
  * later). `live` means a process runs it. `job` is its background session's
  * short id, or empty when it has none. A running one carries its process and
- * status, so connect's one read serves Move here.
+ * status, so connect's one read serves its `move`.
  */
 export type ClaudeConversation = {
   id: string;
@@ -132,7 +132,7 @@ export type ClaudeConversation = {
   job: string;
   pid?: number;
   status?: string;
-  /** Open in a terminal, and Move here can bring it in on this computer. */
+  /** Open in a terminal, and connect's `move` can bring it in on this computer. */
   movable: boolean;
   configDir: string | null;
 };

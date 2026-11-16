@@ -61,13 +61,13 @@ export async function projectInput(folder: string, prompt: string, file?: string
 }
 
 /**
- * The systems where Move here ends a conversation's terminal session and
+ * The systems where connect's `move` ends a conversation's terminal session and
  * resumes it in the background. Add 'windows' when a Windows hand walk shows
  * an idle terminal session, ended from outside, resumes whole under the same id.
  */
 export const MOVE_SYSTEMS: ReadonlySet<System> = new Set<System>(['mac', 'linux']);
 
-/** Whether Move here works on this computer: the one test of `MOVE_SYSTEMS`. */
+/** Whether connect's `move` works on this computer: the one test of `MOVE_SYSTEMS`. */
 export function canMoveHere(): boolean {
   const system = currentSystem();
   return system !== undefined && MOVE_SYSTEMS.has(system);

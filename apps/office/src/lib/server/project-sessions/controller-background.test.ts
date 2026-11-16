@@ -1,0 +1,492 @@
+// A project's Claude Code conversations run in Claude Code's background
+// service, through the controller the project route drives. A stand-in claude
+// logs each whole command and answers from files in the Claude folder it was
+// given, and the terminal library is a stand-in that keeps what each terminal
+// was opened with.
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { once } from 'node:events';
+import {
+  appendFileSync,
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync
+} from 'node:fs';
+import { homedir } from 'node:os';
+import { delimiter, join } from 'node:path';
+import { after, afterEach, beforeEach, mock, test } from 'node:test';
+
+/** Each terminal opened: its arguments, folder and environment. */
+const spawned: { args: string[]; cwd: string; env: Record<string, string> }[] = [];
+mock.module('@oddboro/ledger/project-terminal', {
+  namedExports: {
+    openProjectTerminal: async (
+      _file: string,
+      args: string[],
+      options: { cwd: string; env: Record<string, string> }
+    ) => {
+      spawned.push({ args, cwd: options.cwd, env: options.env });
+      let exited: ((e: { exitCode: number }) => void) | undefined;
+      return {
+        onData: () => {},
+        onExit: (done: typeof exited) => void (exited = done),
+        write: () => {},
+        resize: () => {},
+        kill: () => {
+          // Logged beside claude's commands, so a test can tell which came first.
+          appendFileSync(calls, `terminal closed ${JSON.stringify(args)}\n`);
+          exited?.({ exitCode: 0 });
+        }
+      };
+    }
+  }
+});
+const { L, folder, onPlatform, request, withEnv } = await import('../office-under-test.ts');
+const { projectController } = await import('./controller.ts');
+const { ClaudeNeedsTrust } = await import('./claude-background.ts');
+const { PROJECT_WORDS } = await import('../../project-words.ts');
+
+// The stand-in claude. Every call logs its whole command, then a Node helper
+// answers it from the Claude folder it runs under: `--version` from one file
+// for the computer, `agents --json` from the folder's `agents.json` (without
+// `--all`, leaving out background sessions that ended, as Claude Code does),
+// and `--bg` with the folder's `bg.out`, else the line Claude Code prints. A
+// background start adds its session to `agents.json`, under the folder's
+// `start-id` when the test names one. `stop` and `rm` only log.
+const calls = join(folder, 'background-calls.log');
+const bin = join(folder, 'background-bin');
+mkdirSync(bin);
+const standIn = join(bin, 'claude');
+const versionFile = join(bin, 'version');
+const helper = join(bin, 'answer.mjs');
+writeFileSync(
+  helper,
+  `import { randomUUID } from 'node:crypto';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+const [dir, ...args] = process.argv.slice(2);
+const read = (name) => (existsSync(join(dir, name)) ? readFileSync(join(dir, name), 'utf8') : undefined);
+const rows = JSON.parse(read('agents.json') ?? '[]');
+if (args[0] === '--version') process.stdout.write(readFileSync(${JSON.stringify(versionFile)}, 'utf8'));
+else if (args[0] === 'auth') console.log('{"loggedIn":false}');
+else if (args[0] === 'agents') {
+  const ended = (r) => r.pid === undefined && ['done', 'stopped', 'failed'].includes(r.state);
+  console.log(JSON.stringify(args.includes('--all') ? rows : rows.filter((r) => !ended(r))));
+} else if (args[0] === '--bg') {
+  const said = read('bg.out');
+  const resume = args.indexOf('--resume');
+  if (said !== undefined) process.stdout.write(said);
+  else if (resume >= 0) console.log('backgrounded · ' + args[resume + 1].slice(0, 8) + ' · Work');
+  else {
+    const sessionId = read('start-id')?.trim() ?? randomUUID();
+    rows.push({ sessionId, id: sessionId.slice(0, 8), kind: 'background', status: 'idle', cwd: process.cwd() });
+    writeFileSync(join(dir, 'agents.json'), JSON.stringify(rows));
+    console.log('backgrounded · ' + sessionId.slice(0, 8) + ' · ' + args[args.indexOf('-n') + 1]);
+  }
+}
+`
+);
+writeFileSync(
+  standIn,
+  `#!/bin/sh
+echo "$*" >> "${calls}"
+exec "${process.execPath}" "${helper}" "\${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$@"
+`
+);
+chmodSync(standIn, 0o755);
+process.env.PATH = `${bin}${delimiter}${process.env.PATH}`;
+/** The stand-in by the name a Windows office starts, claude.exe, in a folder of its own. */
+const windowsBin = join(folder, 'background-windows-bin');
+mkdirSync(windowsBin);
+symlinkSync(standIn, join(windowsBin, 'claude.exe'));
+const onWindows = <T>(fn: () => Promise<T>) =>
+  withEnv({ PATH: `${windowsBin}${delimiter}${process.env.PATH}` }, () => onPlatform('win32', fn));
+
+const NEWEST = '2.1.325 (Claude Code)';
+let stamp = 1_700_000_000;
+/**
+ * The stand-in now says it is `version`. The office reads a version once per
+ * change to the binary's file, so the file's change time moves on too.
+ */
+function version(v: string) {
+  writeFileSync(versionFile, v + '\n');
+  stamp += 60;
+  utimesSync(standIn, stamp, stamp);
+}
+version(NEWEST);
+
+/** Each command claude ran since the test began, one per line, and each terminal closed. */
+const logged = () => (existsSync(calls) ? readFileSync(calls, 'utf8').split('\n') : []);
+
+const project = join(homedir(), 'app');
+mkdirSync(project, { recursive: true });
+const app = realpathSync(project);
+/** A Claude folder named in Setup, the only one, so every test reads its own. */
+function claudeFolder(name: string) {
+  const dir = join(homedir(), name);
+  mkdirSync(dir, { recursive: true });
+  L.setClaudeFolders([dir]);
+  return dir;
+}
+/** Save a conversation of the project in the Claude folder `dir`, as Claude Code does. */
+function save(dir: string, id: string) {
+  const where = join(dir, 'projects', app.replace(/[^a-zA-Z0-9]/g, '-'));
+  mkdirSync(where, { recursive: true });
+  writeFileSync(
+    join(where, id + '.jsonl'),
+    JSON.stringify({ type: 'user', cwd: app, message: { content: 'Work' } }) + '\n'
+  );
+}
+/** What `claude agents --json` lists in the Claude folder `dir`. */
+const agents = (dir: string, rows: object[]) =>
+  writeFileSync(join(dir, 'agents.json'), JSON.stringify(rows));
+/** Claude Code's row for `id` open in a terminal, run by the process `pid`. */
+const inTerminal = (id: string, pid: number, status: string) => ({
+  sessionId: id,
+  kind: 'interactive',
+  pid,
+  status,
+  cwd: app
+});
+/**
+ * A process standing in for a terminal session's. A `sleep` child is the only
+ * process a test lets the office signal. The test ends it.
+ */
+const terminalSession = () => spawn('sleep', ['30'], { stdio: 'ignore' });
+const alive = (p: ReturnType<typeof terminalSession>) =>
+  p.exitCode === null && p.signalCode === null;
+/** Every signal the office sends, still sent. */
+const signals = mock.method(process, 'kill');
+const interrupted = (pid: number | undefined) =>
+  signals.mock.calls.some((k) => k.arguments[0] === pid && k.arguments[1] === 'SIGINT');
+/** Where the plugin of the session `id` lives, which `--plugin-dir` names. */
+const pluginOf = (id: string) => L.home('project-sessions', id, 'market', 'plugin');
+const lastTerminal = () => spawned.at(-1)!;
+const SHELL_STAND_IN = { skip: process.platform === 'win32' && 'the stand-in is a shell script' };
+
+const c = projectController();
+/** The controller's runtimes and its release: no public method releases every one. */
+const inside = c as unknown as {
+  sessions: Map<string, unknown>;
+  release(runtime: unknown): Promise<void>;
+};
+// The route answers only with Advanced mode on, which needs an owner.
+await L.setOwnerName('Tester');
+await L.setAdvancedMode(true);
+
+beforeEach(() => writeFileSync(calls, ''));
+afterEach(async () => {
+  for (const runtime of [...inside.sessions.values()]) await inside.release(runtime);
+  L.setClaudeFolders([]);
+});
+after(() => signals.mock.restore());
+
+test(
+  "Start runs a new conversation in Claude Code's background service with the office plugin and shows it with claude attach",
+  SHELL_STAND_IN,
+  async () => {
+    const dir = claudeFolder('.claude-start');
+    const fixture = randomUUID();
+    writeFileSync(join(dir, 'start-id'), fixture);
+    const s = await c.connect('claude', app, { configDir: dir, title: 'Fix the login page' });
+    assert.ok(
+      logged().includes(`--bg -n Fix the login page --plugin-dir ${pluginOf(s.id)}`),
+      logged().join('\n')
+    );
+    assert.ok(!logged().some((line) => line.includes('--session-id')));
+    assert.equal(s.nativeId, fixture);
+    await c.terminal(s.id);
+    assert.deepEqual(lastTerminal().args, ['attach', fixture.slice(0, 8)]);
+  }
+);
+
+test(
+  'Continue of a saved conversation never backgrounded continues it in the background under its own id, even after a /bg copied it elsewhere',
+  SHELL_STAND_IN,
+  async () => {
+    const dir = claudeFolder('.claude-continue');
+    const continues = async (id: string) => {
+      const s = await c.connect('claude', app, { nativeId: id, configDir: dir });
+      await c.terminal(s.id);
+      assert.ok(
+        logged().includes(`--bg --resume ${id} --plugin-dir ${pluginOf(s.id)}`),
+        logged().join('\n')
+      );
+      assert.deepEqual(lastTerminal().args, ['attach', id.slice(0, 8)]);
+    };
+    const id = randomUUID();
+    save(dir, id);
+    await continues(id);
+
+    // The owner's /bg in a terminal ran a copy under another id, which runs
+    // in the background; the conversation itself has only its saved file.
+    const copy = terminalSession();
+    try {
+      const copied = randomUUID();
+      const other = randomUUID();
+      save(dir, copied);
+      save(dir, other);
+      agents(dir, [
+        {
+          sessionId: other,
+          id: other.slice(0, 8),
+          kind: 'background',
+          pid: copy.pid,
+          status: 'idle',
+          cwd: app
+        }
+      ]);
+      await continues(copied);
+      assert.ok(!interrupted(copy.pid));
+    } finally {
+      copy.kill();
+    }
+  }
+);
+
+test(
+  'A conversation with a background row, running or stopped, opens with claude attach and never with flags',
+  SHELL_STAND_IN,
+  async () => {
+    const dir = claudeFolder('.claude-attach');
+    const job = terminalSession();
+    try {
+      const stopped = randomUUID();
+      const running = randomUUID();
+      save(dir, stopped);
+      save(dir, running);
+      agents(dir, [
+        {
+          sessionId: stopped,
+          id: stopped.slice(0, 8),
+          kind: 'background',
+          state: 'stopped',
+          cwd: app
+        },
+        {
+          sessionId: running,
+          id: running.slice(0, 8),
+          kind: 'background',
+          pid: job.pid,
+          status: 'idle',
+          cwd: app
+        }
+      ]);
+      for (const id of [stopped, running]) {
+        const s = await c.connect('claude', app, { nativeId: id, configDir: dir });
+        await c.terminal(s.id);
+        assert.deepEqual(lastTerminal().args, ['attach', id.slice(0, 8)]);
+      }
+      assert.ok(!logged().some((line) => line.startsWith('--bg')), logged().join('\n'));
+      assert.ok(!interrupted(job.pid));
+    } finally {
+      job.kill();
+    }
+  }
+);
+
+test(
+  "A conversation open in a terminal is refused with Move here's words, and with move it is ended at idle and opened in the background",
+  SHELL_STAND_IN,
+  async () => {
+    const dir = claudeFolder('.claude-move');
+    const id = randomUUID();
+    save(dir, id);
+    const session = terminalSession();
+    const busy = terminalSession();
+    try {
+      agents(dir, [inTerminal(id, session.pid!, 'idle')]);
+      await assert.rejects(c.connect('claude', app, { nativeId: id, configDir: dir }), {
+        message: PROJECT_WORDS.useMove
+      });
+      assert.ok(!interrupted(session.pid));
+
+      // Only an idle session is ended: one replying or asking is left running.
+      for (const [status, words] of [
+        ['busy', PROJECT_WORDS.busy],
+        ['waiting', PROJECT_WORDS.waiting]
+      ]) {
+        agents(dir, [inTerminal(id, busy.pid!, status)]);
+        await assert.rejects(
+          c.connect('claude', app, { nativeId: id, configDir: dir, move: true }),
+          { message: words }
+        );
+        assert.ok(!interrupted(busy.pid) && alive(busy), status);
+      }
+
+      // Move here through the route: the session ends, and Claude Code drops its row.
+      agents(dir, [inTerminal(id, session.pid!, 'idle')]);
+      const dropped = once(session, 'exit').then(() => agents(dir, []));
+      const answer = await request('/api/project-sessions', 'POST', {
+        body: {
+          action: 'connect',
+          agent: 'claude',
+          folder: app,
+          nativeId: id,
+          configDir: dir,
+          move: true
+        }
+      });
+      const s = (await answer.json()) as { id: string };
+      assert.ok(interrupted(session.pid));
+      await dropped;
+      await c.terminal(s.id);
+      assert.ok(
+        logged().includes(`--bg --resume ${id} --plugin-dir ${pluginOf(s.id)}`),
+        logged().join('\n')
+      );
+      assert.deepEqual(lastTerminal().args, ['attach', id.slice(0, 8)]);
+
+      // A terminal session with no saved conversation has nothing to continue.
+      const unsaved = randomUUID();
+      agents(dir, [inTerminal(unsaved, busy.pid!, 'idle')]);
+      assert.ok(!(await c.list('claude', app)).some((row) => row.id === unsaved));
+    } finally {
+      session.kill();
+      busy.kill();
+    }
+  }
+);
+
+test(
+  'A resume that prints another id is a copy: stopped, removed and refused',
+  SHELL_STAND_IN,
+  async () => {
+    const dir = claudeFolder('.claude-copy');
+    const id = randomUUID();
+    save(dir, id);
+    writeFileSync(join(dir, 'bg.out'), 'backgrounded · deadbeef · Work\n');
+    const s = await c.connect('claude', app, { nativeId: id, configDir: dir });
+    // The conversation resumes as its terminal opens, so that is where the copy is refused.
+    await assert.rejects(c.terminal(s.id), { message: PROJECT_WORDS.copied });
+    const log = logged();
+    const stop = log.indexOf('stop deadbeef');
+    assert.ok(stop >= 0 && log.indexOf('rm deadbeef') > stop, log.join('\n'));
+  }
+);
+
+test(
+  'Move here is offered and works on Mac and Linux, and Windows gets the walk-through words',
+  SHELL_STAND_IN,
+  async () => {
+    const dir = claudeFolder('.claude-systems');
+    const id = randomUUID();
+    save(dir, id);
+    const session = terminalSession();
+    try {
+      agents(dir, [inTerminal(id, session.pid!, 'idle')]);
+      const movable = async () =>
+        (await c.list('claude', app)).find((row) => row.id === id)?.movable;
+      assert.equal(await onPlatform('darwin', movable), true);
+      assert.equal(await onPlatform('linux', movable), true);
+      assert.equal(await onWindows(movable), false);
+
+      await onWindows(() =>
+        assert.rejects(c.connect('claude', app, { nativeId: id, configDir: dir, move: true }), {
+          message: PROJECT_WORDS.windows
+        })
+      );
+      assert.ok(!interrupted(session.pid) && alive(session));
+
+      const dropped = once(session, 'exit').then(() => agents(dir, []));
+      const s = await onPlatform('linux', async () => {
+        const moved = await c.connect('claude', app, { nativeId: id, configDir: dir, move: true });
+        await dropped;
+        await c.terminal(moved.id);
+        return moved;
+      });
+      assert.ok(interrupted(session.pid));
+      assert.deepEqual(lastTerminal().args, ['attach', id.slice(0, 8)]);
+      assert.equal(s.nativeId, id);
+    } finally {
+      session.kill();
+    }
+  }
+);
+
+test(
+  'Below Claude Code 2.1.285, or with background sessions turned off, Projects refuses in plain words before anything starts',
+  SHELL_STAND_IN,
+  async () => {
+    const dir = claudeFolder('.claude-version');
+    const opened = spawned.length;
+    try {
+      version('2.1.284 (Claude Code)');
+      await assert.rejects(c.connect('claude', app, { configDir: dir }), {
+        message: PROJECT_WORDS.update
+      });
+      assert.ok(!logged().some((line) => line.startsWith('--bg')), logged().join('\n'));
+      assert.equal(spawned.length, opened, 'a terminal opened');
+
+      version('2.1.285 (Claude Code)');
+      const s = await c.connect('claude', app, { configDir: dir });
+      assert.ok(
+        logged().includes(`--bg -n New Claude Code session --plugin-dir ${pluginOf(s.id)}`)
+      );
+
+      writeFileSync(join(dir, 'bg.out'), "'--bg' is disabled by CLAUDE_CODE_DISABLE_AGENT_VIEW.\n");
+      await assert.rejects(c.connect('claude', app, { configDir: dir }), {
+        message: PROJECT_WORDS.backgroundOff
+      });
+    } finally {
+      version(NEWEST);
+    }
+  }
+);
+
+test(
+  "Start in a folder Claude Code was never told to trust opens Claude Code's trust question in a setup terminal, and Start again closes it",
+  SHELL_STAND_IN,
+  async () => {
+    const dir = claudeFolder('.claude-trust');
+    const untrusted = join(dir, 'bg.out');
+    const said = `Workspace not trusted. Run \`claude\` in ${app} once to accept the workspace trust dialog.\n`;
+    writeFileSync(untrusted, said);
+    const plugins = () =>
+      existsSync(L.home('project-sessions')) ? readdirSync(L.home('project-sessions')).sort() : [];
+    const before = plugins();
+    const opened = spawned.length;
+
+    const refused = await c.connect('claude', '~/app', { configDir: dir }).then(
+      () => assert.fail('Start went ahead in a folder Claude Code does not trust'),
+      (e: unknown) => e
+    );
+    assert.ok(refused instanceof ClaudeNeedsTrust);
+    assert.equal(refused.message, PROJECT_WORDS.trustLine);
+    const setup = refused.setup;
+    assert.ok(setup);
+    assert.equal(spawned.length, opened + 1);
+    assert.deepEqual(lastTerminal().args, []);
+    assert.equal(lastTerminal().cwd, app);
+    assert.equal(lastTerminal().env.CLAUDE_CONFIG_DIR, dir);
+    assert.ok(c.openTerminal(setup).running);
+    assert.deepEqual(plugins(), before, 'a plugin folder was left under the unused key');
+
+    // Start again, once the owner answered: the setup terminal closes before the start.
+    rmSync(untrusted);
+    await c.connect('claude', app, { configDir: dir });
+    const log = logged();
+    const closed = log.indexOf('terminal closed []');
+    assert.ok(closed >= 0, log.join('\n'));
+    assert.ok(closed < log.findLastIndex((line) => line.startsWith('--bg -n')), log.join('\n'));
+    assert.throws(() => c.openTerminal(setup));
+
+    // The page's Start through the route gets the terminal to show.
+    writeFileSync(untrusted, said);
+    const answer = await request('/api/project-sessions', 'POST', {
+      body: { action: 'connect', agent: 'claude', folder: app, configDir: dir }
+    });
+    assert.equal(answer.status, 200);
+    const shown = (await answer.json()) as { setup?: string };
+    assert.equal(typeof shown.setup, 'string');
+    await c.disconnect(shown.setup!);
+  }
+);
