@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { projectFolder, projectInput } from './native.ts';
+import { canMoveHere, projectFolder, projectInput } from './native.ts';
 
 test('a project folder typed from ~ opens in the home folder, and ~other is refused', async () => {
   const folder = await mkdtemp(join(homedir(), 'project-'));
@@ -17,6 +17,35 @@ test('a project folder typed from ~ opens in the home folder, and ~other is refu
     });
   } finally {
     await rm(folder, { recursive: true, force: true });
+  }
+});
+
+test('a project folder that is not there, or a path through a file, says the folder is not there', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'office-project-')));
+  try {
+    await writeFile(join(root, 'notes.txt'), 'a file, not a folder');
+    for (const typed of [join(root, 'gone'), join(root, 'notes.txt', 'app')])
+      await assert.rejects(projectFolder(typed), {
+        message: 'That folder is not there. Check the path, such as ~/my-project.'
+      });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('Move here works on a Mac and Linux, and not on Windows', () => {
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  try {
+    for (const [system, moves] of [
+      ['darwin', true],
+      ['linux', true],
+      ['win32', false]
+    ] as const) {
+      Object.defineProperty(process, 'platform', { value: system });
+      assert.equal(canMoveHere(), moves, system);
+    }
+  } finally {
+    Object.defineProperty(process, 'platform', platform);
   }
 });
 

@@ -1,5 +1,5 @@
-// Find existing reads Claude Code's own session files, as the Agent SDK's
-// listSessions did, from fixture files in a throwaway Claude folder.
+// The continue path's list reads Claude Code's own session files, as the Agent
+// SDK's listSessions did, from fixture files in a throwaway Claude folder.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, mkdir, rm, utimes, writeFile } from 'node:fs/promises';
