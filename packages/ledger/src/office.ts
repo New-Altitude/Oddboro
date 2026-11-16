@@ -71,6 +71,8 @@ export {
   folderAskRefused,
   switchAskRefused,
   switchesOff,
+  CLAUDE_ACCOUNT_MARKS,
+  isClaudeAccount,
   STORE_MARKS,
   SECRET_STORES,
   FOLDER_REFUSED,

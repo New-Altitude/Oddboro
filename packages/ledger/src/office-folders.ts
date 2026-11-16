@@ -163,6 +163,17 @@ export const switchesOff = (
 ): OwnSwitch[] => wanted.filter((s) => !who[s]);
 
 /**
+ * What Claude Code keeps in an account folder, its own or a second home's: the
+ * conversations and the prompt history. A project's `.claude`, its settings,
+ * holds neither.
+ */
+export const CLAUDE_ACCOUNT_MARKS = ['history.jsonl', 'projects'];
+
+/** Whether `folder` holds every account mark, so it is surely a Claude account folder. */
+export const isClaudeAccount = (folder: string): boolean =>
+  CLAUDE_ACCOUNT_MARKS.every((m) => existsSync(join(folder, m)));
+
+/**
  * Secret stores, by name, each with how it is found anywhere but the top of
  * the home, where the name alone is enough (`touchesSecretStore`). An empty
  * list means the name alone everywhere. A list names what marks the real
@@ -204,7 +215,7 @@ export const STORE_MARKS: Record<string, string[]> = {
   '.config': ['gcloud', 'gh/hosts.yml'],
   Library: ['Keychains/login.keychain-db', 'Cookies'],
   AppData: ['Roaming', 'Local'],
-  '.claude': ['.credentials.json', 'history.jsonl', 'projects'],
+  '.claude': ['.credentials.json', ...CLAUDE_ACCOUNT_MARKS],
   '.claude.json': [],
   '.google_workspace_mcp': [],
   '.grok': ['auth.json', 'sessions'],
