@@ -9,6 +9,7 @@
   import type { StaffProfile } from '../staff/roster.ts';
   import Pixel from './Pixel.svelte';
   import { projectApi } from './project-api.ts';
+  import { newSessionFields, type SessionPath } from './project-form.ts';
   import ProjectTerminal from './ProjectTerminal.svelte';
   import { LOGOS } from './tool-logos.ts';
   import { advanced, type ProjectAsk } from './windows.svelte.ts';
@@ -64,8 +65,10 @@
     work = $state<ProjectRequest[]>([]),
     view = $state<View>(),
     folders = $state<Folder[]>([]),
-    /** The Claude folder Start new uses. */
-    startIn = $state('');
+    /** The Claude folder Start uses. */
+    startIn = $state(''),
+    /** The owner's answer to "What would you like to do?" on the New session form. */
+    path = $state<SessionPath>();
   let socket = $state(''),
     folder = $state(''),
     agent = $state<ProjectAgent>('claude'),
@@ -91,6 +94,9 @@
   let termView = $state(crypto.randomUUID());
   const selected = $derived(connections.find((s) => s.id === currentId));
   const terminalVisible = $derived(!!view?.connected && !!view.terminal);
+  const fields = $derived(
+    newSessionFields({ path, agent, claudeFolders: folders.length, handingOver: !!handover })
+  );
   const TOOL: Record<ProjectAgent, string> = { claude: 'Claude Code', codex: 'Codex' };
   const STATUS: Record<ProjectStatus, string> = {
     working: 'Working',
@@ -198,10 +204,17 @@
     candidates = [];
     handover = undefined;
     problem = '';
+    path = undefined;
+  }
+  /** Picking Continue lists the folder's conversations at once. */
+  function choosePath(p: SessionPath) {
+    path = p;
+    handover = undefined;
+    if (p === 'continue' && folder && !found) void run(search);
   }
   async function connect(choice?: Choice, handedOver = false) {
     // One source each: a conversation goes with its own folder, or none, so the
-    // office finds it; only Start new takes the folder chosen for it.
+    // office finds it; only Start takes the folder chosen for it.
     const configDir = choice ? choice.configDir || undefined : startIn || undefined;
     const s = await projectApi<ProjectSession>('connect', {
       folder,
@@ -278,8 +291,9 @@
       configDir: selected.configDir
     };
     if (agent === 'codex' && !choice.live) {
-      // Back to the start form, on this folder, to hand the conversation over.
+      // Back to the New session form, on this folder, to hand the conversation over.
       startNew();
+      path = 'continue';
       handover = choice;
     } else await connect(choice);
   }
@@ -458,7 +472,7 @@
               ></select
             >
           </div>
-          {#if agent === 'codex'}<details>
+          {#if fields.socket}<details>
               <summary class="cursor-pointer text-muted">Connect to a running Codex server</summary
               ><label
                 >Private local socket <input
@@ -477,41 +491,64 @@
                 office server.
               </p>
             </details>{/if}
-          <label
-            >Session name <input
-              class="field w-full"
-              bind:value={name}
-              placeholder="Optional"
-              maxlength="200"
-            /></label
-          >
-          <!-- The folder sits beside Start new, the one button that uses it. Find existing
-               does not: each conversation it lists goes with its own folder, or none. -->
-          <div class="flex flex-wrap items-end gap-2">
-            {#if agent === 'claude' && folders.length > 1}<label class="max-w-full min-w-0"
-                >Claude folder <select class="field max-w-full min-w-0" bind:value={startIn}
+          <fieldset>
+            <legend class="mb-2 text-xs text-muted">What would you like to do?</legend>
+            <div class="flex flex-wrap gap-2">
+              <button
+                class="btn"
+                class:on={path === 'start'}
+                aria-pressed={path === 'start'}
+                onclick={() => choosePath('start')}>Start a new conversation</button
+              ><button
+                class="btn"
+                class:on={path === 'continue'}
+                aria-pressed={path === 'continue'}
+                onclick={() => choosePath('continue')}>Continue an earlier one</button
+              >
+            </div>
+          </fieldset>
+          {#if fields.start}
+            <!-- The account sits on the start path only: a conversation found goes with its own. -->
+            {#if fields.account}<label class="max-w-full min-w-0"
+                >Account <select
+                  class="field max-w-full min-w-0"
+                  aria-label="Account"
+                  bind:value={startIn}
                   >{#each folders as f (f.path)}<option value={f.path}>{f.mark}</option
                     >{/each}</select
                 ></label
               >{/if}
-            <button class="btn" disabled={busy || !folder} onclick={() => run(() => connect())}
-              >Start new</button
-            ><button class="btn" disabled={busy || !folder} onclick={() => run(search)}
+            <label
+              >Session name <input
+                class="field w-full"
+                bind:value={name}
+                placeholder="Optional"
+                maxlength="200"
+              /></label
+            >
+            <button
+              class="btn self-start"
+              disabled={busy || !folder}
+              onclick={() => run(() => connect())}>Start</button
+            >
+          {/if}
+          {#if fields.list}
+            <button class="btn self-start" disabled={busy || !folder} onclick={() => run(search)}
               >Find existing</button
             >
-          </div>
-          {#if found && !candidates.length}<p class="text-muted">
-              No conversations found in this folder.
-            </p>{/if}
-          {#each candidates as c (c.id)}<button
-              class="btn text-start"
-              disabled={busy}
-              onclick={() => choose(c)}
-              >{c.title}{#if c.mark}{' · '}{c.mark}{/if} · {c.live ? 'Running' : 'Saved'} · {new Date(
-                c.updated
-              ).toLocaleString()} · {c.id.slice(0, 8)}</button
-            >{/each}
-          {#if handover}<p>
+            {#if found && !candidates.length}<p class="text-muted">
+                No conversations found in this folder.
+              </p>{/if}
+            {#each candidates as c (c.id)}<button
+                class="btn text-start"
+                disabled={busy}
+                onclick={() => choose(c)}
+                >{c.title}{#if c.mark}{' · '}{c.mark}{/if} · {c.live ? 'Running' : 'Saved'} · {new Date(
+                  c.updated
+                ).toLocaleString()} · {c.id.slice(0, 8)}</button
+              >{/each}
+          {/if}
+          {#if fields.handover && handover}<p>
               Finish or stop work in the previous Codex window before continuing this conversation
               here.
             </p>
