@@ -2233,7 +2233,7 @@ Projects. Off, `/api/project-sessions` and its event stream answer 403
 each as the owner typed it, not by its real path. The continue path's list reads Claude Code's
 own session files in every known Claude folder (`claude-sessions.ts`,
 `claudeProjects` in `claude-project.ts`); a session keeps the folder it runs in
-(`config_dir`), and Remove stops its background job and hides a disconnected one (`hidden_at`). A connected Claude session's Stop button ends it for every window. Claude sessions run in Claude Code's background service and the terminal
+(`config_dir`), and Remove stops its background job and hides a disconnected one (`hidden_at`). A connected Claude session's Stop button ends it for every window. While Stop or Remove is stopping a session, nothing is claimed for it, and a connect or a second Stop or Remove is refused (`stopping`). Claude sessions run in Claude Code's background service and the terminal
 attaches to them (`claude-background.ts`). The terminal loads `node-pty` only when it opens. See
 [project sessions](../../docs/project-sessions.md) for native clients,
 handover and recovery.
