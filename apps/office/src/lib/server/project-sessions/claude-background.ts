@@ -142,8 +142,8 @@ export async function endTerminalSession(
   );
   // Not listed now for this conversation: no signal goes to a process no
   // read vouches for. Gone, it ended on its own, and the wait below returns
-  // at once. Still running, it holds another conversation now, as after
-  // /clear or /resume in that terminal, so nothing of this one is closing.
+  // at once. Still running, it holds another conversation or is exiting, as
+  // after /clear, /resume or /exit in that terminal, so nothing is closed here.
   if (!now && !processGone(pid)) throw new Error(PROJECT_WORDS.switched);
   if (now) {
     requireIdle(now.status);
