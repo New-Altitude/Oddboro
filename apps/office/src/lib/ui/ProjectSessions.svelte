@@ -62,7 +62,7 @@
   import SessionDetails from './SessionDetails.svelte';
   import { focusRemembered, rememberFocus } from './projects-focus.ts';
   import { LOGOS } from './tool-logos.ts';
-  import { advanced, type ProjectAsk } from './windows.svelte.ts';
+  import { advanced, projectsFocus, type ProjectAsk } from './windows.svelte.ts';
 
   // The Projects window, which widens the side panel while it is in front:
   // every session down the start side as a tab list, and the selected one
@@ -454,6 +454,14 @@
   onMount(() => {
     focusWanted = focusRemembered();
     return closeSetup;
+  });
+  // The office panel folds its header, tabs and music bar under Focus too. The
+  // cleanup unfolds it when this window closes.
+  $effect(() => {
+    projectsFocus.on = focused;
+    return () => {
+      projectsFocus.on = false;
+    };
   });
   // The list reads again whenever the office's records change, or Setup changes
   // the Claude folders, which live in .env and reach the page no other way.

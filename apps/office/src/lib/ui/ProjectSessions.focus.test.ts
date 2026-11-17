@@ -1,5 +1,5 @@
 // The Projects window mounted in a browser-like document, against a stand-in
-// office: Focus, Reconnect's Move here, Disconnect, which window takes the typing,
+// office: Focus (and the office panel it folds), Reconnect's Move here, Disconnect, which window takes the typing,
 // and Claude Code's setup question answering a Start the owner has since changed
 // or left for a session. Each test clicks and types as the owner does and reads
 // what the window then shows.
@@ -28,17 +28,24 @@ import {
 } from './projects-window-under-test.ts';
 import { rememberFocus } from './projects-focus.ts';
 
+// After the harness above, so it loads compiled for the client: the same module
+// the window writes to.
+const { panelFolded, projectsFocus } = await import('./windows.svelte.ts');
+const PROJECTS_WIN = { id: 'projects', kind: 'projects', ask: { n: 0 } } as const;
+const DESK_WIN = { id: 'desk', kind: 'desk' } as const;
+
 const titleRow = (root: Element) => root.querySelector('header h2')?.textContent ?? null;
 const sessionList = (root: Element) => root.querySelector('nav[aria-label="Sessions"]');
 
-test('Focus folds away the Projects title row and the session list only while a connected session’s terminal shows', async (t) => {
+test('Focus folds away the Projects title row, the session list and the office panel only while a connected session’s terminal shows', async (t) => {
   await t.test(
-    'pressing Focus on a terminal folds both away, and again brings them back',
+    'pressing Focus on a terminal folds them away, and again brings them back',
     async () => {
       rememberFocus(false);
       office({ sessions: [SESSION], view: viewOf(true, true) });
       const shown = await projectsWindow();
       try {
+        assert.equal(projectsFocus.on, false, 'the office panel starts whole');
         assert.ok(shown.target.querySelector('.term .xterm'), 'the session’s terminal shows');
         sameElement(shown.target.querySelector('[role="alert"]'), null, 'with no error');
         assert.equal(titleRow(shown.target), 'Projects');
@@ -56,16 +63,45 @@ test('Focus folds away the Projects title row and the session list only while a 
         assert.equal(titleRow(shown.target), null);
         sameElement(sessionList(shown.target), null, 'no session list');
         assert.equal(focus.getAttribute('aria-pressed'), 'true');
+        assert.equal(projectsFocus.on, true, 'the office panel folds');
 
         focus.click();
         shown.flush();
         assert.equal(titleRow(shown.target), 'Projects');
         assert.ok(sessionList(shown.target));
+        assert.equal(projectsFocus.on, false, 'the office panel unfolds');
       } finally {
         await shown.unmount();
       }
+      assert.equal(projectsFocus.on, false, 'and stays whole once the window closes');
     }
   );
+
+  await t.test('closing the window under Focus unfolds the office panel', async () => {
+    rememberFocus(true);
+    office({ sessions: [SESSION], view: viewOf(true, true) });
+    const shown = await projectsWindow();
+    try {
+      assert.equal(projectsFocus.on, true, 'folded while the window shows');
+    } finally {
+      await shown.unmount();
+    }
+    assert.equal(projectsFocus.on, false);
+  });
+
+  await t.test('the office panel folds only while Projects is the window in front', async () => {
+    rememberFocus(true);
+    office({ sessions: [SESSION], view: viewOf(true, true) });
+    const shown = await projectsWindow();
+    try {
+      assert.equal(panelFolded(PROJECTS_WIN), true, 'Projects in front');
+      assert.equal(panelFolded(DESK_WIN), false, 'another window in front');
+      assert.equal(panelFolded(undefined), false, 'no window in front');
+    } finally {
+      await shown.unmount();
+    }
+    assert.equal(panelFolded(PROJECTS_WIN), false, 'nor once the window closes');
+  });
 
   await t.test('the choice is read as the window opens, and kept for the next', async () => {
     rememberFocus(true);
@@ -99,6 +135,7 @@ test('Focus folds away the Projects title row and the session list only while a 
       try {
         assert.equal(titleRow(shown.target), 'Projects');
         assert.ok(sessionList(shown.target));
+        assert.equal(projectsFocus.on, false, 'the office panel stays whole');
         assert.deepEqual(
           buttons(shown.target, PROJECT_WORDS.focus).map(described),
           [],

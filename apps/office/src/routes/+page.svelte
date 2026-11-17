@@ -43,6 +43,7 @@
     openLessons,
     openProject,
     openReport,
+    panelFolded,
     wins,
     type Win
   } from '#lib/ui/windows.svelte.ts';
@@ -196,6 +197,8 @@
   /** The start panel is open while it holds windows and the owner has not folded it away. */
   const leftOpen = $derived(wins.shown && wins.list.length > 0);
   const front = $derived(wins.list.find((w) => w.id === wins.active));
+  /** Focus in the front Projects window gives its terminal the panel's height. */
+  const folded = $derived(panelFolded(front));
   let deskFocus = $state<string | undefined>();
   let notify = $state(false);
   // The two side panels. Widths are remembered per viewer by SidePanel.
@@ -1335,41 +1338,48 @@
       reach={projectsReach}
     >
       <div class="flex h-full min-h-0 flex-col">
-        <div class="pb-2">{@render plate(true)}</div>
-        <!-- One tab per open window. Every window stays mounted, so each keeps its place. -->
-        <div
-          class="flex gap-1 overflow-x-auto border-t border-hairline px-2 pt-2"
-          role="tablist"
-          aria-label="Open windows"
-        >
-          {#each wins.list as w (w.id)}
-            <div
-              class="flex shrink-0 items-center rounded-t-lg {wins.active === w.id
-                ? 'bg-raise text-ink'
-                : 'text-muted hover:text-ink'}"
-            >
-              <button
-                role="tab"
-                aria-selected={wins.active === w.id}
-                class="flex max-w-44 items-center gap-1.5 truncate py-1.5 ps-2.5 pe-1 text-xs"
-                onclick={() => {
-                  wins.active = w.id;
-                  wins.raised = true;
-                }}
-                >{#if wins.busy[w.id]}<span class="busy" aria-label="drawing"></span>{/if}{winTitle(
-                  w
-                )}{#if w.kind === 'desk' && deskCount}<span class="text-ember">{deskCount}</span
-                  >{/if}{#if wins.dirty[w.id]}<span class="text-ember" aria-label="unsaved">•</span
-                  >{/if}</button
+        <!-- Under Focus the plate and the music bar hide but stay mounted, so the
+             music, the theme and the restored note keep their state. -->
+        <div class="pb-2" class:hidden={folded}>{@render plate(true)}</div>
+        <!-- One tab per open window. Every window stays mounted, so each keeps its place.
+             The row leaves under Focus: it carries `flex`, and `hidden` beside it
+             would win only by the stylesheet's order. -->
+        {#if !folded}
+          <div
+            class="flex gap-1 overflow-x-auto border-t border-hairline px-2 pt-2"
+            role="tablist"
+            aria-label="Open windows"
+          >
+            {#each wins.list as w (w.id)}
+              <div
+                class="flex shrink-0 items-center rounded-t-lg {wins.active === w.id
+                  ? 'bg-raise text-ink'
+                  : 'text-muted hover:text-ink'}"
               >
-              <button
-                class="px-1.5 py-1.5 text-[10px] text-faint hover:text-coral"
-                aria-label={`Close ${winTitle(w)}`}
-                onclick={() => close(w.id)}>✕</button
-              >
-            </div>
-          {/each}
-        </div>
+                <button
+                  role="tab"
+                  aria-selected={wins.active === w.id}
+                  class="flex max-w-44 items-center gap-1.5 truncate py-1.5 ps-2.5 pe-1 text-xs"
+                  onclick={() => {
+                    wins.active = w.id;
+                    wins.raised = true;
+                  }}
+                  >{#if wins.busy[w.id]}<span class="busy" aria-label="drawing"
+                    ></span>{/if}{winTitle(w)}{#if w.kind === 'desk' && deskCount}<span
+                      class="text-ember">{deskCount}</span
+                    >{/if}{#if wins.dirty[w.id]}<span class="text-ember" aria-label="unsaved"
+                      >•</span
+                    >{/if}</button
+                >
+                <button
+                  class="px-1.5 py-1.5 text-[10px] text-faint hover:text-coral"
+                  aria-label={`Close ${winTitle(w)}`}
+                  onclick={() => close(w.id)}>✕</button
+                >
+              </div>
+            {/each}
+          </div>
+        {/if}
         <div class="min-h-0 flex-1 border-t border-hairline">
           {#each wins.list as w (w.id)}
             <div class="h-full min-h-0" class:hidden={wins.active !== w.id} role="tabpanel">
@@ -1465,7 +1475,7 @@
           {/each}
         </div>
         <!-- The music keeps its place and size while Projects widens the panel. -->
-        <div class="border-t border-hairline px-3 py-2">
+        <div class="border-t border-hairline px-3 py-2" class:hidden={folded}>
           <div style="max-inline-size: {leftWidth - 24}px">
             <FloorControls bind:light onfit={fitFloor} onzoom={(d) => floor?.zoomBy(d)} />
           </div>
