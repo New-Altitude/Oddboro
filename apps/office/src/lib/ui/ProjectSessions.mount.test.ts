@@ -298,6 +298,17 @@ test('Claude Code’s question before it works in a new folder shows under Start
   }
 });
 
+test('Closing the Projects window ends the setup question’s terminal', async () => {
+  const shown = await askedToTrust();
+  assert.ok(setupShown(shown.target), 'shown first');
+  await shown.unmount();
+  assert.deepEqual(
+    asked('disconnect').map((s) => s.id),
+    ['setup-1'],
+    'its terminal ended, once'
+  );
+});
+
 test('The setup question ends when the form it was asked for changes', async (t) => {
   const changes = [
     {

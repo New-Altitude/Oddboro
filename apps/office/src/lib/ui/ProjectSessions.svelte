@@ -268,7 +268,7 @@
   /**
    * Ends the setup terminal the form shows, if any. The office keeps one open
    * until told, so every way off it (a change, another session, a new form, the
-   * next Start) comes here. Failing to reach the office shows under Start.
+   * next Start, closing the window) comes here. Failing to reach the office shows under Start.
    */
   function closeSetup() {
     const id = setup?.id;
@@ -416,6 +416,7 @@
   // On mount, since the server has no storage to read it from.
   onMount(() => {
     focusWanted = focusRemembered();
+    return closeSetup;
   });
   // The list reads again whenever the office's records change, or Setup changes
   // the Claude folders, which live in .env and reach the page no other way.
