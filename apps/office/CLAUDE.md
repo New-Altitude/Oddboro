@@ -2219,8 +2219,9 @@ reach again. Another tab in front brings the usual width back. While the rail is
 back to the wide rail's edge, in the rail's own 200 ms, so every Odd stays in
 view. Its sessions run down the start side as a listbox; the selected one's
 terminal fills the rest, and its details fold out over the terminal. The
-terminal refits at once and sends the session its size only once it settles
-(`ProjectTerminal.svelte`).
+terminal refits at once and sends the session its size only once it settles,
+and once more, to redraw, when the owner comes back to it after it or the
+browser window lost focus (`ProjectTerminal.svelte`).
 They sit behind Advanced mode (`owner.advanced_at`), which the owner turns on
 in Setup's Advanced section (`AdvancedSection.svelte`, `PUT
 /api/setup/advanced`) after one warning. The page holds it in `advanced` in
