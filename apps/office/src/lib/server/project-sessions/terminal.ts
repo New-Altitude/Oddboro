@@ -87,6 +87,15 @@ export class ProjectTerminal {
   resize(cols: number, rows: number) {
     if (!this.ended) this.child.resize(cols, rows);
   }
+  /**
+   * Resizes to `cols` by way of one column wider, so the program draws again
+   * for this window even at the size it already has: a terminal sends no
+   * resize signal for an equal size. Claude Code's own repaint does the same.
+   */
+  redraw(cols: number, rows: number) {
+    this.resize(cols + 1, rows);
+    this.resize(cols, rows);
+  }
   async releaseProcess() {
     if (this.ended) return;
     const ended = once(this.events, 'exit', { signal: AbortSignal.timeout(12000) });

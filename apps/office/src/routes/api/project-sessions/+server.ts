@@ -54,7 +54,10 @@ const command = z.discriminatedUnion('action', [
     id,
     view: id,
     cols: z.number().int().min(10).max(500),
-    rows: z.number().int().min(4).max(200)
+    rows: z.number().int().min(4).max(200),
+    // Set when another window may have taken the session's size since this
+    // one last sent it, so the session draws for this window again.
+    redraw: z.boolean().optional()
   }),
   z.object({ action: z.literal('steer'), id, turn: z.string(), prompt, file }),
   z.object({ action: z.literal('stop'), id, expected: z.string() }),
@@ -157,9 +160,12 @@ export const POST: RequestHandler = async ({ request }) => {
       case 'keys':
         c.openTerminal(a.id).requireControl(a.view).write(a.data);
         break;
-      case 'size':
-        c.openTerminal(a.id).requireControl(a.view).resize(a.cols, a.rows);
+      case 'size': {
+        const t = c.openTerminal(a.id).requireControl(a.view);
+        if (a.redraw) t.redraw(a.cols, a.rows);
+        else t.resize(a.cols, a.rows);
         break;
+      }
       case 'steer':
         await c.steer(a.id, a.turn, a.prompt, a.file);
         break;

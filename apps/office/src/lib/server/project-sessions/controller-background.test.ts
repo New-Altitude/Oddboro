@@ -26,6 +26,8 @@ import { app, save } from './controller-under-test.ts';
 
 /** Each terminal opened: its arguments, folder and environment. */
 const spawned: { args: string[]; cwd: string; env: Record<string, string> }[] = [];
+/** Each size any terminal was set to, in order, as [cols, rows]. */
+const resized: number[][] = [];
 mock.module('@oddboro/ledger/project-terminal', {
   namedExports: {
     openProjectTerminal: async (
@@ -39,7 +41,7 @@ mock.module('@oddboro/ledger/project-terminal', {
         onData: () => {},
         onExit: (done: typeof exited) => void (exited = done),
         write: () => {},
-        resize: () => {},
+        resize: (cols: number, rows: number) => void resized.push([cols, rows]),
         kill: () => {
           // Logged beside claude's commands, so a test can tell which came first.
           appendFileSync(calls, `terminal closed ${JSON.stringify(args)}\n`);
@@ -557,6 +559,34 @@ test('Opening the terminal again clears the note that it closed', SHELL_STAND_IN
   await c.terminal(s.id);
   assert.equal(c.view(s.id)?.note, 'Connected');
 });
+
+test(
+  'A size from the page resizes the terminal once, and a redraw resizes it one column wider and back',
+  SHELL_STAND_IN,
+  async () => {
+    const dir = claudeFolder('.claude-size');
+    writeFileSync(join(dir, 'start-id'), randomUUID());
+    const s = await c.connect('claude', app, { configDir: dir, title: 'Work' });
+    await c.terminal(s.id);
+    const view = randomUUID();
+    const post = async (body: object) => {
+      const answer = await request('/api/project-sessions', 'POST', {
+        body: { id: s.id, view, ...body }
+      });
+      assert.ok(answer.ok, await answer.text());
+    };
+    await post({ action: 'control' });
+    resized.length = 0;
+    await post({ action: 'size', cols: 100, rows: 30 });
+    assert.deepEqual(resized, [[100, 30]]);
+    resized.length = 0;
+    await post({ action: 'size', cols: 100, rows: 30, redraw: true });
+    assert.deepEqual(resized, [
+      [101, 30],
+      [100, 30]
+    ]);
+  }
+);
 
 test(
   'Below Claude Code 2.1.285, or with background sessions turned off, Projects refuses in plain words before anything starts',
