@@ -4,45 +4,29 @@
 // list starts, where an error shows, and when Claude Code's setup question
 // for a new folder shows and ends.
 import assert from 'node:assert/strict';
-import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { fileURLToPath } from 'node:url';
 import { PROJECT_WORDS } from '../project-words.ts';
-import { mountedForClient, type Mounted } from './onboarding/mounted-for-client.ts';
+import {
+  asked,
+  button,
+  enterFolder,
+  folderField,
+  FOLDERS,
+  lineOf,
+  office,
+  one,
+  pick,
+  projectsWindow,
+  REFUSED,
+  refused,
+  sameElement,
+  sent,
+  settled,
+  typeFolder,
+  type Answer
+} from './projects-window-under-test.ts';
 import type { Choice } from './project-form.ts';
-import type ProjectSessionsComponent from './ProjectSessions.svelte';
 
-const source = join(dirname(fileURLToPath(import.meta.url)), 'ProjectSessions.svelte');
-
-/** One request the window sent to the project sessions route. */
-type Sent = { action: string } & Record<string, unknown>;
-/** What the stand-in office answers a request with: a body, a whole response, or a wait. */
-type Answer = (sent: Sent) => unknown;
-let answer: Answer = () => ({});
-let sent: Sent[] = [];
-/** What Choose folder's own route answers. */
-let picked: unknown = {};
-globalThis.fetch = (async (url: string, init: RequestInit) => {
-  if (url === '/api/folders/pick') return Response.json(picked);
-  const body = JSON.parse(String(init.body)) as Sent;
-  sent.push(body);
-  const reply = await answer(body);
-  return reply instanceof Response ? reply : Response.json(reply);
-}) as typeof fetch;
-// The window's live updates: none arrive in these tests.
-Object.defineProperty(globalThis, 'EventSource', {
-  value: class {
-    addEventListener() {}
-    close() {}
-  },
-  configurable: true,
-  writable: true
-});
-
-const FOLDERS = [
-  { path: '/work/claude-a', mark: 'owner@example.com' },
-  { path: '/work/claude-b', mark: 'second@example.com' }
-];
 const row = (n: number, more: Partial<Choice> = {}): Choice => ({
   id: `${n}${n}${n}${n}${n}${n}${n}${n}-0000-4000-8000-000000000000`,
   title: `Conversation ${n}`,
@@ -52,93 +36,21 @@ const row = (n: number, more: Partial<Choice> = {}): Choice => ({
 });
 const ROW_1 = row(1);
 const ROW_2 = row(2);
-const REFUSED = 'Claude is replying in that terminal.';
-const refused = (message: string) => Response.json({ message }, { status: 409 });
 
-/** An office with no sessions yet, answering anything else through `more`. */
-function office(more: Answer = () => ({})) {
-  sent = [];
-  picked = {};
-  answer = (s) => {
-    if (s.action === 'connections') return [];
-    if (s.action === 'folders') return FOLDERS;
-    return more(s);
-  };
-}
 /** An answer the test gives when it chooses. */
 function later() {
   return Promise.withResolvers<unknown>();
 }
-const asked = (action: string) => sent.filter((s) => s.action === action);
 
-/** Lets every request answered so far land, and the window show it. */
-async function settled(shown: Mounted) {
-  for (let i = 0; i < 10; i++) {
-    await new Promise((r) => setImmediate(r));
-    shown.flush();
-  }
-}
-async function projectsWindow() {
-  const shown = await mountedForClient<typeof ProjectSessionsComponent>(source, {
-    staff: [],
-    version: 0,
-    ask: { n: 0 }
-  });
-  await settled(shown);
-  return shown;
-}
-
-function one<E extends Element>(root: Element, selector: string): E {
-  const found = root.querySelector<E>(selector);
-  assert.ok(found, `one ${selector}`);
-  return found;
-}
-function buttons(root: Element, words: string) {
-  return [...root.querySelectorAll('button')].filter((b) => b.textContent?.trim() === words);
-}
-function button(root: Element, words: string) {
-  const found = buttons(root, words);
-  assert.equal(found.length, 1, `one button reading "${words}"`);
-  return found[0];
-}
-const folderField = (root: Element) =>
-  one<HTMLInputElement>(root, 'input[placeholder^="Folder path"]');
-/** Types `value` into the folder field, one `input` per keystroke, and stays in it. */
-function typeFolder(root: Element, value: string) {
-  const field = folderField(root);
-  for (let end = 1; end <= value.length; end++) {
-    field.value = value.slice(0, end);
-    field.dispatchEvent(new Event('input', { bubbles: true }));
-  }
-}
-/** Types `value` into the folder field and leaves it, as the owner does. */
-function enterFolder(root: Element, value: string) {
-  typeFolder(root, value);
-  folderField(root).dispatchEvent(new Event('change', { bubbles: true }));
-}
-/** Picks `value` in the list `label` names, as the owner does. */
-function pick(root: Element, label: string, value: string) {
-  const list = one<HTMLSelectElement>(root, `select[aria-label="${label}"]`);
-  list.value = value;
-  list.dispatchEvent(new Event('change', { bubbles: true }));
-}
-/** The line a found conversation's row sits on, with any button beside it. */
-function lineOf(root: Element, c: Choice) {
-  const own = [...root.querySelectorAll('button')].find((b) =>
-    b.textContent?.includes(c.id.slice(0, 8))
-  );
-  return own?.parentElement ?? null;
-}
 const rowShown = (root: Element, c: Choice) => lineOf(root, c) !== null;
-/** The words of each error shown. Tests compare words and yes or no, never elements:
- * a failed assertion on a document element prints the whole document, for a minute. */
+/** The words of each error shown. */
 const alerts = (root: Element) =>
   [...root.querySelectorAll('[role="alert"]')].map((a) => a.textContent?.trim());
 const says = (root: Element, words: string) => root.textContent?.includes(words) ?? false;
 
 /** The window on the continue path, with `folder` entered and its list landed or waiting. */
 async function continuing(folder: string, more: Answer) {
-  office(more);
+  office({ more });
   const shown = await projectsWindow();
   button(shown.target, 'Continue an earlier one').click();
   shown.flush();
@@ -149,7 +61,7 @@ async function continuing(folder: string, more: Answer) {
 
 test('A folder lists its conversations once it is committed, never per keystroke', async (t) => {
   await t.test('typing lists nothing, and leaving the field lists that folder once', async () => {
-    office(() => [ROW_1]);
+    office({ more: () => [ROW_1] });
     const shown = await projectsWindow();
     try {
       button(shown.target, 'Continue an earlier one').click();
@@ -171,12 +83,11 @@ test('A folder lists its conversations once it is committed, never per keystroke
   });
 
   await t.test('Choose folder lists the folder picked', async () => {
-    office(() => [ROW_1]);
+    office({ picked: { path: '/work/picked' }, more: () => [ROW_1] });
     const shown = await projectsWindow();
     try {
       button(shown.target, 'Continue an earlier one').click();
       shown.flush();
-      picked = { path: '/work/picked' };
       button(shown.target, 'Choose folder').click();
       await settled(shown);
       assert.equal(folderField(shown.target).value, '/work/picked');
@@ -315,8 +226,8 @@ test('A conversation that will not open shows the office’s words directly unde
 
     assert.deepEqual(alerts(shown.target), [REFUSED], 'one error, the office’s words');
     const error = one(shown.target, '[role="alert"]');
-    assert.ok(error.previousElementSibling === line, 'right under the row clicked');
-    assert.ok(error.nextElementSibling === lineOf(shown.target, ROW_2), 'above the next row');
+    sameElement(error.previousElementSibling, line, 'right under the row clicked');
+    sameElement(error.nextElementSibling, lineOf(shown.target, ROW_2), 'above the next row');
   } finally {
     await shown.unmount();
   }
@@ -350,7 +261,9 @@ test('Move here on a row open in a terminal moves it, once the owner confirms', 
  */
 async function askedToTrust(next: () => unknown = () => ({})) {
   let starts = 0;
-  office((s) => (s.action === 'connect' ? (++starts === 1 ? { setup: 'setup-1' } : next()) : {}));
+  office({
+    more: (s) => (s.action === 'connect' ? (++starts === 1 ? { setup: 'setup-1' } : next()) : {})
+  });
   const shown = await projectsWindow();
   button(shown.target, 'Start a new conversation').click();
   shown.flush();
