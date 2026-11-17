@@ -74,7 +74,12 @@ function agentList(out: string): Active[] | undefined {
     .filter((a): a is Record<string, unknown> => typeof a === 'object' && a !== null)
     .map((a) => {
       const kind = KINDS.find((k) => k === a.kind);
-      const pid = kind && typeof a.pid === 'number' && Number.isInteger(a.pid) ? a.pid : undefined;
+      // Only a positive id names one process. The office may interrupt it, and 0 or
+      // below would signal a whole group of processes, or every one the owner runs.
+      const pid =
+        kind && typeof a.pid === 'number' && Number.isInteger(a.pid) && a.pid > 0
+          ? a.pid
+          : undefined;
       // The other fields are read as Claude Code prints them, as they were
       // before kind and pid were checked.
       return { ...(a as Omit<Active, 'kind' | 'pid'>), kind, pid };

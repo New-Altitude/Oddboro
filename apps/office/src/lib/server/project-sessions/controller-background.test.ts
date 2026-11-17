@@ -194,6 +194,8 @@ const interrupted = (pid: number | undefined) =>
 const pluginOf = (id: string) => L.home('project-sessions', id, 'market', 'plugin');
 const lastTerminal = () => spawned.at(-1)!;
 const SHELL_STAND_IN = { skip: process.platform === 'win32' && 'the stand-in is a shell script' };
+/** What `claude --bg` prints in a project folder Claude Code was never told to trust. */
+const NOT_TRUSTED = `Workspace not trusted. Run \`claude\` in ${app} once to accept the workspace trust dialog.\n`;
 
 const c = projectController();
 /** The controller's runtimes and its release: no public method releases every one. */
@@ -317,6 +319,63 @@ test(
 );
 
 test(
+  'Open terminal refuses a conversation opened in a plain terminal since it was connected, and resumes no copy beside it',
+  SHELL_STAND_IN,
+  async () => {
+    const dir = claudeFolder('.claude-opened-since');
+    const id = randomUUID();
+    save(dir, id);
+    const s = await c.connect('claude', app, { nativeId: id, configDir: dir });
+    const session = terminalSession();
+    try {
+      agents(dir, [inTerminal(id, session.pid!, 'idle')]);
+      const opened = spawned.length;
+      await assert.rejects(c.terminal(s.id), { message: PROJECT_WORDS.useMove });
+      assert.ok(!logged().some((line) => line.startsWith('--bg')), logged().join('\n'));
+      assert.equal(spawned.length, opened, 'a terminal opened');
+      assert.ok(!interrupted(session.pid) && alive(session));
+    } finally {
+      session.kill();
+    }
+  }
+);
+
+test(
+  'Open terminal checks the Claude Code version again, so one below 2.1.285 since connect is refused in plain words before anything starts',
+  SHELL_STAND_IN,
+  async () => {
+    const dir = claudeFolder('.claude-version-terminal');
+    const id = randomUUID();
+    save(dir, id);
+    const s = await c.connect('claude', app, { nativeId: id, configDir: dir });
+    const opened = spawned.length;
+    try {
+      version('2.1.284 (Claude Code)');
+      await assert.rejects(c.terminal(s.id), { message: PROJECT_WORDS.update });
+      assert.ok(!logged().some((line) => line.startsWith('--bg')), logged().join('\n'));
+      assert.equal(spawned.length, opened, 'a terminal opened');
+    } finally {
+      version(NEWEST);
+    }
+  }
+);
+
+test(
+  'Open terminal on a saved conversation whose folder Claude Code no longer trusts says it could not start, with no trust question',
+  SHELL_STAND_IN,
+  async () => {
+    const dir = claudeFolder('.claude-untrusted-continue');
+    const id = randomUUID();
+    save(dir, id);
+    const s = await c.connect('claude', app, { nativeId: id, configDir: dir });
+    writeFileSync(join(dir, 'bg.out'), NOT_TRUSTED);
+    const opened = spawned.length;
+    await assert.rejects(c.terminal(s.id), { message: PROJECT_WORDS.startFailed });
+    assert.equal(spawned.length, opened, 'a terminal opened');
+  }
+);
+
+test(
   "A conversation open in a terminal is refused with Move here's words, and with move it is ended at idle and opened in the background",
   SHELL_STAND_IN,
   async () => {
@@ -414,6 +473,12 @@ test(
       assert.equal(await onPlatform('linux', movable), true);
       assert.equal(await onWindows(movable), false);
 
+      // Selecting it, and Move here sent anyway, both get the walk-through.
+      await onWindows(() =>
+        assert.rejects(c.connect('claude', app, { nativeId: id, configDir: dir }), {
+          message: PROJECT_WORDS.windows
+        })
+      );
       await onWindows(() =>
         assert.rejects(c.connect('claude', app, { nativeId: id, configDir: dir, move: true }), {
           message: PROJECT_WORDS.windows
@@ -624,8 +689,7 @@ test(
   async () => {
     const dir = claudeFolder('.claude-trust');
     const untrusted = join(dir, 'bg.out');
-    const said = `Workspace not trusted. Run \`claude\` in ${app} once to accept the workspace trust dialog.\n`;
-    writeFileSync(untrusted, said);
+    writeFileSync(untrusted, NOT_TRUSTED);
     const plugins = () =>
       existsSync(L.home('project-sessions')) ? readdirSync(L.home('project-sessions')).sort() : [];
     const before = plugins();
@@ -656,7 +720,7 @@ test(
     assert.throws(() => c.openTerminal(setup));
 
     // The page's Start through the route gets the terminal to show.
-    writeFileSync(untrusted, said);
+    writeFileSync(untrusted, NOT_TRUSTED);
     const answer = await request('/api/project-sessions', 'POST', {
       body: { action: 'connect', agent: 'claude', folder: app, configDir: dir }
     });

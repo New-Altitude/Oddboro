@@ -491,3 +491,41 @@ test(
     assert.equal(rows[started].job, started.slice(0, 8));
   }
 );
+
+test(
+  'an sdk or remote session with a process is not running here and cannot be moved, since only interactive and background sessions are read',
+  { skip: process.platform === 'win32' && 'the stand-in is a shell script' },
+  async () => {
+    const [sdk, remote] = [0, 1].map((i) => `0000040${i}-0000-4000-8000-00000000040${i}`);
+    const rows = await listedWith(
+      [sdk, remote],
+      [
+        { sessionId: sdk, kind: 'sdk', pid: process.pid, status: 'idle' },
+        { sessionId: remote, kind: 'remote', pid: process.pid, status: 'idle' }
+      ]
+    );
+    for (const id of [sdk, remote]) {
+      const { live, pid, movable } = rows[id];
+      assert.deepEqual({ live, pid, movable }, { live: false, pid: undefined, movable: false }, id);
+    }
+  }
+);
+
+test(
+  'a terminal session listed with a process id of 0 or below has no process, so it is not running and cannot be moved',
+  { skip: process.platform === 'win32' && 'the stand-in is a shell script' },
+  async () => {
+    const [zero, negative] = [0, 1].map((i) => `0000050${i}-0000-4000-8000-00000000050${i}`);
+    const rows = await listedWith(
+      [zero, negative],
+      [
+        { sessionId: zero, kind: 'interactive', pid: 0, status: 'idle' },
+        { sessionId: negative, kind: 'interactive', pid: -1, status: 'idle' }
+      ]
+    );
+    for (const id of [zero, negative]) {
+      const { live, pid, movable } = rows[id];
+      assert.deepEqual({ live, pid, movable }, { live: false, pid: undefined, movable: false }, id);
+    }
+  }
+);
