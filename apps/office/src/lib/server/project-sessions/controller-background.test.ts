@@ -545,6 +545,32 @@ test(
 );
 
 test(
+  'Move here on a terminal that switched to another conversation since the first read refuses at once, with no signal',
+  SHELL_STAND_IN,
+  async () => {
+    const dir = claudeFolder('.claude-switched');
+    const id = randomUUID();
+    save(dir, id);
+    const session = terminalSession();
+    try {
+      agents(dir, [inTerminal(id, session.pid!, 'idle')]);
+      // As after /clear or /resume there: the process is alive, and listed
+      // under another conversation or not at all.
+      for (const now of [[inTerminal(randomUUID(), session.pid!, 'idle')], []]) {
+        agentsNow(dir, now);
+        await assert.rejects(
+          c.connect('claude', app, { nativeId: id, configDir: dir, move: true }),
+          { message: PROJECT_WORDS.switched }
+        );
+        assert.ok(!interrupted(session.pid) && alive(session));
+      }
+    } finally {
+      session.kill();
+    }
+  }
+);
+
+test(
   'Move here waits for the terminal session to exit, and says the terminal is still closing when it outlives the wait',
   SHELL_STAND_IN,
   async () => {

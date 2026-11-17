@@ -140,8 +140,11 @@ export async function endTerminalSession(
   const now = (await claudeAgents(folder, liveIn)).find(
     (a) => a.sessionId === row.id && a.pid === pid
   );
-  // Not listed now: it ended, or is ending, on its own. The wait below
-  // confirms it is gone, and no signal goes to a process no read vouches for.
+  // Not listed now for this conversation: no signal goes to a process no
+  // read vouches for. Gone, it ended on its own, and the wait below returns
+  // at once. Still running, it holds another conversation now, as after
+  // /clear or /resume in that terminal, so nothing of this one is closing.
+  if (!now && !processGone(pid)) throw new Error(PROJECT_WORDS.switched);
   if (now) {
     requireIdle(now.status);
     try {

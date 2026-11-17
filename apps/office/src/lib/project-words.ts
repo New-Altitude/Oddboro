@@ -20,6 +20,7 @@ export const PROJECT_WORDS = {
   copied: 'This conversation just opened in another window. Try again.',
   startFailed: 'Claude Code could not start this conversation. Try again.',
   closeSlow: 'That terminal is still closing. Wait a moment, then try again.',
+  switched: 'That terminal has switched to another conversation, so nothing was closed. Try again.',
   waiting: 'Claude is waiting for your answer in that terminal. Answer it there, then try again.',
   focus: 'Focus',
   // Starts with the button's visible word, so voice control finds it by what it shows.
