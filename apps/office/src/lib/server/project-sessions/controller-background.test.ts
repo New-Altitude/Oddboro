@@ -14,7 +14,6 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
-  realpathSync,
   rmSync,
   symlinkSync,
   utimesSync,
@@ -23,6 +22,7 @@ import {
 import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { after, afterEach, beforeEach, mock, test } from 'node:test';
+import { app, save } from './controller-under-test.ts';
 
 /** Each terminal opened: its arguments, folder and environment. */
 const spawned: { args: string[]; cwd: string; env: Record<string, string> }[] = [];
@@ -126,24 +126,12 @@ version(NEWEST);
 /** Each command claude ran since the test began, one per line, and each terminal closed. */
 const logged = () => (existsSync(calls) ? readFileSync(calls, 'utf8').split('\n') : []);
 
-const project = join(homedir(), 'app');
-mkdirSync(project, { recursive: true });
-const app = realpathSync(project);
 /** A Claude folder named in Setup, the only one, so every test reads its own. */
 function claudeFolder(name: string) {
   const dir = join(homedir(), name);
   mkdirSync(dir, { recursive: true });
   L.setClaudeFolders([dir]);
   return dir;
-}
-/** Save a conversation of the project in the Claude folder `dir`, as Claude Code does. */
-function save(dir: string, id: string) {
-  const where = join(dir, 'projects', app.replace(/[^a-zA-Z0-9]/g, '-'));
-  mkdirSync(where, { recursive: true });
-  writeFileSync(
-    join(where, id + '.jsonl'),
-    JSON.stringify({ type: 'user', cwd: app, message: { content: 'Work' } }) + '\n'
-  );
 }
 /** What `claude agents --json` lists in the Claude folder `dir`. */
 const agents = (dir: string, rows: object[]) =>

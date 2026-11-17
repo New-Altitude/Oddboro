@@ -13,12 +13,12 @@ import {
   realpathSync,
   rmSync,
   symlinkSync,
-  utimesSync,
   writeFileSync
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, mock, test } from 'node:test';
+import { app, save } from './controller-under-test.ts';
 import type { ProjectSession } from '@oddboro/ledger';
 
 /** Each terminal opened: its arguments and the environment it got. */
@@ -93,24 +93,7 @@ chmodSync(join(bin, 'claude'), 0o755);
 process.env.PATH = `${bin}:${process.env.PATH}`;
 const logged = () => (existsSync(calls) ? readFileSync(calls, 'utf8') : '');
 
-const project = join(homedir(), 'app');
-mkdirSync(project, { recursive: true });
-const app = realpathSync(project);
 const own = join(homedir(), '.claude');
-/**
- * Save a conversation of the project in the Claude folder `dir`, as Claude
- * Code does, last changed `at` seconds from now when given.
- */
-function save(dir: string, id: string, at?: number) {
-  const where = join(dir, 'projects', app.replace(/[^a-zA-Z0-9]/g, '-'));
-  mkdirSync(where, { recursive: true });
-  const file = join(where, id + '.jsonl');
-  writeFileSync(
-    file,
-    JSON.stringify({ type: 'user', cwd: app, message: { content: 'Work' } }) + '\n'
-  );
-  if (at !== undefined) utimesSync(file, Date.now() / 1000 + at, Date.now() / 1000 + at);
-}
 /**
  * A process standing in for a Claude terminal session's, so a connect that
  * wrongly ended one would interrupt it and fail its test, never the test run.
