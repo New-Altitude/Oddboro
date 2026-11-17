@@ -24,7 +24,7 @@ import { claudeFolderMark } from '../claude.ts';
  * What connect tells the owner about a Claude session's folder, by folder
  * marks (`claudeFolderMark`): `newer` and `to` name the folder holding the
  * conversation's newest copy, `from` the one the session left, and `terminal`
- * the folder of the terminal session Move here ended. A session moves only
+ * the folder of the terminal session connect's `move` ended. A session moves only
  * when its own folder lacks the conversation, or to that terminal's folder,
  * so at most one applies.
  */
@@ -158,7 +158,7 @@ export async function copyToOpen(
   // folder holding its newest copy, so one connected before its folder
   // was known gets it now, and one with no folder found in the office's
   // default folder keeps none. Reconnect moves a session to another
-  // folder only then, or to the folder of a terminal Move here ends (below),
+  // folder only then, or to the folder of a terminal `move` ends (below),
   // and tells the owner.
   const movedTo = known && !own && configDir === undefined ? newest?.configDir : undefined;
   if (!own) configDir ??= newest?.configDir ?? undefined;
@@ -168,7 +168,7 @@ export async function copyToOpen(
   // session ends first: the process this read found, while a second read
   // still finds it idle.
   const open = [own, newest].find(inTerminal);
-  // The Claude folder of the terminal session Move here ended, when it is
+  // The Claude folder of the terminal session `move` ended, when it is
   // not the one this session would resume in. The owner was using that copy,
   // so the session resumes and is stored there, as a pick of it would be,
   // never in an older copy here.
