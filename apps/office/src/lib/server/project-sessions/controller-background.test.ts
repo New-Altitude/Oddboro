@@ -496,6 +496,8 @@ test(
       assert.ok(interrupted(session.pid));
       assert.deepEqual(lastTerminal().args, ['attach', id.slice(0, 8)]);
       assert.equal(s.nativeId, id);
+      // The terminal ran under the folder the session already uses: no notice.
+      assert.equal(c.view(s.id)?.folderNotice, null);
     } finally {
       session.kill();
     }
@@ -545,7 +547,7 @@ test(
 );
 
 test(
-  'Move here on a terminal that switched to another conversation since the first read refuses at once, with no signal',
+  'Move here on a terminal no longer showing the conversation since the first read refuses at once, with no signal',
   SHELL_STAND_IN,
   async () => {
     const dir = claudeFolder('.claude-switched');
@@ -558,10 +560,16 @@ test(
       // under another conversation or not at all.
       for (const now of [[inTerminal(randomUUID(), session.pid!, 'idle')], []]) {
         agentsNow(dir, now);
+        const started = Date.now();
         await assert.rejects(
           c.connect('claude', app, { nativeId: id, configDir: dir, move: true }),
-          { message: PROJECT_WORDS.switched }
+          {
+            message:
+              'That terminal is no longer showing this conversation, so nothing was closed. Try again.'
+          }
         );
+        // At once: not after the wait for a closing terminal.
+        assert.ok(Date.now() - started < 1000, `answered after ${Date.now() - started} ms`);
         assert.ok(!interrupted(session.pid) && alive(session));
       }
     } finally {
