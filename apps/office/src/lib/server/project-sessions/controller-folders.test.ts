@@ -44,7 +44,8 @@ mock.module('@oddboro/ledger/project-terminal', {
 });
 const { L, chatOf, folder, plain, refusal, request, withEnv } =
   await import('../office-under-test.ts');
-const { FOLDER_NOTICE, PICK_LACKS_IT, projectController } = await import('./controller.ts');
+const { projectController } = await import('./controller.ts');
+const { FOLDER_NOTICE, PICK_LACKS_IT } = await import('./controller-claude.ts');
 const { PROJECT_WORDS } = await import('../../project-words.ts');
 const { devReads } = await import('../sandbox.ts');
 // The office's own stand-ins, before this file's claude goes first: an Odd's chat runs on them.
