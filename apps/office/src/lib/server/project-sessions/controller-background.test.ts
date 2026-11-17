@@ -678,7 +678,8 @@ test(
     // Reconnect sends no folder, so the session would run in the default one.
     // That folder lacks the conversation, so the session would move to B's
     // newest copy anyway: storing B here needs only one of that move and the
-    // terminal's, and the stored-in-A test above needs the terminal's.
+    // terminal's. The stored-in-A test above needs the terminal's, and the
+    // Reconnect tests in controller-folders.test.ts need the move.
     assert.deepEqual(await moveIn({ live: b }), {
       notice:
         'The terminal was using ~/.claude-terminal-only-b · signed out, so this session now uses it too.',
