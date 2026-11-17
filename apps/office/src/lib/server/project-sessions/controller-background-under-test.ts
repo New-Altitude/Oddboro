@@ -63,7 +63,9 @@ export const { PROJECT_WORDS } = await import('../../project-words.ts');
 // and `--bg` with the folder's `bg.out`, else the line Claude Code prints. A
 // background start adds its session to `agents.json`, under the folder's
 // `start-id` when the test names one. `stop` and `rm` log again with the
-// project folder and the Claude folder they ran in.
+// project folder and the Claude folder they ran in. A test makes `agents`
+// fail with an `agents.fail` file in the Claude folder, and `stop` with a
+// `stop.fail` file: each then exits 1, `stop` after its log line.
 const calls = join(folder, 'background-calls.log');
 const bin = join(folder, 'background-bin');
 mkdirSync(bin);
@@ -81,6 +83,7 @@ const rows = JSON.parse(read('agents.json') ?? '[]');
 if (args[0] === '--version') process.stdout.write(readFileSync(${JSON.stringify(versionFile)}, 'utf8'));
 else if (args[0] === 'auth') console.log('{"loggedIn":false}');
 else if (args[0] === 'agents') {
+  if (read('agents.fail') !== undefined) process.exit(1);
   const ended = (r) => r.pid === undefined && ['done', 'stopped', 'failed'].includes(r.state);
   const now = read('agents-now.json');
   if (!args.includes('--all') && now !== undefined) process.stdout.write(now);
@@ -96,8 +99,10 @@ else if (args[0] === 'agents') {
     writeFileSync(join(dir, 'agents.json'), JSON.stringify(rows));
     console.log('backgrounded · ' + sessionId.slice(0, 8) + ' · ' + args[args.indexOf('-n') + 1]);
   }
-} else if (args[0] === 'stop' || args[0] === 'rm')
+} else if (args[0] === 'stop' || args[0] === 'rm') {
   appendFileSync(${JSON.stringify(calls)}, args.join(' ') + ' in ' + process.cwd() + ' under ' + dir + '\\n');
+  if (args[0] === 'stop' && read('stop.fail') !== undefined) process.exit(1);
+}
 `
 );
 writeFileSync(

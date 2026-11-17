@@ -7,6 +7,7 @@ import {
   claudeConfigDir,
   defaultClaudeFolder,
   home,
+  connection,
   connectProject,
   OTHER_PROJECT,
   PAIR_SELF,
@@ -44,10 +45,12 @@ import {
 } from './claude-background.ts';
 import {
   copyToOpen,
+  JobOutOfReach,
   openInTerminal,
   runnableClaudeFolder,
   sessionFolder,
-  startedSession
+  startedSession,
+  stopSessionJob
 } from './controller-claude.ts';
 import { PROJECT_WORDS } from '../../project-words.ts';
 import { bus, listen } from '../events.ts';
@@ -811,13 +814,35 @@ export class ProjectController {
     await this.release(c);
   }
   /**
-   * Remove a disconnected session from the owner's list (`hideProject`). A
-   * runtime kept after its Codex server closed is let go first, active work or
-   * not: with the server gone, the owner has no way to stop that turn.
+   * Stop the connected Claude session `id`: its background job ends for every
+   * window joined to it, then the office lets its view go, as Disconnect does.
+   * The stop goes first, so one that fails leaves the session as it was.
+   */
+  async end(id: string) {
+    const c = this.runtime(id);
+    if (c.session.agent !== 'claude') throw new Error('Only a Claude Code session has Stop.');
+    if (c.request || c.turn) throw new Error(PROJECT_WORDS.stopBusy);
+    await stopSessionJob(c.session);
+    await this.release(c);
+  }
+  /**
+   * Remove a disconnected session from the owner's list (`hideProject`), and
+   * stop a Claude session's background job first, so a failed stop hides
+   * nothing. A runtime kept after its Codex server closed is let go first,
+   * active work or not: with the server gone, the owner has no way to stop
+   * that turn.
    */
   async remove(id: string) {
     if (this.creating.has(id) || this.sessions.get(id)?.connected)
       throw new Error('Disconnect it first.');
+    const s = await connection(id);
+    if (s?.agent === 'claude')
+      await stopSessionJob(s).catch((e: unknown) => {
+        // No `claude` may run for it (its folder left Setup or is gone, or
+        // Claude Code is not installed), so nothing can stop its job: the
+        // owner still removes the session.
+        if (!(e instanceof JobOutOfReach)) throw e;
+      });
     const c = this.sessions.get(id);
     if (c) await this.release(c);
     await hideProject(id);

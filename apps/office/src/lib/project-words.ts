@@ -23,6 +23,12 @@ export const PROJECT_WORDS = {
   switched:
     'That terminal is no longer showing this conversation, so nothing was closed. Try again.',
   waiting: 'Claude is waiting for your answer in that terminal. Answer it there, then try again.',
+  stopButton: 'Stop',
+  stopConfirm: 'This ends the session for every window joined to it. The conversation is kept.',
+  // Starts with the button's visible word, so voice control finds it by what it shows.
+  stopName: 'Stop: end this session for every window',
+  stopFailed: 'Claude Code could not stop this session. Try again.',
+  stopBusy: 'Finish or stop the active work before you stop the session.',
   focus: 'Focus',
   // Starts with the button's visible word, so voice control finds it by what it shows.
   focusName: 'Focus: fill the window with the terminal',

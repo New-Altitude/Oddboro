@@ -10,6 +10,7 @@ import {
 } from '@oddboro/ledger';
 import { canMoveHere, nativeEnv, UUID } from './native.ts';
 import {
+  CLAUDE_LIST_FAILED,
   claudeAgents,
   claudeProjects,
   claudeProjectsIn,
@@ -19,6 +20,7 @@ import {
 import { endTerminalSession, stopInBackground, type ClaudeWhere } from './claude-background.ts';
 import { PROJECT_WORDS } from '../../project-words.ts';
 import { claudeFolderMark } from '../claude.ts';
+import { versionOf } from '../versions.ts';
 
 /**
  * What connect tells the owner about a Claude session's folder, by folder
@@ -83,6 +85,44 @@ export const sessionFolder = (s: ProjectSession) =>
   s.configDir === null
     ? foundClaudeFolder(officeClaudeFolder())
     : runnableClaudeFolder(s.configDir);
+
+/**
+ * Why no `claude` can run to stop a session's background job: its Claude
+ * folder is one the office may not run in now (out of Setup, or gone), or
+ * Claude Code is not installed. The message is the words the office already
+ * shows for that case. Remove still hides such a session, since nothing could
+ * stop its job; Stop shows the words.
+ */
+export class JobOutOfReach extends Error {}
+
+/**
+ * Stops the running background job of the Claude session `s`, if it has one,
+ * in the Claude folder the session runs in (`sessionFolder`, as its terminal
+ * does). Only a background row counts: a conversation open in a plain terminal
+ * is not the office's to end. Throws `JobOutOfReach` when no `claude` can
+ * run for it, and the stop-failed words when listing or stopping fails, which
+ * trying again can fix.
+ */
+export async function stopSessionJob(s: ProjectSession): Promise<void> {
+  let dir: string;
+  try {
+    dir = sessionFolder(s);
+  } catch (e) {
+    // Only the folder checks throw here, before any `claude` runs.
+    throw new JobOutOfReach(e instanceof Error ? e.message : String(e));
+  }
+  if ((await versionOf('claude')) === undefined)
+    throw new JobOutOfReach(CLAUDE_LIST_FAILED.missing());
+  // Without --all, so only running sessions list: a stopped job is left alone.
+  const rows = await claudeAgents(s.folder, dir).catch((e: unknown) => {
+    console.error(`claude agents failed before stopping ${s.nativeId}:`, e);
+    throw new Error(PROJECT_WORDS.stopFailed);
+  });
+  const job = rows.find((r) => r.sessionId === s.nativeId && r.kind === 'background');
+  if (!job) return;
+  if (!job.id || !(await stopInBackground({ folder: s.folder, dir }, job.id)))
+    throw new Error(PROJECT_WORDS.stopFailed);
+}
 
 /**
  * The refusal of a Claude conversation open in a terminal: where `move`

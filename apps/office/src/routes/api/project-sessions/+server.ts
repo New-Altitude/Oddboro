@@ -70,6 +70,8 @@ const command = z.discriminatedUnion('action', [
     answers: z.record(z.string(), z.array(z.string())).optional()
   }),
   z.object({ action: z.literal('disconnect'), id }),
+  // Stop on a connected Claude session; `stop` withdraws an assignment.
+  z.object({ action: z.literal('end'), id }),
   z.object({ action: z.literal('remove'), id })
 ]);
 export const POST: RequestHandler = async ({ request }) => {
@@ -177,6 +179,9 @@ export const POST: RequestHandler = async ({ request }) => {
         break;
       case 'disconnect':
         await c.disconnect(a.id);
+        break;
+      case 'end':
+        await c.end(a.id);
         break;
       case 'remove':
         await c.remove(a.id);
