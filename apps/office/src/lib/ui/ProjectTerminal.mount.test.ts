@@ -114,6 +114,11 @@ async function terminal({ more, sized }: { more?: Answer; sized?: Opened } = {})
     focus: () => screen.dispatchEvent(new FocusEvent('focusin', { bubbles: true })),
     leave: () => screen.dispatchEvent(new FocusEvent('focusout', { bubbles: true })),
     type: () => screen.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true })),
+    /** The office saying whether this view takes the typing, as it does when a window takes control. */
+    control: (takes: boolean) => {
+      streamAt('/api/project-sessions/session-1/events?terminal=1').send('control', takes);
+      shown.flush();
+    },
     /** The box changing to hold `cols` by `rows` cells, as a panel drag does. 0 by 0 is a hidden pane. */
     resize: (cols: number, rows = 24) => {
       box = { cols, rows };
@@ -290,21 +295,39 @@ test('Rows that shrink and grow back while the box moves change nothing', async 
 test('Taking the typing fits and sends the size at once, and a view without it sends none', async () => {
   const on = await terminal();
   try {
-    const control = (takes: boolean) => {
-      streamAt('/api/project-sessions/session-1/events?terminal=1').send('control', takes);
-      on.shown.flush();
-    };
-    control(false);
+    on.control(false);
     on.resize(130, 33);
     await settledSize();
     assert.deepEqual(fitted, ['130x33'], 'a view without the typing still fits');
     assert.deepEqual(asked('size'), [], 'and sends no size');
 
-    control(true);
+    on.control(true);
     assert.deepEqual(
       asked('size').map(({ cols, rows }) => ({ cols, rows })),
       [{ cols: 130, rows: 33 }],
       'sent with no wait for the box to settle'
+    );
+  } finally {
+    await on.shown.unmount();
+  }
+});
+
+test('Taking the typing back from another window sends the same size again', async () => {
+  const on = await terminal();
+  try {
+    on.resize(130, 33);
+    await settledSize();
+    assert.equal(asked('size').length, 1, 'the settled size, sent once');
+    // Another window takes control, and may size the session to its own box.
+    on.control(false);
+    on.control(true);
+    assert.deepEqual(
+      asked('size').map(({ cols, rows }) => ({ cols, rows })),
+      [
+        { cols: 130, rows: 33 },
+        { cols: 130, rows: 33 }
+      ],
+      'sent again on taking it back, though the box never changed'
     );
   } finally {
     await on.shown.unmount();
