@@ -5,7 +5,7 @@ import { probe } from '@oddboro/ledger/platform';
 import { PROJECT_WORDS } from '../../project-words.ts';
 import { processGone } from '../drive.ts';
 import { versionOf } from '../versions.ts';
-import { CLAUDE_LIST_FAILED } from './claude-project.ts';
+import { CLAUDE_LIST_FAILED, claudeAgents, type ClaudeConversation } from './claude-project.ts';
 import { canMoveHere, nativeCommand, nativeEnv } from './native.ts';
 
 /**
@@ -109,25 +109,47 @@ export async function resumeInBackground(
   throw new Error(PROJECT_WORDS.copied);
 }
 
-/**
- * Ends the terminal session in `row` with the interrupt a person's Ctrl+C
- * sends, and waits for it to exit, so the conversation can resume in the
- * background in place. It ends only an idle session, and never sends a
- * harder signal: one still running after the wait is the owner's to end.
- */
-export async function endTerminalSession(row: { pid?: number; status?: string }): Promise<void> {
-  if (!canMoveHere()) throw new Error(PROJECT_WORDS.windows);
-  const { pid, status } = row;
-  if (pid === undefined) throw new Error(PROJECT_WORDS.startFailed);
+/** Refuses, in the owner's words, a terminal session that is not idle. */
+function requireIdle(status: string | undefined) {
   if (status === 'waiting') throw new Error(PROJECT_WORDS.waiting);
   if (status !== 'idle') throw new Error(PROJECT_WORDS.busy);
-  try {
-    process.kill(pid, 'SIGINT');
-  } catch (e) {
-    // ESRCH: it exited on its own already, which is what the signal was for.
-    if ((e as NodeJS.ErrnoException).code === 'ESRCH') return;
-    console.error(`Could not interrupt the terminal session ${pid}:`, e);
-    throw new Error(PROJECT_WORDS.startFailed);
+}
+
+/**
+ * Ends the terminal session in `row`, a conversation of the project `folder`,
+ * with the interrupt a person's Ctrl+C sends, and waits for it to exit, so the
+ * conversation can resume in the background in place. It ends only an idle
+ * session, and never sends a harder signal: one still running after the wait
+ * is the owner's to end.
+ *
+ * Connect's read of the status ran beside its other reads, so a reply could
+ * have started since. The status is read again from the row's Claude folder
+ * just before the signal. That narrows the window to one read; it cannot close
+ * it, since Claude Code ends on the interrupt whatever it is doing.
+ */
+export async function endTerminalSession(
+  folder: string,
+  row: Pick<ClaudeConversation, 'id' | 'pid' | 'status' | 'configDir'>
+): Promise<void> {
+  if (!canMoveHere()) throw new Error(PROJECT_WORDS.windows);
+  const { pid, configDir } = row;
+  if (pid === undefined || configDir === null) throw new Error(PROJECT_WORDS.startFailed);
+  requireIdle(row.status);
+  const now = (await claudeAgents(folder, configDir)).find(
+    (a) => a.sessionId === row.id && a.pid === pid
+  );
+  // Not listed now: it ended, or is ending, on its own. The wait below
+  // confirms it is gone, and no signal goes to a process no read vouches for.
+  if (now) {
+    requireIdle(now.status);
+    try {
+      process.kill(pid, 'SIGINT');
+    } catch (e) {
+      // ESRCH: it exited on its own already, which is what the signal was for.
+      if ((e as NodeJS.ErrnoException).code === 'ESRCH') return;
+      console.error(`Could not interrupt the terminal session ${pid}:`, e);
+      throw new Error(PROJECT_WORDS.startFailed);
+    }
   }
   // An idle session was measured to exit 0.6 to 0.8 s after the interrupt.
   const end = performance.now() + 5000;

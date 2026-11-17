@@ -161,11 +161,12 @@ export async function copyToOpen(
   const saved = own ?? newest;
   // Resuming a copy beside one open in a Claude terminal, in any folder,
   // would fork the conversation. With the owner's yes, that terminal
-  // session ends first, by the process and status this one read found.
+  // session ends first: the process this read found, while a second read
+  // still finds it idle.
   const open = [own, newest].find(inTerminal);
   if (open) {
     if (!move) throw openInTerminal();
-    await endTerminalSession(open);
+    await endTerminalSession(folder, open);
   }
   // Told after that refusal, so a refused Reconnect reads no folder's
   // login. A copy running in two folders has no folder to name.

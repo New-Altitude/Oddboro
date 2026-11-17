@@ -51,13 +51,15 @@ mock.module('@oddboro/ledger/project-terminal', {
 });
 const { L, folder, onPlatform, request, withEnv } = await import('../office-under-test.ts');
 const { projectController } = await import('./controller.ts');
-const { ClaudeNeedsTrust } = await import('./claude-background.ts');
+const { ClaudeNeedsTrust, endTerminalSession } = await import('./claude-background.ts');
 const { PROJECT_WORDS } = await import('../../project-words.ts');
 
 // The stand-in claude. Every call logs its whole command, then a Node helper
 // answers it from the Claude folder it runs under: `--version` from one file
 // for the computer, `agents --json` from the folder's `agents.json` (without
-// `--all`, leaving out background sessions that ended, as Claude Code does),
+// `--all`, leaving out background sessions that ended, as Claude Code does, or
+// from `agents-now.json` when a test wrote one: what Move here's second read
+// finds just before its signal, since connect's reads all pass `--all`),
 // and `--bg` with the folder's `bg.out`, else the line Claude Code prints. A
 // background start adds its session to `agents.json`, under the folder's
 // `start-id` when the test names one. `stop` and `rm` log again with the
@@ -80,7 +82,9 @@ if (args[0] === '--version') process.stdout.write(readFileSync(${JSON.stringify(
 else if (args[0] === 'auth') console.log('{"loggedIn":false}');
 else if (args[0] === 'agents') {
   const ended = (r) => r.pid === undefined && ['done', 'stopped', 'failed'].includes(r.state);
-  console.log(JSON.stringify(args.includes('--all') ? rows : rows.filter((r) => !ended(r))));
+  const now = read('agents-now.json');
+  if (!args.includes('--all') && now !== undefined) process.stdout.write(now);
+  else console.log(JSON.stringify(args.includes('--all') ? rows : rows.filter((r) => !ended(r))));
 } else if (args[0] === '--bg') {
   const said = read('bg.out');
   const resume = args.indexOf('--resume');
@@ -138,6 +142,9 @@ function claudeFolder(name: string) {
 /** What `claude agents --json` lists in the Claude folder `dir`. */
 const agents = (dir: string, rows: object[]) =>
   writeFileSync(join(dir, 'agents.json'), JSON.stringify(rows));
+/** What a read without `--all` lists in `dir` from now on: Move here's second read. */
+const agentsNow = (dir: string, rows: object[]) =>
+  writeFileSync(join(dir, 'agents-now.json'), JSON.stringify(rows));
 /** Claude Code's row for `id` open in a terminal, run by the process `pid`. */
 const inTerminal = (id: string, pid: number, status: string) => ({
   sessionId: id,
@@ -153,6 +160,30 @@ const inTerminal = (id: string, pid: number, status: string) => ({
 const terminalSession = () => spawn('sleep', ['30'], { stdio: 'ignore' });
 const alive = (p: ReturnType<typeof terminalSession>) =>
   p.exitCode === null && p.signalCode === null;
+/** The process id of a terminal session that has already exited. */
+async function endedSession() {
+  const p = terminalSession();
+  p.kill();
+  await once(p, 'exit');
+  return p.pid!;
+}
+/**
+ * A terminal session that answers Ctrl+C as `onInterrupt` says, once its
+ * handler is in place. It touches `exiting` just before it exits.
+ */
+async function slowSession(onInterrupt: 'exit after a second' | 'ignore', exiting: string) {
+  const handler =
+    onInterrupt === 'ignore'
+      ? '() => {}'
+      : `() => setTimeout(() => { require('node:fs').writeFileSync(${JSON.stringify(exiting)}, ''); process.exit(0); }, 1000)`;
+  const p = spawn(
+    process.execPath,
+    ['-e', `process.on('SIGINT', ${handler}); console.log('ready'); setInterval(() => {}, 1000);`],
+    { stdio: ['ignore', 'pipe', 'ignore'] }
+  );
+  await once(p.stdout!, 'data');
+  return p;
+}
 /** Every signal the office sends, still sent. */
 const signals = mock.method(process, 'kill');
 const interrupted = (pid: number | undefined) =>
@@ -400,6 +431,79 @@ test(
       assert.equal(s.nativeId, id);
     } finally {
       session.kill();
+    }
+  }
+);
+
+test(
+  'Move here reads the status again just before the signal: a reply or a question since refuses with no signal, and a session gone since counts as ended',
+  SHELL_STAND_IN,
+  async () => {
+    const dir = claudeFolder('.claude-reread');
+    const id = randomUUID();
+    save(dir, id);
+    const session = terminalSession();
+    try {
+      agents(dir, [inTerminal(id, session.pid!, 'idle')]);
+      for (const [status, words] of [
+        ['busy', PROJECT_WORDS.busy],
+        ['waiting', PROJECT_WORDS.waiting]
+      ]) {
+        agentsNow(dir, [inTerminal(id, session.pid!, status)]);
+        await assert.rejects(
+          c.connect('claude', app, { nativeId: id, configDir: dir, move: true }),
+          { message: words }
+        );
+        assert.ok(!interrupted(session.pid) && alive(session), status);
+      }
+    } finally {
+      session.kill();
+    }
+
+    // Listed idle by connect's read, and gone by the second: nothing to signal.
+    const gone = await endedSession();
+    agents(dir, [inTerminal(id, gone, 'idle')]);
+    agentsNow(dir, []);
+    await c.connect('claude', app, { nativeId: id, configDir: dir, move: true });
+    assert.ok(!interrupted(gone));
+
+    // Listed idle by both reads, yet gone before the signal: the signal finds
+    // no process, which counts as ended too.
+    const exited = await endedSession();
+    agents(dir, [inTerminal(id, exited, 'idle')]);
+    agentsNow(dir, [inTerminal(id, exited, 'idle')]);
+    await c.connect('claude', app, { nativeId: id, configDir: dir, move: true });
+    assert.ok(interrupted(exited));
+  }
+);
+
+test(
+  'Move here waits for the terminal session to exit, and says the terminal is still closing when it outlives the wait',
+  SHELL_STAND_IN,
+  async () => {
+    const dir = claudeFolder('.claude-slow');
+    const id = randomUUID();
+    const exiting = join(dir, 'exiting');
+    const row = (pid: number) => ({ id, pid, status: 'idle', configDir: dir });
+
+    const slow = await slowSession('exit after a second', exiting);
+    try {
+      agents(dir, [inTerminal(id, slow.pid!, 'idle')]);
+      await endTerminalSession(app, row(slow.pid!));
+      assert.ok(interrupted(slow.pid) && existsSync(exiting));
+    } finally {
+      slow.kill('SIGKILL');
+    }
+
+    const stuck = await slowSession('ignore', exiting);
+    try {
+      agents(dir, [inTerminal(id, stuck.pid!, 'idle')]);
+      await assert.rejects(endTerminalSession(app, row(stuck.pid!)), {
+        message: PROJECT_WORDS.closeSlow
+      });
+      assert.ok(interrupted(stuck.pid) && alive(stuck));
+    } finally {
+      stuck.kill('SIGKILL');
     }
   }
 );
