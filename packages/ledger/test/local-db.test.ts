@@ -31,7 +31,7 @@ const reaches = (to: { path: string } | { port: number; host: string }) =>
 /** Start the office's own database in a process of its own, with `home` as the office home. */
 function startIn(home: string, port: number) {
   const script = `
-    const { startLocalDatabase } = await import(${JSON.stringify(new URL('../src/local-db.ts', import.meta.url).href)});
+    const { startLocalDatabase } = await import(process.argv[1]);
     const stop = await startLocalDatabase();
     await stop();
   `;
@@ -43,10 +43,11 @@ function startIn(home: string, port: number) {
     ODDBORO_LOCAL_DB: '1'
   };
   delete env.DATABASE_URL;
-  return spawnSync(process.execPath, ['--input-type=module', '-e', script], {
-    env,
-    encoding: 'utf8'
-  });
+  return spawnSync(
+    process.execPath,
+    ['--input-type=module', '-e', script, new URL('../src/local-db.ts', import.meta.url).href],
+    { env, encoding: 'utf8' }
+  );
 }
 
 test(

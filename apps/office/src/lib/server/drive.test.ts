@@ -123,8 +123,9 @@ test('a stop returns every pid it found under the run, the tool first, off Windo
     [
       '-e',
       `const c = require('node:child_process').spawn('sleep', ['60'], { stdio: 'ignore' });
-require('node:fs').writeFileSync(${JSON.stringify(at)}, String(c.pid));
-setInterval(() => {}, 1000);`
+require('node:fs').writeFileSync(process.argv[1], String(c.pid));
+setInterval(() => {}, 1000);`,
+      at
     ],
     { detached: true, stdio: 'ignore' }
   );
@@ -201,10 +202,11 @@ test("a run stopped on Windows stops its tool's whole tree with taskkill", async
 test('a process that outlives a stop is logged, by its pid', async (t) => {
   const at = join(mkdtempSync(join(folder, 'outlives-')), 'grandchild.pid');
   // The grandchild stays in the tool's group and shrugs off the stop's SIGTERM.
+  // Each process gets the next one's code and the path as arguments, never in its own code.
   const grandchild = `process.on('SIGTERM', () => {});
-require('node:fs').writeFileSync(${JSON.stringify(at)}, String(process.pid));
+require('node:fs').writeFileSync(process.argv[1], String(process.pid));
 setInterval(() => {}, 60000);`;
-  const tool = `require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(grandchild)}], { stdio: 'ignore' });
+  const tool = `require('node:child_process').spawn(process.execPath, ['-e', process.argv[1], process.argv[2]], { stdio: 'ignore' });
 setInterval(() => {}, 60000);`;
   const logged = t.mock.method(console, 'error', () => {});
   const launch: Driven = { args: [], env: {}, stdin: '', done: () => {}, read: () => [] };
@@ -213,7 +215,7 @@ setInterval(() => {}, 60000);`;
   let left: number | undefined;
   try {
     const going = drive(
-      () => (child = spawn(process.execPath, ['-e', tool], { detached: true })),
+      () => (child = spawn(process.execPath, ['-e', tool, grandchild, at], { detached: true })),
       launch,
       { event: () => {} },
       { deadline: Date.now() + 60_000, signal: stop.signal }

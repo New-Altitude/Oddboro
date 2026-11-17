@@ -177,10 +177,15 @@ async function slowSession(onInterrupt: 'exit after a second' | 'ignore', exitin
   const handler =
     onInterrupt === 'ignore'
       ? '() => {}'
-      : `() => setTimeout(() => { require('node:fs').writeFileSync(${JSON.stringify(exiting)}, ''); process.exit(0); }, 1000)`;
+      : "() => setTimeout(() => { require('node:fs').writeFileSync(process.argv[1], ''); process.exit(0); }, 1000)";
+  // The path goes as an argument, never into the code.
   const p = spawn(
     process.execPath,
-    ['-e', `process.on('SIGINT', ${handler}); console.log('ready'); setInterval(() => {}, 1000);`],
+    [
+      '-e',
+      `process.on('SIGINT', ${handler}); console.log('ready'); setInterval(() => {}, 1000);`,
+      exiting
+    ],
     { stdio: ['ignore', 'pipe', 'ignore'] }
   );
   await once(p.stdout!, 'data');

@@ -22,13 +22,14 @@ test("under node --test with no ODDBORO_HOME, the office is a throwaway folder a
   delete env.ODDBORO_DB_PORT;
   const script = `
     const { realpathSync } = await import('node:fs');
-    const { home, DATABASE_PORT } = await import(${JSON.stringify(new URL('../src/home.ts', import.meta.url).href)});
+    const { home, DATABASE_PORT } = await import(process.argv[1]);
     process.stdout.write(JSON.stringify({ home: realpathSync(home()), port: DATABASE_PORT }));
   `;
-  const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
-    env,
-    encoding: 'utf8'
-  });
+  const child = spawnSync(
+    process.execPath,
+    ['--input-type=module', '-e', script, new URL('../src/home.ts', import.meta.url).href],
+    { env, encoding: 'utf8' }
+  );
   assert.equal(child.status, 0, child.stderr);
   const { home, port } = JSON.parse(child.stdout) as { home: string; port: number };
   assert.ok(home.startsWith(realpathSync(tmpdir()) + sep), home);
