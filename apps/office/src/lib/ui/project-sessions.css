@@ -1,6 +1,7 @@
 /* The Projects window's form controls, shared by ProjectSessions.svelte and
-   NewSessionForm.svelte, which renders inside it. Each rule sits under the
-   window's root class, so it reaches nothing outside the window. */
+   NewSessionForm.svelte, which renders inside it, and the sessions list's status
+   dots. Each rule sits under the window's root class, so it reaches nothing
+   outside the window. */
 .projects-window label {
   display: flex;
   flex-direction: column;
@@ -46,4 +47,23 @@
   color: var(--color-sea);
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+/* A session's status: working, waiting for you, its last work done, or idle. */
+.projects-window .dot {
+  inline-size: 0.5rem;
+  block-size: 0.5rem;
+  flex-shrink: 0;
+  border-radius: 9999px;
+}
+.projects-window .dot.working {
+  background: var(--color-sea);
+}
+.projects-window .dot.waiting {
+  background: var(--color-ember);
+}
+.projects-window .dot.done {
+  background: var(--color-moss);
+}
+.projects-window .dot.idle {
+  background: var(--color-faint);
 }
