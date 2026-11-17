@@ -753,8 +753,9 @@ test('stopping a run mid-command stops the command too, though Codex runs each c
     [
       '-e',
       `const c = require('node:child_process').spawn('sleep', ['60'], { detached: true, stdio: 'ignore' });
-require('node:fs').writeFileSync(${JSON.stringify(at)}, String(c.pid));
-setInterval(() => {}, 1000);`
+require('node:fs').writeFileSync(process.argv[1], String(c.pid));
+setInterval(() => {}, 1000);`,
+      at
     ],
     { detached: true, stdio: 'ignore' }
   );
