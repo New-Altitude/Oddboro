@@ -12,6 +12,8 @@ export class ProjectTerminal {
   private history = '';
   private ended = false;
   private writer?: string;
+  /** A redraw's restore to the page's size, while it holds the wider one. */
+  private restore?: ReturnType<typeof setTimeout>;
   take(view: string, replace = false) {
     if (!this.writer || replace) {
       this.writer = view;
@@ -85,7 +87,23 @@ export class ProjectTerminal {
     this.child.write(text);
   }
   resize(cols: number, rows: number) {
+    // A size from the page is the newest, so a redraw's pending restore to an
+    // older one is dropped.
+    clearTimeout(this.restore);
+    this.restore = undefined;
     if (!this.ended) this.child.resize(cols, rows);
+  }
+  /**
+   * Draws the program again for this window at the size it already has: one
+   * column wider, then back to `cols` 30 ms later. An equal size sends the
+   * program no resize signal. A program that draws again when the size it
+   * reads changes sees no change if the wider size is undone in the same
+   * moment, as terminal.test.ts shows with a Node child, so the wider size is
+   * held. A size that comes during the hold is newer and replaces the restore.
+   */
+  redraw(cols: number, rows: number) {
+    this.resize(cols + 1, rows);
+    this.restore = setTimeout(() => this.resize(cols, rows), 30);
   }
   async releaseProcess() {
     if (this.ended) return;
@@ -98,6 +116,7 @@ export class ProjectTerminal {
     }
   }
   close() {
+    clearTimeout(this.restore);
     if (!this.ended) this.child.kill();
   }
 }

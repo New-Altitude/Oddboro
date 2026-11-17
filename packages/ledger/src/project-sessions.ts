@@ -89,21 +89,24 @@ export async function connection(id: string) {
  * Connect a native conversation, or connect the same one again, which shows a
  * removed session again with its id. `configDir` is the Claude folder the
  * conversation lives in: given, the row moves there, so a copy the owner
- * picks in Find existing is the one it resumes; left out, the row keeps the
- * folder it has. A different project is refused, and the row stays as it was.
+ * picks in the continue path's list is the one it resumes; left out, the row
+ * keeps the folder it has. A different project is refused, and the row stays
+ * as it was. `id` is a new row's id, for a caller that named files by it
+ * before the conversation existed; a row already there keeps its own.
  */
 export async function connectProject(
   agent: ProjectAgent,
   nativeId: string,
   folder: string,
   title: string,
-  configDir?: string
+  configDir?: string,
+  { id }: { id?: string } = {}
 ) {
   // Only a Claude conversation lives in a Claude folder.
   const claudeFolder = agent === 'claude' ? (configDir ?? null) : null;
   const [session] = await db
     .insert(projectSessions)
-    .values({ id: randomUUID(), agent, nativeId, folder, title, configDir: claudeFolder })
+    .values({ id: id ?? randomUUID(), agent, nativeId, folder, title, configDir: claudeFolder })
     .onConflictDoNothing()
     .returning();
   if (session) return session;

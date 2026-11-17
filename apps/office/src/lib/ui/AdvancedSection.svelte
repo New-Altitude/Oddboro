@@ -12,8 +12,16 @@
   let problem = $state('');
   /** A Claude folder as Setup's route lists it; `mark` is the name Projects shows. */
   type ClaudeFolder = { path: string; isDefault: boolean; mark: string };
+  /** What the route answers: the folders, and account folders in the home to add, as `~/<name>`. */
+  type Listed = { folders: ClaudeFolder[]; suggested: string[] };
   let folders = $state<ClaudeFolder[]>([]);
+  let suggested = $state<string[]>([]);
   let typed = $state('');
+  /**
+   * One row style for a known folder and a suggestion, so a suggestion reads
+   * as found, not as a box to fill in.
+   */
+  const folderRow = 'flex items-center justify-between gap-2 rounded-lg bg-raise px-3 py-2';
 
   const said = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -38,7 +46,7 @@
 
   async function load() {
     try {
-      folders = (await call<{ folders: ClaudeFolder[] }>('/api/setup/claude-folders')).folders;
+      ({ folders, suggested } = await call<Listed>('/api/setup/claude-folders'));
     } catch (e) {
       problem = said(e);
     }
@@ -52,11 +60,10 @@
 
   const change = (body: { add: string } | { remove: string }) =>
     act(async () => {
-      folders = (await call<{ folders: ClaudeFolder[] }>('/api/setup/claude-folders', body, 'PUT'))
-        .folders;
+      ({ folders, suggested } = await call<Listed>('/api/setup/claude-folders', body, 'PUT'));
       // So an open Projects window lists the folders again.
       advanced.folders += 1;
-      if ('add' in body) typed = '';
+      if ('add' in body && body.add === typed) typed = '';
     });
   const button =
     'rounded-lg bg-raise px-3 py-2 text-xs font-medium hover:bg-sea/20 disabled:opacity-40';
@@ -82,7 +89,7 @@
     </p>
     <ul class="flex flex-col gap-1" aria-labelledby="claude-folders">
       {#each folders as f (f.path)}
-        <li class="flex items-center justify-between gap-2 rounded-lg bg-raise px-3 py-2">
+        <li class={folderRow}>
           <span class="min-w-0 truncate" title={f.path}>{f.mark}</span>
           {#if !f.isDefault}
             <button
@@ -95,6 +102,22 @@
         </li>
       {/each}
     </ul>
+    {#if suggested.length}
+      <p id="claude-found" class="text-muted">Found in your home folder:</p>
+      <ul class="flex flex-col gap-1" aria-labelledby="claude-found">
+        {#each suggested as s (s)}
+          <li class={folderRow}>
+            <span class="min-w-0 truncate">{s}</span>
+            <button
+              class="shrink-0 text-muted hover:text-ink disabled:opacity-40"
+              aria-label="Add {s}"
+              disabled={busy}
+              onclick={() => change({ add: s })}>Add</button
+            >
+          </li>
+        {/each}
+      </ul>
+    {/if}
     <form
       class="flex gap-2"
       onsubmit={(e) => {

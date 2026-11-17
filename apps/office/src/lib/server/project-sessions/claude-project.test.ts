@@ -1,6 +1,6 @@
-// Find existing asks Claude Code which sessions run in a project. When it
-// cannot answer, the owner reads plain words, never the raw error of starting
-// the command, its path, or what it printed.
+// The continue path's list asks Claude Code which sessions run in a project.
+// When it cannot answer, the owner reads plain words, never the raw error of
+// starting the command, its path, or what it printed.
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
 import {
@@ -126,8 +126,8 @@ test('when Claude Code does not answer in time, listing a project says it could 
   try {
     const refused = await refusal(root, root);
     assert.deepEqual(
-      started.map((s) => s.slice(-4)),
-      [['agents', '--json', '--cwd', root]]
+      started.map((s) => s.slice(-5)),
+      [['agents', '--json', '--cwd', root, '--all']]
     );
     assert.equal(refused, FAILED);
     assert.ok(!refused.includes(root), refused);
@@ -187,7 +187,7 @@ esac
     const running = '00000009-0000-4000-8000-000000000009';
     writeFileSync(
       join(b, 'agents.json'),
-      JSON.stringify([{ sessionId: running, cwd: project, kind: 'bg', id: 'job-1' }])
+      JSON.stringify([{ sessionId: running, cwd: project, kind: 'background', id: 'job-1' }])
     );
     writeFileSync(join(out, 'agents-fail'), '');
     setClaudeFolders([b, out, key, missing]);
@@ -358,7 +358,12 @@ exit 0
         utimesSync(file, seconds, seconds);
       }
       for (const which of runningIn ?? [])
-        running[which].push({ sessionId: ids[i], cwd: project, kind: 'bg', id: `job-${i}` });
+        running[which].push({
+          sessionId: ids[i],
+          cwd: project,
+          kind: 'background',
+          id: `job-${i}`
+        });
     }
     for (const which of ['first', 'second'] as const)
       writeFileSync(join(dirs[which], 'agents.json'), JSON.stringify(running[which]));
@@ -378,6 +383,152 @@ exit 0
       setClaudeFolders([]);
       for (const dir of Object.values(dirs)) rmSync(join(dir, 'agents.json'), { force: true });
       await rm(root, { recursive: true, force: true });
+    }
+  }
+);
+
+/**
+ * Lists `project` with a stand-in claude whose own folder saves `saved` and
+ * whose `claude agents` prints `running`, and returns each listed row by id.
+ */
+async function listedWith(saved: string[], running: object[]) {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'office-claude-kinds-')));
+  const project = join(root, 'app');
+  const bin = join(root, 'bin');
+  const own = join(homedir(), '.claude');
+  const at = join(own, 'projects', project.replace(/[^a-zA-Z0-9]/g, '-'));
+  mkdirSync(project);
+  mkdirSync(bin);
+  mkdirSync(at, { recursive: true });
+  writeFileSync(
+    join(bin, 'claude'),
+    `#!/bin/sh
+dir="\${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+[ "$1 $2" = "agents --json" ] && { cat "$dir/agents.json" 2>/dev/null || echo '[]'; }
+exit 0
+`
+  );
+  chmodSync(join(bin, 'claude'), 0o755);
+  for (const id of saved)
+    writeFileSync(
+      join(at, id + '.jsonl'),
+      JSON.stringify({ type: 'user', cwd: project, message: { content: 'Work' } }) + '\n'
+    );
+  writeFileSync(
+    join(own, 'agents.json'),
+    JSON.stringify(running.map((row) => ({ cwd: project, ...row })))
+  );
+  const was = process.env.PATH;
+  process.env.PATH = `${bin}:${was}`;
+  try {
+    return Object.fromEntries((await claudeProjects(project)).map((r) => [r.id, r]));
+  } finally {
+    process.env.PATH = was;
+    rmSync(join(own, 'agents.json'), { force: true });
+    rmSync(at, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+test(
+  'A stopped background session lists as not running with its job, a terminal session lists as running with no job, and one id with both lists as the terminal one',
+  { skip: process.platform === 'win32' && 'the stand-in is a shell script' },
+  async () => {
+    const [stopped, terminal, bothBgFirst, bothTerminalFirst] = [0, 1, 2, 3].map(
+      (i) => `0000020${i}-0000-4000-8000-00000000020${i}`
+    );
+    const pid = process.pid;
+    const background = (id: string) => ({ sessionId: id, kind: 'background', id: id.slice(0, 8) });
+    const inTerminal = (id: string) => ({
+      sessionId: id,
+      kind: 'interactive',
+      pid,
+      status: 'idle'
+    });
+    const rows = await listedWith(
+      [stopped, terminal, bothBgFirst, bothTerminalFirst],
+      [
+        background(stopped),
+        inTerminal(terminal),
+        background(bothBgFirst),
+        inTerminal(bothBgFirst),
+        inTerminal(bothTerminalFirst),
+        background(bothTerminalFirst)
+      ]
+    );
+    const state = (id: string) => {
+      const { live, job, pid, status, liveIn, movable } = rows[id];
+      return { live, job, pid, status, liveIn, movable };
+    };
+    assert.deepEqual(state(stopped), {
+      live: false,
+      job: stopped.slice(0, 8),
+      pid: undefined,
+      status: undefined,
+      liveIn: undefined,
+      movable: false
+    });
+    // The Claude folder that listed the process, where Move here reads it again.
+    const liveIn = join(homedir(), '.claude');
+    const open = { live: true, job: '', pid, status: 'idle', liveIn, movable: true };
+    assert.deepEqual(state(terminal), open);
+    assert.deepEqual(state(bothBgFirst), open);
+    assert.deepEqual(state(bothTerminalFirst), open);
+    assert.equal(Object.keys(rows).length, 4);
+  }
+);
+
+test(
+  'a terminal session with no saved conversation is left out, and a background one with none stays listed',
+  { skip: process.platform === 'win32' && 'the stand-in is a shell script' },
+  async () => {
+    const [fresh, started] = [0, 1].map((i) => `0000030${i}-0000-4000-8000-00000000030${i}`);
+    const rows = await listedWith(
+      [],
+      [
+        { sessionId: fresh, kind: 'interactive', pid: process.pid, status: 'idle' },
+        { sessionId: started, kind: 'background', id: started.slice(0, 8), pid: process.pid }
+      ]
+    );
+    assert.deepEqual(Object.keys(rows), [started]);
+    assert.equal(rows[started].job, started.slice(0, 8));
+  }
+);
+
+test(
+  'an sdk or remote session with a process is not running here and cannot be moved, since only interactive and background sessions are read',
+  { skip: process.platform === 'win32' && 'the stand-in is a shell script' },
+  async () => {
+    const [sdk, remote] = [0, 1].map((i) => `0000040${i}-0000-4000-8000-00000000040${i}`);
+    const rows = await listedWith(
+      [sdk, remote],
+      [
+        { sessionId: sdk, kind: 'sdk', pid: process.pid, status: 'idle' },
+        { sessionId: remote, kind: 'remote', pid: process.pid, status: 'idle' }
+      ]
+    );
+    for (const id of [sdk, remote]) {
+      const { live, pid, movable } = rows[id];
+      assert.deepEqual({ live, pid, movable }, { live: false, pid: undefined, movable: false }, id);
+    }
+  }
+);
+
+test(
+  'a terminal session listed with a process id of 0 or below has no process, so it is not running and cannot be moved',
+  { skip: process.platform === 'win32' && 'the stand-in is a shell script' },
+  async () => {
+    const [zero, negative] = [0, 1].map((i) => `0000050${i}-0000-4000-8000-00000000050${i}`);
+    const rows = await listedWith(
+      [zero, negative],
+      [
+        { sessionId: zero, kind: 'interactive', pid: 0, status: 'idle' },
+        { sessionId: negative, kind: 'interactive', pid: -1, status: 'idle' }
+      ]
+    );
+    for (const id of [zero, negative]) {
+      const { live, pid, movable } = rows[id];
+      assert.deepEqual({ live, pid, movable }, { live: false, pid: undefined, movable: false }, id);
     }
   }
 );

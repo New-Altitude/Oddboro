@@ -1,3 +1,16 @@
+<script module lang="ts">
+  /**
+   * Whether this terminal asks the session to draw again for it when the owner
+   * comes back to it. Claude Code's background service draws a session for the
+   * window that sized it last, so another window of a different width shows it
+   * garbled. Oddboro cannot see another window take the size, so the terminal or
+   * the browser window losing focus is the sign. Off, the terminal sends its
+   * size only when that changes. It can go once Claude Code draws each window
+   * at its own size.
+   */
+  export const REDRAW_ON_RETURN = true;
+</script>
+
 <script lang="ts">
   import { onMount } from 'svelte';
   import { projectApi } from './project-api.ts';
@@ -85,15 +98,25 @@
       // its new size once the box settles, and only when it differs, so a
       // panel sliding wider or narrower sends one size, not one per frame.
       let sent = '',
+        /** Whether another window may have sized the session since this one last did. */
+        stale = false,
         settle: ReturnType<typeof setTimeout> | undefined;
-      const send = () => {
-        const size = `${term.cols}x${term.rows}`;
-        if (!writable || size === sent) return;
-        sent = size;
-        void projectApi('size', { id, view, cols: term.cols, rows: term.rows }).catch((e) =>
+      /** Sends this terminal's size. A new size redraws the session for it, so it clears `stale`. */
+      const post = (redraw?: true) => {
+        sent = `${term.cols}x${term.rows}`;
+        stale = false;
+        void projectApi('size', { id, view, cols: term.cols, rows: term.rows, redraw }).catch((e) =>
           onerror(e.message)
         );
       };
+      const send = () => {
+        if (writable && `${term.cols}x${term.rows}` !== sent) post();
+      };
+      /** The same size, with `redraw`: the server nudges it, since an equal size redraws nothing. */
+      const redraw = () => {
+        if (writable && stale) post(true);
+      };
+      const lost = () => (stale = true);
       const resize = () => {
         if (!host.clientWidth || !host.clientHeight) return;
         fit.fit();
@@ -102,9 +125,18 @@
       };
       const observer = new ResizeObserver(resize);
       observer.observe(host);
+      if (REDRAW_ON_RETURN) {
+        host.addEventListener('focusout', lost);
+        window.addEventListener('blur', lost);
+        host.addEventListener('focusin', redraw);
+        // In the capture phase: xterm stops every key it sends to the terminal
+        // from going further, so a listener waiting for it to bubble never hears one.
+        host.addEventListener('keydown', redraw, { capture: true });
+      }
       resize();
       term.focus();
       cleanup = () => {
+        window.removeEventListener('blur', lost);
         clearTimeout(settle);
         stream.close();
         observer.disconnect();

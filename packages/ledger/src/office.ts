@@ -71,6 +71,8 @@ export {
   folderAskRefused,
   switchAskRefused,
   switchesOff,
+  CLAUDE_ACCOUNT_MARKS,
+  isClaudeAccount,
   STORE_MARKS,
   SECRET_STORES,
   FOLDER_REFUSED,
@@ -81,7 +83,8 @@ export {
   within,
   shownFolder,
   touchesSecretStore,
-  checkFolder
+  checkFolder,
+  expandHome
 } from './office-folders.ts';
 export { record, searchLedger, precedent, reindexLedger } from './office-ledger.ts';
 export {

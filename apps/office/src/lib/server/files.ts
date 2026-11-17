@@ -219,6 +219,7 @@ function givenFile(
     return file ? { file, path, folder: f.name } : undefined;
   }
   if (!isFull(path)) return undefined;
+  // Not `expandHome`: a file an Odd names sits under a folder, so `~` alone is never one.
   const full = path.startsWith('~/') ? join(homedir(), path.slice(2)) : resolve(path);
   // The innermost folder first, as the Odd wrote it or by its real path.
   for (const f of folders.sort((a, b) => b.real.length - a.real.length)) {

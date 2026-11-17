@@ -163,6 +163,17 @@ export const switchesOff = (
 ): OwnSwitch[] => wanted.filter((s) => !who[s]);
 
 /**
+ * What Claude Code keeps in an account folder, its own or a second home's: the
+ * conversations and the prompt history. A project's `.claude`, its settings,
+ * holds neither.
+ */
+export const CLAUDE_ACCOUNT_MARKS = ['history.jsonl', 'projects'];
+
+/** Whether `folder` holds every account mark, so it is surely a Claude account folder. */
+export const isClaudeAccount = (folder: string): boolean =>
+  CLAUDE_ACCOUNT_MARKS.every((m) => existsSync(join(folder, m)));
+
+/**
  * Secret stores, by name, each with how it is found anywhere but the top of
  * the home, where the name alone is enough (`touchesSecretStore`). An empty
  * list means the name alone everywhere. A list names what marks the real
@@ -204,7 +215,7 @@ export const STORE_MARKS: Record<string, string[]> = {
   '.config': ['gcloud', 'gh/hosts.yml'],
   Library: ['Keychains/login.keychain-db', 'Cookies'],
   AppData: ['Roaming', 'Local'],
-  '.claude': ['.credentials.json', 'history.jsonl', 'projects'],
+  '.claude': ['.credentials.json', ...CLAUDE_ACCOUNT_MARKS],
   '.claude.json': [],
   '.google_workspace_mcp': [],
   '.grok': ['auth.json', 'sessions'],
@@ -372,6 +383,14 @@ export function touchesSecretStore(path: string): boolean {
 }
 
 /**
+ * `typed` with a leading `~` read as the home folder, as a shell reads it: `~`
+ * alone or followed by a slash of either kind. Any other path, `~other`
+ * included, comes back as typed, so the absolute-path check after it refuses it.
+ */
+export const expandHome = (typed: string): string =>
+  /^~(?=$|[\\/])/.test(typed) ? join(homedir(), typed.slice(1)) : typed;
+
+/**
  * Whether `path`, as the owner typed it, may be given to an Odd, and its real
  * path when it may. Any folder on the computer but the home itself, and one
  * that holds or sits in a secret store (`touchesSecretStore`), the office's
@@ -390,7 +409,7 @@ export function checkFolder(
   accept = false
 ): { real: string } | { refused: string } | { warning: string } {
   const typed = path.trim();
-  const expanded = /^~(?=$|[\\/])/.test(typed) ? join(homedir(), typed.slice(1)) : typed;
+  const expanded = expandHome(typed);
   if (!isAbsolute(expanded) || !existsSync(expanded)) return { refused: FOLDER_REFUSED.missing };
   const p = real(expanded);
   if (!statSync(p).isDirectory()) return { refused: FOLDER_REFUSED.missing };

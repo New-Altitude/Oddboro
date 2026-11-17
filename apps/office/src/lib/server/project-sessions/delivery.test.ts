@@ -1,5 +1,6 @@
 // The owner route, database and paired plugin run together. Only the native
-// terminal and Claude's process discovery stand in for an installed client.
+// terminal, Claude's process discovery and its background sessions stand in
+// for an installed client.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -25,6 +26,22 @@ afterEach(() => {
 // Settled once a readiness check has set its timer, so a test ticks the mocked
 // clock past that timer only once it exists, however late the check starts.
 let checking = Promise.withResolvers<void>();
+// A Start begins a conversation in the background, and `claude agents` lists it
+// at once by the short id Start was given. Opening its terminal resumes it in
+// the background, under the same short id.
+const background = await import('./claude-background.ts');
+let begun = '';
+mock.module('./claude-background.ts', {
+  namedExports: {
+    ...background,
+    requireBackground: async () => {},
+    startInBackground: async () => {
+      begun = randomUUID();
+      return begun.slice(0, 8);
+    },
+    resumeInBackground: async (_where: unknown, id: string) => id.slice(0, 8)
+  }
+});
 mock.module('./claude-project.ts', {
   namedExports: {
     ...claude,
@@ -38,6 +55,9 @@ mock.module('./claude-project.ts', {
       checking.resolve();
       return check;
     },
+    claudeAgents: async () => [
+      { sessionId: begun, id: begun.slice(0, 8), kind: 'background', cwd: '' }
+    ],
     claudeProjects: async () => running,
     claudeProjectsIn: async () => running
   }
@@ -178,6 +198,7 @@ test('a live session that never takes its offered work becomes uncertain, and a 
       updated: Date.now(),
       live: true,
       job: 'native-job',
+      movable: false,
       configDir: null
     }
   ];

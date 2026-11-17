@@ -258,11 +258,22 @@
    * is wide, the panel steps back to its edge, so every Odd stays in view.
    */
   const projectsReach = $derived.by(() => {
-    if (!wide || !leftOpen || front?.kind !== 'projects') return undefined;
+    if (!leftOpen || front?.kind !== 'projects') return undefined;
+    // On a narrow screen the open rail and an Odd's card come and go over the
+    // panel, as they do over the floor, so only the closed rail is kept clear.
+    if (!wide) return showRail && !cardOpen ? ODDS_RAIL + 24 : undefined;
     if (cardOpen) return rightWidth + 24;
     if (showRail) return (railOpen ? ODDS_RAIL_OPEN : ODDS_RAIL) + 24;
     return 16;
   });
+  /**
+   * The office panel's narrowest width. At phone width the room beside the
+   * closed rail is under 340 px, and SidePanel never reaches below its min, so
+   * the min drops to that room or the panel would slide under the rail.
+   */
+  const officeMin = $derived(
+    !wide && projectsReach !== undefined ? Math.min(340, innerWidth - 16 - projectsReach) : 340
+  );
   const selectedActivity = $derived(crew.tags.find((t) => t.id === selected)?.activity ?? 'home');
   const clock = $derived(
     now.toLocaleTimeString('en-US', { ...PT, hour: 'numeric', minute: '2-digit' })
@@ -709,6 +720,7 @@
       {crew}
       {plate}
       {innerWidth}
+      min={officeMin}
       reach={projectsReach}
       {desk}
       {deskCount}

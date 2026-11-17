@@ -16,6 +16,7 @@ import {
 } from '@oddboro/ledger';
 import { ADVANCED_OFF, projectController } from '#lib/server/project-sessions/controller.ts';
 import { folderMarks } from '#lib/server/project-sessions/claude-project.ts';
+import { ClaudeNeedsTrust } from '#lib/server/project-sessions/claude-background.ts';
 import { claudeFolderMark } from '#lib/server/claude.ts';
 import type { RequestHandler } from './$types';
 const id = z.string().uuid(),
@@ -36,7 +37,8 @@ const command = z.discriminatedUnion('action', [
     nativeId: id.optional(),
     title: z.string().max(200).optional(),
     handedOver: z.boolean().optional(),
-    configDir: z.string().min(1).max(4096).optional()
+    configDir: z.string().min(1).max(4096).optional(),
+    move: z.boolean().optional()
   }),
   z.object({ action: z.literal('history'), id }),
   z.object({ action: z.literal('send'), id, key: id, prompt, file }),
@@ -52,7 +54,10 @@ const command = z.discriminatedUnion('action', [
     id,
     view: id,
     cols: z.number().int().min(10).max(500),
-    rows: z.number().int().min(4).max(200)
+    rows: z.number().int().min(4).max(200),
+    // Set when another window may have taken the session's size since this
+    // one last sent it, so the session draws for this window again.
+    redraw: z.boolean().optional()
   }),
   z.object({ action: z.literal('steer'), id, turn: z.string(), prompt, file }),
   z.object({ action: z.literal('stop'), id, expected: z.string() }),
@@ -109,7 +114,8 @@ export const POST: RequestHandler = async ({ request }) => {
             title: a.title,
             handedOver: a.handedOver,
             socket: a.socket,
-            configDir: a.configDir
+            configDir: a.configDir,
+            move: a.move
           })
         );
       case 'history':
@@ -154,9 +160,12 @@ export const POST: RequestHandler = async ({ request }) => {
       case 'keys':
         c.openTerminal(a.id).requireControl(a.view).write(a.data);
         break;
-      case 'size':
-        c.openTerminal(a.id).requireControl(a.view).resize(a.cols, a.rows);
+      case 'size': {
+        const t = c.openTerminal(a.id).requireControl(a.view);
+        if (a.redraw) t.redraw(a.cols, a.rows);
+        else t.resize(a.cols, a.rows);
         break;
+      }
       case 'steer':
         await c.steer(a.id, a.turn, a.prompt, a.file);
         break;
@@ -179,6 +188,9 @@ export const POST: RequestHandler = async ({ request }) => {
     }
     return json({ ok: true });
   } catch (e) {
+    // Claude Code asks a terminal to trust a new folder first: Start answers
+    // with that terminal, which the page shows.
+    if (e instanceof ClaudeNeedsTrust && e.setup) return json({ setup: e.setup });
     error(
       409,
       e instanceof Error ? e.message : 'The project session could not complete that action.'

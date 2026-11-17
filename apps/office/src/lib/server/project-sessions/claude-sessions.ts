@@ -1,7 +1,7 @@
 // Claude Code's saved conversations for one project folder, read from the files
 // Claude Code writes itself: `<its folder>/projects/<project key>/<id>.jsonl`.
-// Only what Find existing shows: each conversation's ID, title, folder and
-// last change. A large file is read at its two ends only.
+// Only what the continue path's list shows: each conversation's ID, title,
+// folder and last change. A large file is read at its two ends only.
 import { access, open, readdir, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { UUID } from './native.ts';

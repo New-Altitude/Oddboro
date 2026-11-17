@@ -395,6 +395,17 @@ test('the secret stores are the ones the office keeps shut', () => {
   ]);
 });
 
+test('a leading ~ reads as the home folder on every system, and ~other stays as typed', async () => {
+  for (const platform of ['darwin', 'linux', 'win32'] as const)
+    await onPlatform(platform, async () => {
+      assert.equal(O.expandHome('~'), HOME, platform);
+      assert.equal(O.expandHome('~/work'), join(HOME, 'work'), platform);
+      assert.ok(O.expandHome('~\\folder').startsWith(HOME), platform);
+      assert.equal(O.expandHome('~other'), '~other', platform);
+      assert.equal(O.expandHome('/srv/work'), '/srv/work', platform);
+    });
+});
+
 test(
   "checkFolder refuses Docker's and Kubernetes' folders, which hold sign-ins and cluster keys",
   { skip: TEMP_IN_APPDATA },

@@ -13,7 +13,10 @@ import { L, onPlatform, request, withEnv } from './office-under-test.ts';
 const { ADVANCED_OFF } = await import('./project-sessions/controller.ts');
 const { readEnv } = await import('@oddboro/ledger/env');
 
-type Listed = { folders: { path: string; isDefault: boolean; found: boolean; mark: string }[] };
+type Listed = {
+  folders: { path: string; isDefault: boolean; found: boolean; mark: string }[];
+  suggested: string[];
+};
 
 /** What the route said when it refused, or undefined when it answered. */
 async function refused(answer: Promise<Response>) {
@@ -158,6 +161,91 @@ test('Setup names and removes Claude folders on a Mac, Linux and Windows', async
               await put({ add: workLink });
               assert.equal(stored(), workLink);
               await put({ remove: workLink });
+              assert.equal(stored(), undefined);
+            });
+          } finally {
+            L.setClaudeFolders([]);
+            rmSync(h, { recursive: true, force: true });
+            rmSync(elsewhere, { recursive: true, force: true });
+          }
+        })
+    );
+});
+
+test('Setup suggests the account folders in the home folder not named yet, on a Mac, Linux and Windows', async (t) => {
+  await L.setOwnerName('Tester');
+  await request('/api/setup/advanced', 'PUT', { body: { on: true } });
+  // What Claude Code keeps in an account folder; a folder needs both to be suggested.
+  assert.deepEqual(L.CLAUDE_ACCOUNT_MARKS, ['history.jsonl', 'projects']);
+  /** Makes `folder` holding `marks`: the history a file, the projects a folder. */
+  const marked = (folder: string, marks = L.CLAUDE_ACCOUNT_MARKS) => {
+    mkdirSync(folder, { recursive: true });
+    for (const m of marks)
+      if (m === 'projects') mkdirSync(join(folder, m));
+      else writeFileSync(join(folder, m), '');
+  };
+
+  for (const { platform } of SYSTEMS)
+    await t.test(
+      platform,
+      {
+        skip:
+          process.platform === 'win32' &&
+          platform !== 'win32' &&
+          'a Windows path holds a colon, the list’s delimiter on a Mac and Linux'
+      },
+      () =>
+        onPlatform(platform, async () => {
+          const h = mkdtempSync(join(tmpdir(), 'oddboro-owner-'));
+          const elsewhere = mkdtempSync(join(tmpdir(), 'oddboro-claude-'));
+          try {
+            await withEnv({ HOME: h, USERPROFILE: h }, async () => {
+              mkdirSync(join(h, '.claude'));
+              // Nothing to suggest is an empty list, so Setup shows no heading.
+              assert.deepEqual((await list()).suggested, []);
+
+              // `~/.claude` and a link to it are always listed, never suggested.
+              marked(join(h, '.claude'));
+              symlinkSync(join(h, '.claude'), join(h, '.claude-home'), 'junction');
+              marked(join(h, '.claude-work'));
+              marked(join(h, '.Claude-Caps'));
+              // A link counts by its own name, as a typed path is kept.
+              const target = join(elsewhere, 'linked');
+              marked(target);
+              symlinkSync(target, join(h, '.claude-linked'), 'junction');
+              // Not suggested: a folder missing a mark, a project's settings
+              // below the home's top level, a file, and a name not starting `.claude`.
+              for (const m of L.CLAUDE_ACCOUNT_MARKS) marked(join(h, `.claude-only-${m}`), [m]);
+              marked(join(h, 'code', 'shop', '.claude'));
+              writeFileSync(join(h, '.claude-file'), 'not a folder');
+              marked(join(h, 'claude-work'));
+
+              const all = ['~/.Claude-Caps', '~/.claude-linked', '~/.claude-work'];
+              assert.deepEqual((await list()).suggested, all);
+
+              // A suggestion is added as typing it is: stored by the path `~` gives.
+              const work = join(h, '.claude-work');
+              assert.deepEqual((await put({ add: '~/.claude-work' })).suggested, [
+                '~/.Claude-Caps',
+                '~/.claude-linked'
+              ]);
+              assert.equal(stored(), work);
+              assert.deepEqual((await put({ remove: work })).suggested, all);
+
+              const link = join(h, '.claude-linked');
+              assert.deepEqual((await put({ add: '~/.claude-linked' })).suggested, [
+                '~/.Claude-Caps',
+                '~/.claude-work'
+              ]);
+              assert.equal(stored(), link);
+              await put({ remove: link });
+              // The link's folder named by its real path is the same folder.
+              const real = realpathSync.native(target);
+              assert.deepEqual((await put({ add: real })).suggested, [
+                '~/.Claude-Caps',
+                '~/.claude-work'
+              ]);
+              await put({ remove: real });
               assert.equal(stored(), undefined);
             });
           } finally {
