@@ -25,8 +25,9 @@ import { claudeFolderMark } from '../claude.ts';
  * marks (`claudeFolderMark`): `newer` and `to` name the folder holding the
  * conversation's newest copy, `from` the one the session left, and `terminal`
  * the folder of the terminal session connect's `move` ended. A session moves only
- * when its own folder lacks the conversation, or to that terminal's folder,
- * so at most one applies.
+ * when its own folder lacks the conversation, or to that terminal's folder.
+ * One notice shows: the terminal's when both apply, since the owner was using
+ * that copy.
  */
 export const FOLDER_NOTICE = {
   newer: (mark: string) =>
@@ -169,14 +170,16 @@ export async function copyToOpen(
   // still finds it idle.
   const open = [own, newest].find(inTerminal);
   // The Claude folder the terminal session `move` ended ran under, when it
-  // is not the one this session would resume in. The owner was using that
-  // copy, so the session resumes and is stored there, as a pick of it would
-  // be, whichever folder holds the newest file.
+  // is not the one this session would run in: a known session's own folder
+  // (picked, stored, or the default while it has none), not the newest
+  // copy's it moves to above, else a new one's picked or newest copy's. The
+  // owner was using the terminal's copy, so the session resumes and is
+  // stored there, as a pick of it would be, and the owner is told.
   let terminalDir: string | undefined;
   if (open) {
     if (!move) throw openInTerminal();
     await endTerminalSession(folder, open);
-    if (open.liveIn !== undefined && open.liveIn !== (configDir ?? ownDir)) {
+    if (open.liveIn !== undefined && open.liveIn !== (ownDir ?? configDir)) {
       terminalDir = configDir = open.liveIn;
       saved = open;
     }
