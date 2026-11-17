@@ -122,12 +122,18 @@ export async function connectProject(
       )
     )
     .returning();
-  if (!existing) throw new Error('This conversation belongs to a different project.');
+  if (!existing) throw new Error(OTHER_PROJECT);
   return existing;
 }
 /** The session `id`, locked until the transaction ends. */
 const lockSession = async (tx: Db, id: string): Promise<ProjectSession | undefined> =>
   (await tx.select().from(projectSessions).where(eq(projectSessions.id, id)).for('update'))[0];
+
+/**
+ * Connect's refusal of a conversation tied to another project folder: one
+ * already connected there, or a Codex thread whose folder is another.
+ */
+export const OTHER_PROJECT = 'This conversation belongs to a different project.';
 
 /** What an action that would let an Odd into a removed session answers. */
 export const SESSION_REMOVED = 'This session was removed from Projects.';

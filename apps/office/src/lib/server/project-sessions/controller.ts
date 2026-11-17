@@ -8,6 +8,7 @@ import {
   defaultClaudeFolder,
   home,
   connectProject,
+  OTHER_PROJECT,
   PAIR_SELF,
   hideProject,
   claimProject,
@@ -297,8 +298,7 @@ export class ProjectController {
           rpc.request<{ thread: Thread }>('thread/read', { threadId: id }),
           rpc.request<{ data: string[] }>('thread/loaded/list')
         ]);
-        if (thread.cwd !== folder)
-          throw new Error('That conversation belongs to a different project.');
+        if (thread.cwd !== folder) throw new Error(OTHER_PROJECT);
         saved = {
           id: thread.id,
           title: thread.name || thread.preview || 'Codex',
