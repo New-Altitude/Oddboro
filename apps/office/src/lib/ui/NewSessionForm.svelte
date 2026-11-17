@@ -29,7 +29,8 @@
   // The Projects window's New session form. ProjectSessions.svelte keeps every
   // piece of state and every action; this only shows them and reports clicks.
   // The one exception is which row's move confirm is open: nothing outside the
-  // form reads it, and it closes whenever the form does.
+  // form reads it, and it closes whenever the form does. The form also drops a
+  // setup question another window's Start closed, since only its stream hears it.
   type Props = {
     folder: string;
     agent: ProjectAgent;
@@ -52,7 +53,8 @@
     place: ErrorPlace | undefined;
     /** The id of the conversation whose row the error shows under. */
     problemRow: string | undefined;
-    /** Claude Code's question before it works in a new folder, shown under Start. */
+    /** Claude Code's question before it works in a new folder, shown under Start. Bound,
+     * since one that another window's Start closed goes from here: the office ended it. */
     setup: SetupTerminal | undefined;
     /** The owner typed in the filter. */
     onfilter: () => void;
@@ -86,7 +88,7 @@
     problem,
     place,
     problemRow,
-    setup,
+    setup = $bindable(),
     onfilter,
     onchange,
     onpick,
@@ -205,13 +207,26 @@
             id={setup.id}
             view={setup.view}
             onerror={onsetuperror}
-            onstream={(stream, id) =>
+            onstream={(stream, id) => {
               // Claude Code quits once the owner answers its question. Only the
               // question still shown starts again: one closed since was for a form
               // that changed, or a Start that already ran.
-              stream.addEventListener('end', () => {
+              const ended = () => {
                 if (setup?.id === id) onstart({ after: 'trust' });
-              })}
+              };
+              stream.addEventListener('end', ended);
+              // A stream refused for good found the terminal gone: Claude Code quit
+              // before the stream connected. One the browser reconnects is a blip.
+              // A listener, since the terminal sets the stream's onerror itself.
+              stream.addEventListener('error', () => {
+                if (stream.readyState === EventSource.CLOSED) ended();
+              });
+              // Closed by another window's Start, not answered: the form goes back
+              // to how it was before Start, and nothing starts here.
+              stream.addEventListener('replaced', () => {
+                if (setup?.id === id) setup = undefined;
+              });
+            }}
           />{/key}
       </div>
     {/if}

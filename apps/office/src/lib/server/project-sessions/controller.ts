@@ -139,7 +139,8 @@ export class ProjectController {
   private creating = new Map<string, Promise<Runtime>>();
   /**
    * Terminals opened only so Claude Code can ask the owner to trust a folder,
-   * by an id of their own, which the terminal routes take as a session's.
+   * by an id of their own, which the terminal routes take as a session's. One
+   * another window's Start closes emits `replaced` on its terminal first.
    */
   private setups = new Map<string, { folder: string; dir: string; terminal: ProjectTerminal }>();
   /**
@@ -354,7 +355,11 @@ export class ProjectController {
    */
   private async startClaude(folder: string, dir: string, title: string) {
     for (const [id, setup] of this.setups)
-      if (setup.folder === folder && setup.dir === dir) await this.closeSetup(id);
+      if (setup.folder === folder && setup.dir === dir) {
+        // Its window must not read this close as the owner's answer and start again.
+        setup.terminal.events.emit('replaced');
+        await this.closeSetup(id);
+      }
     const key = randomUUID();
     const p = prepareClaude({ id: key, nativeId: PAIR_SELF, folder });
     try {

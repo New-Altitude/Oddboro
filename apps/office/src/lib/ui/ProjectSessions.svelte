@@ -119,6 +119,8 @@
     removing = $state(false),
     /** Stop asks once in place, above the terminal. */
     stopping = $state(false);
+  /** The setup whose question ended while the window was busy: Start waits to run for it. */
+  let retryFor: string | undefined;
   /** This window's terminal view. A new one per session opened. */
   let termView = $state(crypto.randomUUID());
   /** The move confirm, in place of Reconnect, for the session opened with `view`. Each opening
@@ -219,6 +221,11 @@
       problem = { text: describe(e), from, row };
     } finally {
       busy = false;
+      // Claude Code's question ended while this ran. Start runs for it now, once, but
+      // only while it still shows: an action that changed the form closed it.
+      const id = retryFor;
+      retryFor = undefined;
+      if (id && setup?.id === id) start({ after: 'trust' });
     }
   }
   async function history(id: string) {
@@ -447,9 +454,14 @@
   }
   /**
    * Start, chosen by the owner or run once by itself when Claude Code's
-   * question ends. Any question still shown closes first.
+   * question ends. Any question still shown closes first. A question that ends
+   * while another action holds the window waits for it, as `run` says.
    */
   function start(how: { after?: 'trust' } = {}) {
+    if (how.after === 'trust' && busy) {
+      retryFor = setup?.id;
+      return;
+    }
     void run(() => {
       closeSetup();
       return connect(undefined, how);
@@ -607,7 +619,7 @@
         problem={problem?.text}
         {place}
         problemRow={problem?.row}
-        {setup}
+        bind:setup
         onfilter={() => {
           if (filterClears(place)) problem = undefined;
         }}

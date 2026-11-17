@@ -37,6 +37,8 @@ import {
 } from './controller-background-under-test.ts';
 import { app, save } from './controller-under-test.ts';
 
+const events = await import('../../../routes/api/project-sessions/[id]/events/+server.ts');
+
 test(
   "Start runs a new conversation in Claude Code's background service with the office plugin and shows it with claude attach",
   SHELL_STAND_IN,
@@ -671,5 +673,109 @@ test(
     agentsNow(b, []);
     await c.connect('claude', app, { nativeId: id, configDir: a, move: true });
     assert.ok(!interrupted(gone));
+  }
+);
+
+/**
+ * A window's stream of the trust terminal `id`, opened as the owner's page opens it,
+ * with the name of each event it sent so far.
+ */
+async function trustStream(id: string) {
+  const view = randomUUID();
+  const url = new URL(`http://office/api/project-sessions/${id}/events?terminal=1&view=${view}`);
+  const leave = new AbortController();
+  const answer = await events.GET({
+    params: { id },
+    url,
+    request: new Request(url, {
+      headers: { 'sec-fetch-site': 'same-origin' },
+      signal: leave.signal
+    })
+  } as never);
+  const reader = answer.body!.getReader();
+  const decoder = new TextDecoder();
+  let text = '';
+  const read = (async () => {
+    for (let r = await reader.read(); !r.done; r = await reader.read())
+      text += decoder.decode(r.value);
+  })();
+  return {
+    /** The events sent so far, once every chunk sent has been read. */
+    async sent() {
+      await new Promise((r) => setImmediate(r));
+      return [...text.matchAll(/^event: (\w+)$/gm)].map((m) => m[1]);
+    },
+    async leave() {
+      leave.abort();
+      await read;
+    }
+  };
+}
+/** A Start in `folder` under `dir` that Claude Code answers with its trust question. */
+async function askedToTrust(folder: string, dir: string) {
+  const refused = await c.connect('claude', folder, { configDir: dir }).then(
+    () => assert.fail('Start went ahead in a folder Claude Code does not trust'),
+    (e: unknown) => e
+  );
+  assert.ok(refused instanceof ClaudeNeedsTrust && refused.setup);
+  return refused.setup;
+}
+
+test(
+  "A window's trust question ends with end only when its own terminal exits, and another window's Start in the same folder and account tells it replaced",
+  SHELL_STAND_IN,
+  async (t) => {
+    /** The Claude folder Start uses, set up again for each step: every test's end clears it. */
+    const untrusted = () => {
+      const dir = claudeFolder('.claude-replaced');
+      writeFileSync(join(dir, 'bg.out'), NOT_TRUSTED);
+      return dir;
+    };
+
+    await t.test('one window: Claude Code quitting once answered sends end', async () => {
+      const dir = untrusted();
+      const setup = await askedToTrust(app, dir);
+      const a = await trustStream(setup);
+      c.openTerminal(setup).close();
+      const sent = await a.sent();
+      assert.ok(sent.includes('end'), sent.join(' '));
+      assert.ok(!sent.includes('replaced'), sent.join(' '));
+      await a.leave();
+    });
+
+    await t.test(
+      "two windows on the same folder and account: the second's Start sends the first replaced, and no end",
+      async () => {
+        const dir = untrusted();
+        const first = await askedToTrust(app, dir);
+        const a = await trustStream(first);
+        const second = await askedToTrust(app, dir);
+        assert.notEqual(second, first);
+        assert.throws(() => c.openTerminal(first), 'the first question was closed');
+        const sent = await a.sent();
+        assert.ok(sent.includes('replaced'), sent.join(' '));
+        assert.ok(!sent.includes('end'), sent.join(' '));
+        await a.leave();
+        await c.disconnect(second);
+      }
+    );
+
+    await t.test(
+      "two windows on different folders: the second's Start closes nothing",
+      async () => {
+        const dir = untrusted();
+        const other = join(homedir(), 'other-app');
+        mkdirSync(other, { recursive: true });
+        const first = await askedToTrust(app, dir);
+        const a = await trustStream(first);
+        const second = await askedToTrust(other, dir);
+        assert.ok(c.openTerminal(first).running, 'the first question still shows');
+        const sent = await a.sent();
+        assert.ok(!sent.includes('replaced') && !sent.includes('end'), sent.join(' '));
+        await a.leave();
+        await c.disconnect(first);
+        await c.disconnect(second);
+      }
+    );
   }
 );

@@ -42,14 +42,18 @@ const streams: QuietStream[] = [];
  * `EventTarget` refuses.
  */
 class QuietStream {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSED = 2;
   readonly url: string;
+  readyState: number = QuietStream.OPEN;
   onerror: (() => void) | null = null;
-  #listeners = new Map<string, ((e: { data: string }) => void)[]>();
+  #listeners = new Map<string, ((e: { data?: string }) => void)[]>();
   constructor(url: string) {
     this.url = url;
     streams.push(this);
   }
-  addEventListener(type: string, listener: (e: { data: string }) => void) {
+  addEventListener(type: string, listener: (e: { data?: string }) => void) {
     this.#listeners.set(type, [...(this.#listeners.get(type) ?? []), listener]);
   }
   close() {}
@@ -57,6 +61,15 @@ class QuietStream {
   send(type: string, data: unknown = null) {
     for (const listener of this.#listeners.get(type) ?? [])
       listener({ data: JSON.stringify(data) });
+  }
+  /**
+   * Fails as a browser's stream does: `closed` when the office refused it for
+   * good, else a drop the browser reconnects by itself.
+   */
+  fail(closed: boolean) {
+    this.readyState = closed ? QuietStream.CLOSED : QuietStream.CONNECTING;
+    for (const listener of this.#listeners.get('error') ?? []) listener({});
+    this.onerror?.();
   }
 }
 Object.defineProperty(globalThis, 'EventSource', {
