@@ -128,6 +128,8 @@
     focusWanted = $state(false),
     /** While this window lets the session go, its terminal view is closed. */
     closing = $state(false);
+  /** This window's terminal while it shows. */
+  let terminal = $state<ReturnType<typeof ProjectTerminal>>();
   const selected = $derived(connections.find((s) => s.id === currentId));
   const terminalVisible = $derived(!!view?.connected && !!view.terminal && !closing);
   /** Only while the terminal shows: a session not connected keeps the list in reach. */
@@ -371,14 +373,17 @@
     await Promise.all([history(id), load()]);
   }
   /**
-   * Closes this window's terminal view first, as closeSetup does, so nothing it
-   * still sends reaches a session being let go. A refusal leaves the session
-   * connected, so the terminal shows again.
+   * Closes this window's terminal view first, as closeSetup does, then waits for
+   * the keys it already sent to land, so nothing it sends reaches a session being
+   * let go. A refusal leaves the session connected, so the terminal shows again.
    */
   async function letGo(op: 'disconnect' | 'end') {
+    // Taken while the terminal is still there: closing it takes it away.
+    const landed = terminal?.keysLanded();
     closing = true;
     await tick();
     try {
+      await landed;
       await action(op);
     } finally {
       closing = false;
@@ -712,6 +717,7 @@
       <div class="term relative flex min-h-0 flex-1 flex-col">
         {#if terminalVisible}
           {#key termView}<ProjectTerminal
+              bind:this={terminal}
               onstream={updates}
               id={selected.id}
               view={termView}

@@ -1,5 +1,6 @@
 // The Projects window mounted in a browser-like document, against a stand-in
-// office: Focus (and the office panel it folds), Reconnect's Move here, Disconnect, which window takes the typing,
+// office: Focus (and the office panel it folds), Reconnect's Move here, Disconnect
+// and Stop waiting for the terminal's keys, which window takes the typing,
 // and Claude Code's setup question answering a Start the owner has since changed
 // or left for a session. Each test clicks and types as the owner does and reads
 // what the window then shows.
@@ -31,6 +32,18 @@ import { rememberFocus } from './projects-focus.ts';
 // After the harness above, so it loads compiled for the client: the same module
 // the window writes to.
 const { panelFolded, projectsFocus } = await import('./windows.svelte.ts');
+// What the terminal sends the session, as xterm's own replies and the owner's
+// keys go: the mount helper's stand-in terminal hands its listener here as it opens.
+type OnData = (listener: (data: string) => void) => { dispose(): void };
+const { Terminal } = (await import('@xterm/xterm')) as unknown as {
+  Terminal: { prototype: { open(host: HTMLElement): void } };
+};
+let typed: (data: string) => void = (data) => assert.fail(`nothing listens for ${data}`);
+const open = Terminal.prototype.open;
+Terminal.prototype.open = function (this: { onData: OnData }, host: HTMLElement) {
+  this.onData = (listener) => ((typed = listener), { dispose() {} });
+  open.call(this, host);
+};
 const PROJECTS_WIN = { id: 'projects', kind: 'projects', ask: { n: 0 } } as const;
 const DESK_WIN = { id: 'desk', kind: 'desk' } as const;
 
@@ -396,6 +409,75 @@ test('Disconnect closes this window’s terminal before it asks the office, and 
       await shown.unmount();
     }
   });
+});
+
+test('Disconnect and Stop ask the office only once the keys this window sent have landed', async (t) => {
+  type Press = (shown: Awaited<ReturnType<typeof projectsWindow>>) => void;
+  const disconnect: Press = (shown) => button(shown.target, 'Disconnect').click();
+  /** Stop, then Stop again on its confirm. */
+  const stop: Press = (shown) => {
+    one<HTMLButtonElement>(shown.target, `button[aria-label="${PROJECT_WORDS.stopName}"]`).click();
+    shown.flush();
+    button(one(shown.target, '[role="alertdialog"]'), PROJECT_WORDS.stopButton).click();
+  };
+  const cases = [
+    {
+      name: 'Disconnect after xterm’s focus report as the click takes focus',
+      data: '\x1b[O',
+      press: disconnect,
+      op: 'disconnect',
+      reply: () => Response.json({})
+    },
+    {
+      name: 'Stop after typing',
+      data: 'a',
+      press: stop,
+      op: 'end',
+      reply: () => Response.json({})
+    },
+    {
+      name: 'Disconnect after a key the office refuses',
+      data: 'a',
+      press: disconnect,
+      op: 'disconnect',
+      reply: () => refused('Connect this session first.')
+    }
+  ];
+  for (const { name, data, press, op, reply } of cases) {
+    await t.test(name, async () => {
+      let land: (reply: Response) => void = () => assert.fail('no key sent');
+      office({
+        sessions: [SESSION],
+        view: viewOf(true, true),
+        more: (s) => (s.action === 'keys' ? new Promise<Response>((r) => (land = r)) : {})
+      });
+      const shown = await projectsWindow();
+      try {
+        streamAt(`/api/project-sessions/${SESSION.id}/events?terminal=1`).send('control', true);
+        shown.flush();
+        typed(data);
+        await settled(shown);
+        assert.deepEqual(
+          asked('keys').map((s) => s.data),
+          [data],
+          'the key is on its way'
+        );
+        press(shown);
+        await settled(shown);
+        assert.deepEqual(asked(op), [], 'nothing asked while the key is on its way');
+        land(reply());
+        await settled(shown);
+        assert.deepEqual(
+          asked(op).map((s) => s.id),
+          [SESSION.id],
+          'asked once the key landed'
+        );
+        sameElement(shown.target.querySelector('[role="alert"]'), null, 'with no error');
+      } finally {
+        await shown.unmount();
+      }
+    });
+  }
 });
 
 test('Reconnect and Open terminal ask for the terminal with the view their stream opens with', async (t) => {

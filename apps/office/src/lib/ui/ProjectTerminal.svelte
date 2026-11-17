@@ -33,6 +33,16 @@
     onerror: (text: string) => void;
   } = $props();
   let host: HTMLDivElement;
+  /** This view's key posts, one after another. It never rejects: `report` takes a failed post. */
+  let chain = Promise.resolve();
+  /**
+   * Settles once every key this view has sent has landed or failed. Disconnect and
+   * Stop wait for it, so the office never gets a key after the session is let go:
+   * xterm sends its focus report as the owner presses the button.
+   */
+  export function keysLanded() {
+    return chain;
+  }
 
   onMount(() => {
     let disposed = false,
@@ -91,7 +101,6 @@
       const report = (e: Error) => {
         if (!disposed) onerror(e.message);
       };
-      let chain = Promise.resolve();
       const input = term.onData((data) => {
         chain = chain
           .then(async () => {
