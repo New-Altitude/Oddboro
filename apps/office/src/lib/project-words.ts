@@ -8,17 +8,18 @@ export const PROJECT_WORDS = {
   trustLine:
     'Claude Code asks once before it works in a new folder. Answer its question, then choose Start again.',
   startAgain: 'Start again',
-  inTerminal: 'Open in a terminal',
+  inTerminal: 'Running in a terminal',
   moveButton: 'Move here',
   moveConfirm:
-    'This closes the conversation in its terminal and opens it here. Nothing is lost. To keep using it in that terminal too, run the command it shows there.',
+    'This closes the conversation in its terminal and opens it here. The conversation is kept. To keep using it in that terminal too, run the command it shows there.',
   moveCancel: 'Cancel',
   busy: 'Claude is replying in that terminal. Try again when it finishes.',
   windows:
-    'This conversation is open in a terminal. In that terminal, type /exit, then choose Connect again.',
+    'This conversation is open in a terminal. In that terminal, type /exit, then select it here again.',
   useMove: 'This conversation is open in a terminal. Choose Move here to bring it in.',
   copied: 'This conversation just opened in another window. Try again.',
   startFailed: 'Claude Code could not start this conversation. Try again.',
+  closeSlow: 'That terminal is still closing. Wait a moment, then try again.',
   waiting: 'Claude is waiting for your answer in that terminal. Answer it there, then try again.',
   focus: 'Focus',
   // Starts with the button's visible word, so voice control finds it by what it shows.

@@ -134,7 +134,7 @@ export async function endTerminalSession(row: { pid?: number; status?: string })
   while (!processGone(pid)) {
     if (performance.now() > end) {
       console.error(`The terminal session ${pid} was still running 5 s after the interrupt.`);
-      throw new Error(PROJECT_WORDS.startFailed);
+      throw new Error(PROJECT_WORDS.closeSlow);
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
