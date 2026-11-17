@@ -566,7 +566,7 @@ test(
 );
 
 test(
-  "Start in a folder Claude Code was never told to trust opens Claude Code's trust question in a setup terminal, and Start again closes it",
+  "Start in a folder Claude Code was never told to trust opens Claude Code's trust question in a setup terminal that ends itself once answered",
   SHELL_STAND_IN,
   async () => {
     const dir = claudeFolder('.claude-trust');
@@ -586,17 +586,17 @@ test(
     const setup = refused.setup;
     assert.ok(setup);
     assert.equal(spawned.length, opened + 1);
-    assert.deepEqual(lastTerminal().args, []);
+    assert.deepEqual(lastTerminal().args, ['/exit']);
     assert.equal(lastTerminal().cwd, app);
     assert.equal(lastTerminal().env.CLAUDE_CONFIG_DIR, dir);
     assert.ok(c.openTerminal(setup).running);
     assert.deepEqual(plugins(), before, 'a plugin folder was left under the unused key');
 
-    // Start again, once the owner answered: the setup terminal closes before the start.
+    // Start once the trust question ended: the setup terminal closes before the start.
     rmSync(untrusted);
     await c.connect('claude', app, { configDir: dir });
     const log = logged();
-    const closed = log.indexOf('terminal closed []');
+    const closed = log.indexOf(`terminal closed ${JSON.stringify(['/exit'])}`);
     assert.ok(closed >= 0, log.join('\n'));
     assert.ok(closed < log.findLastIndex((line) => line.startsWith('--bg -n')), log.join('\n'));
     assert.throws(() => c.openTerminal(setup));

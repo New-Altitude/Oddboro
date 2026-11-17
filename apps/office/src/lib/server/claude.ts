@@ -261,8 +261,9 @@ function claudeFolderLogin(dir: string, fresh: boolean): Promise<ClaudeAccount |
 /**
  * How Projects names a Claude folder: its name, then the email it is signed in
  * as now, such as `~/.claude-personal · owner@example.com`. A folder not in
- * Setup, or not on the disk, says so, and no `claude` runs in it, since
- * `claude auth status` writes into the folder it reads.
+ * Setup, or not on the disk, says so. No `claude` runs in a stored folder
+ * outside Setup, since `claude auth status` writes into the folder it reads.
+ * A session with no stored folder runs where its terminal runs.
  */
 export async function claudeFolderMark(
   dir: string,

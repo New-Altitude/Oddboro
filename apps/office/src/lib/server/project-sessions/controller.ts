@@ -365,11 +365,13 @@ export class ProjectController {
   /**
    * Opens Claude Code in a terminal in `folder`, under the Claude folder
    * `dir`, so it can ask the owner to trust the folder, and returns the
-   * terminal's id. Quit before any message, it saves no conversation.
+   * terminal's id. Its first prompt is `/exit`, so once the owner answers,
+   * Claude Code quits by itself and the terminal ends, which tells the page
+   * to start again. No message is sent, so it saves no conversation.
    */
   private async trustTerminal(folder: string, dir: string): Promise<string> {
     const id = randomUUID();
-    const terminal = await ProjectTerminal.open('claude', [], folder, {
+    const terminal = await ProjectTerminal.open('claude', ['/exit'], folder, {
       CLAUDE_CONFIG_DIR: claudeConfigDir(dir)
     });
     this.setups.set(id, { folder, dir, terminal });
@@ -540,8 +542,9 @@ export class ProjectController {
         row?.job ||
         (await resumeInBackground({ folder: s.folder, dir }, s.nativeId, c.plugin!).catch(
           (e: unknown) => {
-            // Start again means nothing for a saved conversation, whose folder
-            // this account no longer trusts.
+            // A saved conversation whose folder this account no longer trusts
+            // gets no trust question, only the line that it could not start:
+            // the trust terminal belongs to Start's new sessions.
             throw e instanceof ClaudeNeedsTrust ? new Error(PROJECT_WORDS.startFailed) : e;
           }
         ));
