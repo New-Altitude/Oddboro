@@ -1,6 +1,6 @@
 // The Projects window mounted in a browser-like document, against a stand-in
 // office: Focus, Reconnect's Move here, and Claude Code's setup question
-// answering a Start the owner has since changed. Each test clicks and types as
+// answering a Start the owner has since changed or left for a session. Each test clicks and types as
 // the owner does and reads what the window then shows.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -128,15 +128,24 @@ test('Focus folds away the Projects title row and the session list only while a 
   rememberFocus(false);
 });
 
-test('Reconnect on a conversation open in a terminal asks before moving it here', async (t) => {
-  const inTerminal = (movable: boolean) => ({
-    id: NATIVE,
-    title: 'Fix the build',
-    live: true,
-    updated: 0,
-    ...(movable && { movable })
-  });
+/** The session's conversation as a list finds it: open in a terminal, and `movable` or not. */
+const inTerminal = (movable: boolean) => ({
+  id: NATIVE,
+  title: 'Fix the build',
+  live: true,
+  updated: 0,
+  ...(movable && { movable })
+});
+/** The session in the list whose title is `title`. */
+const rowOf = (root: Element, title: string) => {
+  const found = [...root.querySelectorAll('[role="option"]')].filter((o) =>
+    o.textContent?.includes(title)
+  );
+  assert.equal(found.length, 1, `one session row for "${title}"`);
+  return found[0] as HTMLElement;
+};
 
+test('Reconnect on a conversation open in a terminal asks before moving it here', async (t) => {
   await t.test('one the office can move shows the confirm in place of Reconnect', async () => {
     office({
       sessions: [SESSION],
@@ -193,6 +202,73 @@ test('Reconnect on a conversation open in a terminal asks before moving it here'
       await shown.unmount();
     }
   });
+});
+
+test('The move confirm shows only on the session it was opened for', async () => {
+  const other = {
+    ...SESSION,
+    id: 'session-2',
+    nativeId: NATIVE.replace('1111', '2222'),
+    title: 'Write the docs'
+  };
+  office({
+    sessions: [SESSION, other],
+    view: viewOf(false, false),
+    more: (s) => (s.action === 'find' ? [inTerminal(true)] : {})
+  });
+  const shown = await projectsWindow();
+  try {
+    const confirm = () => shown.target.querySelector('.term [role="alertdialog"]');
+    button(one(shown.target, '.term'), 'Reconnect').click();
+    await settled(shown);
+    assert.ok(confirm(), 'the confirm shows on the session it was opened for');
+
+    rowOf(shown.target, other.title).click();
+    await settled(shown);
+    sameElement(confirm(), null, 'not on another session');
+    button(one(shown.target, '.term'), 'Reconnect');
+
+    rowOf(shown.target, SESSION.title).click();
+    await settled(shown);
+    sameElement(confirm(), null, 'nor on its own once opened again');
+    assert.equal(
+      sent.some((s) => s.action === 'connect'),
+      false,
+      'nothing moved'
+    );
+  } finally {
+    await shown.unmount();
+  }
+});
+
+test('Opening a session ends the setup question’s terminal', async () => {
+  office({
+    sessions: [SESSION],
+    view: viewOf(false, false),
+    more: (s) => (s.action === 'connect' ? { setup: 'setup-1' } : {})
+  });
+  const shown = await projectsWindow();
+  try {
+    button(shown.target, '+ New session').click();
+    shown.flush();
+    button(shown.target, 'Start a new conversation').click();
+    shown.flush();
+    enterFolder(shown.target, '/work/app');
+    shown.flush();
+    button(shown.target, 'Start').click();
+    await settled(shown);
+    assert.ok(shown.target.textContent?.includes(PROJECT_WORDS.trustLine), 'shown first');
+
+    rowOf(shown.target, SESSION.title).click();
+    await settled(shown);
+    assert.deepEqual(
+      sent.filter((s) => s.action === 'disconnect').map((s) => s.id),
+      ['setup-1'],
+      'its terminal ended, once'
+    );
+  } finally {
+    await shown.unmount();
+  }
 });
 
 test('Claude Code’s setup question for a Start the owner has since changed never shows, and ends', async (t) => {
