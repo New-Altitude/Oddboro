@@ -60,9 +60,13 @@ export function runnableClaudeFolder(dir: string): string {
 
 /** `dir`, unless it is a folder other than `~/.claude` that is not on the disk now. */
 function foundClaudeFolder(dir: string): string {
-  if (claudeConfigDir(dir) !== undefined && !claudeFolderFound(dir))
-    throw new Error('That Claude folder is not found.');
+  if (!claudeFolderThere(dir)) throw new Error('That Claude folder is not found.');
   return dir;
+}
+
+/** Whether `dir` is `~/.claude`, which is always tried, or a folder on the disk now. */
+function claudeFolderThere(dir: string): boolean {
+  return claudeConfigDir(dir) === undefined || claudeFolderFound(dir);
 }
 
 /**
@@ -183,17 +187,28 @@ export async function copyToOpen(
   // continue path's list, which moves it there, else its own (`sessionFolder`).
   const ownDir = known && (configDir ?? sessionFolder(known));
   const find = (rows: ClaudeConversation[]) => rows.find((row) => row.id === id);
-  const [own, newest, newIdPick] = await Promise.all([
+  // A session with no folder of its own could run in the office's default
+  // folder, which `claudeProjects` never reads when it is outside Setup. A
+  // gone one is skipped rather than refused, so it never blocks a good pick,
+  // and no `claude` command creates it.
+  const defaultDir = known?.configDir === null ? officeClaudeFolder() : undefined;
+  const readsDefault =
+    defaultDir !== undefined &&
+    configDir !== undefined &&
+    !isClaudeFolder(defaultDir) &&
+    claudeFolderThere(defaultDir);
+  const [own, newest, newIdPick, stays] = await Promise.all([
     ownDir ? claudeProjectsIn(folder, ownDir).then(find) : undefined,
     claudeProjects(folder).then(find),
     // A new id's pick is looked up only for the refusal below, so it
     // never gets a notice; a known session's pick is its `ownDir`.
-    !known && configDir !== undefined ? claudeProjectsIn(folder, configDir).then(find) : undefined
+    !known && configDir !== undefined ? claudeProjectsIn(folder, configDir).then(find) : undefined,
+    readsDefault ? claudeProjectsIn(folder, defaultDir).then(find) : undefined
   ]);
-  // A pick that lacks a conversation some folder holds is a stale list.
-  // Refused before anything is stored or spawned, so no terminal starts
-  // that id afresh while a copy of it exists.
-  if (configDir !== undefined && !(known ? own : newIdPick) && newest)
+  // A pick that lacks a conversation some folder the session could run in
+  // holds is a stale list. Refused before anything is stored or spawned, so
+  // no terminal starts that id afresh while a copy of it exists.
+  if (configDir !== undefined && !(known ? own : newIdPick) && (newest ?? stays))
     throw new Error(PICK_LACKS_IT(await claudeFolderMark(configDir, { fresh: true })));
   // Only a session whose own folder lacks the conversation takes the
   // folder holding its newest copy, so one connected before its folder

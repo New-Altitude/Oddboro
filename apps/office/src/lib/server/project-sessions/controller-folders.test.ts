@@ -621,6 +621,51 @@ test(
 );
 
 test(
+  "a pick that lacks the conversation is refused when only the office's own Claude folder outside Setup holds it, and nothing is stored",
+  { skip: process.platform === 'win32' && 'the stand-in is a shell script' },
+  async () => {
+    // Not named in Setup, so the folder list never reads it.
+    const env = named('.claude-env-only');
+    const b = named('.claude-env-pick');
+    L.setClaudeFolders([b]);
+    const ids: string[] = [];
+    try {
+      const id = randomUUID();
+      save(env, id);
+      const s = await L.connectProject('claude', id, app, 'Before folders');
+      ids.push(s.id);
+      const count = spawned.length;
+      await withEnv({ CLAUDE_CONFIG_DIR: env }, () =>
+        assert.rejects(c.connect('claude', app, { nativeId: id, configDir: b }), {
+          message: PICK_LACKS_IT('~/.claude-env-pick · signed out')
+        })
+      );
+      assert.equal((await L.connection(s.id)).configDir, null);
+      assert.equal(spawned.length, count);
+      assert.ok(!inside.sessions.has(s.id), 'the refused connect kept a runtime');
+
+      // The office's folder is gone: the pick holding it resumes there, and
+      // the gone folder is never read or made.
+      const gone = join(homedir(), '.claude-env-gone');
+      const held = randomUUID();
+      save(b, held);
+      const t = await L.connectProject('claude', held, app, 'Before folders');
+      ids.push(t.id);
+      const since = logged().length;
+      await withEnv({ CLAUDE_CONFIG_DIR: gone }, () =>
+        c.connect('claude', app, { nativeId: held, configDir: b })
+      );
+      assert.equal((await L.connection(t.id)).configDir, b);
+      assert.ok(!existsSync(gone), 'the missing folder was made');
+      assert.ok(!logged().slice(since).includes(gone), logged());
+    } finally {
+      for (const id of ids) await c.disconnect(id);
+      L.setClaudeFolders([]);
+    }
+  }
+);
+
+test(
   "the continue path's list, through the route, refuses a new conversation picked in a folder that lacks it, and stores nothing",
   { skip: process.platform === 'win32' && 'the stand-in is a shell script' },
   async () => {
