@@ -147,25 +147,32 @@ test('Confirming Stop closes this window’s terminal before it asks the office 
   );
 });
 
-test('Remove’s confirm says it ends the session for every window still joined to it', async () => {
-  office({ sessions: [SESSION], view: viewOf(false, false) });
-  const shown = await projectsWindow();
-  try {
-    const body = one(shown.target, '.term');
-    button(body, 'Remove').click();
-    await settled(shown);
-    const confirm = confirmIn(body);
-    assert.ok(confirm, 'the confirm shows');
-    const warning = one(confirm, '#remove-warning');
-    assert.equal(warning.textContent, PROJECT_WORDS.removeConfirm);
-    assert.ok(
-      PROJECT_WORDS.removeConfirm.includes(
-        ' This ends the session for every window still joined to it. '
-      ),
-      PROJECT_WORDS.removeConfirm
-    );
-    assert.equal(buttons(confirm, 'Remove').length, 1, 'with its own Remove');
-  } finally {
-    await shown.unmount();
-  }
+test('Remove’s confirm says it ends the session in every window still joined only for a Claude session', async (t) => {
+  for (const { name, session, says } of [
+    {
+      name: 'a Claude session not connected',
+      session: SESSION,
+      says: 'Remove this session from Projects? This ends the session for every window still joined to it. Work still waiting for it stops, and no Odd can send it more work. The conversation itself is kept: connect it again to bring the session back, then share it again with any Odd that should have it.'
+    },
+    {
+      name: 'a Codex session not connected',
+      session: { ...SESSION, agent: 'codex' },
+      says: 'Remove this session from Projects? Work still waiting for it stops, and no Odd can send it more work. The conversation itself is kept: connect it again to bring the session back, then share it again with any Odd that should have it.'
+    }
+  ])
+    await t.test(name, async () => {
+      office({ sessions: [session], view: viewOf(false, false) });
+      const shown = await projectsWindow();
+      try {
+        const body = one(shown.target, '.term');
+        button(body, 'Remove').click();
+        await settled(shown);
+        const confirm = confirmIn(body);
+        assert.ok(confirm, 'the confirm shows');
+        assert.equal(one(confirm, '#remove-warning').textContent, says);
+        assert.equal(buttons(confirm, 'Remove').length, 1, 'with its own Remove');
+      } finally {
+        await shown.unmount();
+      }
+    });
 });

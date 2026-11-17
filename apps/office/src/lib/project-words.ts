@@ -31,8 +31,11 @@ export const PROJECT_WORDS = {
   stopFailed: 'Claude Code could not stop this session. Try again.',
   stopBusy: 'Finish or stop the active work before you stop the session.',
   stopping: 'This session is being stopped. Try again in a moment.',
-  removeConfirm:
-    'Remove this session from Projects? This ends the session for every window still joined to it. Work still waiting for it stops, and no Odd can send it more work. The conversation itself is kept: connect it again to bring the session back, then share it again with any Odd that should have it.',
+  // Remove's confirm reads removeAsk, then removeEnds for a Claude session only, then removeDetail.
+  removeAsk: 'Remove this session from Projects?',
+  removeEnds: 'This ends the session for every window still joined to it.',
+  removeDetail:
+    'Work still waiting for it stops, and no Odd can send it more work. The conversation itself is kept: connect it again to bring the session back, then share it again with any Odd that should have it.',
   focus: 'Focus',
   // Starts with the button's visible word, so voice control finds it by what it shows.
   focusName: 'Focus: fill the window with the terminal',

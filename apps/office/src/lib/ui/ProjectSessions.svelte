@@ -132,6 +132,13 @@
   const terminalVisible = $derived(!!view?.connected && !!view.terminal && !closing);
   /** Only while the terminal shows: a session not connected keeps the list in reach. */
   const focused = $derived(focusWanted && terminalVisible);
+  /** Remove's confirm. Only removing a Claude session ends it in every window still joined,
+   * so a Codex owner is never told that. */
+  const removeWarning = $derived(
+    selected?.agent === 'claude'
+      ? `${PROJECT_WORDS.removeAsk} ${PROJECT_WORDS.removeEnds} ${PROJECT_WORDS.removeDetail}`
+      : `${PROJECT_WORDS.removeAsk} ${PROJECT_WORDS.removeDetail}`
+  );
   /** What a list asks about now, and the rows found for exactly that. */
   const listNow = $derived(listAsk({ folder, agent, socket }));
   const place = $derived(
@@ -731,7 +738,7 @@
                     role="alertdialog"
                     aria-labelledby="remove-warning"
                   >
-                    <p id="remove-warning" class="text-ink">{PROJECT_WORDS.removeConfirm}</p>
+                    <p id="remove-warning" class="text-ink">{removeWarning}</p>
                     <div class="flex gap-2">
                       <button class="btn" disabled={busy} onclick={() => run(remove)}>Remove</button
                       ><button class="btn" onclick={() => (removing = false)}>Cancel</button>
