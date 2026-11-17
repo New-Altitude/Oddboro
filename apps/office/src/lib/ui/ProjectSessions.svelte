@@ -298,10 +298,14 @@
   }
   /**
    * Opens `choice` here, or starts a new conversation without one. `handedOver`
-   * says the owner finished with it in the previous Codex window, and `move`
-   * that they confirmed ending it in its terminal to open it here.
+   * says the owner finished with it in the previous Codex window, `move` that
+   * they confirmed ending it in its terminal to open it here, and `after` that
+   * Claude Code's question about the folder just ended.
    */
-  async function connect(choice?: Choice, how: { handedOver?: boolean; move?: boolean } = {}) {
+  async function connect(
+    choice?: Choice,
+    how: { handedOver?: boolean; move?: boolean; after?: 'trust' } = {}
+  ) {
     // One source each: a conversation goes with its own folder, or none, so the
     // office finds it; only Start takes the folder chosen for it.
     const configDir = choice ? choice.configDir || undefined : startIn || undefined;
@@ -318,11 +322,16 @@
     });
     if ('setup' in s) {
       // Claude Code asks before it works in a new folder: its terminal
-      // shows under Start, for the owner to answer and then Start again. Asked
-      // for a folder, tool or account changed since, it is for a form no longer
-      // shown, so it ends at once.
+      // shows under Start, and once the owner answers it, Start runs again.
+      // Asked for a folder, tool or account changed since, it is for a form no
+      // longer shown, so it ends at once. Asked again right after the owner
+      // answered, the answer was no: it ends too, so a no is asked again only
+      // when the owner chooses Start.
       setup = { id: s.setup, view: crypto.randomUUID() };
-      if (folder !== sent.folder || agent !== sent.agent || startIn !== sent.startIn) closeSetup();
+      const shown = folder === sent.folder && agent === sent.agent && startIn === sent.startIn;
+      if (!shown || how.after === 'trust') closeSetup();
+      if (shown && how.after === 'trust')
+        problem = { text: PROJECT_WORDS.notTrusted, from: 'start' };
       return;
     }
     await load();
@@ -399,11 +408,14 @@
     }
     void run(() => connect(c), 'row', c.id);
   }
-  /** Start, and Start again under Claude Code's question, which then closes first. */
-  function start() {
+  /**
+   * Start, chosen by the owner or run once by itself when Claude Code's
+   * question ends. Any question still shown closes first.
+   */
+  function start(how: { after?: 'trust' } = {}) {
     void run(() => {
       closeSetup();
-      return connect();
+      return connect(undefined, how);
     }, 'start');
   }
   async function copyId() {

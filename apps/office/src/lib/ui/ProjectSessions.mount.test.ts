@@ -22,6 +22,7 @@ import {
   sameElement,
   sent,
   settled,
+  streamAt,
   typeFolder,
   type Answer
 } from './projects-window-under-test.ts';
@@ -286,13 +287,68 @@ test('Claude Code’s question before it works in a new folder shows under Start
     );
     assert.ok(line, 'the trust line');
     const terminal = one(shown.target, '.xterm');
-    const again = button(shown.target, PROJECT_WORDS.startAgain);
     const follows = (a: Node, b: Node) =>
       !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
     assert.ok(follows(start, line), 'the line under Start');
     assert.ok(follows(line, terminal), 'then the setup terminal');
-    assert.ok(follows(terminal, again), 'then Start again');
     assert.deepEqual(asked('disconnect'), [], 'it stays open for the owner to answer');
+  } finally {
+    await shown.unmount();
+  }
+});
+
+/** Claude Code quitting in setup terminal `id`, as it does once the owner answers its question. */
+const answered = (id: string) =>
+  streamAt(`/api/project-sessions/${id}/events?terminal=1`).send('end', true);
+
+test('Once the trust question ends, Start runs again once by itself, and a folder still untrusted shows the line with no second terminal', async () => {
+  const shown = await askedToTrust(() => ({ setup: 'setup-2' }));
+  try {
+    assert.ok(setupShown(shown.target), 'shown first');
+    answered('setup-1');
+    await settled(shown);
+
+    assert.equal(asked('connect').length, 2, 'Start ran again by itself, once');
+    assert.ok(says(shown.target, PROJECT_WORDS.notTrusted), 'the line shows');
+    assert.equal(setupShown(shown.target), false, 'no second terminal');
+    assert.deepEqual(
+      asked('disconnect').map((s) => s.id),
+      ['setup-1', 'setup-2'],
+      'the new question ended at once'
+    );
+    answered('setup-1');
+    await settled(shown);
+    assert.equal(asked('connect').length, 2, 'no third Start');
+  } finally {
+    await shown.unmount();
+  }
+});
+
+test('Once the trust question is answered yes, its terminal goes and the session opens', async () => {
+  const shown = await askedToTrust(() => ({ id: 'session-1' }));
+  try {
+    answered('setup-1');
+    await settled(shown);
+    assert.equal(asked('connect').length, 2, 'Start ran again by itself');
+    assert.equal(setupShown(shown.target), false, 'the terminal is gone');
+    assert.ok(
+      asked('history').some((s) => s.id === 'session-1'),
+      'the session opened'
+    );
+  } finally {
+    await shown.unmount();
+  }
+});
+
+test('A trust question closed by a form change starts nothing when it ends', async () => {
+  const shown = await askedToTrust();
+  try {
+    enterFolder(shown.target, '/work/other');
+    await settled(shown);
+    answered('setup-1');
+    await settled(shown);
+    assert.equal(asked('connect').length, 1, 'no Start');
+    assert.equal(says(shown.target, PROJECT_WORDS.notTrusted), false, 'no line');
   } finally {
     await shown.unmount();
   }

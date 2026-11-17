@@ -287,7 +287,7 @@ test("a row's error whose row is no longer shown shows at the list", () => {
   assert.equal(alerts(none), 1);
 });
 
-test("Claude Code's question about a new folder shows under Start, with Start again", () => {
+test("Claude Code's question about a new folder shows under Start, with no second Start", () => {
   const setup = {
     id: '11111111-0000-4000-8000-000000000000',
     view: '22222222-0000-4000-8000-000000000000'
@@ -296,13 +296,11 @@ test("Claude Code's question about a new folder shows under Start, with Start ag
   const start = body.indexOf('>Start</button>');
   const line = body.indexOf(PROJECT_WORDS.trustLine);
   const terminal = body.indexOf('bg-night');
-  const again = body.indexOf(`>${PROJECT_WORDS.startAgain}</button>`);
   assert.ok(start > -1 && start < line, 'the trust line is under Start');
   assert.ok(line < terminal, 'then the terminal');
-  assert.ok(terminal < again, 'then Start again');
+  assert.equal(body.split('>Start</button>').length, 2, 'Start shows once');
 
   const without = shown({ path: 'start' });
   assert.ok(!without.includes(PROJECT_WORDS.trustLine));
-  assert.ok(!without.includes(PROJECT_WORDS.startAgain));
   assert.ok(!without.includes('bg-night'));
 });

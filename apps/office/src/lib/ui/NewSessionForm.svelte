@@ -60,8 +60,8 @@
     onchange: (change: FormChange) => void;
     onpick: () => void;
     onpath: (p: SessionPath) => void;
-    /** Start, and Start again under Claude Code's question. */
-    onstart: () => void;
+    /** Start, chosen by the owner, or `after: 'trust'` once Claude Code's question ends. */
+    onstart: (how?: { after: 'trust' }) => void;
     onchoose: (c: Choice) => void;
     /** The owner confirmed moving a conversation out of its terminal and into the office. */
     onmove: (c: Choice) => void;
@@ -192,7 +192,9 @@
         maxlength="200"
       /></label
     >
-    <button class="btn self-start" disabled={busy || !folder} onclick={onstart}>Start</button>
+    <button class="btn self-start" disabled={busy || !folder} onclick={() => onstart()}
+      >Start</button
+    >
     {@render alert('start')}
     {#if setup}
       <p class="text-ink">{PROJECT_WORDS.trustLine}</p>
@@ -203,15 +205,15 @@
             id={setup.id}
             view={setup.view}
             onerror={onsetuperror}
-            onstream={() => {
-              // Nothing to attach: a setup terminal is Claude Code's own trust
-              // question, with no session whose view the stream would update.
-            }}
+            onstream={(stream, id) =>
+              // Claude Code quits once the owner answers its question. Only the
+              // question still shown starts again: one closed since was for a form
+              // that changed, or a Start that already ran.
+              stream.addEventListener('end', () => {
+                if (setup?.id === id) onstart({ after: 'trust' });
+              })}
           />{/key}
       </div>
-      <button class="btn self-start" disabled={busy || !folder} onclick={onstart}
-        >{PROJECT_WORDS.startAgain}</button
-      >
     {/if}
   {/if}
   {#if fields.list}

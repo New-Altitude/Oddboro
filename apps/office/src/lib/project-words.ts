@@ -6,8 +6,9 @@ export const PROJECT_WORDS = {
   backgroundOff:
     'Projects needs Claude Code’s background sessions, and they are turned off on this computer. Ask whoever manages Claude Code here to turn them on.',
   trustLine:
-    'Claude Code asks once before it works in a new folder. Answer its question, then choose Start again.',
-  startAgain: 'Start again',
+    'Claude Code asks once before it works in a new folder. Answer its question there, and the session starts.',
+  notTrusted:
+    'Claude Code was not told to trust this folder, so nothing started. Choose Start to be asked again.',
   inTerminal: 'Running in a terminal',
   moveButton: 'Move here',
   moveConfirm:

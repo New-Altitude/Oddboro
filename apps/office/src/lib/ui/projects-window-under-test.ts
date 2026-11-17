@@ -6,7 +6,7 @@
 //
 // Importing it makes the test file a client one, as `mounted-for-client.ts`
 // says, and puts the stand-in office's `fetch` and a quiet `EventSource` on
-// `globalThis`.
+// `globalThis`. A test sends an event on one of its streams with `streamAt(url).send`.
 import assert from 'node:assert/strict';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,15 +33,42 @@ globalThis.fetch = (async (url: string, init: RequestInit) => {
   const reply = await answer(body);
   return reply instanceof Response ? reply : Response.json(reply);
 }) as typeof fetch;
-// The window's live updates: none arrive in these tests.
+/** Every stream the window opened since the last `office`, in order. */
+const streams: QuietStream[] = [];
+/**
+ * A live-update stream that sends nothing until a test calls `send`. Not an
+ * `EventTarget`: the mounted document brings its own `Event`, which Node's
+ * `EventTarget` refuses.
+ */
+class QuietStream {
+  readonly url: string;
+  onerror: (() => void) | null = null;
+  #listeners = new Map<string, ((e: { data: string }) => void)[]>();
+  constructor(url: string) {
+    this.url = url;
+    streams.push(this);
+  }
+  addEventListener(type: string, listener: (e: { data: string }) => void) {
+    this.#listeners.set(type, [...(this.#listeners.get(type) ?? []), listener]);
+  }
+  close() {}
+  /** Sends `type` with `data` as JSON to every listener, as the office's stream does. */
+  send(type: string, data: unknown = null) {
+    for (const listener of this.#listeners.get(type) ?? [])
+      listener({ data: JSON.stringify(data) });
+  }
+}
 Object.defineProperty(globalThis, 'EventSource', {
-  value: class {
-    addEventListener() {}
-    close() {}
-  },
+  value: QuietStream,
   configurable: true,
   writable: true
 });
+/** The newest stream the window opened whose URL starts with `start`. */
+export function streamAt(start: string): QuietStream {
+  const found = streams.findLast((s) => s.url.startsWith(start));
+  assert.ok(found, `a stream at ${start}`);
+  return found;
+}
 
 export const FOLDERS = [
   { path: '/work/claude-a', mark: 'owner@example.com' },
@@ -62,6 +89,7 @@ export function office({
   more = () => ({})
 }: { sessions?: unknown[]; view?: unknown; picked?: unknown; more?: Answer } = {}) {
   sent.length = 0;
+  streams.length = 0;
   picked = chosen;
   answer = (s) => {
     if (s.action === 'connections') return sessions;
