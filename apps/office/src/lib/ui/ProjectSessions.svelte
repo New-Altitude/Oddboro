@@ -338,7 +338,9 @@
     }
     await load();
     await select(s.id);
-    if (agent === 'claude') await action('terminal');
+    // With the view the terminal's stream opens with: the window that opens the terminal
+    // takes the typing, not whichever window's stream reaches the office first.
+    if (agent === 'claude') await action('terminal', { view: termView });
   }
   async function pick() {
     const r = await fetch('/api/folders/pick', {
@@ -678,7 +680,10 @@
             <div class="flex flex-col items-center gap-2">
               {#if view?.connected}
                 <p class="text-muted">The terminal is closed.</p>
-                <button class="btn" disabled={busy} onclick={() => run(() => action('terminal'))}
+                <button
+                  class="btn"
+                  disabled={busy}
+                  onclick={() => run(() => action('terminal', { view: termView }))}
                   >Open terminal</button
                 >
               {:else if view}

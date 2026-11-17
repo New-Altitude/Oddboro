@@ -1,11 +1,13 @@
 // The Projects window mounted in a browser-like document, against a stand-in
-// office: Focus, Reconnect's Move here, Disconnect, and Claude Code's setup question
-// answering a Start the owner has since changed or left for a session. Each test clicks and types as
-// the owner does and reads what the window then shows.
+// office: Focus, Reconnect's Move here, Disconnect, which window takes the typing,
+// and Claude Code's setup question answering a Start the owner has since changed
+// or left for a session. Each test clicks and types as the owner does and reads
+// what the window then shows.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { PROJECT_WORDS } from '../project-words.ts';
 import {
+  asked,
   button,
   buttons,
   described,
@@ -18,7 +20,8 @@ import {
   refused,
   sameElement,
   sent,
-  settled
+  settled,
+  streamAt
 } from './projects-window-under-test.ts';
 import { rememberFocus } from './projects-focus.ts';
 
@@ -375,4 +378,44 @@ test('Disconnect closes this window’s terminal before it asks the office, and 
       await shown.unmount();
     }
   });
+});
+
+test('Reconnect and Open terminal ask for the terminal with the view their stream opens with', async (t) => {
+  /** The window, after the owner clicked `words` on a session `connected` or not. */
+  async function opened(connected: boolean, words: string) {
+    const view = viewOf(connected, false);
+    office({
+      sessions: [SESSION],
+      view,
+      more: (s) => {
+        if (s.action === 'find') return [];
+        if (s.action === 'connect') {
+          view.connected = true;
+          return SESSION;
+        }
+        if (s.action === 'terminal') view.terminal = true;
+        return {};
+      }
+    });
+    const shown = await projectsWindow();
+    button(one(shown.target, '.term'), words).click();
+    await settled(shown);
+    return shown;
+  }
+  for (const [words, connected] of [
+    ['Reconnect', false],
+    ['Open terminal', true]
+  ] as const)
+    await t.test(words, async () => {
+      const shown = await opened(connected, words);
+      try {
+        const stream = streamAt(`/api/project-sessions/${SESSION.id}/events?terminal=1`);
+        const streamView = new URL(stream.url, 'http://office').searchParams.get('view');
+        assert.equal(asked('terminal').length, 1, 'one terminal asked for');
+        assert.ok(streamView, 'the stream names its view');
+        assert.equal(asked('terminal')[0].view, streamView);
+      } finally {
+        await shown.unmount();
+      }
+    });
 });
