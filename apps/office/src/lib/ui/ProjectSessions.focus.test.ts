@@ -133,7 +133,11 @@ test('Focus folds away the Projects title row and the session list only while a 
         assert.equal(titleRow(shown.target), 'Projects');
         assert.ok(sessionList(shown.target));
         const focus = button(shown.target, PROJECT_WORDS.focus);
-        assert.equal(focus.getAttribute('aria-label'), PROJECT_WORDS.focusName);
+        assert.equal(focus.getAttribute('aria-label'), 'Focus: fill the window with the terminal');
+        assert.ok(
+          focus.getAttribute('aria-label')?.startsWith(focus.textContent?.trim() ?? '\u0000'),
+          'its name starts with the word it shows'
+        );
         assert.equal(focus.getAttribute('aria-pressed'), 'false');
 
         focus.click();
