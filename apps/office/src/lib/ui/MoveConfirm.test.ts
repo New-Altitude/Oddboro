@@ -35,10 +35,10 @@ test('The move confirm asks in the ruled words, as an alert dialog named by them
 test('The move confirm offers Move here, then Cancel, and Move here waits while busy', () => {
   assert.deepEqual(buttons(shown(false)), [
     { text: PROJECT_WORDS.moveButton, disabled: false },
-    { text: PROJECT_WORDS.moveCancel, disabled: false }
+    { text: PROJECT_WORDS.cancel, disabled: false }
   ]);
   assert.deepEqual(buttons(shown(true)), [
     { text: PROJECT_WORDS.moveButton, disabled: true },
-    { text: PROJECT_WORDS.moveCancel, disabled: false }
+    { text: PROJECT_WORDS.cancel, disabled: false }
   ]);
 });

@@ -22,6 +22,6 @@
   <p id="move-{id}" class="text-ink">{PROJECT_WORDS.moveConfirm}</p>
   <div class="flex gap-2">
     <button class="btn" disabled={busy} onclick={onconfirm}>{PROJECT_WORDS.moveButton}</button
-    ><button class="btn" onclick={oncancel}>{PROJECT_WORDS.moveCancel}</button>
+    ><button class="btn" onclick={oncancel}>{PROJECT_WORDS.cancel}</button>
   </div>
 </div>

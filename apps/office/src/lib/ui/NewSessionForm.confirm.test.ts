@@ -54,7 +54,7 @@ test('Cancel closes the move confirm and moves nothing', async () => {
     shown.flush();
     const confirm = shown.target.querySelector('[role="alertdialog"]');
     assert.ok(confirm);
-    button(confirm, PROJECT_WORDS.moveCancel).click();
+    button(confirm, PROJECT_WORDS.cancel).click();
     shown.flush();
     sameElement(shown.target.querySelector('[role="alertdialog"]'), null, 'the confirm closes');
     assert.deepEqual(shown.moved, []);

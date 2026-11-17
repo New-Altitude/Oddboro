@@ -66,7 +66,7 @@ test('Stop asks in place with the ruled words, and Cancel sends nothing', async 
     assert.equal(one(confirm, '#stop-warning').textContent, PROJECT_WORDS.stopConfirm);
     assert.equal(sent.length, before, 'nothing sent before the yes');
 
-    button(confirm, 'Cancel').click();
+    button(confirm, PROJECT_WORDS.cancel).click();
     await settled(shown);
     sameElement(confirmIn(shown.target), null, 'the confirm closes');
     assert.equal(sent.length, before, 'nothing sent');
@@ -171,6 +171,7 @@ test('Remove’s confirm says it ends the session in every window still joined o
         assert.ok(confirm, 'the confirm shows');
         assert.equal(one(confirm, '#remove-warning').textContent, says);
         assert.equal(buttons(confirm, 'Remove').length, 1, 'with its own Remove');
+        assert.equal(buttons(confirm, PROJECT_WORDS.cancel).length, 1, 'and the shared Cancel');
       } finally {
         await shown.unmount();
       }

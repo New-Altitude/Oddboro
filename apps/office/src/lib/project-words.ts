@@ -13,7 +13,7 @@ export const PROJECT_WORDS = {
   moveButton: 'Move here',
   moveConfirm:
     'This closes the conversation in its terminal and opens it here. The conversation is kept. To keep using it in that terminal too, run the command it shows there.',
-  moveCancel: 'Cancel',
+  cancel: 'Cancel',
   busy: 'Claude is still working in that terminal. Try again when it finishes.',
   windows:
     'This conversation is open in a terminal. In that terminal, type /exit, then select it here again.',

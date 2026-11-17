@@ -703,7 +703,7 @@
           <p id="stop-warning" class="flex-1 text-ink">{PROJECT_WORDS.stopConfirm}</p>
           <div class="flex gap-2">
             <button class="btn" disabled={busy} onclick={stop}>{PROJECT_WORDS.stopButton}</button
-            ><button class="btn" onclick={() => (stopping = false)}>Cancel</button>
+            ><button class="btn" onclick={() => (stopping = false)}>{PROJECT_WORDS.cancel}</button>
           </div>
         </div>
       {/if}
@@ -741,7 +741,9 @@
                     <p id="remove-warning" class="text-ink">{removeWarning}</p>
                     <div class="flex gap-2">
                       <button class="btn" disabled={busy} onclick={() => run(remove)}>Remove</button
-                      ><button class="btn" onclick={() => (removing = false)}>Cancel</button>
+                      ><button class="btn" onclick={() => (removing = false)}
+                        >{PROJECT_WORDS.cancel}</button
+                      >
                     </div>
                   </div>
                 {:else if moving?.view === termView && !details}
