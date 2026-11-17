@@ -1,7 +1,7 @@
 /* The Projects window's form controls, shared by ProjectSessions.svelte and
-   NewSessionForm.svelte, which renders inside it, and the sessions list's status
-   dots. Each rule sits under the window's root class, so it reaches nothing
-   outside the window. */
+   NewSessionForm.svelte and SessionDetails.svelte, which render inside it, and
+   the sessions list's status dots. Each rule sits under the window's root
+   class, so it reaches nothing outside the window. */
 .projects-window label {
   display: flex;
   flex-direction: column;

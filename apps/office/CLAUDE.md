@@ -2202,7 +2202,8 @@ file.
 
 The Projects window and its local controller live in
 `src/lib/ui/ProjectSessions.svelte` (its New session form in
-`NewSessionForm.svelte`, whose rules are `project-form.ts`) and
+`NewSessionForm.svelte`, whose rules are `project-form.ts`, and its Details
+drawer in `SessionDetails.svelte`) and
 `src/lib/server/project-sessions/`.
 Projects is a window in the start panel (`openProject` in
 `windows.svelte.ts`). While it is in front on a wide screen, the panel
