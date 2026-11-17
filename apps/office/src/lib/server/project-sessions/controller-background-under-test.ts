@@ -20,7 +20,7 @@ import {
 import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { after, afterEach, beforeEach, mock } from 'node:test';
-import { currentPlatform } from '@oddboro/ledger/platform';
+import { currentSystem, type System } from '@oddboro/ledger/platform';
 import { app } from './controller-under-test.ts';
 
 /** Each terminal opened: its arguments, folder and environment. */
@@ -202,9 +202,14 @@ export const interrupted = (pid: number | undefined) =>
 /** Where the plugin of the session `id` lives, which `--plugin-dir` names. */
 export const pluginOf = (id: string) => L.home('project-sessions', id, 'market', 'plugin');
 export const lastTerminal = () => spawned.at(-1)!;
-export const SHELL_STAND_IN = {
-  skip: currentPlatform() === 'win32' && 'the stand-in is a shell script'
+/** Why each system skips the tests that run the stand-in for `claude`, or false where it runs. */
+const STAND_IN_SKIP: Record<System, string | false> = {
+  mac: false,
+  linux: false,
+  windows: 'the stand-in is a shell script'
 };
+const standInSystem = currentSystem();
+export const SHELL_STAND_IN = { skip: standInSystem ? STAND_IN_SKIP[standInSystem] : false };
 /** What `claude --bg` prints in a project folder Claude Code was never told to trust. */
 export const NOT_TRUSTED = `Workspace not trusted. Run \`claude\` in ${app} once to accept the workspace trust dialog.\n`;
 
