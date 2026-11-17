@@ -172,9 +172,11 @@
     </div>
   </fieldset>
   {#if fields.start}
-    <!-- The account sits on the start path only: a conversation found goes with its own. -->
-    {#if fields.account}<label class="max-w-full min-w-0"
-        >Account <select class="field max-w-full min-w-0" aria-label="Account" bind:value={startIn}
+    <!-- The account sits on the start path only: a conversation found goes with its own.
+         The select clips its own text: WebKit draws a long account on one line past the
+         select's edge and can count it as width, which makes the whole form scroll sideways. -->
+    {#if fields.account}<label
+        >Account <select class="field overflow-hidden" aria-label="Account" bind:value={startIn}
           >{#each folders as f (f.path)}<option value={f.path}>{f.mark}</option>{/each}</select
         ></label
       >{/if}
