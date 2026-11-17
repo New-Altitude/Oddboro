@@ -607,6 +607,20 @@ async function moveIn({ live, stored, sent }: { live: string; stored?: string; s
 }
 
 test(
+  'Move here in the Claude folder the session is stored in shows no folder notice and keeps that folder',
+  SHELL_STAND_IN,
+  async () => {
+    const a = claudeFolder('.claude-own-a');
+    // A row of that folder sends it, as Reconnect does.
+    assert.deepEqual(await moveIn({ live: a, stored: a, sent: a }), {
+      notice: null,
+      runsIn: a,
+      stored: a
+    });
+  }
+);
+
+test(
   "Move here on a session stored in one Claude folder, while a terminal runs the conversation under another, continues in the terminal's folder and stores it",
   SHELL_STAND_IN,
   async () => {
@@ -647,6 +661,19 @@ test(
     });
     // The list's row names the folder of the copy that runs.
     assert.deepEqual(await moveIn({ live: b, sent: b }), { notice: null, runsIn: b, stored: b });
+  }
+);
+
+test(
+  'Move here on a session stored with no Claude folder, while a terminal runs the conversation under the default one, shows no folder notice and stores none',
+  SHELL_STAND_IN,
+  async () => {
+    // The default folder runs with no CLAUDE_CONFIG_DIR.
+    assert.deepEqual(await moveIn({ live: L.defaultClaudeFolder() }), {
+      notice: null,
+      runsIn: undefined,
+      stored: null
+    });
   }
 );
 
