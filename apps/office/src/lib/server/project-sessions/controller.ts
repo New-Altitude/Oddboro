@@ -142,6 +142,12 @@ export class ProjectController {
    * by an id of their own, which the terminal routes take as a session's.
    */
   private setups = new Map<string, { folder: string; dir: string; terminal: ProjectTerminal }>();
+  /**
+   * The sessions a Stop or Remove is stopping, from its check until the stop
+   * settles: meanwhile nothing is claimed for one and no connect reaches it,
+   * since the stop would end what they start.
+   */
+  private ending = new Set<string>();
   constructor() {
     listen();
     bus.on('event', (e) => {
@@ -386,6 +392,7 @@ export class ProjectController {
     await setup?.terminal.releaseProcess();
   }
   private attach(s: ProjectSession, socket?: string, started?: Thread) {
+    if (this.ending.has(s.id)) throw new Error(PROJECT_WORDS.stopping);
     const existing = this.sessions.get(s.id);
     if (existing?.connected) {
       if (existing.socket !== socket)
@@ -600,7 +607,8 @@ export class ProjectController {
     return this.pump(this.runtime(id));
   }
   private pump(c: Runtime): Promise<void> {
-    if (!c.connected || c.turn || c.request) return Promise.resolve();
+    if (!c.connected || c.turn || c.request || this.ending.has(c.session.id))
+      return Promise.resolve();
     if (c.busy) return c.busy;
     c.busy = this.dispatch(c).finally(() => {
       c.busy = undefined;
@@ -632,9 +640,10 @@ export class ProjectController {
       }
       if (!c.connected) return;
     }
-    const r = await claimProject(c.session.id);
+    // A Stop that began during the check claims nothing; one that fails pumps again.
+    const r = this.ending.has(c.session.id) ? undefined : await claimProject(c.session.id);
     if (!r) {
-      // The claim sent nothing, so the readiness note no longer applies.
+      // Nothing was claimed, so the readiness note no longer applies.
       if (c.note !== before) {
         c.note = before;
         this.changed(c);
@@ -834,8 +843,15 @@ export class ProjectController {
     const c = this.runtime(id);
     if (c.session.agent !== 'claude') throw new Error('Only a Claude Code session has Stop.');
     if (c.request || c.turn) throw new Error(PROJECT_WORDS.stopBusy);
-    await stopSessionJob(c.session);
-    await this.release(c);
+    this.markEnding(id);
+    try {
+      await stopSessionJob(c.session);
+      await this.release(c);
+    } finally {
+      this.ending.delete(id);
+      // A failed stop leaves the session connected: work held back meanwhile goes now.
+      void this.pump(c).catch((e) => this.warn(c, e));
+    }
   }
   /**
    * Remove a disconnected session from the owner's list (`hideProject`), and
@@ -847,17 +863,27 @@ export class ProjectController {
   async remove(id: string) {
     if (this.creating.has(id) || this.sessions.get(id)?.connected)
       throw new Error('Disconnect it first.');
-    const s = await connection(id);
-    if (s?.agent === 'claude')
-      await stopSessionJob(s).catch((e: unknown) => {
-        // No `claude` may run for it (its folder left Setup or is gone, or
-        // Claude Code is not installed), so nothing can stop its job: the
-        // owner still removes the session.
-        if (!(e instanceof JobOutOfReach)) throw e;
-      });
-    const c = this.sessions.get(id);
-    if (c) await this.release(c);
-    await hideProject(id);
+    this.markEnding(id);
+    try {
+      const s = await connection(id);
+      if (s?.agent === 'claude')
+        await stopSessionJob(s).catch((e: unknown) => {
+          // No `claude` may run for it (its folder left Setup or is gone, or
+          // Claude Code is not installed), so nothing can stop its job: the
+          // owner still removes the session.
+          if (!(e instanceof JobOutOfReach)) throw e;
+        });
+      const c = this.sessions.get(id);
+      if (c) await this.release(c);
+      await hideProject(id);
+    } finally {
+      this.ending.delete(id);
+    }
+  }
+  /** Marks the session `id` as ending, or refuses while another Stop or Remove ends it. */
+  private markEnding(id: string) {
+    if (this.ending.has(id)) throw new Error(PROJECT_WORDS.stopping);
+    this.ending.add(id);
   }
   private async release(c: Runtime) {
     c.connected = false;

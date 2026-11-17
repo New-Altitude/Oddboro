@@ -66,7 +66,8 @@ export const { PROJECT_WORDS } = await import('../../project-words.ts');
 // `start-id` when the test names one. `stop` and `rm` log again with the
 // project folder and the Claude folder they ran in. A test makes `agents`
 // fail with an `agents.fail` file in the Claude folder, and `stop` with a
-// `stop.fail` file: each then exits 1, `stop` after its log line.
+// `stop.fail` file: each then exits 1, `stop` after its log line. A
+// `stop.hold` file holds `stop` after its log line until the test deletes it.
 const calls = join(folder, 'background-calls.log');
 const bin = join(folder, 'background-bin');
 mkdirSync(bin);
@@ -102,6 +103,7 @@ else if (args[0] === 'agents') {
   }
 } else if (args[0] === 'stop' || args[0] === 'rm') {
   appendFileSync(${JSON.stringify(calls)}, args.join(' ') + ' in ' + process.cwd() + ' under ' + dir + '\\n');
+  while (args[0] === 'stop' && read('stop.hold') !== undefined) await new Promise((r) => setTimeout(r, 20));
   if (args[0] === 'stop' && read('stop.fail') !== undefined) process.exit(1);
 }
 `

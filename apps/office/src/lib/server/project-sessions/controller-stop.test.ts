@@ -3,7 +3,7 @@
 // library are in controller-background-under-test.ts.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -52,6 +52,35 @@ const stops = () => logged().filter((line) => line.startsWith('stop '));
 const listed = async (id: string) => (await L.projectOverview()).some((s) => s.id === id);
 const fail = (dir: string, command: 'agents' | 'stop') =>
   writeFileSync(join(dir, `${command}.fail`), '');
+/** Holds `claude stop` in `dir` once it has begun, until `letGo`. */
+const hold = (dir: string) => writeFileSync(join(dir, 'stop.hold'), '');
+const letGo = (dir: string) => rmSync(join(dir, 'stop.hold'));
+/** Polls until `fn` holds, since the stand-in and the filesystem answer in their own time. */
+async function until(fn: () => boolean | Promise<boolean>, what: string) {
+  const end = performance.now() + 5000;
+  while (performance.now() < end) {
+    if (await fn()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.fail(what);
+}
+const stopBegun = (s: ProjectSession, dir: string) =>
+  until(() => stops().includes(stopLine(s, dir)), 'claude stop never began');
+/** Reconnect as the page sends it: the session's own conversation and Claude folder. */
+const reconnect = (s: ProjectSession, dir: string) =>
+  c.connect('claude', app, { nativeId: s.nativeId, configDir: dir });
+const queue = (s: ProjectSession) =>
+  L.requestProject({ id: randomUUID(), sessionId: s.id, prompt: 'Work on this.' });
+const stateOf = async (s: ProjectSession) => (await L.projectWork(s.id))[0].state;
+/** The readiness check's probe in the inbox of `s`, which its plugin's receivers answer. */
+const probe = (s: ProjectSession) => join(L.home('project-sessions', s.id, 'inbox'), 'probe.json');
+/** Answers the readiness check waiting for `s`, as both of its plugin's receivers do. */
+async function answerProbe(s: ProjectSession) {
+  await until(() => existsSync(probe(s)), 'no readiness check began');
+  const { key } = JSON.parse(readFileSync(probe(s), 'utf8')) as { key: string };
+  for (const receiver of L.PROJECT_RECEIVERS)
+    writeFileSync(join(probe(s), '..', `${key}.${receiver}`), '');
+}
 /** The office's runtimes, where a test puts active work: no public method starts a turn. */
 const runtimes = (c as unknown as { sessions: Map<string, { request?: unknown; turn?: string }> })
   .sessions;
@@ -320,3 +349,92 @@ test('Remove hides a Codex session and runs no claude', async () => {
   assert.ok(!(await listed(s.id)));
   assert.deepEqual(logged().filter(Boolean), []);
 });
+
+test(
+  'While Stop is stopping a session, a Reconnect and a second Stop are refused with the stopping words, and once it has stopped a Reconnect connects',
+  SHELL_STAND_IN,
+  async () => {
+    const dir = claudeFolder('.claude-stop-held');
+    const s = await connected(dir);
+    hold(dir);
+    const ending = c.end(s.id);
+    await stopBegun(s, dir);
+    await assert.rejects(reconnect(s, dir), { message: PROJECT_WORDS.stopping });
+    await assert.rejects(c.end(s.id), { message: PROJECT_WORDS.stopping });
+    letGo(dir);
+    await ending;
+    assert.equal(c.view(s.id).connected, false);
+    await reconnect(s, dir);
+    assert.ok(c.view(s.id).connected);
+  }
+);
+
+test(
+  'While Remove is stopping a session, a Reconnect and a second Remove are refused with the stopping words, and once it is removed a Reconnect brings it back',
+  SHELL_STAND_IN,
+  async () => {
+    const dir = claudeFolder('.claude-stop-remove-held');
+    const s = await disconnected(dir);
+    agents(dir, [job(s.nativeId)]);
+    hold(dir);
+    const removing = c.remove(s.id);
+    await stopBegun(s, dir);
+    await assert.rejects(reconnect(s, dir), { message: PROJECT_WORDS.stopping });
+    await assert.rejects(c.remove(s.id), { message: PROJECT_WORDS.stopping });
+    letGo(dir);
+    await removing;
+    assert.equal(c.view(s.id).connected, false);
+    assert.ok(!(await listed(s.id)));
+    await reconnect(s, dir);
+    assert.ok(c.view(s.id).connected && (await listed(s.id)));
+  }
+);
+
+test(
+  'Work queued while Stop is stopping a session is not claimed, and goes ahead once the stop fails and leaves the session connected',
+  SHELL_STAND_IN,
+  async () => {
+    const dir = claudeFolder('.claude-stop-queued');
+    const s = await connected(dir);
+    fail(dir, 'stop');
+    hold(dir);
+    const ending = c.end(s.id);
+    await stopBegun(s, dir);
+    await queue(s);
+    // A readiness check would hold work open for up to 30 seconds; during the stop it starts none.
+    let returned = false;
+    void c.work(s.id).finally(() => (returned = true));
+    await until(() => returned, 'work during the stop began a readiness check');
+    assert.equal(await stateOf(s), 'queued');
+    assert.ok(!existsSync(probe(s)), 'a readiness check began during the stop');
+    letGo(dir);
+    await assert.rejects(ending, { message: PROJECT_WORDS.stopFailed });
+    assert.ok(c.view(s.id).connected);
+    await answerProbe(s);
+    await until(async () => (await stateOf(s)) === 'sending', 'the held work never went ahead');
+  }
+);
+
+test(
+  'A readiness check under way when Stop is pressed claims nothing once it passes, and puts the earlier note back',
+  SHELL_STAND_IN,
+  async () => {
+    const dir = claudeFolder('.claude-stop-dispatch');
+    const s = await connected(dir);
+    const before = c.view(s.id).note;
+    await queue(s);
+    const sending = c.work(s.id);
+    await until(() => existsSync(probe(s)), 'no readiness check began');
+    hold(dir);
+    const ending = c.end(s.id);
+    await stopBegun(s, dir);
+    await answerProbe(s);
+    await sending;
+    assert.equal(await stateOf(s), 'queued');
+    assert.equal(c.view(s.id).note, before);
+    letGo(dir);
+    await ending;
+    assert.equal(c.view(s.id).connected, false);
+    assert.equal(await stateOf(s), 'queued');
+  }
+);

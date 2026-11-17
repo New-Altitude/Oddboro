@@ -30,6 +30,7 @@ export const PROJECT_WORDS = {
   stopName: 'Stop: end this session for every window',
   stopFailed: 'Claude Code could not stop this session. Try again.',
   stopBusy: 'Finish or stop the active work before you stop the session.',
+  stopping: 'This session is being stopped. Try again in a moment.',
   removeConfirm:
     'Remove this session from Projects? This ends the session for every window still joined to it. Work still waiting for it stops, and no Odd can send it more work. The conversation itself is kept: connect it again to bring the session back, then share it again with any Odd that should have it.',
   focus: 'Focus',
