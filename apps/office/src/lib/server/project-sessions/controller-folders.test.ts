@@ -445,7 +445,7 @@ test(
       opened.push(s.id);
       assert.equal(
         await folderNoticeOf(s),
-        moved({ from: '~/.claude-lost · signed out', to: '~/.claude-holds · signed out' })
+        moved({ from: '~/.claude-lost', to: '~/.claude-holds · signed out' })
       );
       assert.equal((await L.connection(s.id)).configDir, q);
       await c.terminal(s.id);
@@ -494,7 +494,7 @@ test(
       assert.equal(
         await folderNoticeOf(s),
         moved({
-          from: '~/.claude-gone-from · signed out',
+          from: '~/.claude-gone-from',
           to: '~/.claude-newest-copy · signed out'
         })
       );
@@ -507,12 +507,13 @@ test(
 );
 
 test(
-  'Reconnect moves a session with no folder, whose default folder lacks the conversation, to the named folder holding it, and says so',
+  'Reconnect moves a session with no folder, whose default folder lacks the conversation, to the named folder holding it, and says so, naming the folder it left by its path',
   { skip: process.platform === 'win32' && 'the stand-in is a shell script' },
   async () => {
     const q = named('.claude-named-holds');
     L.setClaudeFolders([q]);
     let s: ProjectSession | undefined;
+    let t: ProjectSession | undefined;
     try {
       // Only the named folder has it: the office's default folder, `~/.claude`
       // here, never saw this conversation.
@@ -521,14 +522,29 @@ test(
       s = await L.connectProject('claude', id, app, 'Work');
       assert.equal(
         await folderNoticeOf(s),
-        moved({ from: '~/.claude · signed out', to: '~/.claude-named-holds · signed out' })
+        moved({ from: '~/.claude', to: '~/.claude-named-holds · signed out' })
       );
       assert.equal((await L.connection(s.id)).configDir, q);
       await c.terminal(s.id);
       assert.deepEqual(lastTerminal().args.slice(-2), ['attach', id.slice(0, 8)]);
       assert.equal(lastTerminal().env.CLAUDE_CONFIG_DIR, q);
+
+      // The office's CLAUDE_CONFIG_DIR, outside Setup, is the folder it left:
+      // named by its path, with no Setup mark.
+      const left = named('.claude-office-left');
+      const other = randomUUID();
+      save(q, other);
+      const moving = await L.connectProject('claude', other, app, 'Work');
+      t = moving;
+      const notice = await withEnv({ CLAUDE_CONFIG_DIR: left }, () => folderNoticeOf(moving));
+      assert.equal(
+        notice,
+        moved({ from: '~/.claude-office-left', to: '~/.claude-named-holds · signed out' })
+      );
+      assert.ok(!notice?.includes('not in Setup'), notice ?? 'no notice');
     } finally {
       if (s) await c.disconnect(s.id);
+      if (t) await c.disconnect(t.id);
       L.setClaudeFolders([]);
     }
   }
@@ -550,7 +566,7 @@ test(
       opened.push(s.id);
       assert.equal(
         await folderNoticeOf(s, b),
-        moved({ from: '~/.claude-sent-back · signed out', to: '~/.claude-has-it · signed out' })
+        moved({ from: '~/.claude-sent-back', to: '~/.claude-has-it · signed out' })
       );
       assert.equal((await L.connection(s.id)).configDir, a);
       await c.terminal(s.id);

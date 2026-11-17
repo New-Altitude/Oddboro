@@ -6,6 +6,7 @@ import {
   claudeFolderFound,
   defaultClaudeFolder,
   isClaudeFolder,
+  shownFolder,
   type ProjectSession
 } from '@oddboro/ledger';
 import { canMoveHere, nativeEnv, UUID } from './native.ts';
@@ -25,11 +26,13 @@ import { versionOf } from '../versions.ts';
 /**
  * What connect tells the owner about a Claude session's folder, by folder
  * marks (`claudeFolderMark`): `newer` and `to` name the folder holding the
- * conversation's newest copy, `from` the one the session left, and `terminal`
- * the folder of the terminal session connect's `move` ended. A session moves only
- * when its own folder lacks the conversation, or to that terminal's folder.
- * One notice shows: the terminal's when both apply, since the owner was using
- * that copy.
+ * conversation's newest copy, and `terminal` the folder of the terminal
+ * session connect's `move` ended. `from`, the folder the session left, is
+ * named by its path alone (`shownFolder`): a mark's login and Setup state are
+ * for a folder the owner can pick, and the office's default folder may sit
+ * outside Setup. A session moves only when its own folder lacks the
+ * conversation, or to that terminal's folder. One notice shows: the
+ * terminal's when both apply, since the owner was using that copy.
  */
 export const FOLDER_NOTICE = {
   newer: (mark: string) =>
@@ -243,12 +246,11 @@ export async function copyToOpen(
   // login. A copy running in two folders has no folder to name.
   if (terminalDir)
     folderNotice = FOLDER_NOTICE.terminal(await claudeFolderMark(terminalDir, { fresh: true }));
-  else if (movedTo && ownDir) {
-    const [from, to] = await Promise.all(
-      [ownDir, movedTo].map((dir) => claudeFolderMark(dir, { fresh: true }))
-    );
-    folderNotice = FOLDER_NOTICE.moved({ from, to });
-  }
+  else if (movedTo && ownDir)
+    folderNotice = FOLDER_NOTICE.moved({
+      from: shownFolder(ownDir),
+      to: await claudeFolderMark(movedTo, { fresh: true })
+    });
   // A session with its own copy still opens it, so the owner never
   // lands in an older one without being told.
   else if (own && newest?.configDir && newest.configDir !== ownDir && newest.updated > own.updated)
