@@ -21,16 +21,19 @@ import { PROJECT_WORDS } from '../../project-words.ts';
 import { claudeFolderMark } from '../claude.ts';
 
 /**
- * What Reconnect tells the owner about a Claude session's folder, by folder
+ * What connect tells the owner about a Claude session's folder, by folder
  * marks (`claudeFolderMark`): `newer` and `to` name the folder holding the
- * conversation's newest copy, `from` the one the session left. A session
- * moves only when its own folder lacks the conversation, so at most one applies.
+ * conversation's newest copy, `from` the one the session left, and `terminal`
+ * the folder of the terminal session Move here ended. A session moves only
+ * when its own folder lacks the conversation, or to that terminal's folder,
+ * so at most one applies.
  */
 export const FOLDER_NOTICE = {
   newer: (mark: string) =>
     `A newer copy of this conversation is in ${mark}. To switch to it, choose it under Continue an earlier one.`,
   moved: ({ from, to }: { from: string; to: string }) =>
-    `This conversation is no longer in ${from}, so the session moved to ${to}, which has its newest copy.`
+    `This conversation is no longer in ${from}, so the session moved to ${to}, which has its newest copy.`,
+  terminal: (mark: string) => `The terminal was using ${mark}, so this session now uses it too.`
 };
 
 /**
@@ -155,22 +158,34 @@ export async function copyToOpen(
   // folder holding its newest copy, so one connected before its folder
   // was known gets it now, and one with no folder found in the office's
   // default folder keeps none. Reconnect moves a session to another
-  // folder only then, and tells the owner.
+  // folder only then, or to the folder of a terminal Move here ends (below),
+  // and tells the owner.
   const movedTo = known && !own && configDir === undefined ? newest?.configDir : undefined;
   if (!own) configDir ??= newest?.configDir ?? undefined;
-  const saved = own ?? newest;
+  let saved = own ?? newest;
   // Resuming a copy beside one open in a Claude terminal, in any folder,
   // would fork the conversation. With the owner's yes, that terminal
   // session ends first: the process this read found, while a second read
   // still finds it idle.
   const open = [own, newest].find(inTerminal);
+  // The Claude folder of the terminal session Move here ended, when it is
+  // not the one this session would resume in. The owner was using that copy,
+  // so the session resumes and is stored there, as a pick of it would be,
+  // never in an older copy here.
+  let terminalDir: string | undefined;
   if (open) {
     if (!move) throw openInTerminal();
     await endTerminalSession(folder, open);
+    if (open.configDir !== null && open.configDir !== (configDir ?? ownDir)) {
+      terminalDir = configDir = open.configDir;
+      saved = open;
+    }
   }
   // Told after that refusal, so a refused Reconnect reads no folder's
   // login. A copy running in two folders has no folder to name.
-  if (movedTo && ownDir) {
+  if (terminalDir)
+    folderNotice = FOLDER_NOTICE.terminal(await claudeFolderMark(terminalDir, { fresh: true }));
+  else if (movedTo && ownDir) {
     const [from, to] = await Promise.all(
       [ownDir, movedTo].map((dir) => claudeFolderMark(dir, { fresh: true }))
     );

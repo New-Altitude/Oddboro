@@ -509,6 +509,46 @@ test(
 );
 
 test(
+  "Move here on a session stored in one Claude folder, while a terminal runs the conversation under another, continues in the terminal's folder and stores it",
+  SHELL_STAND_IN,
+  async () => {
+    const a = join(homedir(), '.claude-stored-a');
+    const b = join(homedir(), '.claude-terminal-b');
+    mkdirSync(a, { recursive: true });
+    mkdirSync(b, { recursive: true });
+    L.setClaudeFolders([a, b]);
+    const moveIn = async (configDir: string | undefined) => {
+      const id = randomUUID();
+      save(a, id, -3600);
+      save(b, id);
+      const known = await L.connectProject('claude', id, app, 'Work', a);
+      const session = terminalSession();
+      try {
+        agents(b, [inTerminal(id, session.pid!, 'idle')]);
+        const dropped = once(session, 'exit').then(() => agents(b, []));
+        const s = await c.connect('claude', app, { nativeId: id, configDir, move: true });
+        await dropped;
+        await c.terminal(s.id);
+        assert.equal(s.id, known.id);
+        assert.ok(interrupted(session.pid));
+        assert.equal(lastTerminal().env.CLAUDE_CONFIG_DIR, b);
+        assert.equal((await L.connection(s.id))?.configDir, b);
+        return c.view(s.id)?.folderNotice;
+      } finally {
+        session.kill();
+      }
+    };
+    // Reconnect sends the stored folder.
+    assert.equal(
+      await moveIn(a),
+      'The terminal was using ~/.claude-terminal-b · signed out, so this session now uses it too.'
+    );
+    // The list's row names the folder of the copy that runs.
+    assert.equal(await moveIn(b), null);
+  }
+);
+
+test(
   'Below Claude Code 2.1.285, or with background sessions turned off, Projects refuses in plain words before anything starts',
   SHELL_STAND_IN,
   async () => {
