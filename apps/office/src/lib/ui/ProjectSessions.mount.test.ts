@@ -321,6 +321,13 @@ test('The setup question ends when the form it was asked for changes', async (t)
       change: (root: Element) => pick(root, 'Coding tool', 'codex'),
       // Codex starts in no Claude account, so the Account list goes.
       took: (root: Element) => !root.querySelector('select[aria-label="Account"]')
+    },
+    {
+      // The question was the old account's: answering it would trust the folder for that one.
+      name: 'an Account change',
+      change: (root: Element) => pick(root, 'Account', FOLDERS[1].path),
+      took: (root: Element) =>
+        one<HTMLSelectElement>(root, 'select[aria-label="Account"]').value === FOLDERS[1].path
     }
   ];
   for (const { name, change, took } of changes) {
@@ -332,14 +339,18 @@ test('The setup question ends when the form it was asked for changes', async (t)
         await settled(shown);
         assert.ok(took(shown.target), 'the form changed');
         assert.equal(setupShown(shown.target), false, 'no longer shown');
-        assert.ok(ended('setup-1'), 'its terminal ended');
+        assert.deepEqual(
+          asked('disconnect').map((s) => s.id),
+          ['setup-1'],
+          'its terminal ended, once'
+        );
       } finally {
         await shown.unmount();
       }
     });
   }
 
-  await t.test('after an Account change, Start ends it before asking again', async () => {
+  await t.test('after an Account change, Start asks again in the account picked', async () => {
     // The second Start waits, so what shows while it does is the old question or none.
     const shown = await askedToTrust(() => later().promise);
     try {

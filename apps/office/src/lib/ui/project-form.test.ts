@@ -260,7 +260,7 @@ const listsOn = (
   change: FormChange,
   form: { path?: SessionPath; now: ListAsk; found?: Found; loading?: ListAsk }
 ) => lists(change, { path: form.path, now: form.now, found: form.found, loading: form.loading });
-const CHANGES: FormChange[] = ['path', 'typed', 'folder', 'tool', 'refresh'];
+const CHANGES: FormChange[] = ['path', 'typed', 'folder', 'tool', 'account', 'refresh'];
 const inB = asking('~/project-b');
 
 test('choosing Continue with a folder lists once, and again only for a changed ask', () => {
@@ -291,6 +291,11 @@ test('Choose folder lists a different folder once, and the same folder not at al
 test('switching the coding tool lists once', () => {
   const codex = asking('~/project-a', 'codex');
   assert.equal(listsOn('tool', { path: 'continue', now: codex, found: inA }), true);
+});
+
+test('an Account change never lists: a conversation found goes with its own account', () => {
+  assert.equal(listsOn('account', { path: 'continue', now: inB, found: inA }), false);
+  assert.equal(listsOn('account', { path: 'continue', now: inA.ask }), false);
 });
 
 test('Refresh list lists on every press, but not while a list for the same ask loads', () => {

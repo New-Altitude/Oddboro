@@ -176,7 +176,11 @@
          The select clips its own text: WebKit draws a long account on one line past the
          select's edge and can count it as width, which makes the whole form scroll sideways. -->
     {#if fields.account}<label
-        >Account <select class="field overflow-hidden" aria-label="Account" bind:value={startIn}
+        >Account <select
+          class="field overflow-hidden"
+          aria-label="Account"
+          bind:value={startIn}
+          onchange={() => onchange('account')}
           >{#each folders as f (f.path)}<option value={f.path}>{f.mark}</option>{/each}</select
         ></label
       >{/if}

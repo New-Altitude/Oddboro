@@ -138,13 +138,16 @@ export type FormChange =
   | 'folder'
   /** Switched the coding tool. */
   | 'tool'
+  /** Picked another Claude folder in Account, which only Start uses. */
+  | 'account'
   /** Pressed Refresh list. */
   | 'refresh';
 
 /**
  * Whether a change lists the folder's conversations: only on the continue path
- * with a folder set, once per committed change, never per keystroke and never
- * on a timer. A change that leaves the ask as the newest list had it (the same
+ * with a folder set, once per committed change, never per keystroke, never for
+ * an Account change (a conversation found goes with its own) and never on a
+ * timer. A change that leaves the ask as the newest list had it (the same
  * folder chosen again, Continue chosen with those rows shown or loading) lists
  * nothing. Refresh list lists on every press, except while a list for the same
  * ask still loads: the answer on its way is already the fresh one.
@@ -159,7 +162,8 @@ export function lists(
     loading: ListAsk | undefined;
   }
 ): boolean {
-  if (change === 'typed' || form.path !== 'continue' || !form.now.folder.trim()) return false;
+  if (change === 'typed' || change === 'account') return false;
+  if (form.path !== 'continue' || !form.now.folder.trim()) return false;
   if (form.loading) return !sameAsk(form.loading, form.now);
   return change === 'refresh' || !sameAsk(form.found?.ask, form.now);
 }

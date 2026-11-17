@@ -252,9 +252,9 @@
     changed('path');
   }
   /**
-   * Every change on the New session form that may list goes through here: the
-   * path, the folder typed or chosen, the tool, the socket and Refresh list.
-   * `lists` decides, so a list starts once per committed change.
+   * Every change on the New session form goes through here: the path, the
+   * folder typed or chosen, the tool, the account, the socket and Refresh list.
+   * `lists` decides which list, so a list starts once per committed change.
    */
   function changed(change: FormChange) {
     // A hand-over waits for the folder and tool it was found in, and Claude
