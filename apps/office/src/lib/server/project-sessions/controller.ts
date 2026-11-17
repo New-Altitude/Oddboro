@@ -123,6 +123,10 @@ type Listed = {
 export const ADVANCED_OFF =
   'Project sessions need advanced mode. Turn it on in Setup, under Advanced.';
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+/** The header note of a session just connected. */
+const CONNECTED = 'Connected';
+/** The header note once the session's terminal closed, until it opens again. */
+const TERMINAL_CLOSED = 'Terminal closed. You can reopen the conversation.';
 
 export class ProjectController {
   readonly events = new EventEmitter().setMaxListeners(100);
@@ -396,7 +400,7 @@ export class ProjectController {
       session: s,
       connected: false,
       reply: '',
-      note: 'Connected',
+      note: CONNECTED,
       folderNotice: null,
       tail: Promise.resolve(),
       questions: new Map(),
@@ -542,8 +546,9 @@ export class ProjectController {
         CLAUDE_CONFIG_DIR: claudeConfigDir(dir)
       });
     }
+    if (c.note === TERMINAL_CLOSED) c.note = CONNECTED;
     c.terminal.events.on('exit', () => {
-      c.note = 'Terminal closed. You can reopen the conversation.';
+      c.note = TERMINAL_CLOSED;
       this.changed(c);
     });
     this.changed(c);

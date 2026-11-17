@@ -548,6 +548,16 @@ test(
   }
 );
 
+test('Opening the terminal again clears the note that it closed', SHELL_STAND_IN, async () => {
+  const dir = claudeFolder('.claude-reopen');
+  writeFileSync(join(dir, 'start-id'), randomUUID());
+  const s = await c.connect('claude', app, { configDir: dir, title: 'Work' });
+  (await c.terminal(s.id)).close();
+  assert.equal(c.view(s.id)?.note, 'Terminal closed. You can reopen the conversation.');
+  await c.terminal(s.id);
+  assert.equal(c.view(s.id)?.note, 'Connected');
+});
+
 test(
   'Below Claude Code 2.1.285, or with background sessions turned off, Projects refuses in plain words before anything starts',
   SHELL_STAND_IN,
