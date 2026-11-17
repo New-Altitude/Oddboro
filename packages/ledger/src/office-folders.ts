@@ -264,8 +264,10 @@ export const FOLDER_WARNING =
 /**
  * Whether `p` is a secret store by `STORE_MARKS`. By its own folder's name, a
  * key's last segment, so `keyrings` anywhere is `.local/share/keyrings`.
+ * Setup's Claude folders route asks it too, to tell an account's `.claude`
+ * from a project's.
  */
-function marksStore(p: string): boolean {
+export function marksStore(p: string): boolean {
   const name = basename(p).toLowerCase();
   const marks = Object.entries(STORE_MARKS).find(
     ([store]) => basename(store).toLowerCase() === name

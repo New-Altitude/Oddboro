@@ -74,6 +74,7 @@ export {
   CLAUDE_ACCOUNT_MARKS,
   isClaudeAccount,
   STORE_MARKS,
+  marksStore,
   SECRET_STORES,
   FOLDER_REFUSED,
   FOLDER_WARNING,

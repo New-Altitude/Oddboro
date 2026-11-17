@@ -23,8 +23,8 @@ import {
   home,
   isClaudeAccount,
   isClaudeFolder,
+  marksStore,
   setClaudeFolders,
-  STORE_MARKS,
   within
 } from '@oddboro/ledger';
 import { claudeFolderMark } from '#lib/server/claude.ts';
@@ -109,17 +109,15 @@ function folderToName(typed: string): { path: string } | { refused: string } {
   if (claudeConfigDir(p) === undefined) return { refused: REFUSED.always };
   const real = realpathSync.native(p);
   // `~/.claude` is refused above as always listed. Any other `.claude` is an
-  // account folder, such as a second home's, only when it holds what Claude
-  // Code keeps in one (`STORE_MARKS`, the same marks that shut it to every
-  // Odd); without them it is a project's settings. In any case on every
+  // account folder, such as a second home's, only when it is a secret store
+  // by its marks (`marksStore`, the same test that shuts it to every Odd);
+  // without them it is a project's settings. The name is checked first, since
+  // `marksStore` is true of the other stores too. In any case on every
   // system: a Mac's disk ignores case by default, and a project's `.Claude` is
   // no account folder on a disk that keeps it either. Any one mark is enough
   // here, where it only refuses a project's settings; `suggested` needs every
   // account mark, since it offers a folder the owner did not type.
-  if (
-    basename(real).toLowerCase() === '.claude' &&
-    !STORE_MARKS['.claude'].some((m) => existsSync(join(real, m)))
-  )
+  if (basename(real).toLowerCase() === '.claude' && !marksStore(real))
     return { refused: REFUSED.project };
   const own = [home(), accountsHome()].map((q) => (existsSync(q) ? realpathSync.native(q) : q));
   if (own.some((q) => within(real, q))) return { refused: REFUSED.office };
