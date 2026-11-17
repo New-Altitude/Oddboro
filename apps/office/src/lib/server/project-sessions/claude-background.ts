@@ -30,8 +30,15 @@ export class ClaudeNeedsTrust extends Error {
   }
 }
 
-/** Runs `claude` with `args` in `folder`, under the Claude folder `dir`. */
-function claude(folder: string, dir: string, args: string[], timeout: number) {
+/**
+ * Where a `claude` command runs: the project `folder` it works in, and the
+ * Claude folder `dir` it runs under. One object, since the two are both paths
+ * and a swap would run the command against the wrong Claude folder.
+ */
+export type ClaudeWhere = { folder: string; dir: string };
+
+/** Runs `claude` with `args` in `where`. */
+function claude({ folder, dir }: ClaudeWhere, args: string[], timeout: number) {
   const [exe, prefix] = nativeCommand('claude');
   return probe(exe, [...prefix, ...args], {
     env: claudeFolderEnv(dir, nativeEnv()),
@@ -45,12 +52,8 @@ function claude(folder: string, dir: string, args: string[], timeout: number) {
  * short id. Claude Code writes some of its lines to stderr, so both streams
  * are read.
  */
-export async function startInBackground(
-  folder: string,
-  dir: string,
-  args: string[]
-): Promise<string> {
-  const r = await claude(folder, dir, ['--bg', ...args], 30_000);
+export async function startInBackground(where: ClaudeWhere, args: string[]): Promise<string> {
+  const r = await claude(where, ['--bg', ...args], 30_000);
   switch (r.status) {
     case 'missing':
       throw new Error(CLAUDE_LIST_FAILED.missing());
@@ -79,14 +82,14 @@ export async function startInBackground(
  * failure is logged, not thrown: each caller is already on its way to a
  * refusal of its own, which the owner reads.
  */
-async function endInBackground(verb: 'stop' | 'rm', folder: string, dir: string, short: string) {
-  const r = await claude(folder, dir, [verb, short], 10_000);
+async function endInBackground(verb: 'stop' | 'rm', where: ClaudeWhere, short: string) {
+  const r = await claude(where, [verb, short], 10_000);
   if (r.status !== 'ok') console.error(`claude ${verb} ${short} came back ${r.status}`);
 }
 
 /** Stops the background session `short`, which this office just started. */
-export const stopInBackground = (folder: string, dir: string, short: string) =>
-  endInBackground('stop', folder, dir, short);
+export const stopInBackground = (where: ClaudeWhere, short: string) =>
+  endInBackground('stop', where, short);
 
 /**
  * Resumes the conversation `id` as a background session and returns its
@@ -95,15 +98,14 @@ export const stopInBackground = (folder: string, dir: string, short: string) =>
  * so a copy is stopped and removed, and the owner is asked to try again.
  */
 export async function resumeInBackground(
-  folder: string,
-  dir: string,
+  where: ClaudeWhere,
   id: string,
   plugin: string
 ): Promise<string> {
-  const short = await startInBackground(folder, dir, ['--resume', id, '--plugin-dir', plugin]);
+  const short = await startInBackground(where, ['--resume', id, '--plugin-dir', plugin]);
   if (short === id.slice(0, 8)) return short;
-  await endInBackground('stop', folder, dir, short);
-  await endInBackground('rm', folder, dir, short);
+  await endInBackground('stop', where, short);
+  await endInBackground('rm', where, short);
   throw new Error(PROJECT_WORDS.copied);
 }
 

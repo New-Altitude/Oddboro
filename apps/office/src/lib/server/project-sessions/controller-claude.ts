@@ -16,7 +16,7 @@ import {
   inTerminal,
   type ClaudeConversation
 } from './claude-project.ts';
-import { endTerminalSession, stopInBackground } from './claude-background.ts';
+import { endTerminalSession, stopInBackground, type ClaudeWhere } from './claude-background.ts';
 import { PROJECT_WORDS } from '../../project-words.ts';
 import { claudeFolderMark } from '../claude.ts';
 
@@ -88,19 +88,19 @@ export const openInTerminal = () =>
   new Error(canMoveHere() ? PROJECT_WORDS.useMove : PROJECT_WORDS.windows);
 
 /**
- * The conversation id of the background session `short`, which `folder` just
- * started under the Claude folder `dir`, once `claude agents` lists it. A new
+ * The conversation id of the background session `short`, just started in
+ * `where`, once `claude agents` lists it. A new
  * session was measured to list within half a second. One not listed in 5 s is
  * stopped, and Start fails.
  */
-export async function startedSession(folder: string, dir: string, short: string): Promise<string> {
+export async function startedSession(where: ClaudeWhere, short: string): Promise<string> {
   const end = performance.now() + 5000;
   let failed: unknown;
   for (;;) {
     // A read that fails counts as not listed yet: the session may still be
     // starting, and the 5 s limit ends the wait either way. The last failure
     // is logged if it never lists.
-    const rows = await claudeAgents(folder, dir).catch((e: unknown) => {
+    const rows = await claudeAgents(where.folder, where.dir).catch((e: unknown) => {
       failed = e;
       return [];
     });
@@ -113,7 +113,7 @@ export async function startedSession(folder: string, dir: string, short: string)
     `claude agents never listed the session ${short} it started:`,
     failed ?? 'not listed'
   );
-  await stopInBackground(folder, dir, short);
+  await stopInBackground(where, short);
   throw new Error(PROJECT_WORDS.startFailed);
 }
 

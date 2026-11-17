@@ -39,7 +39,7 @@ mock.module('./claude-background.ts', {
       begun = randomUUID();
       return begun.slice(0, 8);
     },
-    resumeInBackground: async (_folder: string, _dir: string, id: string) => id.slice(0, 8)
+    resumeInBackground: async (_where: unknown, id: string) => id.slice(0, 8)
   }
 });
 mock.module('./claude-project.ts', {

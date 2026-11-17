@@ -345,8 +345,9 @@ export class ProjectController {
     const key = randomUUID();
     const p = prepareClaude({ id: key, nativeId: PAIR_SELF, folder });
     try {
-      const short = await startInBackground(folder, dir, ['-n', title, '--plugin-dir', p.plugin]);
-      return { id: await startedSession(folder, dir, short), key };
+      const where = { folder, dir };
+      const short = await startInBackground(where, ['-n', title, '--plugin-dir', p.plugin]);
+      return { id: await startedSession(where, short), key };
     } catch (e) {
       // No session will read this plugin.
       rmSync(home('project-sessions', key), { recursive: true, force: true });
@@ -530,11 +531,13 @@ export class ProjectController {
       // this session opened.
       const short =
         row?.job ||
-        (await resumeInBackground(s.folder, dir, s.nativeId, c.plugin!).catch((e: unknown) => {
-          // Start again means nothing for a saved conversation, whose folder
-          // this account no longer trusts.
-          throw e instanceof ClaudeNeedsTrust ? new Error(PROJECT_WORDS.startFailed) : e;
-        }));
+        (await resumeInBackground({ folder: s.folder, dir }, s.nativeId, c.plugin!).catch(
+          (e: unknown) => {
+            // Start again means nothing for a saved conversation, whose folder
+            // this account no longer trusts.
+            throw e instanceof ClaudeNeedsTrust ? new Error(PROJECT_WORDS.startFailed) : e;
+          }
+        ));
       c.terminal = await ProjectTerminal.open('claude', ['attach', short], s.folder, {
         CLAUDE_CONFIG_DIR: claudeConfigDir(dir)
       });

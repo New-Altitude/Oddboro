@@ -60,7 +60,8 @@ const { PROJECT_WORDS } = await import('../../project-words.ts');
 // `--all`, leaving out background sessions that ended, as Claude Code does),
 // and `--bg` with the folder's `bg.out`, else the line Claude Code prints. A
 // background start adds its session to `agents.json`, under the folder's
-// `start-id` when the test names one. `stop` and `rm` only log.
+// `start-id` when the test names one. `stop` and `rm` log again with the
+// project folder and the Claude folder they ran in.
 const calls = join(folder, 'background-calls.log');
 const bin = join(folder, 'background-bin');
 mkdirSync(bin);
@@ -70,7 +71,7 @@ const helper = join(bin, 'answer.mjs');
 writeFileSync(
   helper,
   `import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 const [dir, ...args] = process.argv.slice(2);
 const read = (name) => (existsSync(join(dir, name)) ? readFileSync(join(dir, name), 'utf8') : undefined);
@@ -91,7 +92,8 @@ else if (args[0] === 'agents') {
     writeFileSync(join(dir, 'agents.json'), JSON.stringify(rows));
     console.log('backgrounded · ' + sessionId.slice(0, 8) + ' · ' + args[args.indexOf('-n') + 1]);
   }
-}
+} else if (args[0] === 'stop' || args[0] === 'rm')
+  appendFileSync(${JSON.stringify(calls)}, args.join(' ') + ' in ' + process.cwd() + ' under ' + dir + '\\n');
 `
 );
 writeFileSync(
@@ -345,7 +347,7 @@ test(
 );
 
 test(
-  'A resume that prints another id is a copy: stopped, removed and refused',
+  'A resume that prints another id is a copy: stopped, then removed, in the project under its Claude folder, and refused',
   SHELL_STAND_IN,
   async () => {
     const dir = claudeFolder('.claude-copy');
@@ -355,9 +357,11 @@ test(
     const s = await c.connect('claude', app, { nativeId: id, configDir: dir });
     // The conversation resumes as its terminal opens, so that is where the copy is refused.
     await assert.rejects(c.terminal(s.id), { message: PROJECT_WORDS.copied });
-    const log = logged();
-    const stop = log.indexOf('stop deadbeef');
-    assert.ok(stop >= 0 && log.indexOf('rm deadbeef') > stop, log.join('\n'));
+    // In order, in the project, under the Claude folder the copy started in.
+    assert.deepEqual(
+      logged().filter((line) => line.includes(' under ')),
+      [`stop deadbeef in ${app} under ${dir}`, `rm deadbeef in ${app} under ${dir}`]
+    );
   }
 );
 
