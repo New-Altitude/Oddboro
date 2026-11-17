@@ -10,6 +10,7 @@
 import assert from 'node:assert/strict';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PROJECT_WORDS } from '../project-words.ts';
 import { mountedForClient, type Mounted } from './onboarding/mounted-for-client.ts';
 import { newSessionFields, type Choice, type FormChange } from './project-form.ts';
 import type NewSessionFormComponent from './NewSessionForm.svelte';
@@ -74,7 +75,8 @@ export const FOLDERS = [
   { path: '/work/claude-a', mark: 'owner@example.com' },
   { path: '/work/claude-b', mark: 'second@example.com' }
 ];
-export const REFUSED = 'Claude is replying in that terminal.';
+/** A refusal the office really sends, so a test reads the owner's words. */
+export const REFUSED = PROJECT_WORDS.busy;
 /** The office refusing an action with `message`, as its route does. */
 export const refused = (message: string) => Response.json({ message }, { status: 409 });
 
