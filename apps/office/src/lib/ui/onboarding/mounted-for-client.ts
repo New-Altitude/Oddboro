@@ -3,8 +3,10 @@
 //
 // Importing this file makes its test file a client one: components load
 // compiled for the client, and the document's classes and objects stand in
-// for the browser's on `globalThis`, as the page has them.
-import { after } from 'node:test';
+// for the browser's on `globalThis`, as the page has them. A test file that
+// imports it runs with `--experimental-test-module-mocks`, as `npm test` does,
+// for the terminal's stand-in below.
+import { after, mock } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { Window } from 'happy-dom';
 import type { Component, ComponentProps } from 'svelte';
@@ -47,6 +49,48 @@ for (const [name, value] of Object.entries(names)) {
 }
 // The document's timers would keep the test process open past its last test.
 after(() => browser.happyDOM.close());
+
+// Svelte's select `bind:value` reads the option picked with `:checked`, which
+// happy-dom matches on no option. A list answers it as a browser does, so a
+// test picks with `value` and a `change` event, as the owner's click does.
+const query = browser.HTMLSelectElement.prototype.querySelector;
+browser.HTMLSelectElement.prototype.querySelector = function (
+  this: HTMLSelectElement,
+  selector: string
+) {
+  if (selector !== ':checked') return query.call(this, selector);
+  return [...this.options].find((o) => o.selected) ?? null;
+} as typeof query;
+
+// xterm's module does not load under these hooks ("Terminal is not a
+// constructor"), so a stand-in takes its place in every component that opens a
+// terminal: one that shows an `.xterm` element where the component puts it,
+// and does nothing else.
+class StandInTerminal {
+  options = {};
+  cols = 80;
+  rows = 24;
+  parser = { registerOscHandler: () => ({ dispose() {} }) };
+  open(host: HTMLElement) {
+    const shown = document.createElement('div');
+    shown.className = 'xterm';
+    host.append(shown);
+  }
+  onData = () => ({ dispose() {} });
+  loadAddon() {}
+  write() {}
+  reset() {}
+  focus() {}
+  dispose() {}
+}
+mock.module('@xterm/xterm', { exports: { Terminal: StandInTerminal } });
+mock.module('@xterm/addon-fit', {
+  exports: {
+    FitAddon: class {
+      fit() {}
+    }
+  }
+});
 
 /** A component in the document, and the controls a test needs on it. */
 export type Mounted = {

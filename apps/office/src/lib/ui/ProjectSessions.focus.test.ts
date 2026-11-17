@@ -4,7 +4,7 @@
 // the owner does and reads what the window then shows.
 import assert from 'node:assert/strict';
 import { dirname, join } from 'node:path';
-import { mock, test } from 'node:test';
+import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { PROJECT_WORDS } from '../project-words.ts';
 import { mountedForClient, type Mounted } from './onboarding/mounted-for-client.ts';
@@ -33,35 +33,6 @@ Object.defineProperty(globalThis, 'EventSource', {
   value: QuietStream,
   configurable: true,
   writable: true
-});
-
-// xterm's module does not load under the test's client hooks ("Terminal is not
-// a constructor"), so a stand-in takes its place: a terminal that shows itself
-// where the window puts it, and does nothing else.
-class StandInTerminal {
-  options = {};
-  cols = 80;
-  rows = 24;
-  parser = { registerOscHandler: () => ({ dispose() {} }) };
-  open(host: HTMLElement) {
-    const shown = document.createElement('div');
-    shown.className = 'xterm';
-    host.append(shown);
-  }
-  onData = () => ({ dispose() {} });
-  loadAddon() {}
-  write() {}
-  reset() {}
-  focus() {}
-  dispose() {}
-}
-mock.module('@xterm/xterm', { namedExports: { Terminal: StandInTerminal } });
-mock.module('@xterm/addon-fit', {
-  namedExports: {
-    FitAddon: class {
-      fit() {}
-    }
-  }
 });
 
 const NATIVE = '11111111-0000-4000-8000-000000000000';
@@ -146,13 +117,6 @@ function typeInto(root: Element, selector: string, value: string) {
 function pick(root: Element, selector: string, value: string) {
   const list = one<HTMLSelectElement>(root, selector);
   list.value = value;
-  // Svelte's bind:value reads the option picked with `:checked`, which
-  // happy-dom matches on no option, so the list answers it as a browser does.
-  const query = list.querySelector.bind(list);
-  list.querySelector = ((q: string) =>
-    q === ':checked'
-      ? ([...list.options].find((o) => o.selected) ?? null)
-      : query(q)) as typeof query;
   list.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
