@@ -16,7 +16,7 @@
   import { projectApi } from './project-api.ts';
   import '@xterm/xterm/css/xterm.css';
   // The native terminal, filling the space its parent gives it and refitting
-  // as that changes. The parent shows Take control, for this view's ID.
+  // once it settles. The parent shows Take control, for this view's ID.
   let {
     id,
     view,
@@ -75,7 +75,7 @@
         term.options.disableStdin = !writable;
         // Another view may have sized the terminal while this one watched.
         sent = '';
-        if (writable) resize();
+        if (writable) fitAndSend();
       });
       stream.addEventListener('output', (e) => term.write(JSON.parse(e.data)));
       stream.addEventListener('end', () => {
@@ -94,9 +94,11 @@
           })
           .catch((e) => onerror(e.message));
       });
-      // The terminal refits at once as its box changes, and tells the session
-      // its new size once the box settles, and only when it differs, so a
-      // panel sliding wider or narrower sends one size, not one per frame.
+      // The terminal refits only once its box settles, in the same step as it
+      // tells the session its size, and only when that differs. xterm drops
+      // cells past a narrower width when it is resized partway through a slide,
+      // and only a new size makes the program draw them again, so a box sliding
+      // back to the size already sent must never resize it on the way.
       let sent = '',
         /** Whether another window may have sized the session since this one last did. */
         stale = false,
@@ -117,11 +119,16 @@
         if (writable && stale) post(true);
       };
       const lost = () => (stale = true);
-      const resize = () => {
-        if (!host.clientWidth || !host.clientHeight) return;
+      /** A hidden pane leaves the box with no size: the terminal keeps its own until it shows. */
+      const sized = () => host.clientWidth > 0 && host.clientHeight > 0;
+      const fitAndSend = () => {
+        if (!sized()) return;
         fit.fit();
+        send();
+      };
+      const resize = () => {
         clearTimeout(settle);
-        settle = setTimeout(send, 150);
+        settle = setTimeout(fitAndSend, 150);
       };
       const observer = new ResizeObserver(resize);
       observer.observe(host);
@@ -133,7 +140,10 @@
         // from going further, so a listener waiting for it to bubble never hears one.
         host.addEventListener('keydown', redraw, { capture: true });
       }
-      resize();
+      // The first fit sends nothing. The stream's first write comes after it, so
+      // it lands at this size, and a size sent before the control event says
+      // this view takes the typing could be refused. That event sends it.
+      if (sized()) fit.fit();
       term.focus();
       cleanup = () => {
         window.removeEventListener('blur', lost);
