@@ -70,23 +70,38 @@ const settledSize = () => new Promise((r) => setTimeout(r, 200));
 /**
  * The terminal for session-1, taking the typing, against an office answering
  * anything else with `more`, with its box, what it sent and the errors it showed.
+ * With `sized`, its box holds that many cells as it mounts; without, it has no size yet.
  */
-async function terminal(more?: Answer) {
+async function terminal({ more, sized }: { more?: Answer; sized?: Opened } = {}) {
   office({ more });
   opened.length = 0;
   fitted.length = 0;
   const errors: string[] = [];
-  const shown = await mountedForClient<typeof ProjectTerminalComponent>(
-    join(here, 'ProjectTerminal.svelte'),
-    {
-      id: 'session-1',
-      view: 'view-1',
-      writable: true,
-      onerror: (text) => errors.push(text),
-      onstream: () => {}
-    }
-  );
-  await settled(shown);
+  // The box does not exist before the mount, so every new div measures `sized`
+  // until the terminal has mounted.
+  const div = Object.getPrototypeOf(document.createElement('div'));
+  if (sized) {
+    box = sized;
+    Object.defineProperty(div, 'clientWidth', { get: () => sized.cols, configurable: true });
+    Object.defineProperty(div, 'clientHeight', { get: () => sized.rows, configurable: true });
+  }
+  let shown;
+  try {
+    shown = await mountedForClient<typeof ProjectTerminalComponent>(
+      join(here, 'ProjectTerminal.svelte'),
+      {
+        id: 'session-1',
+        view: 'view-1',
+        writable: true,
+        onerror: (text) => errors.push(text),
+        onstream: () => {}
+      }
+    );
+    await settled(shown);
+  } finally {
+    delete div.clientWidth;
+    delete div.clientHeight;
+  }
   const screen = one<HTMLElement>(shown.target, '.xterm');
   const host = screen.parentElement;
   assert.ok(host, 'the terminal sits in its box');
@@ -137,6 +152,19 @@ test('Coming back to the terminal after focus left it asks the session to draw a
         await on.shown.unmount();
       }
     });
+  }
+});
+
+test('A box sized as the terminal opens fits it once, before the screen is written, and sends no size', async () => {
+  const on = await terminal({ sized: { cols: 100, rows: 30 } });
+  try {
+    const fitsAtWrite: string[][] = [];
+    Object.assign(opened[0], { write: () => fitsAtWrite.push([...fitted]) });
+    streamAt('/api/project-sessions/session-1/events?terminal=1').send('screen', 'the screen');
+    assert.deepEqual(fitsAtWrite, [['100x30']], 'one fit, before the write');
+    assert.deepEqual(asked('size'), [], 'no size until the control event says this view types');
+  } finally {
+    await on.shown.unmount();
   }
 });
 
@@ -285,9 +313,9 @@ test('Taking the typing fits and sends the size at once, and a view without it s
 
 test('A reply the terminal sent as its view closed shows no error once the view is gone', async () => {
   let answer: (reply: Response) => void = () => {};
-  const on = await terminal((s) =>
-    s.action === 'keys' ? new Promise<Response>((r) => (answer = r)) : {}
-  );
+  const on = await terminal({
+    more: (s) => (s.action === 'keys' ? new Promise<Response>((r) => (answer = r)) : {})
+  });
   let gone = false;
   try {
     // xterm's focus report as the click that lets the session go takes focus.
