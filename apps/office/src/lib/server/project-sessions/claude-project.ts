@@ -126,8 +126,9 @@ export async function claudeAgents(
  * One conversation the continue path's list shows. `configDir` is the Claude
  * folder that holds it, or null when that is not known yet (connect finds it
  * later). `live` means a process runs it. `job` is its background session's
- * short id, or empty when it has none. A running one carries its process and
- * status, so connect's one read serves its `move`.
+ * short id, or empty when it has none. A running one carries its process, its
+ * status and `liveIn`, so connect's `move` can read that status again where it
+ * was listed.
  */
 export type ClaudeConversation = {
   id: string;
@@ -137,6 +138,12 @@ export type ClaudeConversation = {
   job: string;
   pid?: number;
   status?: string;
+  /**
+   * The Claude folder whose `claude agents` listed the process, while one runs.
+   * Not always `configDir`: that folder holds the newest file, and a terminal
+   * can run the conversation under another.
+   */
+  liveIn?: string;
   /** Open in a terminal, and connect's `move` can bring it in on this computer. */
   movable: boolean;
   configDir: string | null;
@@ -172,20 +179,21 @@ function conversations(folder: string, answers: FolderAnswer[]): ClaudeConversat
         configDir: dir
       });
     }
-  const listedBy = new Map<string, { a: Active; dirs: string[] }>();
+  const listedBy = new Map<string, { a: Active; dirs: string[]; liveIn?: string }>();
   for (const { dir, running } of answers)
     for (const a of running ?? []) {
       if (a.cwd !== folder || !a.sessionId) continue;
+      const liveIn = a.pid === undefined ? undefined : dir;
       const seen = listedBy.get(a.sessionId);
-      if (!seen) listedBy.set(a.sessionId, { a, dirs: [dir] });
+      if (!seen) listedBy.set(a.sessionId, { a, dirs: [dir], liveIn });
       else {
         if (!seen.dirs.includes(dir)) seen.dirs.push(dir);
         // A stopped background session the owner resumed in a terminal lists
         // twice under one id. The row with a process is the one that runs.
-        if (a.pid !== undefined && seen.a.pid === undefined) seen.a = a;
+        if (a.pid !== undefined && seen.a.pid === undefined) Object.assign(seen, { a, liveIn });
       }
     }
-  for (const [id, { a, dirs }] of listedBy) {
+  for (const [id, { a, dirs, liveIn }] of listedBy) {
     const had = rows.get(id);
     const live = a.pid !== undefined;
     const job = a.kind === 'background' ? (a.id ?? '') : '';
@@ -201,6 +209,7 @@ function conversations(folder: string, answers: FolderAnswer[]): ClaudeConversat
       job,
       pid: a.pid,
       status: a.status,
+      liveIn,
       movable: open && canMoveHere(),
       configDir: had?.configDir ?? (dirs.length === 1 ? dirs[0] : null)
     });

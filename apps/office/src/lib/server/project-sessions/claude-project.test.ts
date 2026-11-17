@@ -457,17 +457,20 @@ test(
       ]
     );
     const state = (id: string) => {
-      const { live, job, pid, status, movable } = rows[id];
-      return { live, job, pid, status, movable };
+      const { live, job, pid, status, liveIn, movable } = rows[id];
+      return { live, job, pid, status, liveIn, movable };
     };
     assert.deepEqual(state(stopped), {
       live: false,
       job: stopped.slice(0, 8),
       pid: undefined,
       status: undefined,
+      liveIn: undefined,
       movable: false
     });
-    const open = { live: true, job: '', pid, status: 'idle', movable: true };
+    // The Claude folder that listed the process, where Move here reads it again.
+    const liveIn = join(homedir(), '.claude');
+    const open = { live: true, job: '', pid, status: 'idle', liveIn, movable: true };
     assert.deepEqual(state(terminal), open);
     assert.deepEqual(state(bothBgFirst), open);
     assert.deepEqual(state(bothTerminalFirst), open);

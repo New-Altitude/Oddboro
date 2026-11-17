@@ -168,16 +168,16 @@ export async function copyToOpen(
   // session ends first: the process this read found, while a second read
   // still finds it idle.
   const open = [own, newest].find(inTerminal);
-  // The Claude folder of the terminal session `move` ended, when it is
-  // not the one this session would resume in. The owner was using that copy,
-  // so the session resumes and is stored there, as a pick of it would be,
-  // never in an older copy here.
+  // The Claude folder the terminal session `move` ended ran under, when it
+  // is not the one this session would resume in. The owner was using that
+  // copy, so the session resumes and is stored there, as a pick of it would
+  // be, whichever folder holds the newest file.
   let terminalDir: string | undefined;
   if (open) {
     if (!move) throw openInTerminal();
     await endTerminalSession(folder, open);
-    if (open.configDir !== null && open.configDir !== (configDir ?? ownDir)) {
-      terminalDir = configDir = open.configDir;
+    if (open.liveIn !== undefined && open.liveIn !== (configDir ?? ownDir)) {
+      terminalDir = configDir = open.liveIn;
       saved = open;
     }
   }

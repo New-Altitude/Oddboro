@@ -551,7 +551,7 @@ test(
     const dir = claudeFolder('.claude-slow');
     const id = randomUUID();
     const exiting = join(dir, 'exiting');
-    const row = (pid: number) => ({ id, pid, status: 'idle', configDir: dir });
+    const row = (pid: number) => ({ id, pid, status: 'idle', liveIn: dir });
 
     const slow = await slowSession('exit after a second', exiting);
     try {
@@ -728,5 +728,66 @@ test(
     const shown = (await answer.json()) as { setup?: string };
     assert.equal(typeof shown.setup, 'string');
     await c.disconnect(shown.setup!);
+  }
+);
+
+test(
+  "Move here reads the status again in the Claude folder that listed the terminal's process, even when another folder holds the newest file",
+  SHELL_STAND_IN,
+  async () => {
+    const a = join(homedir(), '.claude-newest-a');
+    const b = join(homedir(), '.claude-listed-b');
+    mkdirSync(a, { recursive: true });
+    mkdirSync(b, { recursive: true });
+    L.setClaudeFolders([a, b]);
+    /** A conversation stored in `a`, whose newest file is in `a`, open in a terminal only `b` lists. */
+    const listedInB = async (pid: number) => {
+      const id = randomUUID();
+      save(a, id);
+      save(b, id, -3600);
+      await L.connectProject('claude', id, app, 'Work', a);
+      agents(b, [inTerminal(id, pid, 'idle')]);
+      rmSync(join(b, 'agents-now.json'), { force: true });
+      return id;
+    };
+
+    // Idle at both reads: the signal goes, and the session continues in b.
+    const session = terminalSession();
+    try {
+      const id = await listedInB(session.pid!);
+      const dropped = once(session, 'exit').then(() => agents(b, []));
+      const s = await c.connect('claude', app, { nativeId: id, configDir: a, move: true });
+      await dropped;
+      await c.terminal(s.id);
+      assert.ok(interrupted(session.pid));
+      assert.equal(lastTerminal().env.CLAUDE_CONFIG_DIR, b);
+      assert.equal((await L.connection(s.id))?.configDir, b);
+      assert.equal(
+        c.view(s.id)?.folderNotice,
+        'The terminal was using ~/.claude-listed-b · signed out, so this session now uses it too.'
+      );
+    } finally {
+      session.kill();
+    }
+
+    // Busy by the second read in b: refused in the busy words, with no signal.
+    const busy = terminalSession();
+    try {
+      const id = await listedInB(busy.pid!);
+      agentsNow(b, [inTerminal(id, busy.pid!, 'busy')]);
+      await assert.rejects(c.connect('claude', app, { nativeId: id, configDir: a, move: true }), {
+        message: PROJECT_WORDS.busy
+      });
+      assert.ok(!interrupted(busy.pid) && alive(busy));
+    } finally {
+      busy.kill();
+    }
+
+    // Gone by the second read in b: counts as ended, with no signal.
+    const gone = await endedSession();
+    const id = await listedInB(gone);
+    agentsNow(b, []);
+    await c.connect('claude', app, { nativeId: id, configDir: a, move: true });
+    assert.ok(!interrupted(gone));
   }
 );

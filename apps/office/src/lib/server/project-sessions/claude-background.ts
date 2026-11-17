@@ -123,19 +123,21 @@ function requireIdle(status: string | undefined) {
  * is the owner's to end.
  *
  * Connect's read of the status ran beside its other reads, so a reply could
- * have started since. The status is read again from the row's Claude folder
- * just before the signal. That narrows the window to one read; it cannot close
- * it, since Claude Code ends on the interrupt whatever it is doing.
+ * have started since. The status is read again just before the signal, from
+ * the Claude folder that listed the process (`liveIn`), not the row's
+ * `configDir`: that one holds the newest file, and its read would miss a
+ * process another folder runs. That narrows the window to one read; it cannot
+ * close it, since Claude Code ends on the interrupt whatever it is doing.
  */
 export async function endTerminalSession(
   folder: string,
-  row: Pick<ClaudeConversation, 'id' | 'pid' | 'status' | 'configDir'>
+  row: Pick<ClaudeConversation, 'id' | 'pid' | 'status' | 'liveIn'>
 ): Promise<void> {
   if (!canMoveHere()) throw new Error(PROJECT_WORDS.windows);
-  const { pid, configDir } = row;
-  if (pid === undefined || configDir === null) throw new Error(PROJECT_WORDS.startFailed);
+  const { pid, liveIn } = row;
+  if (pid === undefined || liveIn === undefined) throw new Error(PROJECT_WORDS.startFailed);
   requireIdle(row.status);
-  const now = (await claudeAgents(folder, configDir)).find(
+  const now = (await claudeAgents(folder, liveIn)).find(
     (a) => a.sessionId === row.id && a.pid === pid
   );
   // Not listed now: it ended, or is ending, on its own. The wait below
