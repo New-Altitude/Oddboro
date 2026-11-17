@@ -9,21 +9,33 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { mountedForClient } from './onboarding/mounted-for-client.ts';
-import { asked, office, one, settled, streamAt } from './projects-window-under-test.ts';
+import {
+  asked,
+  office,
+  one,
+  refused,
+  settled,
+  streamAt,
+  type Answer
+} from './projects-window-under-test.ts';
 import type ProjectTerminalComponent from './ProjectTerminal.svelte';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
 // The stand-in terminal from the mount helper, which keeps each one opened, so a
-// fit can size it.
+// fit can size it, and what it sends the session as `send`, as xterm's own
+// replies and the owner's keys go.
 type Opened = { cols: number; rows: number };
+type OnData = (listener: (data: string) => void) => { dispose(): void };
 const { Terminal } = (await import('@xterm/xterm')) as unknown as {
   Terminal: { prototype: { open(host: HTMLElement): void } };
 };
 const opened: Opened[] = [];
+let send: (data: string) => void = (data) => assert.fail(`nothing listens for ${data}`);
 const open = Terminal.prototype.open;
-Terminal.prototype.open = function (this: Opened, host: HTMLElement) {
+Terminal.prototype.open = function (this: Opened & { onData: OnData }, host: HTMLElement) {
   opened.push(this);
+  this.onData = (listener) => ((send = listener), { dispose() {} });
   open.call(this, host);
 };
 // A fit sizes the terminal to the cells its box holds, as xterm's fit does. The
@@ -55,14 +67,24 @@ globalThis.ResizeObserver = class {
 /** Lets the size the terminal settles on go out: it waits 150 ms after the last change. */
 const settledSize = () => new Promise((r) => setTimeout(r, 200));
 
-/** The terminal for session-1, taking the typing, with its box and what it sent. */
-async function terminal() {
-  office();
+/**
+ * The terminal for session-1, taking the typing, against an office answering
+ * anything else with `more`, with its box, what it sent and the errors it showed.
+ */
+async function terminal(more?: Answer) {
+  office({ more });
   opened.length = 0;
   fitted.length = 0;
+  const errors: string[] = [];
   const shown = await mountedForClient<typeof ProjectTerminalComponent>(
     join(here, 'ProjectTerminal.svelte'),
-    { id: 'session-1', view: 'view-1', writable: true, onerror: () => {}, onstream: () => {} }
+    {
+      id: 'session-1',
+      view: 'view-1',
+      writable: true,
+      onerror: (text) => errors.push(text),
+      onstream: () => {}
+    }
   );
   await settled(shown);
   const screen = one<HTMLElement>(shown.target, '.xterm');
@@ -73,6 +95,7 @@ async function terminal() {
   return {
     shown,
     host,
+    errors,
     focus: () => screen.dispatchEvent(new FocusEvent('focusin', { bubbles: true })),
     leave: () => screen.dispatchEvent(new FocusEvent('focusout', { bubbles: true })),
     type: () => screen.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true })),
@@ -257,5 +280,30 @@ test('Taking the typing fits and sends the size at once, and a view without it s
     );
   } finally {
     await on.shown.unmount();
+  }
+});
+
+test('A reply the terminal sent as its view closed shows no error once the view is gone', async () => {
+  let answer: (reply: Response) => void = () => {};
+  const on = await terminal((s) =>
+    s.action === 'keys' ? new Promise<Response>((r) => (answer = r)) : {}
+  );
+  let gone = false;
+  try {
+    // xterm's focus report as the click that lets the session go takes focus.
+    send('\x1b[O');
+    await settled(on.shown);
+    assert.deepEqual(
+      asked('keys').map((s) => s.data),
+      ['\x1b[O'],
+      'sent before the view closed'
+    );
+    await on.shown.unmount();
+    gone = true;
+    answer(refused('Connect this session first.'));
+    await settled(on.shown);
+    assert.deepEqual(on.errors, []);
+  } finally {
+    if (!gone) await on.shown.unmount();
   }
 });

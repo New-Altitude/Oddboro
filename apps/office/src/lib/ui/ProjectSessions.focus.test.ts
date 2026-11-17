@@ -1,5 +1,5 @@
 // The Projects window mounted in a browser-like document, against a stand-in
-// office: Focus, Reconnect's Move here, and Claude Code's setup question
+// office: Focus, Reconnect's Move here, Disconnect, and Claude Code's setup question
 // answering a Start the owner has since changed or left for a session. Each test clicks and types as
 // the owner does and reads what the window then shows.
 import assert from 'node:assert/strict';
@@ -323,4 +323,56 @@ test('Claude Code’s setup question for a Start the owner has since changed nev
       }
     });
   }
+});
+
+test('Disconnect closes this window’s terminal before it asks the office, and brings it back when the office refuses', async (t) => {
+  const NOT_CONNECTED = 'This session is not connected to the office.';
+  /** The window, with whether its terminal showed as the office got the disconnect. */
+  async function disconnected(answer: (view: ReturnType<typeof viewOf>) => unknown) {
+    const view = viewOf(true, true);
+    let shown: Awaited<ReturnType<typeof projectsWindow>> | undefined;
+    const terminalShows = () => !!shown?.target.querySelector('.term .xterm');
+    let shownAsAsked: boolean | undefined;
+    office({
+      sessions: [SESSION],
+      view,
+      more: (s) => {
+        if (s.action !== 'disconnect') return {};
+        shownAsAsked = terminalShows();
+        return answer(view);
+      }
+    });
+    shown = await projectsWindow();
+    assert.ok(terminalShows(), 'the terminal shows first');
+    button(shown.target, 'Disconnect').click();
+    await settled(shown);
+    return { shown, terminalShows, shownAsAsked };
+  }
+
+  await t.test('a refusal brings the terminal back and shows', async () => {
+    const refusal = 'Finish or stop the active work before disconnecting.';
+    const { shown, terminalShows, shownAsAsked } = await disconnected(() => refused(refusal));
+    try {
+      assert.equal(shownAsAsked, false, 'closed before the office was asked');
+      assert.ok(terminalShows(), 'back once the office refused');
+      assert.equal(shown.target.querySelector('[role="alert"] p')?.textContent, refusal);
+    } finally {
+      await shown.unmount();
+    }
+  });
+
+  await t.test('a disconnect the office takes shows no error', async () => {
+    const { shown, terminalShows, shownAsAsked } = await disconnected((view) => {
+      view.connected = false;
+      return {};
+    });
+    try {
+      assert.equal(shownAsAsked, false, 'closed before the office was asked');
+      assert.ok(!terminalShows(), 'gone with the session');
+      sameElement(shown.target.querySelector('[role="alert"]'), null, 'with no error');
+      assert.ok(shown.target.textContent?.includes(NOT_CONNECTED), described(shown.target));
+    } finally {
+      await shown.unmount();
+    }
+  });
 });

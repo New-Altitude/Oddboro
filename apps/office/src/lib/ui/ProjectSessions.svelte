@@ -28,7 +28,7 @@
 </script>
 
 <script lang="ts">
-  import { onMount, untrack } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
   import type { ProjectAgent, ProjectRequest } from '@oddboro/ledger';
   import type { StaffProfile } from '../staff/roster.ts';
   import { PROJECT_WORDS } from '../project-words.ts';
@@ -123,9 +123,11 @@
    * makes a new view, so the confirm never shows on another session, or this one again. */
   let moving = $state<{ view: string; choice: Choice }>(),
     /** The owner's Focus choice, kept on this computer. */
-    focusWanted = $state(false);
+    focusWanted = $state(false),
+    /** While this window lets the session go, its terminal view is closed. */
+    closing = $state(false);
   const selected = $derived(connections.find((s) => s.id === currentId));
-  const terminalVisible = $derived(!!view?.connected && !!view.terminal);
+  const terminalVisible = $derived(!!view?.connected && !!view.terminal && !closing);
   /** Only while the terminal shows: a session not connected keeps the list in reach. */
   const focused = $derived(focusWanted && terminalVisible);
   /** What a list asks about now, and the rows found for exactly that. */
@@ -355,6 +357,20 @@
     if (!id) return;
     await projectApi(op, { id, ...fields });
     await Promise.all([history(id), load()]);
+  }
+  /**
+   * Closes this window's terminal view first, as closeSetup does, so nothing it
+   * still sends reaches a session being let go. A refusal leaves the session
+   * connected, so the terminal shows again.
+   */
+  async function letGo(op: 'disconnect' | 'end') {
+    closing = true;
+    await tick();
+    try {
+      await action(op);
+    } finally {
+      closing = false;
+    }
   }
   async function reconnect() {
     if (!selected) return;
@@ -619,7 +635,7 @@
             <button
               class="btn shrink-0"
               disabled={busy}
-              onclick={() => run(() => action('disconnect'))}>Disconnect</button
+              onclick={() => run(() => letGo('disconnect'))}>Disconnect</button
             >
           {:else if view}
             <button class="btn shrink-0" disabled={busy} onclick={() => run(reconnect)}

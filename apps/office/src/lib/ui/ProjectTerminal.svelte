@@ -86,13 +86,18 @@
         writable = false;
         term.options.disableStdin = true;
       };
+      // A post that fails after this view closed has no one to tell: it was
+      // the view's own reply, a focus report or a size, to a session being let go.
+      const report = (e: Error) => {
+        if (!disposed) onerror(e.message);
+      };
       let chain = Promise.resolve();
       const input = term.onData((data) => {
         chain = chain
           .then(async () => {
             if (!disposed && writable) await projectApi('keys', { id, view, data });
           })
-          .catch((e) => onerror(e.message));
+          .catch(report);
       });
       // The terminal refits only once its box settles, in the same step as it
       // tells the session its size, and only when that differs. xterm drops
@@ -107,8 +112,8 @@
       const post = (redraw?: true) => {
         sent = `${term.cols}x${term.rows}`;
         stale = false;
-        void projectApi('size', { id, view, cols: term.cols, rows: term.rows, redraw }).catch((e) =>
-          onerror(e.message)
+        void projectApi('size', { id, view, cols: term.cols, rows: term.rows, redraw }).catch(
+          report
         );
       };
       const send = () => {
