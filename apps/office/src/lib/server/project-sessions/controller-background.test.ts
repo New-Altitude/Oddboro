@@ -615,6 +615,41 @@ test(
   }
 );
 
+test(
+  'Move here on a session stored with no Claude folder, while a terminal runs the conversation under one, continues in that folder and stores it',
+  SHELL_STAND_IN,
+  async () => {
+    const b = join(homedir(), '.claude-terminal-only-b');
+    mkdirSync(b, { recursive: true });
+    L.setClaudeFolders([b]);
+    const moveIn = async (configDir: string | undefined) => {
+      const id = randomUUID();
+      save(b, id);
+      const known = await L.connectProject('claude', id, app, 'Work');
+      assert.equal(known.configDir, null);
+      const session = terminalSession();
+      try {
+        agents(b, [inTerminal(id, session.pid!, 'idle')]);
+        const dropped = once(session, 'exit').then(() => agents(b, []));
+        const s = await c.connect('claude', app, { nativeId: id, configDir, move: true });
+        await dropped;
+        await c.terminal(s.id);
+        assert.equal(s.id, known.id);
+        assert.ok(interrupted(session.pid));
+        assert.equal(lastTerminal().env.CLAUDE_CONFIG_DIR, b);
+        assert.equal((await L.connection(s.id))?.configDir, b);
+        return c.view(s.id)?.folderNotice;
+      } finally {
+        session.kill();
+      }
+    };
+    // Reconnect sends no folder: the session takes the terminal's, and says so.
+    assert.match((await moveIn(undefined)) ?? '', /~\/\.claude-terminal-only-b/);
+    // The list's row names the folder of the copy that runs.
+    assert.equal(await moveIn(b), null);
+  }
+);
+
 test('Opening the terminal again clears the note that it closed', SHELL_STAND_IN, async () => {
   const dir = claudeFolder('.claude-reopen');
   writeFileSync(join(dir, 'start-id'), randomUUID());
