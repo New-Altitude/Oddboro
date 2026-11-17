@@ -13,6 +13,7 @@ import {
   described,
   enterFolder,
   FOLDERS,
+  NATIVE,
   office,
   one,
   pick,
@@ -20,32 +21,12 @@ import {
   refused,
   sameElement,
   sent,
+  SESSION,
   settled,
-  streamAt
+  streamAt,
+  viewOf
 } from './projects-window-under-test.ts';
 import { rememberFocus } from './projects-focus.ts';
-
-const NATIVE = '11111111-0000-4000-8000-000000000000';
-const SESSION = {
-  id: 'session-1',
-  agent: 'claude',
-  folder: '/work/app',
-  title: 'Fix the build',
-  nativeId: NATIVE,
-  staffId: null,
-  configDir: null,
-  sendsUnasked: null,
-  status: 'idle',
-  connected: true,
-  mark: null
-};
-const viewOf = (connected: boolean, terminal: boolean) => ({
-  connected,
-  terminal,
-  note: connected ? 'Connected' : 'Not connected',
-  folderNotice: null,
-  reply: ''
-});
 
 const titleRow = (root: Element) => root.querySelector('header h2')?.textContent ?? null;
 const sessionList = (root: Element) => root.querySelector('nav[aria-label="Sessions"]');

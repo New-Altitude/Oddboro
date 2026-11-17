@@ -116,7 +116,9 @@
     copied = $state(false),
     loaded = $state(false),
     /** Remove asks once in place, under the session's Reconnect. */
-    removing = $state(false);
+    removing = $state(false),
+    /** Stop asks once in place, above the terminal. */
+    stopping = $state(false);
   /** This window's terminal view. A new one per session opened. */
   let termView = $state(crypto.randomUUID());
   /** The move confirm, in place of Reconnect, for the session opened with `view`. Each opening
@@ -230,6 +232,7 @@
     handover = undefined;
     unasked = undefined;
     removing = false;
+    stopping = false;
     writable = false;
     termView = crypto.randomUUID();
     await history(id);
@@ -409,6 +412,10 @@
   function move(choice: Choice) {
     moving = undefined;
     void run(() => connect(choice, { move: true }));
+  }
+  function stop() {
+    stopping = false;
+    void run(() => letGo('end'));
   }
   async function remove() {
     await action('remove');
@@ -639,6 +646,14 @@
               disabled={busy}
               onclick={() => run(() => letGo('disconnect'))}>Disconnect</button
             >
+            {#if selected.agent === 'claude'}
+              <button
+                class="btn shrink-0"
+                disabled={busy}
+                aria-label={PROJECT_WORDS.stopName}
+                onclick={() => (stopping = true)}>{PROJECT_WORDS.stopButton}</button
+              >
+            {/if}
           {:else if view}
             <button class="btn shrink-0" disabled={busy} onclick={() => run(reconnect)}
               >Reconnect</button
@@ -663,6 +678,19 @@
         <p class="mx-3 mt-2 rounded-lg bg-raise p-2 break-words text-ink" role="status">
           {view.folderNotice}
         </p>
+      {/if}
+      {#if stopping && view?.connected}
+        <div
+          class="mx-3 mt-2 flex flex-wrap items-center gap-2 rounded-lg bg-ember/10 p-2"
+          role="alertdialog"
+          aria-labelledby="stop-warning"
+        >
+          <p id="stop-warning" class="flex-1 text-ink">{PROJECT_WORDS.stopConfirm}</p>
+          <div class="flex gap-2">
+            <button class="btn" disabled={busy} onclick={stop}>{PROJECT_WORDS.stopButton}</button
+            ><button class="btn" onclick={() => (stopping = false)}>Cancel</button>
+          </div>
+        </div>
       {/if}
 
       <!-- The terminal fills what is left. The drawer opens over it. -->
@@ -695,11 +723,7 @@
                     role="alertdialog"
                     aria-labelledby="remove-warning"
                   >
-                    <p id="remove-warning" class="text-ink">
-                      Remove this session from Projects? Work still waiting for it stops, and no Odd
-                      can send it more work. The conversation itself is kept: connect it again to
-                      bring the session back, then share it again with any Odd that should have it.
-                    </p>
+                    <p id="remove-warning" class="text-ink">{PROJECT_WORDS.removeConfirm}</p>
                     <div class="flex gap-2">
                       <button class="btn" disabled={busy} onclick={() => run(remove)}>Remove</button
                       ><button class="btn" onclick={() => (removing = false)}>Cancel</button>

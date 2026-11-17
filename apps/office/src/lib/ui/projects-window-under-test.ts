@@ -77,6 +77,30 @@ export const FOLDERS = [
 ];
 /** A refusal the office really sends, so a test reads the owner's words. */
 export const REFUSED = PROJECT_WORDS.busy;
+/** The conversation `SESSION` shows. */
+export const NATIVE = '11111111-0000-4000-8000-000000000000';
+/** One Claude session the office knows, connected. */
+export const SESSION = {
+  id: 'session-1',
+  agent: 'claude',
+  folder: '/work/app',
+  title: 'Fix the build',
+  nativeId: NATIVE,
+  staffId: null,
+  configDir: null,
+  sendsUnasked: null,
+  status: 'idle',
+  connected: true,
+  mark: null
+};
+/** What the office shows of a session, `connected` or not, with its terminal open or not. */
+export const viewOf = (connected: boolean, terminal: boolean) => ({
+  connected,
+  terminal,
+  note: connected ? 'Connected' : 'Not connected',
+  folderNotice: null,
+  reply: ''
+});
 /** The office refusing an action with `message`, as its route does. */
 export const refused = (message: string) => Response.json({ message }, { status: 409 });
 
