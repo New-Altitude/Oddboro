@@ -190,7 +190,9 @@
     {@render alert('start')}
     {#if setup}
       <p class="text-ink">{PROJECT_WORDS.trustLine}</p>
-      <div class="flex h-64 min-h-0 flex-col">
+      <!-- Never shrinks to fit the form: the form scrolls instead. Squeezed, the
+           terminal sends fewer rows than the server takes, and the question is lost. -->
+      <div class="flex h-64 shrink-0 flex-col">
         {#key setup.id}<ProjectTerminal
             id={setup.id}
             view={setup.view}

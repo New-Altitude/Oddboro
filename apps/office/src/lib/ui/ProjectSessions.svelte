@@ -584,58 +584,67 @@
         onhandover={handOver}
       />
     {:else}
-      <!-- A slim header: what this is, and the few controls that act on it. -->
-      <div class="flex items-center gap-2 border-b border-hairline px-3 py-1.5 text-xs">
-        {@render logo(selected.agent, 'size-4 shrink-0 text-muted')}
-        <strong class="max-w-56 truncate text-sm font-medium text-ink" title={selected.folder}
-          >{folderName(selected.folder)}</strong
-        >
-        <span class="shrink-0 text-muted">{TOOL[selected.agent]}</span>
-        <button
-          class="shrink-0 rounded bg-raise px-1.5 py-0.5 font-mono text-[11px] text-muted hover:text-ink"
-          title={`Copy the conversation ID ${selected.nativeId}`}
-          aria-label="Copy the conversation ID"
-          onclick={() => run(copyId)}>{copied ? 'Copied' : selected.nativeId.slice(0, 8)}</button
-        >
-        <span class="min-w-0 flex-1 truncate text-muted" aria-live="polite"
-          >{view?.note ?? 'Loading session'}</span
-        >
-        {#if terminalVisible && !writable}
+      <!-- A slim header: what this is, and the few controls that act on it. When the
+           row cannot give what this is 12rem beside the controls, as in a narrow pane,
+           the controls wrap onto a line of their own instead of running past its edge. -->
+      <div
+        class="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-hairline px-3 py-1.5 text-xs"
+      >
+        <div class="flex min-w-0 flex-[1_1_12rem] items-center gap-2">
+          {@render logo(selected.agent, 'size-4 shrink-0 text-muted')}
+          <strong class="max-w-56 truncate text-sm font-medium text-ink" title={selected.folder}
+            >{folderName(selected.folder)}</strong
+          >
+          <span class="shrink-0 text-muted">{TOOL[selected.agent]}</span>
+          <button
+            class="shrink-0 rounded bg-raise px-1.5 py-0.5 font-mono text-[11px] text-muted hover:text-ink"
+            title={`Copy the conversation ID ${selected.nativeId}`}
+            aria-label="Copy the conversation ID"
+            onclick={() => run(copyId)}>{copied ? 'Copied' : selected.nativeId.slice(0, 8)}</button
+          >
+          <span class="min-w-0 flex-1 truncate text-muted" aria-live="polite"
+            >{view?.note ?? 'Loading session'}</span
+          >
+        </div>
+        <div class="ms-auto flex flex-wrap items-center justify-end gap-2">
+          {#if terminalVisible && !writable}
+            <button
+              class="btn shrink-0"
+              onclick={() => run(() => projectApi('control', { id: selected?.id, view: termView }))}
+              >Take control of terminal</button
+            >
+          {/if}
           <button
             class="btn shrink-0"
-            onclick={() => run(() => projectApi('control', { id: selected?.id, view: termView }))}
-            >Take control of terminal</button
+            class:on={details}
+            aria-expanded={details}
+            aria-controls="project-details"
+            onclick={() => (details = !details)}
+            >Details{#if waitingCount}<span class="ms-1 text-ember">{waitingCount}</span
+              >{/if}</button
           >
-        {/if}
-        <button
-          class="btn shrink-0"
-          class:on={details}
-          aria-expanded={details}
-          aria-controls="project-details"
-          onclick={() => (details = !details)}
-          >Details{#if waitingCount}<span class="ms-1 text-ember">{waitingCount}</span>{/if}</button
-        >
-        {#if view?.connected}
-          <button
-            class="btn shrink-0"
-            disabled={busy}
-            onclick={() => run(() => action('disconnect'))}>Disconnect</button
-          >
-        {:else if view}
-          <button class="btn shrink-0" disabled={busy} onclick={() => run(reconnect)}
-            >Reconnect</button
-          >
-        {/if}
-        {#if terminalVisible}
-          <button
-            class="btn shrink-0"
-            class:on={focused}
-            aria-pressed={focused}
-            aria-label={PROJECT_WORDS.focusName}
-            onclick={() => rememberFocus((focusWanted = !focusWanted))}
-            >{PROJECT_WORDS.focus}</button
-          >
-        {/if}
+          {#if view?.connected}
+            <button
+              class="btn shrink-0"
+              disabled={busy}
+              onclick={() => run(() => action('disconnect'))}>Disconnect</button
+            >
+          {:else if view}
+            <button class="btn shrink-0" disabled={busy} onclick={() => run(reconnect)}
+              >Reconnect</button
+            >
+          {/if}
+          {#if terminalVisible}
+            <button
+              class="btn shrink-0"
+              class:on={focused}
+              aria-pressed={focused}
+              aria-label={PROJECT_WORDS.focusName}
+              onclick={() => rememberFocus((focusWanted = !focusWanted))}
+              >{PROJECT_WORDS.focus}</button
+            >
+          {/if}
+        </div>
       </div>
 
       <!-- Above the terminal area, outside it, so the drawer never covers it. It wraps
