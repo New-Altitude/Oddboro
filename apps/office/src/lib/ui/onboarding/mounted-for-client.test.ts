@@ -41,16 +41,20 @@ test('Typing, leaving a field and a click on a mounted component reach its callb
       folders: [],
       candidates: [],
       found: false,
+      listing: false,
       busy: false,
       problem: undefined,
       place: undefined,
       problemRow: undefined,
+      setup: undefined,
       onfilter: nothing,
       onchange: (change) => seen.push(change),
       onpick: () => seen.push('pick'),
       onpath: nothing,
       onstart: nothing,
       onchoose: nothing,
+      onmove: nothing,
+      onsetuperror: nothing,
       onhandover: nothing
     }
   );

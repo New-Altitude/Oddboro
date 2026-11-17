@@ -9,16 +9,18 @@
   import type { StaffProfile } from '../staff/roster.ts';
   import Pixel from './Pixel.svelte';
   import { projectApi } from './project-api.ts';
-  import NewSessionForm from './NewSessionForm.svelte';
+  import NewSessionForm, { type SetupTerminal } from './NewSessionForm.svelte';
   import './project-sessions.css';
   import {
     errorPlace,
+    errorShows,
     filterClears,
     listAsk,
     listFor,
     lists,
     newSessionFields,
     rowsFor,
+    sameAsk,
     type Choice,
     type ErrorSource,
     type Folder,
@@ -84,14 +86,17 @@
     name = $state(''),
     replies = $state<Record<string, string>>({});
   let busy = $state(false),
-    /** The last error, what raised it, which says where it shows, and the row it came from. */
-    problem = $state<{ text: string; from: ErrorSource; row?: string }>(),
+    /** The last error, what raised it, which says where it shows, and the row it came from.
+     * A list's error keeps what it asked about, and shows only while the form asks the same. */
+    problem = $state<{ text: string; from: ErrorSource; row?: string; ask?: ListAsk }>(),
     handover = $state<Choice>(),
     /** The conversations the last list found, with the folder and tool it asked about. */
     found = $state<Found>(),
     /** What the newest list still loading asked about. A list never holds `busy`, so Choose
      * folder and the other actions still work while it loads. */
     loading = $state.raw<ListAsk>(),
+    /** Claude Code's terminal asking to trust a new folder, which Start answered with. */
+    setup = $state<SetupTerminal>(),
     /** The details drawer, open over the terminal. */
     details = $state(false),
     /** The Odd waiting on the owner's second yes to send without asking. */
@@ -106,9 +111,11 @@
   let termView = $state(crypto.randomUUID());
   const selected = $derived(connections.find((s) => s.id === currentId));
   const terminalVisible = $derived(!!view?.connected && !!view.terminal);
-  const place = $derived(problem && errorPlace(problem.from, !!selected));
   /** What a list asks about now, and the rows found for exactly that. */
   const listNow = $derived(listAsk({ folder, agent, socket }));
+  const place = $derived(
+    problem && errorShows(problem, listNow) ? errorPlace(problem.from, !!selected) : undefined
+  );
   const listed = $derived(rowsFor(found, listNow));
   const fields = $derived(
     newSessionFields({
@@ -206,6 +213,7 @@
   }
   async function select(id: string) {
     if (currentId === id) return;
+    closeSetup();
     currentId = id;
     work = [];
     view = undefined;
@@ -224,6 +232,7 @@
     );
   }
   function startNew() {
+    closeSetup();
     currentId = undefined;
     view = undefined;
     work = [];
@@ -243,9 +252,24 @@
    * `lists` decides, so a list starts once per committed change.
    */
   function changed(change: FormChange) {
-    // A hand-over waits for the folder and tool it was found in.
-    if (change !== 'refresh') handover = undefined;
+    // A hand-over waits for the folder and tool it was found in, and Claude
+    // Code's setup question was asked for the form as it was.
+    if (change !== 'refresh') {
+      handover = undefined;
+      closeSetup();
+    }
     if (lists(change, { path, now: listNow, found, loading })) list();
+  }
+  /**
+   * Ends the setup terminal the form shows, if any. The office keeps one open
+   * until told, so every way off it (a change, another session, a new form, the
+   * next Start) comes here. Failing to reach the office shows under Start.
+   */
+  function closeSetup() {
+    const id = setup?.id;
+    if (!id) return;
+    setup = undefined;
+    projectApi('disconnect', { id }).catch((e) => (problem = { text: describe(e), from: 'start' }));
   }
   /** Every list this window started, so only the newest one's answer lands. */
   const listCount: ListCount = { started: 0 };
@@ -262,24 +286,36 @@
         found = f;
         filter = '';
       },
-      failed: (e) => (problem = { text: describe(e), from: 'continue' })
+      failed: (e, asked) => (problem = { text: describe(e), from: 'continue', ask: asked })
     }).finally(() => {
       if (loading === ask) loading = undefined;
     });
   }
-  async function connect(choice?: Choice, handedOver = false) {
+  /**
+   * Opens `choice` here, or starts a new conversation without one. `handedOver`
+   * says the owner finished with it in the previous Codex window, and `move`
+   * that they confirmed ending it in its terminal to open it here.
+   */
+  async function connect(choice?: Choice, how: { handedOver?: boolean; move?: boolean } = {}) {
     // One source each: a conversation goes with its own folder, or none, so the
     // office finds it; only Start takes the folder chosen for it.
     const configDir = choice ? choice.configDir || undefined : startIn || undefined;
-    const s = await projectApi<ProjectSession>('connect', {
+    const s = await projectApi<ProjectSession | { setup: string }>('connect', {
       folder,
       agent,
       socket: (agent === 'codex' && socket.trim()) || undefined,
       nativeId: choice?.id,
-      handedOver,
+      handedOver: how.handedOver,
+      move: how.move,
       title: choice?.title || name || undefined,
       configDir: agent === 'claude' ? configDir : undefined
     });
+    if ('setup' in s) {
+      // Claude Code asks before it works in a new folder: its terminal
+      // shows under Start, for the owner to answer and then Start again.
+      setup = { id: s.setup, view: crypto.randomUUID() };
+      return;
+    }
     await load();
     await select(s.id);
     if (agent === 'claude') await action('terminal');
@@ -350,7 +386,7 @@
   }
   function handOver() {
     const c = handover;
-    if (c) void run(() => connect(c, true), 'handover');
+    if (c) void run(() => connect(c, { handedOver: true }), 'handover');
   }
   function choose(c: Choice) {
     if (agent === 'codex' && !c.live) {
@@ -358,6 +394,13 @@
       return;
     }
     void run(() => connect(c), 'row', c.id);
+  }
+  /** Start, and Start again under Claude Code's question, which then closes first. */
+  function start() {
+    void run(() => {
+      closeSetup();
+      return connect();
+    }, 'start');
   }
   async function copyId() {
     if (!selected) return;
@@ -505,18 +548,22 @@
           {folders}
           candidates={listed ?? []}
           found={!!listed}
+          listing={sameAsk(loading, listNow)}
           {busy}
           problem={problem?.text}
           {place}
           problemRow={problem?.row}
+          {setup}
           onfilter={() => {
             if (filterClears(place)) problem = undefined;
           }}
           onchange={changed}
           onpick={() => run(pick, 'pick')}
           onpath={choosePath}
-          onstart={() => run(() => connect(), 'start')}
+          onstart={start}
           onchoose={choose}
+          onmove={(c) => run(() => connect(c, { move: true }), 'row', c.id)}
+          onsetuperror={(text) => (problem = { text, from: 'start' })}
           onhandover={handOver}
         />
       {:else}

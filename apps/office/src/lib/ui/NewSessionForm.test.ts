@@ -9,6 +9,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { render } from 'svelte/server';
 import type { ProjectAgent } from '@oddboro/ledger';
+import { PROJECT_WORDS } from '../project-words.ts';
 import { compiledForServer } from './onboarding/compiled-for-server.ts';
 import {
   newSessionFields,
@@ -37,9 +38,11 @@ function shown(form: {
   folders?: Folder[];
   candidates?: Choice[];
   found?: boolean;
+  listing?: boolean;
   problem?: string;
   place?: ErrorPlace;
   problemRow?: string;
+  setup?: { id: string; view: string };
 }) {
   const { path, folder = '~/my-project', agent = 'claude', folders = TWO_FOLDERS } = form;
   const fields = newSessionFields({
@@ -62,16 +65,20 @@ function shown(form: {
       folders,
       candidates: form.candidates ?? [],
       found: form.found ?? false,
+      listing: form.listing ?? false,
       busy: false,
       problem: form.problem,
       place: form.place,
       problemRow: form.problemRow,
+      setup: form.setup,
       onfilter: () => {},
       onchange: () => {},
       onpick: () => {},
       onpath: () => {},
       onstart: () => {},
       onchoose: () => {},
+      onmove: () => {},
+      onsetuperror: () => {},
       onhandover: () => {}
     }
   }).body;
@@ -98,7 +105,7 @@ test('Refresh list shows at the end of the filter row on the continue path with 
   );
 });
 
-test('Refresh list shows while the list is empty or not loaded yet, as after /bg', () => {
+test('Refresh list shows while the list is empty or not loaded yet', () => {
   assert.match(shown({ path: 'continue', found: true }), REFRESH);
   assert.match(shown({ path: 'continue', found: false }), REFRESH);
 });
@@ -128,6 +135,8 @@ const REFUSED = 'That conversation is no longer in ~/.claude-second · second@ex
 const ALERT = `<p role="alert" class="text-coral">${REFUSED}</p>`;
 /** The end of a conversation's row: the first 8 characters of its id close the button. */
 const rowEnd = (c: Choice) => `${c.id.slice(0, 8)}</button>`;
+/** The end of the row's line, which holds the row's button and any button beside it. */
+const lineEnd = (c: Choice) => `${rowEnd(c)}${GAP}</div>`;
 const alerts = (body: string) => body.split('role="alert"').length - 1;
 
 test('an error opening the last of a long list shows right under that row, and only there', () => {
@@ -142,7 +151,7 @@ test('an error opening the last of a long list shows right under that row, and o
       place: 'row',
       problemRow: last.id
     });
-    assert.ok(new RegExp(`${rowEnd(last)}${GAP}${ALERT}`).test(body), `${n} rows`);
+    assert.ok(new RegExp(`${lineEnd(last)}${GAP}${ALERT}`).test(body), `${n} rows`);
     assert.equal(alerts(body), 1, `${n} rows`);
   }
 });
@@ -196,4 +205,104 @@ test('Account renders on the start path with two Claude folders, and not with on
   const one = shown({ path: 'start', folders: ONE_FOLDER });
   assert.doesNotMatch(one, /aria-label="Account"/);
   assert.match(one, /Session name/);
+});
+
+/** One conversation of each kind a Claude Code list can hold. */
+function kinds(): Record<'movable' | 'windows' | 'running' | 'saved', Choice> {
+  const [movable, windows, running, saved] = conversations(4);
+  return {
+    movable: { ...movable, live: true, movable: true },
+    windows: { ...windows, live: true, movable: false },
+    running: { ...running, live: true, job: 'job-1', movable: true },
+    saved
+  };
+}
+const MOVE = `>${PROJECT_WORDS.moveButton}</button>`;
+const moves = (body: string) => body.split(MOVE).length - 1;
+
+test('Move here shows only on a row the office says can move', () => {
+  const rows = kinds();
+  const body = shown({ path: 'continue', candidates: Object.values(rows), found: true });
+  assert.equal(moves(body), 1);
+  // Beside the row's own button, never inside it.
+  assert.match(body, new RegExp(`${rowEnd(rows.movable)}${GAP}<button[^>]*${MOVE}`));
+  // Only the row the office can move gets its own button after it.
+  const after = (c: Choice) => body.slice(body.indexOf(rowEnd(c))).split('</div>')[0];
+  assert.doesNotMatch(after(rows.windows), new RegExp(MOVE), 'open in a terminal, not movable');
+  assert.doesNotMatch(after(rows.running), new RegExp(MOVE), 'running in the background');
+});
+
+test('each row says whether its conversation is open in a terminal, running or saved', () => {
+  const rows = kinds();
+  const body = shown({ path: 'continue', candidates: Object.values(rows), found: true });
+  const label = (c: Choice) =>
+    body
+      .slice(0, body.indexOf(rowEnd(c)))
+      .split('<button')
+      .at(-1);
+  assert.match(label(rows.movable) ?? '', new RegExp(` · ${PROJECT_WORDS.inTerminal} · `));
+  assert.match(label(rows.windows) ?? '', new RegExp(` · ${PROJECT_WORDS.inTerminal} · `));
+  assert.match(label(rows.running) ?? '', / · Running · /);
+  assert.match(label(rows.saved) ?? '', / · Saved · /);
+});
+
+test('a running Codex conversation reads as running and offers no move', () => {
+  const rows = kinds();
+  const body = shown({
+    path: 'continue',
+    agent: 'codex',
+    candidates: [rows.movable],
+    found: true
+  });
+  assert.match(body, / · Running · /);
+  assert.equal(moves(body), 0);
+});
+
+const LOOKING = `<p class="text-xs text-muted">${PROJECT_WORDS.looking}</p>`;
+
+test('while a list loads, one line under Refresh list says the office is looking', () => {
+  const body = shown({ path: 'continue', listing: true });
+  assert.match(body, new RegExp(`${REFRESH.source}${GAP}</div>${GAP}${LOOKING}`));
+  assert.equal(body.split(PROJECT_WORDS.looking).length - 1, 1);
+  assert.doesNotMatch(shown({ path: 'continue', found: true }), new RegExp(PROJECT_WORDS.looking));
+});
+
+test("a row's error whose row is no longer shown shows at the list", () => {
+  const rows = conversations(3);
+  const gone = conversations(4)[3];
+  const body = shown({
+    path: 'continue',
+    candidates: rows,
+    found: true,
+    problem: REFUSED,
+    place: 'row',
+    problemRow: gone.id
+  });
+  const at = body.indexOf(ALERT);
+  assert.ok(at > body.indexOf('Refresh list'), 'the error renders under Refresh list');
+  assert.ok(at < body.indexOf(rowEnd(rows[0])), 'above the rows');
+  assert.equal(alerts(body), 1);
+  // With no rows at all, as after the folder changed, it still shows.
+  const none = shown({ path: 'continue', problem: REFUSED, place: 'row', problemRow: gone.id });
+  assert.equal(alerts(none), 1);
+});
+
+test("Claude Code's question about a new folder shows under Start, with Start again", () => {
+  const setup = {
+    id: '11111111-0000-4000-8000-000000000000',
+    view: '22222222-0000-4000-8000-000000000000'
+  };
+  const body = shown({ path: 'start', setup });
+  const start = body.indexOf('>Start</button>');
+  const line = body.indexOf(PROJECT_WORDS.trustLine);
+  const terminal = body.indexOf('bg-night');
+  const again = body.indexOf(`>${PROJECT_WORDS.startAgain}</button>`);
+  assert.ok(start > -1 && start < line, 'the trust line is under Start');
+  assert.ok(line < terminal, 'then the terminal');
+  assert.ok(terminal < again, 'then Start again');
+
+  const without = shown({ path: 'start' });
+  assert.ok(!without.includes(PROJECT_WORDS.trustLine));
+  assert.ok(!without.includes(PROJECT_WORDS.startAgain));
+  assert.ok(!without.includes('bg-night'));
 });
