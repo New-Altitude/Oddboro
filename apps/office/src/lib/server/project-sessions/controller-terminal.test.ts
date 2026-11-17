@@ -75,3 +75,33 @@ test(
     assert.deepEqual(sizes(1000), [[101, 30]]);
   }
 );
+
+test(
+  "The window that opens a session's terminal takes its typing before any other window's stream connects",
+  SHELL_STAND_IN,
+  async () => {
+    const dir = claudeFolder('.claude-opener');
+    writeFileSync(join(dir, 'start-id'), randomUUID());
+    const s = await c.connect('claude', app, { configDir: dir, title: 'Work' });
+    const [a, b] = [randomUUID(), randomUUID()];
+    const open = async (view: string) => {
+      const answer = await request('/api/project-sessions', 'POST', {
+        body: { action: 'terminal', id: s.id, view }
+      });
+      assert.ok(answer.ok, await answer.text());
+    };
+    await open(a);
+    const opened = c.openTerminal(s.id);
+    assert.ok(opened.controls(a));
+    assert.equal(opened.take(b), false);
+
+    // Open terminal in another window while it runs moves the typing there.
+    await open(b);
+    assert.equal(c.openTerminal(s.id), opened);
+    assert.ok(opened.controls(b));
+
+    // Work an Odd sends opens the terminal for no window.
+    opened.close();
+    assert.equal((await c.terminal(s.id)).take(b), true);
+  }
+);

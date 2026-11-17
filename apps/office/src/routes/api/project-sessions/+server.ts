@@ -46,7 +46,7 @@ const command = z.discriminatedUnion('action', [
   z.object({ action: z.literal('unasked'), id, staffId: z.string().min(1).max(100).nullable() }),
   z.object({ action: z.literal('decide'), id, key: id, approve: z.boolean() }),
   z.object({ action: z.literal('resolve'), id, key: id }),
-  z.object({ action: z.literal('terminal'), id }),
+  z.object({ action: z.literal('terminal'), id, view: id }),
   z.object({ action: z.literal('control'), id, view: id }),
   z.object({ action: z.literal('keys'), id, view: id, data: z.string().max(100000) }),
   z.object({
@@ -154,7 +154,7 @@ export const POST: RequestHandler = async ({ request }) => {
         await c.resolve(a.id, a.key);
         break;
       case 'terminal':
-        await c.terminal(a.id);
+        await c.terminal(a.id, a.view);
         break;
       case 'control':
         c.openTerminal(a.id).take(a.view, true);

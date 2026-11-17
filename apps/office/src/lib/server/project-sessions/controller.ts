@@ -518,12 +518,21 @@ export class ProjectController {
     if (!c?.connected) throw new Error('Connect this session first.');
     return c;
   }
-  async terminal(id: string) {
+  /**
+   * The session's running terminal, opened if need be. `view` is the window
+   * that asked: it takes the typing before any window's stream connects, so a
+   * second window on the session cannot win the race to it and set its size.
+   * Work an Odd sends names no window, and the first stream takes it.
+   */
+  async terminal(id: string, view?: string) {
     const c = this.runtime(id);
-    if (c.terminal?.running) return c.terminal;
-    return (c.openingTerminal ??= this.launchTerminal(c).finally(() => {
-      c.openingTerminal = undefined;
-    }));
+    const t = c.terminal?.running
+      ? c.terminal
+      : await (c.openingTerminal ??= this.launchTerminal(c).finally(() => {
+          c.openingTerminal = undefined;
+        }));
+    if (view) t.take(view, true);
+    return t;
   }
   private async launchTerminal(c: Runtime) {
     const s = c.session;
