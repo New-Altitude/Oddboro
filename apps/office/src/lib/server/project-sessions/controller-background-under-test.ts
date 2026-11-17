@@ -20,6 +20,7 @@ import {
 import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { after, afterEach, beforeEach, mock } from 'node:test';
+import { currentPlatform } from '@oddboro/ledger/platform';
 import { app } from './controller-under-test.ts';
 
 /** Each terminal opened: its arguments, folder and environment. */
@@ -202,7 +203,7 @@ export const interrupted = (pid: number | undefined) =>
 export const pluginOf = (id: string) => L.home('project-sessions', id, 'market', 'plugin');
 export const lastTerminal = () => spawned.at(-1)!;
 export const SHELL_STAND_IN = {
-  skip: process.platform === 'win32' && 'the stand-in is a shell script'
+  skip: currentPlatform() === 'win32' && 'the stand-in is a shell script'
 };
 /** What `claude --bg` prints in a project folder Claude Code was never told to trust. */
 export const NOT_TRUSTED = `Workspace not trusted. Run \`claude\` in ${app} once to accept the workspace trust dialog.\n`;
