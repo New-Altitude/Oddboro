@@ -198,7 +198,7 @@
   const leftOpen = $derived(wins.shown && wins.list.length > 0);
   const front = $derived(wins.list.find((w) => w.id === wins.active));
   /** Focus in the front Projects window gives its terminal the panel's height. */
-  const folded = $derived(panelFolded(front));
+  const focusFolds = $derived(panelFolded(front));
   let deskFocus = $state<string | undefined>();
   let notify = $state(false);
   // The two side panels. Widths are remembered per viewer by SidePanel.
@@ -1340,11 +1340,11 @@
       <div class="flex h-full min-h-0 flex-col">
         <!-- Under Focus the plate and the music bar hide but stay mounted, so the
              music, the theme and the restored note keep their state. -->
-        <div class="pb-2" class:hidden={folded}>{@render plate(true)}</div>
+        <div class="pb-2" class:hidden={focusFolds}>{@render plate(true)}</div>
         <!-- One tab per open window. Every window stays mounted, so each keeps its place.
              The row leaves under Focus: it carries `flex`, and `hidden` beside it
              would win only by the stylesheet's order. -->
-        {#if !folded}
+        {#if !focusFolds}
           <div
             class="flex gap-1 overflow-x-auto border-t border-hairline px-2 pt-2"
             role="tablist"
@@ -1475,7 +1475,7 @@
           {/each}
         </div>
         <!-- The music keeps its place and size while Projects widens the panel. -->
-        <div class="border-t border-hairline px-3 py-2" class:hidden={folded}>
+        <div class="border-t border-hairline px-3 py-2" class:hidden={focusFolds}>
           <div style="max-inline-size: {leftWidth - 24}px">
             <FloorControls bind:light onfit={fitFloor} onzoom={(d) => floor?.zoomBy(d)} />
           </div>
