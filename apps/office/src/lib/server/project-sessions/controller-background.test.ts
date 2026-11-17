@@ -658,7 +658,7 @@ test(
       const id = await listedInB(busy.pid!);
       agentsNow(b, [inTerminal(id, busy.pid!, 'busy')]);
       await assert.rejects(c.connect('claude', app, { nativeId: id, configDir: a, move: true }), {
-        message: PROJECT_WORDS.busy
+        message: 'Claude is still working in that terminal. Try again when it finishes.'
       });
       assert.ok(!interrupted(busy.pid) && alive(busy));
     } finally {
