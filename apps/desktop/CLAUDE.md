@@ -106,7 +106,11 @@ digits>`, answered with HMAC-SHA256 under the key of `oddboro-proof:` and
     there as a link the office makes for that path: the shell asks
     `POST /api/browser-link` with the key and opens the address with the
     code it gets, which works once within a minute. If the office makes
-    none, the shell logs it and opens nothing.
+    none, the shell logs it and opens nothing. On Linux the shell lets the
+    page open a window after it waits on the office, as the Mac's webview
+    already does (`open_windows_after_a_wait`). WebKitGTK otherwise blocks a
+    window no click opened in that moment, so a Sign in button that asks the
+    office for its page first did nothing (#204).
 11. Reports a panic, giving up on the office (step 4's timeout, step 6's
     limit, or Node not starting) and a broken install (no Node, no server
     code), only when it found a report address and the office's `.env`
@@ -190,12 +194,24 @@ Saving a report works with online diagnostics off.
   never touches Caddy.
 - Node's stdout is a pipe too. A line `oddboro:notify <title>\t<text>` is a
   notification, which the shell shows as Oddboro's: `mac-notification-sys`
-  with the Glass sound on a Mac, `notify-send --app-name=Oddboro` on Linux,
-  and a toast through `tauri-winrt-notification` on Windows, under the app's
-  identifier, which the installer gives its Start menu shortcut. A
-  line `oddboro:update-check` is the owner's Check now. A line
+  with the Glass sound on a Mac, and a toast through
+  `tauri-winrt-notification` on Windows, under the app's identifier, which
+  the installer gives its Start menu shortcut. On Linux the shell calls
+  `org.freedesktop.Notifications.Notify` on the session bus, with app name
+  Oddboro and the hint `desktop-entry=oddboro`. If that call fails, the
+  office log gets one line with the error. There is no `notify-send` second
+  try: it goes through the same bus, so it fails when the bus call does.
+  A line `oddboro:update-check` is the owner's Check now. A line
   `oddboro:secret <json>` asks for the Keychain (below). Every other line goes
   to the log.
+- A host program the shell starts on Linux (`systemd-inhibit`, `xdg-open`,
+  and `secret-tool`) gets the host's library path from
+  `src-tauri/src/host.rs`. Inside an AppImage `LD_LIBRARY_PATH` points at the
+  glib the bundle carries, which is older than the host's libnotify, so those
+  programs fail to start. `host.rs` drops that path, or puts back the values
+  the runtime saved, and takes the AppImage's folders off `PATH`. The office
+  does the same for the programs it starts (`hostEnv` in the ledger's
+  `platform.ts`), sign-ins and installs among them (`cleanEnv`).
 - The Keychain, on a Mac (`src-tauri/src/secrets.rs`). The office sends
   `oddboro:secret {"id":n,"op":"list"|"legacy"|"set"|"remove","account":"...","value":"..."}`
   and the shell answers on Node's stdin with one line, `{"id":n,"ok":true,...}`
@@ -276,6 +292,8 @@ Every update is required. `src-tauri/src/update.rs` runs them with
   the owner's yes and the New Altitude sign-in, against a local listener.
 - `src-tauri/src/server.rs`. Starting, watching, restarting and stopping Node.
 - `src-tauri/src/env.rs`. Port, home, log path and the login-shell PATH.
+- `src-tauri/src/host.rs`. The environment a host program gets inside an
+  AppImage.
 - `src-tauri/src/key.rs`. The app's key: a new one per start of Node, the
   line Node reads it from, the window's cookie, the header and the proof.
 - `src-tauri/src/secrets.rs`. The office's secrets in the Mac's Keychain, and

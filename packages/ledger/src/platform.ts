@@ -1,9 +1,10 @@
 // What differs between operating systems, in one place: where logs go, how a
-// page or a file opens, and how a login service runs. Each system gets
-// one entry in the tables below. A Mac uses launchd and ~/Library/Logs, Linux
-// a systemd user unit and the XDG state folder, and Windows a Task Scheduler
-// task and %LOCALAPPDATA%\Oddboro. Everything else in the office is the same
-// code on each.
+// page or a file opens, how a login service runs, and the environment a host
+// program gets inside an AppImage. Each system gets one entry in the tables
+// below. A Mac uses launchd and ~/Library/Logs, Linux a systemd user unit and
+// the XDG state folder, and Windows a Task Scheduler task and
+// %LOCALAPPDATA%\Oddboro. Everything else in the office is the same code on
+// each.
 import { execFile, execFileSync, spawn, type ExecFileException } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -49,6 +50,68 @@ export const folderDelimiter = (): string => (currentPlatform() === 'win32' ? ';
  */
 export const foldPathCase = (p: string): string =>
   currentPlatform() === 'win32' ? p.toLowerCase() : p;
+
+/**
+ * Names an AppImage runtime may have used to keep a variable from before it
+ * started. The long name is the usual one. The short name is the other
+ * spelling. The first that is set wins, and an empty value means it was unset.
+ */
+const SAVED_LIBRARY_PATH = ['APPIMAGE_ORIGINAL_LD_LIBRARY_PATH', 'APPIMAGE_ORIG_LD_LIBRARY_PATH'];
+const SAVED_PRELOAD = ['APPIMAGE_ORIGINAL_LD_PRELOAD', 'APPIMAGE_ORIG_LD_PRELOAD'];
+
+/**
+ * The environment for a program that ships with the computer, such as
+ * notify-send, xdg-open, secret-tool or zenity. Outside an AppImage this is
+ * `base` itself. Inside one, the runtime points LD_LIBRARY_PATH at the glib
+ * it bundled, which is older than the host's, so those programs fail to
+ * start. This puts back the values from before the AppImage started, or
+ * removes them, and takes the AppImage's own folders off PATH.
+ */
+export function hostEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  if (!base.APPIMAGE && !base.APPDIR) return base;
+  const env: NodeJS.ProcessEnv = { ...base };
+  restoreOrClear(env, 'LD_LIBRARY_PATH', SAVED_LIBRARY_PATH);
+  restoreOrClear(env, 'LD_PRELOAD', SAVED_PRELOAD);
+  if (base.APPDIR && env.PATH) env.PATH = withoutAppDir(env.PATH, base.APPDIR);
+  return env;
+}
+
+function restoreOrClear(
+  env: NodeJS.ProcessEnv,
+  key: 'LD_LIBRARY_PATH' | 'LD_PRELOAD',
+  names: readonly string[]
+) {
+  let found = false;
+  let value: string | undefined;
+  for (const name of names) {
+    if (!Object.hasOwn(env, name)) continue;
+    found = true;
+    value = env[name];
+    break;
+  }
+  if (found && value) env[key] = value;
+  else delete env[key];
+}
+
+/** A path without its trailing slashes. A loop, since a regex here is slow on a long run of them. */
+function trimSlashes(path: string): string {
+  let end = path.length;
+  while (end > 0 && path[end - 1] === '/') end--;
+  return path.slice(0, end);
+}
+
+/** PATH with every entry inside the AppImage mount taken out. */
+function withoutAppDir(path: string, appdir: string): string {
+  const root = trimSlashes(appdir);
+  if (!root) return path;
+  return path
+    .split(delimiter)
+    .filter((entry) => {
+      const dir = trimSlashes(entry);
+      return dir !== root && !dir.startsWith(`${root}/`);
+    })
+    .join(delimiter);
+}
 
 /**
  * Where the office's logs go. XDG_STATE_HOME wins wherever it is set;
@@ -111,7 +174,12 @@ export function probe(
       const child = execFile(
         cmd,
         args,
-        { ...options, encoding: 'utf8', ...(showWindow ? {} : { windowsHide: true }) },
+        {
+          ...options,
+          env: hostEnv(options.env ?? process.env),
+          encoding: 'utf8',
+          ...(showWindow ? {} : { windowsHide: true })
+        },
         (e, out, err) => done(e ? ended(e, out, err) : { status: 'ok', out, err })
       );
       // stdin always closes, with or without input, so a command that reads
@@ -172,7 +240,7 @@ const psScript = (script: string) =>
 export function powershellSync(script: string, env: Record<string, string> = {}, input?: string) {
   return execFileSync('powershell.exe', [...POWERSHELL, '-Command', psScript(script)], {
     encoding: 'utf8',
-    env: { ...process.env, ...env },
+    env: { ...hostEnv(), ...env },
     input,
     stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
     windowsHide: true
@@ -254,7 +322,11 @@ export const OPENER_FAILS_WITHIN_MS = 1_000;
  */
 export function openFile(path: string): Promise<boolean> {
   return new Promise((done) => {
-    const child = spawn(OPEN, [...OPEN_WORDS, path], { detached: true, stdio: 'ignore' });
+    const child = spawn(OPEN, [...OPEN_WORDS, path], {
+      detached: true,
+      stdio: 'ignore',
+      env: hostEnv()
+    });
     const working = setTimeout(() => done(true), OPENER_FAILS_WITHIN_MS);
     const failed = (why: unknown) => {
       clearTimeout(working);
@@ -366,7 +438,7 @@ const xml = (s: string) =>
 const quoted = (s: string) => `"${s.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
 const quietly = (cmd: string, args: string[]) => {
   try {
-    execFileSync(cmd, args, { stdio: 'ignore' });
+    execFileSync(cmd, args, { stdio: 'ignore', env: hostEnv() });
   } catch {
     // Not running.
   }

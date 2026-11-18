@@ -1,5 +1,5 @@
 // Token usage, the owner's plan and its window, and the owner's name and welcome.
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sum } from 'drizzle-orm';
 import { db, sql as pg } from './db.ts';
 import { fixedError } from './errors.ts';
 import { type Db } from './threads.ts';
@@ -8,7 +8,10 @@ import { zone } from './time.ts';
 
 // Usage and the plan
 
-/** One run's token counts, per model, as Claude Code's result reports them. */
+/**
+ * Token counts per model, in the shape of Claude Code's result: one run's, or
+ * the whole session's so far on a tool that reports a running total.
+ */
 export type ModelUsage = Record<
   string,
   {
@@ -20,18 +23,94 @@ export type ModelUsage = Record<
   }
 >;
 
-/** `staffId` is null for a run as the office itself. */
-export async function recordUsage(staffId: string | null, kind: UsageKind, byModel: ModelUsage) {
-  const rows = Object.entries(byModel).map(([model, u]) => ({
-    staffId,
-    kind,
-    model,
-    inputTokens: u.inputTokens ?? 0,
-    outputTokens: u.outputTokens ?? 0,
-    cacheReadTokens: u.cacheReadInputTokens ?? 0,
-    cacheWriteTokens: u.cacheCreationInputTokens ?? 0,
-    costUsd: u.costUSD ?? 0
-  }));
+/** One model's counts, as a usage row keeps them. */
+export type UsageCounts = {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  costUsd: number;
+};
+const TOKENS = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens'] as const;
+
+const countsOf = (u: ModelUsage[string]): UsageCounts => ({
+  inputTokens: u.inputTokens ?? 0,
+  outputTokens: u.outputTokens ?? 0,
+  cacheReadTokens: u.cacheReadInputTokens ?? 0,
+  cacheWriteTokens: u.cacheCreationInputTokens ?? 0,
+  costUsd: u.costUSD ?? 0
+});
+
+/**
+ * A run's own share of a session's running total: the total less what the
+ * session's earlier runs already counted. A total below what was counted means
+ * the tool began counting again, so the whole total is the run's own.
+ */
+export function runShare(total: UsageCounts, counted: UsageCounts | undefined): UsageCounts {
+  if (!counted || TOKENS.some((k) => total[k] < counted[k])) return total;
+  return {
+    inputTokens: total.inputTokens - counted.inputTokens,
+    outputTokens: total.outputTokens - counted.outputTokens,
+    cacheReadTokens: total.cacheReadTokens - counted.cacheReadTokens,
+    cacheWriteTokens: total.cacheWriteTokens - counted.cacheWriteTokens,
+    costUsd: Math.max(0, total.costUsd - counted.costUsd)
+  };
+}
+
+/** Each session's latest recording, so the next one reads the session after it is written. */
+const recording = new Map<string, Promise<void>>();
+
+/**
+ * Keep one run's tokens. `staffId` is null for a run as the office itself.
+ * `session` names the session when the tool reports a running total for it,
+ * as Claude Code and Codex do once a session is resumed. Each row then holds
+ * the run's own share (`runShare`), so no earlier run counts twice.
+ */
+export function recordUsage(
+  staffId: string | null,
+  kind: UsageKind,
+  byModel: ModelUsage,
+  session?: string
+): Promise<void> {
+  if (!session) return keepUsage(staffId, kind, byModel);
+  const next = (recording.get(session) ?? Promise.resolve())
+    .catch(() => {})
+    .then(() => keepUsage(staffId, kind, byModel, session));
+  recording.set(session, next);
+  const done = () => {
+    if (recording.get(session) === next) recording.delete(session);
+  };
+  next.then(done, done);
+  return next;
+}
+
+async function keepUsage(
+  staffId: string | null,
+  kind: UsageKind,
+  byModel: ModelUsage,
+  session?: string
+): Promise<void> {
+  const counted = new Map<string, UsageCounts>();
+  if (session)
+    for (const { model, ...c } of await db
+      .select({
+        model: usage.model,
+        inputTokens: sum(usage.inputTokens).mapWith(Number),
+        outputTokens: sum(usage.outputTokens).mapWith(Number),
+        cacheReadTokens: sum(usage.cacheReadTokens).mapWith(Number),
+        cacheWriteTokens: sum(usage.cacheWriteTokens).mapWith(Number),
+        costUsd: sum(usage.costUsd).mapWith(Number)
+      })
+      .from(usage)
+      .where(eq(usage.session, session))
+      .groupBy(usage.model))
+      counted.set(model, c);
+  const rows = Object.entries(byModel).flatMap(([model, u]) => {
+    const own = runShare(countsOf(u), counted.get(model));
+    // A model only an earlier run of the session used adds nothing now.
+    if (counted.has(model) && TOKENS.every((k) => own[k] === 0)) return [];
+    return [{ staffId, kind, model, session: session ?? null, ...own }];
+  });
   if (rows.length) await db.insert(usage).values(rows);
 }
 

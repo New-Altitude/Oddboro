@@ -1,10 +1,14 @@
 // The migration journal drizzle runs from. Drizzle runs a migration only when
 // its journal time is later than the last one an office recorded, so one that
 // sorts earlier is skipped on every office already past it, with no error.
+// A migration renumbered later, as 0038_project_session_folders was from 0036,
+// runs again on an office that ran its earlier form, so it must not fail over
+// the columns it finds there.
 // Run with `npm test -w @oddboro/ledger`.
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { db } from './pglite.ts';
 
 const folder = new URL('../migrations/', import.meta.url);
 
@@ -51,4 +55,9 @@ test("every migration's journal time is later than the one before it, and every 
     tags,
     'each migrations/*.sql file needs one journal entry, and each entry a file'
   );
+});
+
+test('0038_project_session_folders runs again with no error on a database that already has its columns, as on an office that ran its earlier form under 0036', async () => {
+  // exec, since the file holds two statements, which one prepared query refuses.
+  await db.$client.exec(readFileSync(new URL('0038_project_session_folders.sql', folder), 'utf8'));
 });

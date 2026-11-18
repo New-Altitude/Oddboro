@@ -9,7 +9,13 @@
 import { execFileSync } from 'node:child_process';
 import { readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { currentPlatform, modelSection, runsGoing, type ModelUsage } from '@oddboro/ledger';
+import {
+  currentPlatform,
+  hostEnv,
+  modelSection,
+  runsGoing,
+  type ModelUsage
+} from '@oddboro/ledger';
 import { cleanEnv } from './claude.ts';
 
 /** Where the owner signs a tool in for the office: beside the Odd's "Runs on" picker. */
@@ -97,7 +103,11 @@ export type RunEvent =
   | { type: 'message'; text: string }
   /** One streamed piece of the reply, as it comes. */
   | { type: 'delta'; text: string }
-  | { type: 'usage'; usage: ModelUsage }
+  /**
+   * Tokens per model. With `session`, a running total for that whole session,
+   * earlier runs of it included (`recordUsage` keeps this run's share).
+   */
+  | { type: 'usage'; usage: ModelUsage; session?: string }
   /** What the tool said of the plan's limits (Claude Code's `rate_limit_event`), as it said it. */
   | { type: 'plan'; info: unknown }
   /**
@@ -221,7 +231,7 @@ export function stopGroups(pid: number, signal: 'SIGTERM' | 'SIGKILL' = 'SIGTERM
       execFileSync(
         join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe'),
         ['/PID', String(pid), '/T', '/F'],
-        { windowsHide: true, stdio: 'ignore' }
+        { env: hostEnv(), windowsHide: true, stdio: 'ignore' }
       );
     } catch {
       // The run may already have exited.
@@ -231,7 +241,10 @@ export function stopGroups(pid: number, signal: 'SIGTERM' | 'SIGKILL' = 'SIGTERM
   const groups = new Set([pid]);
   const under = new Set([pid]);
   try {
-    const rows = execFileSync('ps', ['-axo', 'pid=,ppid=,pgid='], { encoding: 'utf8' })
+    const rows = execFileSync('ps', ['-axo', 'pid=,ppid=,pgid='], {
+      encoding: 'utf8',
+      env: hostEnv()
+    })
       .trim()
       .split('\n')
       .map((l) => l.trim().split(/\s+/).map(Number));

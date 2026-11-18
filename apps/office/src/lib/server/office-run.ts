@@ -179,7 +179,7 @@ async function runOn(
       event: (e) => {
         switch (e.type) {
           case 'usage':
-            void recordUsage(null, opts.kind, e.usage).catch(() => {});
+            void recordUsage(null, opts.kind, e.usage, e.session).catch(() => {});
             break;
           case 'plan':
             void notePlan(e.info);

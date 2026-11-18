@@ -2,7 +2,7 @@
 // with the office closed: a staffer's ping, or the setup test. While the tab
 // is open the browser shows its own (Notification API), on every system.
 //
-// In the Mac app the server asks the app on stdout, one line each, and macOS
+// In the app the server asks the shell on stdout, one line each, and the shell
 // shows it as Oddboro's (apps/desktop/src-tauri/src/server.rs). Run from the
 // repo, each system has its own way, in the table below: osascript on a Mac
 // (which macOS shows as Script Editor's, so Script Editor has to be allowed in
@@ -48,8 +48,31 @@ const NOTIFY: Record<System, ((title: string, message: string) => Promise<Probe>
       message,
       title
     ]),
-  linux: (title, message) => probe('notify-send', ['--app-name', 'Oddboro', title, message]),
+  linux: (title, message) =>
+    probe('notify-send', [
+      '--app-name=Oddboro',
+      '--hint=string:desktop-entry:oddboro',
+      '--',
+      title,
+      message
+    ]),
   windows: (title, message) => powershell(TOAST, { ODDBORO_TITLE: title, ODDBORO_MESSAGE: message })
+};
+
+/** One line for the log: the exit code, then stderr with the line breaks taken out. */
+const failed = (cmd: string, code: number | null, stderr: string) => {
+  const said = stderr.trim().replace(/\s+/g, ' ').slice(0, 300);
+  const exit = code ?? 'error';
+  return said
+    ? `notify failed: ${cmd} exited ${exit}: ${said}`
+    : `notify failed: ${cmd} exited ${exit}`;
+};
+
+/** The program each system's notification runs, for the log line. */
+const PROGRAM: Record<System, string> = {
+  mac: 'osascript',
+  linux: 'notify-send',
+  windows: 'powershell.exe'
 };
 
 /** Where each system lets the owner allow notifications. Linux has no one place, so none. */
@@ -84,8 +107,11 @@ export async function notifyMac(title: string, message: string): Promise<boolean
     case 'ok':
       return true;
     case 'failed':
+      console.error(`office: ${failed(PROGRAM[SYSTEM!], r.code, r.err)}`);
+      return false;
     case 'missing':
     case 'timeout':
+      console.error(`office: notify failed: ${r.status}`);
       return false;
     default: {
       const missed: never = r;

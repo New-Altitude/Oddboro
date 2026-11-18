@@ -1,5 +1,5 @@
 {
-  "id": "32b275a9-3349-4ec0-9fd1-3236412295b7",
+  "id": "d0f1e9b4-81e7-4a25-8eb0-83f9ccf1f382",
   "prevId": "c49bd4c9-1bee-474e-9483-f4c950b4d17b",
   "version": "7",
   "dialect": "postgresql",
@@ -2142,18 +2142,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "hidden_at": {
-          "name": "hidden_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "config_dir": {
-          "name": "config_dir",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -2429,6 +2417,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "claude_agent_name": {
+          "name": "claude_agent_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "role": {
           "name": "role",

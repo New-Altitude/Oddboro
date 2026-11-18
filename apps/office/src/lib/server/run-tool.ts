@@ -558,7 +558,7 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
           break;
         }
         case 'usage':
-          void recordUsage(who.id, opts.kind, e.usage).catch(() => {});
+          void recordUsage(who.id, opts.kind, e.usage, e.session).catch(() => {});
           break;
         case 'plan':
           void notePlan(e.info);

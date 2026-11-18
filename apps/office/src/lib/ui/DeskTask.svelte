@@ -29,6 +29,8 @@
     step: (t: TaskRow, index: number, body: Record<string, unknown>) => Promise<void>;
     saveSecret: (t: TaskRow, index: number) => Promise<void>;
     hostedSignIn: (t: TaskRow, index: number) => Promise<void>;
+    /** Each sign-in step's page once Sign in made one, for when no browser opened. */
+    signInPage: Record<number, string>;
     loadTools: (t: TaskRow, index: number) => Promise<void>;
     finish: (t: TaskRow, done: boolean) => Promise<void>;
     unsaved: boolean;
@@ -46,6 +48,7 @@
     step,
     saveSecret,
     hostedSignIn,
+    signInPage,
     loadTools,
     finish,
     unsaved = $bindable(),
@@ -121,6 +124,14 @@
             disabled={busy}
             onclick={() => hostedSignIn(t, index)}>Sign in</button
           >
+          {#if signInPage[index]}
+            <a
+              class="ms-2 text-xs text-sea underline underline-offset-2"
+              href={signInPage[index]}
+              target="_blank"
+              rel="noopener noreferrer">No page opened? Open the sign-in page</a
+            >
+          {/if}
           <details class="mt-2 text-xs text-muted">
             <summary class="cursor-pointer">The service won't let me sign in</summary>
             <p class="mt-2">

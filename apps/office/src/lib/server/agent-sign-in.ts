@@ -15,7 +15,7 @@
 // `GROK_HOME=<office> grok logout` removed the owner's own ~/.grok sign-in in
 // the same second. The session at xAI or OpenAI lasts until it ends or the
 // owner removes it in their account. Server only.
-import { rmSync } from 'node:fs';
+import { realpathSync, rmSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { OFFICE_ACCOUNT, type Agent } from '@oddboro/ledger';
 import {
@@ -248,7 +248,13 @@ export function agentCommand(tool: Agent): Command | undefined {
     if (found) return found;
   }
   const found = onPath(tool);
-  return found ? [found, []] : undefined;
+  if (!found) return undefined;
+  // Codex starts a copy of itself inside the run's sandbox, by the path it was
+  // started with. A link in a folder the sandbox shuts, such as
+  // /opt/homebrew/bin/codex into Codex.app, stopped every run ("execvp() of
+  // '/opt/homebrew/bin/codex' failed: Operation not permitted", #197). The
+  // sandbox runs a real file from any folder, so Codex starts by its real path.
+  return [tool === 'codex' ? realpathSync(found) : found, []];
 }
 
 /**

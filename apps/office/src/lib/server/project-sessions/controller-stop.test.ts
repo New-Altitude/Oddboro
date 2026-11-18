@@ -56,9 +56,9 @@ const fail = (dir: string, command: 'agents' | 'stop') =>
 /** Holds `claude stop` in `dir` once it has begun, until `letGo`. */
 const hold = (dir: string) => writeFileSync(join(dir, 'stop.hold'), '');
 const letGo = (dir: string) => rmSync(join(dir, 'stop.hold'));
-/** Polls until `fn` holds, since the stand-in and the filesystem answer in their own time. */
-async function until(fn: () => boolean | Promise<boolean>, what: string) {
-  const end = performance.now() + 5000;
+/** Polls until `fn` holds, for up to `limit` ms, since the stand-in and the filesystem answer in their own time. */
+async function until(fn: () => boolean | Promise<boolean>, what: string, limit = 5000) {
+  const end = performance.now() + limit;
   while (performance.now() < end) {
     if (await fn()) return;
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -75,12 +75,23 @@ const queue = (s: ProjectSession) =>
 const stateOf = async (s: ProjectSession) => (await L.projectWork(s.id))[0].state;
 /** The readiness check's probe in the inbox of `s`, which its plugin's receivers answer. */
 const probe = (s: ProjectSession) => join(L.home('project-sessions', s.id, 'inbox'), 'probe.json');
-/** Answers the readiness check waiting for `s`, as both of its plugin's receivers do. */
+/**
+ * Answers the readiness check waiting for `s`, as both of its plugin's
+ * receivers do, and returns once the check has ended, which removes its probe.
+ */
 async function answerProbe(s: ProjectSession) {
   await until(() => existsSync(probe(s)), 'no readiness check began');
   const { key } = JSON.parse(readFileSync(probe(s), 'utf8')) as { key: string };
   for (const receiver of L.PROJECT_RECEIVERS)
     writeFileSync(join(probe(s), '..', `${key}.${receiver}`), '');
+  // The check hears the answers through a folder watch, which can be slow or
+  // miss the event (Linear NEW-1964). So this waits just past the check's own
+  // 30-second limit, which removes the probe and fails the work. Each caller's
+  // next assertion catches that, except the test of a check under way when
+  // Stop is pressed, which only Stop's own 10-second limit catches. The Stop
+  // claim test answers two checks, so with both near their limit it could run
+  // past the test's 60 seconds and fail, but no test can hang.
+  await until(() => !existsSync(probe(s)), 'the readiness check never ended', 35_000);
 }
 /** Whether the offer of an assignment was posted to the inbox of `s`, for its Claude to take. */
 const offered = (s: ProjectSession) =>
@@ -534,9 +545,9 @@ async function claimWhile<T>(s: ProjectSession, press: () => Promise<T>) {
   const unlock = await lockRow(s);
   try {
     const sending = c.work(s.id);
+    // The claim begins with no wait after the check passes, so once the check
+    // has ended the claim is under way, held on the row's lock.
     await answerProbe(s);
-    // The check removes its probe as it passes, and the claim begins with no wait between.
-    await until(() => !existsSync(probe(s)), 'the readiness check never passed');
     const pressed = await press();
     await unlock();
     await sending;
