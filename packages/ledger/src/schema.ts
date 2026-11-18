@@ -1047,7 +1047,10 @@ export const parts = pgTable(
   (t) => [primaryKey({ columns: [t.kind, t.name] })]
 );
 
-/** Tokens one run used, per model. Read from the run's own result. */
+/**
+ * Tokens one run used, per model. Read from the run's own result, less what
+ * earlier runs of the same session already counted (`recordUsage`).
+ */
 export const usage = pgTable(
   'usage',
   {
@@ -1056,6 +1059,11 @@ export const usage = pgTable(
     staffId: text().references(() => staff.id),
     kind: text().$type<UsageKind>().notNull(),
     model: text().notNull(),
+    /**
+     * The session the run went on, when its tool reports a running total for
+     * the whole session (Claude Code and Codex). Null when it reports the run alone.
+     */
+    session: text(),
     inputTokens: integer().notNull().default(0),
     outputTokens: integer().notNull().default(0),
     cacheReadTokens: integer().notNull().default(0),
@@ -1068,7 +1076,10 @@ export const usage = pgTable(
     costUsd: doublePrecision().notNull().default(0),
     createdAt: created()
   },
-  (t) => [index('usage_by_staff').on(t.staffId, t.createdAt)]
+  (t) => [
+    index('usage_by_staff').on(t.staffId, t.createdAt),
+    index('usage_by_session').on(t.session, t.model)
+  ]
 );
 
 /**

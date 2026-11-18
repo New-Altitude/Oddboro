@@ -1,5 +1,5 @@
 {
-  "id": "e377c718-973e-4130-bd2d-95128841e7c6",
+  "id": "5961b899-11fe-4e27-b1bb-855aeafc7c25",
   "prevId": "d0f1e9b4-81e7-4a25-8eb0-83f9ccf1f382",
   "version": "7",
   "dialect": "postgresql",
@@ -2142,18 +2142,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "hidden_at": {
-          "name": "hidden_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "config_dir": {
-          "name": "config_dir",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -3119,6 +3107,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "session": {
+          "name": "session",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "input_tokens": {
           "name": "input_tokens",
           "type": "integer",
@@ -3184,6 +3178,27 @@
             },
             {
               "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "usage_by_session": {
+          "name": "usage_by_session",
+          "columns": [
+            {
+              "expression": "session",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "model",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

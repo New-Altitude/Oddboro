@@ -497,6 +497,9 @@ test("Codex's shell commands, MCP calls and file changes reach the floor once ea
 });
 
 test("a Codex run's tokens are recorded with cached and cache-written tokens apart from the rest of its input", async () => {
+  // The stand-in reports one thread and one total on every run, and a
+  // thread's total counts once (`recordUsage`), so earlier runs would leave this one nothing.
+  await L.pg`delete from usage`;
   await chatOf('cole');
   let rows: Record<string, unknown>[] = [];
   for (let i = 0; i < 100 && !rows.length; i++) {

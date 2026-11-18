@@ -442,6 +442,9 @@ export type ClaudeRun = CliRun & {
  */
 export function claudeLaunch(r: ClaudeRun): Launch {
   const env = staffEnv(r.toolDir || undefined);
+  // Outside tools wait behind tool search (`ALWAYS_LOADED`).
+  const searched = Object.keys(r.servers).some((name) => !ALWAYS_LOADED.has(name));
+  if (searched) env.ENABLE_TOOL_SEARCH = 'true';
   const pictures =
     r.pictures ??
     r.images?.map((i) => ({
@@ -486,7 +489,11 @@ export function claudeLaunch(r: ClaudeRun): Launch {
   const writeFiles = (): (() => void) => {
     mkdirSync(home('mcp'), { recursive: true, mode: 0o700 });
     const mode = { mode: 0o600 };
-    writeFileSync(files.mcp, JSON.stringify({ mcpServers: configServers(r.servers) }), mode);
+    const servers = Object.entries(configServers(r.servers)).map(([name, s]) => [
+      name,
+      ALWAYS_LOADED.has(name) ? { ...s, alwaysLoad: true } : s
+    ]);
+    writeFileSync(files.mcp, JSON.stringify({ mcpServers: Object.fromEntries(servers) }), mode);
     writeFileSync(files.settings, JSON.stringify(settings()), mode);
     writeFileSync(files.prompt, r.system, mode);
     return () => {
@@ -506,7 +513,8 @@ export function claudeLaunch(r: ClaudeRun): Launch {
     [
       ...(r.officeFiles ? [] : ['Read,Glob,Grep,Write,Edit']),
       ...(r.commands ? ['Bash'] : []),
-      ...(r.web ? ['WebSearch,WebFetch'] : [])
+      ...(r.web ? ['WebSearch,WebFetch'] : []),
+      ...(searched ? ['ToolSearch'] : [])
     ].join(','),
     '--permission-mode',
     'dontAsk',
@@ -546,6 +554,15 @@ export function claudeLaunch(r: ClaudeRun): Launch {
     ...stream
   };
 }
+
+/**
+ * The office's own servers, whose tools every run holds in full, since most
+ * runs use them. An outside tool's server waits behind Claude Code's tool
+ * search: the run sees its tools' names, and loads a tool's whole description
+ * only to use it. A run starts with each outside tool's description otherwise,
+ * every one of them, which on a connector of a hundred tools is most of the run.
+ */
+export const ALWAYS_LOADED = new Set(['office', 'files']);
 
 /**
  * The office's own run: no tools, no MCP server, none of the owner's
@@ -641,8 +658,14 @@ export function claudeReader(
     }
     if (e.type === 'rate_limit_event') events.push({ type: 'plan', info: e.rate_limit_info });
     // Claude Code's own shape for it, which the ledger's usage reads as it is.
+    // Claude Code counts it for the whole session, earlier runs of a resumed
+    // one included, so it names the session. Grok's is not known to.
     if (e.type === 'result' && e.modelUsage)
-      events.push({ type: 'usage', usage: e.modelUsage as ModelUsage });
+      events.push({
+        type: 'usage',
+        usage: e.modelUsage as ModelUsage,
+        ...(agent === 'claude' && session ? { session } : {})
+      });
     for (const name of streamTools(agent, e)) events.push({ type: 'tool', name });
     if (e.type === 'stream_event') {
       const ev = e.event as { type: string; delta?: { type: string; text?: string } };

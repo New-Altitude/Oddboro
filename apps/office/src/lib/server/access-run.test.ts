@@ -206,8 +206,9 @@ test(
     await setOwn('ava', { commands: true, web: true, folders: [{ path: w, write: true }] });
     const h = await gave('lead', 'ava', { title: 'Handed over' });
     const run = await runOf(h.id);
-    // The office carries its files, so no file tool of its own.
-    assert.equal(after(run.args, '--tools'), 'Bash,WebSearch,WebFetch');
+    // The office carries its files, so no file tool of its own; the
+    // connector's tools wait behind tool search.
+    assert.equal(after(run.args, '--tools'), 'Bash,WebSearch,WebFetch,ToolSearch');
     assert.ok(filesOf(run)?.walls.writes.includes(w), 'the given folder left the file tools');
     assert.ok(sandboxOf(run), 'the handed-over run lost its sandbox');
     const allowed = run.claudeSettings!.permissions.allow;

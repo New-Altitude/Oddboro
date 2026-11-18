@@ -103,7 +103,11 @@ export type RunEvent =
   | { type: 'message'; text: string }
   /** One streamed piece of the reply, as it comes. */
   | { type: 'delta'; text: string }
-  | { type: 'usage'; usage: ModelUsage }
+  /**
+   * Tokens per model. With `session`, a running total for that whole session,
+   * earlier runs of it included (`recordUsage` keeps this run's share).
+   */
+  | { type: 'usage'; usage: ModelUsage; session?: string }
   /** What the tool said of the plan's limits (Claude Code's `rate_limit_event`), as it said it. */
   | { type: 'plan'; info: unknown }
   /**

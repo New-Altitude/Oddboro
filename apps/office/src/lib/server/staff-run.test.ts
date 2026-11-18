@@ -213,8 +213,47 @@ const WRITTEN = {
 test("a Claude Code run's MCP config gives a command server and a hosted one in the shape it always had", async () => {
   const { mcp } = await chatOf('cleo');
   const config = mcp as { mcpServers: Record<string, object> };
-  assert.deepEqual(Object.keys(config.mcpServers.office), ['command', 'args', 'env']);
+  assert.deepEqual(Object.keys(config.mcpServers.office), ['command', 'args', 'env', 'alwaysLoad']);
   assert.deepEqual(configServers(SERVERS), WRITTEN);
+});
+
+test("a Claude Code run holds the office's own tools whole and finds an outside tool's by tool search", async () => {
+  const dir = join(folder, 'staff', 'cleo');
+  const launchWith = (servers: Parameters<typeof LAUNCHES.claude>[0]['servers']) =>
+    LAUNCHES.claude({
+      key: 'tool-search',
+      account: 'office',
+      staffId: 'cleo',
+      dir,
+      reads: [],
+      writes: [dir],
+      granted: [],
+      commands: false,
+      network: false,
+      system: 'You are Cleo.',
+      input: 'Hello.',
+      servers,
+      allowed: [],
+      timeoutMs: 60_000,
+      web: false
+    });
+  const outside = await launchWith(SERVERS);
+  assert.ok('args' in outside, JSON.stringify(outside));
+  const config = JSON.parse(
+    readFileSync(outside.args[outside.args.indexOf('--mcp-config') + 1], 'utf8')
+  ) as { mcpServers: Record<string, { alwaysLoad?: boolean }> };
+  outside.done();
+  assert.equal(config.mcpServers.office.alwaysLoad, true);
+  assert.equal(config.mcpServers.notes.alwaysLoad, undefined);
+  const tools = (l: { args: string[] }) => l.args[l.args.indexOf('--tools') + 1].split(',');
+  assert.ok(tools(outside).includes('ToolSearch'), tools(outside).join());
+  assert.equal(outside.env.ENABLE_TOOL_SEARCH, 'true');
+  // With only the office's own tools, nothing waits behind a search.
+  const own = await launchWith({ office: SERVERS.office });
+  assert.ok('args' in own, JSON.stringify(own));
+  own.done();
+  assert.ok(!tools(own).includes('ToolSearch'), tools(own).join());
+  assert.equal(own.env.ENABLE_TOOL_SEARCH, undefined);
 });
 
 test("a Grok run's agent file gives a command server and a hosted one in the shape it always had", async () => {

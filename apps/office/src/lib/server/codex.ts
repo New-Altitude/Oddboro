@@ -555,9 +555,12 @@ const count = (n: unknown) => (typeof n === 'number' ? n : 0);
  */
 export function codexReader(model: string): (e: Record<string, unknown>) => RunEvent[] {
   const seen = new Set<string>();
+  let thread: string | undefined;
   return (e) => {
-    if (e.type === 'thread.started' && typeof e.thread_id === 'string')
-      return [{ type: 'session', id: e.thread_id }];
+    if (e.type === 'thread.started' && typeof e.thread_id === 'string') {
+      thread = e.thread_id;
+      return [{ type: 'session', id: thread }];
+    }
     if (e.type === 'item.started' || e.type === 'item.completed') {
       const item = (e.item ?? {}) as Record<string, unknown>;
       const tool = toolOf(item);
@@ -583,7 +586,9 @@ export function codexReader(model: string): (e: Record<string, unknown>) => RunE
               cacheReadInputTokens: cached,
               cacheCreationInputTokens: written
             }
-          }
+          },
+          // Codex counts the whole thread, earlier runs of a resumed one included.
+          ...(thread ? { session: thread } : {})
         },
         { type: 'done' }
       ];
