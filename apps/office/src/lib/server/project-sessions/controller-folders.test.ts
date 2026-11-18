@@ -445,7 +445,7 @@ test(
       opened.push(s.id);
       assert.equal(
         await folderNoticeOf(s),
-        moved({ from: '~/.claude-lost · signed out', to: '~/.claude-holds · signed out' })
+        moved({ from: '~/.claude-lost', to: '~/.claude-holds · signed out' })
       );
       assert.equal((await L.connection(s.id)).configDir, q);
       await c.terminal(s.id);
@@ -494,7 +494,7 @@ test(
       assert.equal(
         await folderNoticeOf(s),
         moved({
-          from: '~/.claude-gone-from · signed out',
+          from: '~/.claude-gone-from',
           to: '~/.claude-newest-copy · signed out'
         })
       );
@@ -507,12 +507,13 @@ test(
 );
 
 test(
-  'Reconnect moves a session with no folder, whose default folder lacks the conversation, to the named folder holding it, and says so',
+  'Reconnect moves a session with no folder, whose default folder lacks the conversation, to the named folder holding it, and says so, naming the folder it left by its path',
   { skip: process.platform === 'win32' && 'the stand-in is a shell script' },
   async () => {
     const q = named('.claude-named-holds');
     L.setClaudeFolders([q]);
     let s: ProjectSession | undefined;
+    let t: ProjectSession | undefined;
     try {
       // Only the named folder has it: the office's default folder, `~/.claude`
       // here, never saw this conversation.
@@ -521,14 +522,29 @@ test(
       s = await L.connectProject('claude', id, app, 'Work');
       assert.equal(
         await folderNoticeOf(s),
-        moved({ from: '~/.claude · signed out', to: '~/.claude-named-holds · signed out' })
+        moved({ from: '~/.claude', to: '~/.claude-named-holds · signed out' })
       );
       assert.equal((await L.connection(s.id)).configDir, q);
       await c.terminal(s.id);
       assert.deepEqual(lastTerminal().args.slice(-2), ['attach', id.slice(0, 8)]);
       assert.equal(lastTerminal().env.CLAUDE_CONFIG_DIR, q);
+
+      // The office's CLAUDE_CONFIG_DIR, outside Setup, is the folder it left:
+      // named by its path, with no Setup mark.
+      const left = named('.claude-office-left');
+      const other = randomUUID();
+      save(q, other);
+      const moving = await L.connectProject('claude', other, app, 'Work');
+      t = moving;
+      const notice = await withEnv({ CLAUDE_CONFIG_DIR: left }, () => folderNoticeOf(moving));
+      assert.equal(
+        notice,
+        moved({ from: '~/.claude-office-left', to: '~/.claude-named-holds · signed out' })
+      );
+      assert.ok(!notice?.includes('not in Setup'), notice ?? 'no notice');
     } finally {
       if (s) await c.disconnect(s.id);
+      if (t) await c.disconnect(t.id);
       L.setClaudeFolders([]);
     }
   }
@@ -550,7 +566,7 @@ test(
       opened.push(s.id);
       assert.equal(
         await folderNoticeOf(s, b),
-        moved({ from: '~/.claude-sent-back · signed out', to: '~/.claude-has-it · signed out' })
+        moved({ from: '~/.claude-sent-back', to: '~/.claude-has-it · signed out' })
       );
       assert.equal((await L.connection(s.id)).configDir, a);
       await c.terminal(s.id);
@@ -615,6 +631,51 @@ test(
       assert.ok(!inside.sessions.has(s.id), 'the refused connect kept a runtime');
     } finally {
       if (s) await c.disconnect(s.id);
+      L.setClaudeFolders([]);
+    }
+  }
+);
+
+test(
+  "a pick that lacks the conversation is refused when only the office's own Claude folder outside Setup holds it, and nothing is stored",
+  { skip: process.platform === 'win32' && 'the stand-in is a shell script' },
+  async () => {
+    // Not named in Setup, so the folder list never reads it.
+    const env = named('.claude-env-only');
+    const b = named('.claude-env-pick');
+    L.setClaudeFolders([b]);
+    const ids: string[] = [];
+    try {
+      const id = randomUUID();
+      save(env, id);
+      const s = await L.connectProject('claude', id, app, 'Before folders');
+      ids.push(s.id);
+      const count = spawned.length;
+      await withEnv({ CLAUDE_CONFIG_DIR: env }, () =>
+        assert.rejects(c.connect('claude', app, { nativeId: id, configDir: b }), {
+          message: PICK_LACKS_IT('~/.claude-env-pick · signed out')
+        })
+      );
+      assert.equal((await L.connection(s.id)).configDir, null);
+      assert.equal(spawned.length, count);
+      assert.ok(!inside.sessions.has(s.id), 'the refused connect kept a runtime');
+
+      // The office's folder is gone: the pick holding it resumes there, and
+      // the gone folder is never read or made.
+      const gone = join(homedir(), '.claude-env-gone');
+      const held = randomUUID();
+      save(b, held);
+      const t = await L.connectProject('claude', held, app, 'Before folders');
+      ids.push(t.id);
+      const since = logged().length;
+      await withEnv({ CLAUDE_CONFIG_DIR: gone }, () =>
+        c.connect('claude', app, { nativeId: held, configDir: b })
+      );
+      assert.equal((await L.connection(t.id)).configDir, b);
+      assert.ok(!existsSync(gone), 'the missing folder was made');
+      assert.ok(!logged().slice(since).includes(gone), logged());
+    } finally {
+      for (const id of ids) await c.disconnect(id);
       L.setClaudeFolders([]);
     }
   }

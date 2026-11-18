@@ -28,7 +28,7 @@
 </script>
 
 <script lang="ts">
-  import { onMount, untrack } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
   import type { ProjectAgent, ProjectRequest } from '@oddboro/ledger';
   import type { StaffProfile } from '../staff/roster.ts';
   import { PROJECT_WORDS } from '../project-words.ts';
@@ -62,7 +62,7 @@
   import SessionDetails from './SessionDetails.svelte';
   import { focusRemembered, rememberFocus } from './projects-focus.ts';
   import { LOGOS } from './tool-logos.ts';
-  import { advanced, type ProjectAsk } from './windows.svelte.ts';
+  import { advanced, projectsFocus, type ProjectAsk } from './windows.svelte.ts';
 
   // The Projects window, which widens the side panel while it is in front:
   // every session down the start side as a tab list, and the selected one
@@ -116,18 +116,33 @@
     copied = $state(false),
     loaded = $state(false),
     /** Remove asks once in place, under the session's Reconnect. */
-    removing = $state(false);
+    removing = $state(false),
+    /** Stop asks once in place, above the terminal. */
+    stopping = $state(false);
+  /** The setup whose question ended while the window was busy: Start waits to run for it. */
+  let retryFor: string | undefined;
   /** This window's terminal view. A new one per session opened. */
   let termView = $state(crypto.randomUUID());
   /** The move confirm, in place of Reconnect, for the session opened with `view`. Each opening
    * makes a new view, so the confirm never shows on another session, or this one again. */
   let moving = $state<{ view: string; choice: Choice }>(),
     /** The owner's Focus choice, kept on this computer. */
-    focusWanted = $state(false);
+    focusWanted = $state(false),
+    /** While this window lets the session go, its terminal view is closed. */
+    closing = $state(false);
+  /** This window's terminal while it shows. */
+  let terminal = $state<ReturnType<typeof ProjectTerminal>>();
   const selected = $derived(connections.find((s) => s.id === currentId));
-  const terminalVisible = $derived(!!view?.connected && !!view.terminal);
+  const terminalVisible = $derived(!!view?.connected && !!view.terminal && !closing);
   /** Only while the terminal shows: a session not connected keeps the list in reach. */
   const focused = $derived(focusWanted && terminalVisible);
+  /** Remove's confirm. Only removing a Claude session ends it in every window still joined,
+   * so a Codex owner is never told that. */
+  const removeWarning = $derived(
+    selected?.agent === 'claude'
+      ? `${PROJECT_WORDS.removeAsk} ${PROJECT_WORDS.removeEnds} ${PROJECT_WORDS.removeDetail}`
+      : `${PROJECT_WORDS.removeAsk} ${PROJECT_WORDS.removeDetail}`
+  );
   /** What a list asks about now, and the rows found for exactly that. */
   const listNow = $derived(listAsk({ folder, agent, socket }));
   const place = $derived(
@@ -206,6 +221,11 @@
       problem = { text: describe(e), from, row };
     } finally {
       busy = false;
+      // Claude Code's question ended while this ran. Start runs for it now, once, but
+      // only while it still shows: an action that changed the form closed it.
+      const id = retryFor;
+      retryFor = undefined;
+      if (id && setup?.id === id) start({ after: 'trust' });
     }
   }
   async function history(id: string) {
@@ -228,6 +248,7 @@
     handover = undefined;
     unasked = undefined;
     removing = false;
+    stopping = false;
     writable = false;
     termView = crypto.randomUUID();
     await history(id);
@@ -298,10 +319,14 @@
   }
   /**
    * Opens `choice` here, or starts a new conversation without one. `handedOver`
-   * says the owner finished with it in the previous Codex window, and `move`
-   * that they confirmed ending it in its terminal to open it here.
+   * says the owner finished with it in the previous Codex window, `move` that
+   * they confirmed ending it in its terminal to open it here, and `after` that
+   * Claude Code's question about the folder just ended.
    */
-  async function connect(choice?: Choice, how: { handedOver?: boolean; move?: boolean } = {}) {
+  async function connect(
+    choice?: Choice,
+    how: { handedOver?: boolean; move?: boolean; after?: 'trust' } = {}
+  ) {
     // One source each: a conversation goes with its own folder, or none, so the
     // office finds it; only Start takes the folder chosen for it.
     const configDir = choice ? choice.configDir || undefined : startIn || undefined;
@@ -318,16 +343,23 @@
     });
     if ('setup' in s) {
       // Claude Code asks before it works in a new folder: its terminal
-      // shows under Start, for the owner to answer and then Start again. Asked
-      // for a folder, tool or account changed since, it is for a form no longer
-      // shown, so it ends at once.
+      // shows under Start, and once the owner answers it, Start runs again.
+      // Asked for a folder, tool or account changed since, it is for a form no
+      // longer shown, so it ends at once. Asked again right after the owner
+      // answered, the answer was no: it ends too, so a no is asked again only
+      // when the owner chooses Start.
       setup = { id: s.setup, view: crypto.randomUUID() };
-      if (folder !== sent.folder || agent !== sent.agent || startIn !== sent.startIn) closeSetup();
+      const shown = folder === sent.folder && agent === sent.agent && startIn === sent.startIn;
+      if (!shown || how.after === 'trust') closeSetup();
+      if (shown && how.after === 'trust')
+        problem = { text: PROJECT_WORDS.notTrusted, from: 'start' };
       return;
     }
     await load();
     await select(s.id);
-    if (agent === 'claude') await action('terminal');
+    // With the view the terminal's stream opens with: the window that opens the terminal
+    // takes the typing, not whichever window's stream reaches the office first.
+    if (agent === 'claude') await action('terminal', { view: termView });
   }
   async function pick() {
     const r = await fetch('/api/folders/pick', {
@@ -346,6 +378,23 @@
     if (!id) return;
     await projectApi(op, { id, ...fields });
     await Promise.all([history(id), load()]);
+  }
+  /**
+   * Closes this window's terminal view first, as closeSetup does, then waits for
+   * the keys it already sent to land, so nothing it sends reaches a session being
+   * let go. A refusal leaves the session connected, so the terminal shows again.
+   */
+  async function letGo(op: 'disconnect' | 'end') {
+    // Taken while the terminal is still there: closing it takes it away.
+    const landed = terminal?.keysLanded();
+    closing = true;
+    await tick();
+    try {
+      await landed;
+      await action(op);
+    } finally {
+      closing = false;
+    }
   }
   async function reconnect() {
     if (!selected) return;
@@ -383,6 +432,10 @@
     moving = undefined;
     void run(() => connect(choice, { move: true }));
   }
+  function stop() {
+    stopping = false;
+    void run(() => letGo('end'));
+  }
   async function remove() {
     await action('remove');
     // Off the hidden id, so connecting the same conversation again selects it.
@@ -399,11 +452,19 @@
     }
     void run(() => connect(c), 'row', c.id);
   }
-  /** Start, and Start again under Claude Code's question, which then closes first. */
-  function start() {
+  /**
+   * Start, chosen by the owner or run once by itself when Claude Code's
+   * question ends. Any question still shown closes first. A question that ends
+   * while another action holds the window waits for it, as `run` says.
+   */
+  function start(how: { after?: 'trust' } = {}) {
+    if (how.after === 'trust' && busy) {
+      retryFor = setup?.id;
+      return;
+    }
     void run(() => {
       closeSetup();
-      return connect();
+      return connect(undefined, how);
     }, 'start');
   }
   async function copyId() {
@@ -417,6 +478,14 @@
   onMount(() => {
     focusWanted = focusRemembered();
     return closeSetup;
+  });
+  // The office panel folds its header, tabs and music bar under Focus too. The
+  // cleanup unfolds it when this window closes.
+  $effect(() => {
+    projectsFocus.on = focused;
+    return () => {
+      projectsFocus.on = false;
+    };
   });
   // The list reads again whenever the office's records change, or Setup changes
   // the Claude folders, which live in .env and reach the page no other way.
@@ -550,7 +619,7 @@
         problem={problem?.text}
         {place}
         problemRow={problem?.row}
-        {setup}
+        bind:setup
         onfilter={() => {
           if (filterClears(place)) problem = undefined;
         }}
@@ -607,8 +676,16 @@
             <button
               class="btn shrink-0"
               disabled={busy}
-              onclick={() => run(() => action('disconnect'))}>Disconnect</button
+              onclick={() => run(() => letGo('disconnect'))}>Disconnect</button
             >
+            {#if selected.agent === 'claude'}
+              <button
+                class="btn shrink-0"
+                disabled={busy}
+                aria-label={PROJECT_WORDS.stopName}
+                onclick={() => (stopping = true)}>{PROJECT_WORDS.stopButton}</button
+              >
+            {/if}
           {:else if view}
             <button class="btn shrink-0" disabled={busy} onclick={() => run(reconnect)}
               >Reconnect</button
@@ -634,11 +711,25 @@
           {view.folderNotice}
         </p>
       {/if}
+      {#if stopping && view?.connected}
+        <div
+          class="mx-3 mt-2 flex flex-wrap items-center gap-2 rounded-lg bg-ember/10 p-2"
+          role="alertdialog"
+          aria-labelledby="stop-warning"
+        >
+          <p id="stop-warning" class="flex-1 text-ink">{PROJECT_WORDS.stopConfirm}</p>
+          <div class="flex gap-2">
+            <button class="btn" disabled={busy} onclick={stop}>{PROJECT_WORDS.stopButton}</button
+            ><button class="btn" onclick={() => (stopping = false)}>{PROJECT_WORDS.cancel}</button>
+          </div>
+        </div>
+      {/if}
 
       <!-- The terminal fills what is left. The drawer opens over it. -->
       <div class="term relative flex min-h-0 flex-1 flex-col">
         {#if terminalVisible}
           {#key termView}<ProjectTerminal
+              bind:this={terminal}
               onstream={updates}
               id={selected.id}
               view={termView}
@@ -650,7 +741,10 @@
             <div class="flex flex-col items-center gap-2">
               {#if view?.connected}
                 <p class="text-muted">The terminal is closed.</p>
-                <button class="btn" disabled={busy} onclick={() => run(() => action('terminal'))}
+                <button
+                  class="btn"
+                  disabled={busy}
+                  onclick={() => run(() => action('terminal', { view: termView }))}
                   >Open terminal</button
                 >
               {:else if view}
@@ -662,14 +756,12 @@
                     role="alertdialog"
                     aria-labelledby="remove-warning"
                   >
-                    <p id="remove-warning" class="text-ink">
-                      Remove this session from Projects? Work still waiting for it stops, and no Odd
-                      can send it more work. The conversation itself is kept: connect it again to
-                      bring the session back, then share it again with any Odd that should have it.
-                    </p>
+                    <p id="remove-warning" class="text-ink">{removeWarning}</p>
                     <div class="flex gap-2">
                       <button class="btn" disabled={busy} onclick={() => run(remove)}>Remove</button
-                      ><button class="btn" onclick={() => (removing = false)}>Cancel</button>
+                      ><button class="btn" onclick={() => (removing = false)}
+                        >{PROJECT_WORDS.cancel}</button
+                      >
                     </div>
                   </div>
                 {:else if moving?.view === termView && !details}

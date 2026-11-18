@@ -1,16 +1,20 @@
 // The Projects window mounted in a browser-like document, against a stand-in
-// office: Focus, Reconnect's Move here, and Claude Code's setup question
-// answering a Start the owner has since changed or left for a session. Each test clicks and types as
-// the owner does and reads what the window then shows.
+// office: Focus (and the office panel it folds), Reconnect's Move here, Disconnect
+// and Stop waiting for the terminal's keys, which window takes the typing,
+// and Claude Code's setup question answering a Start the owner has since changed
+// or left for a session. Each test clicks and types as the owner does and reads
+// what the window then shows.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { PROJECT_WORDS } from '../project-words.ts';
 import {
+  asked,
   button,
   buttons,
   described,
   enterFolder,
   FOLDERS,
+  NATIVE,
   office,
   one,
   pick,
@@ -18,43 +22,43 @@ import {
   refused,
   sameElement,
   sent,
-  settled
+  SESSION,
+  settled,
+  streamAt,
+  viewOf
 } from './projects-window-under-test.ts';
 import { rememberFocus } from './projects-focus.ts';
 
-const NATIVE = '11111111-0000-4000-8000-000000000000';
-const SESSION = {
-  id: 'session-1',
-  agent: 'claude',
-  folder: '/work/app',
-  title: 'Fix the build',
-  nativeId: NATIVE,
-  staffId: null,
-  configDir: null,
-  sendsUnasked: null,
-  status: 'idle',
-  connected: true,
-  mark: null
+// After the harness above, so it loads compiled for the client: the same module
+// the window writes to.
+const { panelFolded, projectsFocus } = await import('./windows.svelte.ts');
+// What the terminal sends the session, as xterm's own replies and the owner's
+// keys go: the mount helper's stand-in terminal hands its listener here as it opens.
+type OnData = (listener: (data: string) => void) => { dispose(): void };
+const { Terminal } = (await import('@xterm/xterm')) as unknown as {
+  Terminal: { prototype: { open(host: HTMLElement): void } };
 };
-const viewOf = (connected: boolean, terminal: boolean) => ({
-  connected,
-  terminal,
-  note: connected ? 'Connected' : 'Not connected',
-  folderNotice: null,
-  reply: ''
-});
+let typed: (data: string) => void = (data) => assert.fail(`nothing listens for ${data}`);
+const open = Terminal.prototype.open;
+Terminal.prototype.open = function (this: { onData: OnData }, host: HTMLElement) {
+  this.onData = (listener) => ((typed = listener), { dispose() {} });
+  open.call(this, host);
+};
+const PROJECTS_WIN = { id: 'projects', kind: 'projects', ask: { n: 0 } } as const;
+const DESK_WIN = { id: 'desk', kind: 'desk' } as const;
 
 const titleRow = (root: Element) => root.querySelector('header h2')?.textContent ?? null;
 const sessionList = (root: Element) => root.querySelector('nav[aria-label="Sessions"]');
 
-test('Focus folds away the Projects title row and the session list only while a connected session’s terminal shows', async (t) => {
+test('Focus folds away the Projects title row, the session list and the office panel only while a connected session’s terminal shows', async (t) => {
   await t.test(
-    'pressing Focus on a terminal folds both away, and again brings them back',
+    'pressing Focus on a terminal folds them away, and again brings them back',
     async () => {
       rememberFocus(false);
       office({ sessions: [SESSION], view: viewOf(true, true) });
       const shown = await projectsWindow();
       try {
+        assert.equal(projectsFocus.on, false, 'the office panel starts whole');
         assert.ok(shown.target.querySelector('.term .xterm'), 'the session’s terminal shows');
         sameElement(shown.target.querySelector('[role="alert"]'), null, 'with no error');
         assert.equal(titleRow(shown.target), 'Projects');
@@ -72,16 +76,45 @@ test('Focus folds away the Projects title row and the session list only while a 
         assert.equal(titleRow(shown.target), null);
         sameElement(sessionList(shown.target), null, 'no session list');
         assert.equal(focus.getAttribute('aria-pressed'), 'true');
+        assert.equal(projectsFocus.on, true, 'the office panel folds');
 
         focus.click();
         shown.flush();
         assert.equal(titleRow(shown.target), 'Projects');
         assert.ok(sessionList(shown.target));
+        assert.equal(projectsFocus.on, false, 'the office panel unfolds');
       } finally {
         await shown.unmount();
       }
+      assert.equal(projectsFocus.on, false, 'and stays whole once the window closes');
     }
   );
+
+  await t.test('closing the window under Focus unfolds the office panel', async () => {
+    rememberFocus(true);
+    office({ sessions: [SESSION], view: viewOf(true, true) });
+    const shown = await projectsWindow();
+    try {
+      assert.equal(projectsFocus.on, true, 'folded while the window shows');
+    } finally {
+      await shown.unmount();
+    }
+    assert.equal(projectsFocus.on, false);
+  });
+
+  await t.test('the office panel folds only while Projects is the window in front', async () => {
+    rememberFocus(true);
+    office({ sessions: [SESSION], view: viewOf(true, true) });
+    const shown = await projectsWindow();
+    try {
+      assert.equal(panelFolded(PROJECTS_WIN), true, 'Projects in front');
+      assert.equal(panelFolded(DESK_WIN), false, 'another window in front');
+      assert.equal(panelFolded(undefined), false, 'no window in front');
+    } finally {
+      await shown.unmount();
+    }
+    assert.equal(panelFolded(PROJECTS_WIN), false, 'nor once the window closes');
+  });
 
   await t.test('the choice is read as the window opens, and kept for the next', async () => {
     rememberFocus(true);
@@ -115,6 +148,7 @@ test('Focus folds away the Projects title row and the session list only while a 
       try {
         assert.equal(titleRow(shown.target), 'Projects');
         assert.ok(sessionList(shown.target));
+        assert.equal(projectsFocus.on, false, 'the office panel stays whole');
         assert.deepEqual(
           buttons(shown.target, PROJECT_WORDS.focus).map(described),
           [],
@@ -323,4 +357,165 @@ test('Claude Code’s setup question for a Start the owner has since changed nev
       }
     });
   }
+});
+
+test('Disconnect closes this window’s terminal before it asks the office, and brings it back when the office refuses', async (t) => {
+  const NOT_CONNECTED = 'This session is not connected to the office.';
+  /** The window, with whether its terminal showed as the office got the disconnect. */
+  async function disconnected(answer: (view: ReturnType<typeof viewOf>) => unknown) {
+    const view = viewOf(true, true);
+    let shown: Awaited<ReturnType<typeof projectsWindow>> | undefined;
+    const terminalShows = () => !!shown?.target.querySelector('.term .xterm');
+    let shownAsAsked: boolean | undefined;
+    office({
+      sessions: [SESSION],
+      view,
+      more: (s) => {
+        if (s.action !== 'disconnect') return {};
+        shownAsAsked = terminalShows();
+        return answer(view);
+      }
+    });
+    shown = await projectsWindow();
+    assert.ok(terminalShows(), 'the terminal shows first');
+    button(shown.target, 'Disconnect').click();
+    await settled(shown);
+    return { shown, terminalShows, shownAsAsked };
+  }
+
+  await t.test('a refusal brings the terminal back and shows', async () => {
+    const refusal = 'Finish or stop the active work before disconnecting.';
+    const { shown, terminalShows, shownAsAsked } = await disconnected(() => refused(refusal));
+    try {
+      assert.equal(shownAsAsked, false, 'closed before the office was asked');
+      assert.ok(terminalShows(), 'back once the office refused');
+      assert.equal(shown.target.querySelector('[role="alert"] p')?.textContent, refusal);
+    } finally {
+      await shown.unmount();
+    }
+  });
+
+  await t.test('a disconnect the office takes shows no error', async () => {
+    const { shown, terminalShows, shownAsAsked } = await disconnected((view) => {
+      view.connected = false;
+      return {};
+    });
+    try {
+      assert.equal(shownAsAsked, false, 'closed before the office was asked');
+      assert.ok(!terminalShows(), 'gone with the session');
+      sameElement(shown.target.querySelector('[role="alert"]'), null, 'with no error');
+      assert.ok(shown.target.textContent?.includes(NOT_CONNECTED), described(shown.target));
+    } finally {
+      await shown.unmount();
+    }
+  });
+});
+
+test('Disconnect and Stop ask the office only once the keys this window sent have landed', async (t) => {
+  type Press = (shown: Awaited<ReturnType<typeof projectsWindow>>) => void;
+  const disconnect: Press = (shown) => button(shown.target, 'Disconnect').click();
+  /** Stop, then Stop again on its confirm. */
+  const stop: Press = (shown) => {
+    one<HTMLButtonElement>(shown.target, `button[aria-label="${PROJECT_WORDS.stopName}"]`).click();
+    shown.flush();
+    button(one(shown.target, '[role="alertdialog"]'), PROJECT_WORDS.stopButton).click();
+  };
+  const cases = [
+    {
+      name: 'Disconnect after xterm’s focus report as the click takes focus',
+      data: '\x1b[O',
+      press: disconnect,
+      op: 'disconnect',
+      reply: () => Response.json({})
+    },
+    {
+      name: 'Stop after typing',
+      data: 'a',
+      press: stop,
+      op: 'end',
+      reply: () => Response.json({})
+    },
+    {
+      name: 'Disconnect after a key the office refuses',
+      data: 'a',
+      press: disconnect,
+      op: 'disconnect',
+      reply: () => refused('Connect this session first.')
+    }
+  ];
+  for (const { name, data, press, op, reply } of cases) {
+    await t.test(name, async () => {
+      let land: (reply: Response) => void = () => assert.fail('no key sent');
+      office({
+        sessions: [SESSION],
+        view: viewOf(true, true),
+        more: (s) => (s.action === 'keys' ? new Promise<Response>((r) => (land = r)) : {})
+      });
+      const shown = await projectsWindow();
+      try {
+        streamAt(`/api/project-sessions/${SESSION.id}/events?terminal=1`).send('control', true);
+        shown.flush();
+        typed(data);
+        await settled(shown);
+        assert.deepEqual(
+          asked('keys').map((s) => s.data),
+          [data],
+          'the key is on its way'
+        );
+        press(shown);
+        await settled(shown);
+        assert.deepEqual(asked(op), [], 'nothing asked while the key is on its way');
+        land(reply());
+        await settled(shown);
+        assert.deepEqual(
+          asked(op).map((s) => s.id),
+          [SESSION.id],
+          'asked once the key landed'
+        );
+        sameElement(shown.target.querySelector('[role="alert"]'), null, 'with no error');
+      } finally {
+        await shown.unmount();
+      }
+    });
+  }
+});
+
+test('Reconnect and Open terminal ask for the terminal with the view their stream opens with', async (t) => {
+  /** The window, after the owner clicked `words` on a session `connected` or not. */
+  async function opened(connected: boolean, words: string) {
+    const view = viewOf(connected, false);
+    office({
+      sessions: [SESSION],
+      view,
+      more: (s) => {
+        if (s.action === 'find') return [];
+        if (s.action === 'connect') {
+          view.connected = true;
+          return SESSION;
+        }
+        if (s.action === 'terminal') view.terminal = true;
+        return {};
+      }
+    });
+    const shown = await projectsWindow();
+    button(one(shown.target, '.term'), words).click();
+    await settled(shown);
+    return shown;
+  }
+  for (const [words, connected] of [
+    ['Reconnect', false],
+    ['Open terminal', true]
+  ] as const)
+    await t.test(words, async () => {
+      const shown = await opened(connected, words);
+      try {
+        const stream = streamAt(`/api/project-sessions/${SESSION.id}/events?terminal=1`);
+        const streamView = new URL(stream.url, 'http://office').searchParams.get('view');
+        assert.equal(asked('terminal').length, 1, 'one terminal asked for');
+        assert.ok(streamView, 'the stream names its view');
+        assert.equal(asked('terminal')[0].view, streamView);
+      } finally {
+        await shown.unmount();
+      }
+    });
 });

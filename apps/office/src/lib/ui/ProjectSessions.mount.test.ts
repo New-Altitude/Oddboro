@@ -22,6 +22,7 @@ import {
   sameElement,
   sent,
   settled,
+  streamAt,
   typeFolder,
   type Answer
 } from './projects-window-under-test.ts';
@@ -257,11 +258,12 @@ test('Move here on a row open in a terminal moves it, once the owner confirms', 
 
 /**
  * The window on the start path for ~/app, after a Start Claude Code answered
- * with its setup question. A later Start gets `next`.
+ * with its setup question. A later Start gets `next`, and Choose folder `picked`.
  */
-async function askedToTrust(next: () => unknown = () => ({})) {
+async function askedToTrust(next: () => unknown = () => ({}), { picked = {} } = {}) {
   let starts = 0;
   office({
+    picked,
     more: (s) => (s.action === 'connect' ? (++starts === 1 ? { setup: 'setup-1' } : next()) : {})
   });
   const shown = await projectsWindow();
@@ -286,13 +288,69 @@ test('Claude Code’s question before it works in a new folder shows under Start
     );
     assert.ok(line, 'the trust line');
     const terminal = one(shown.target, '.xterm');
-    const again = button(shown.target, PROJECT_WORDS.startAgain);
     const follows = (a: Node, b: Node) =>
       !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
     assert.ok(follows(start, line), 'the line under Start');
     assert.ok(follows(line, terminal), 'then the setup terminal');
-    assert.ok(follows(terminal, again), 'then Start again');
     assert.deepEqual(asked('disconnect'), [], 'it stays open for the owner to answer');
+  } finally {
+    await shown.unmount();
+  }
+});
+
+/** Claude Code quitting in setup terminal `id`, as it does once the owner answers its question. */
+const answered = (id: string) => setupStream(id).send('end', true);
+/** The stream setup terminal `id` shows through. */
+const setupStream = (id: string) => streamAt(`/api/project-sessions/${id}/events?terminal=1`);
+
+test('Once the trust question ends, Start runs again once by itself, and a folder still untrusted shows the line with no second terminal', async () => {
+  const shown = await askedToTrust(() => ({ setup: 'setup-2' }));
+  try {
+    assert.ok(setupShown(shown.target), 'shown first');
+    answered('setup-1');
+    await settled(shown);
+
+    assert.equal(asked('connect').length, 2, 'Start ran again by itself, once');
+    assert.ok(says(shown.target, PROJECT_WORDS.notTrusted), 'the line shows');
+    assert.equal(setupShown(shown.target), false, 'no second terminal');
+    assert.deepEqual(
+      asked('disconnect').map((s) => s.id),
+      ['setup-1', 'setup-2'],
+      'the new question ended at once'
+    );
+    answered('setup-1');
+    await settled(shown);
+    assert.equal(asked('connect').length, 2, 'no third Start');
+  } finally {
+    await shown.unmount();
+  }
+});
+
+test('Once the trust question is answered yes, its terminal goes and the session opens', async () => {
+  const shown = await askedToTrust(() => ({ id: 'session-1' }));
+  try {
+    answered('setup-1');
+    await settled(shown);
+    assert.equal(asked('connect').length, 2, 'Start ran again by itself');
+    assert.equal(setupShown(shown.target), false, 'the terminal is gone');
+    assert.ok(
+      asked('history').some((s) => s.id === 'session-1'),
+      'the session opened'
+    );
+  } finally {
+    await shown.unmount();
+  }
+});
+
+test('A trust question closed by a form change starts nothing when it ends', async () => {
+  const shown = await askedToTrust();
+  try {
+    enterFolder(shown.target, '/work/other');
+    await settled(shown);
+    answered('setup-1');
+    await settled(shown);
+    assert.equal(asked('connect').length, 1, 'no Start');
+    assert.equal(says(shown.target, PROJECT_WORDS.notTrusted), false, 'no line');
   } finally {
     await shown.unmount();
   }
@@ -370,6 +428,147 @@ test('The setup question ends when the form it was asked for changes', async (t)
         order.indexOf('disconnect') < order.lastIndexOf('connect'),
         'ended before Start asked again'
       );
+    } finally {
+      await shown.unmount();
+    }
+  });
+});
+
+test('A trust question that ends while another action runs starts again once that action ends, only while it still shows', async (t) => {
+  await t.test('Choose folder cancelled: Start runs again once, after it', async () => {
+    const shown = await askedToTrust(() => ({ setup: 'setup-2' }));
+    try {
+      button(shown.target, 'Choose folder').click();
+      answered('setup-1');
+      await settled(shown);
+      assert.equal(asked('connect').length, 2, 'Start ran again by itself, once');
+      assert.ok(says(shown.target, PROJECT_WORDS.notTrusted), 'as the Start after the question');
+    } finally {
+      await shown.unmount();
+    }
+  });
+
+  await t.test(
+    'Choose folder picked another folder: the question went with it, and nothing starts',
+    async () => {
+      const shown = await askedToTrust(() => ({ setup: 'setup-2' }), {
+        picked: { path: '/work/other' }
+      });
+      try {
+        button(shown.target, 'Choose folder').click();
+        answered('setup-1');
+        await settled(shown);
+        assert.equal(folderField(shown.target).value, '/work/other', 'the folder changed');
+        assert.equal(asked('connect').length, 1, 'no Start');
+        assert.deepEqual(
+          asked('disconnect').map((s) => s.id),
+          ['setup-1'],
+          'its terminal ended, once'
+        );
+        assert.equal(says(shown.target, PROJECT_WORDS.notTrusted), false, 'no line');
+      } finally {
+        await shown.unmount();
+      }
+    }
+  );
+});
+
+test('A trust terminal gone before its stream connected counts as answered, and a stream the browser reconnects does not', async (t) => {
+  await t.test('a stream the office refused for good starts Start again once', async () => {
+    const shown = await askedToTrust(() => ({ setup: 'setup-2' }));
+    try {
+      setupStream('setup-1').fail(true);
+      await settled(shown);
+      assert.equal(asked('connect').length, 2, 'Start ran again by itself, once');
+      assert.ok(says(shown.target, PROJECT_WORDS.notTrusted), 'as the Start after the question');
+    } finally {
+      await shown.unmount();
+    }
+  });
+
+  await t.test(
+    'a dropped stream the browser reconnects starts nothing, and the question stays',
+    async () => {
+      const shown = await askedToTrust(() => ({ setup: 'setup-2' }));
+      try {
+        setupStream('setup-1').fail(false);
+        await settled(shown);
+        assert.equal(asked('connect').length, 1, 'no Start');
+        assert.ok(setupShown(shown.target), 'the question still shows');
+        assert.deepEqual(asked('disconnect'), [], 'its terminal stays open');
+      } finally {
+        await shown.unmount();
+      }
+    }
+  );
+});
+
+test('One trust question that ends twice starts Start again only once', async () => {
+  const shown = await askedToTrust(() => ({ setup: 'setup-2' }));
+  try {
+    answered('setup-1');
+    setupStream('setup-1').fail(true);
+    await settled(shown);
+    assert.equal(asked('connect').length, 2, 'Start ran again by itself, once');
+    setupStream('setup-1').fail(true);
+    await settled(shown);
+    assert.equal(asked('connect').length, 2, 'no third Start');
+  } finally {
+    await shown.unmount();
+  }
+});
+
+test("A trust question another window's Start replaced goes, says why under Start, and starts nothing here", async (t) => {
+  await t.test(
+    'the line shows in place of the question, and its stream ending starts nothing',
+    async () => {
+      const shown = await askedToTrust(() => ({ setup: 'setup-2' }));
+      try {
+        setupStream('setup-1').send('replaced', true);
+        await settled(shown);
+        assert.equal(setupShown(shown.target), false, 'the trust line and its terminal are gone');
+        assert.equal(button(shown.target, 'Start').disabled, false, 'Start is ready again');
+        assert.deepEqual(asked('disconnect'), [], 'the office already closed it');
+        assert.deepEqual(alerts(shown.target), [PROJECT_WORDS.replaced], 'why it closed');
+
+        // Its stream ending after that, as an end or a refusal, starts nothing.
+        answered('setup-1');
+        setupStream('setup-1').fail(true);
+        await settled(shown);
+        assert.equal(asked('connect').length, 1, 'no Start');
+        assert.equal(says(shown.target, PROJECT_WORDS.notTrusted), false, 'no line');
+        assert.deepEqual(alerts(shown.target), [PROJECT_WORDS.replaced], 'the line stays');
+      } finally {
+        await shown.unmount();
+      }
+    }
+  );
+
+  await t.test('pressing Start takes the line away', async () => {
+    const shown = await askedToTrust(() => ({ setup: 'setup-2' }));
+    try {
+      setupStream('setup-1').send('replaced', true);
+      await settled(shown);
+      button(shown.target, 'Start').click();
+      await settled(shown);
+      assert.equal(asked('connect').length, 2, 'Start ran');
+      assert.deepEqual(alerts(shown.target), [], 'the line is gone');
+      assert.ok(setupShown(shown.target), 'the new question shows');
+    } finally {
+      await shown.unmount();
+    }
+  });
+
+  await t.test('a problem the window shows takes its place', async () => {
+    const shown = await askedToTrust(() => ({ setup: 'setup-2' }), {
+      picked: { unavailable: 'No folder picker here.' }
+    });
+    try {
+      setupStream('setup-1').send('replaced', true);
+      await settled(shown);
+      button(shown.target, 'Choose folder').click();
+      await settled(shown);
+      assert.deepEqual(alerts(shown.target), ['No folder picker here.']);
     } finally {
       await shown.unmount();
     }

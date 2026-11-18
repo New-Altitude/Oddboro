@@ -2214,7 +2214,7 @@ stretches to 8 px short of the Odd's panel, else of the Odds rail. On a
 narrow screen it stretches to 8 px short of the closed rail, and an Odd's card
 or the opened rail overlays it (`projectsReach` in `+page.svelte`, `reach` on
 `SidePanel.svelte`). The desk
-pill hides, and the music keeps its usual width. Its handle still drags: the
+pill hides, and the music keeps its usual width. Focus folds the plate, the tabs and the music bar too (`projectsFocus` in `windows.svelte.ts`). Its handle still drags: the
 width it leaves is Projects' own (`reachWidth`, kept beside the panel's usual
 width), from `min` up to that reach, and dragged all the way it follows the
 reach again. Another tab in front brings the usual width back. While the rail is wide
@@ -2222,8 +2222,8 @@ reach again. Another tab in front brings the usual width back. While the rail is
 back to the wide rail's edge, in the rail's own 200 ms, so every Odd stays in
 view. Its sessions run down the start side as a listbox; the selected one's
 terminal fills the rest, and its details fold out over the terminal. The
-terminal refits at once and sends the session its size only once it settles,
-and once more, to redraw, when the owner comes back to it after it or the
+terminal refits only once its box settles, in the same step as it sends the
+session its size, and once more, to redraw, when the owner comes back to it after it or the
 browser window lost focus (`ProjectTerminal.svelte`).
 They sit behind Advanced mode (`owner.advanced_at`), which the owner turns on
 in Setup's Advanced section (`AdvancedSection.svelte`, `PUT
@@ -2236,7 +2236,7 @@ Projects. Off, `/api/project-sessions` and its event stream answer 403
 each as the owner typed it, not by its real path. The continue path's list reads Claude Code's
 own session files in every known Claude folder (`claude-sessions.ts`,
 `claudeProjects` in `claude-project.ts`); a session keeps the folder it runs in
-(`config_dir`), and Remove hides a disconnected one (`hidden_at`). Claude sessions run in Claude Code's background service and the terminal
+(`config_dir`), and Remove stops its background job and hides a disconnected one (`hidden_at`). A connected Claude session's Stop button ends it for every window. While Stop or Remove is stopping a session, nothing is claimed for it and no terminal opens: a claim already under way goes back to the state it was claimed from, as it does after a Disconnect, a connect or a terminal open is refused (`stopping`), and a second Stop or Remove is refused (`alreadyEnding`). Claude sessions run in Claude Code's background service and the terminal
 attaches to them (`claude-background.ts`). The terminal loads `node-pty` only when it opens. See
 [project sessions](../../docs/project-sessions.md) for native clients,
 handover and recovery.

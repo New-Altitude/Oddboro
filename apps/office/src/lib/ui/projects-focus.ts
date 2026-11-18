@@ -1,5 +1,6 @@
-// Whether the owner wants the Projects window to fold its title row and session
-// list away while a session's terminal shows (its Focus button). The choice is
+// Whether the owner wants the Projects window to fold the office panel's header,
+// tabs and music bar, and its own title row and list, away while a session's
+// terminal shows (its Focus button). The choice is
 // kept on this computer, in the browser's storage, like the page's other
 // per-viewer choices.
 

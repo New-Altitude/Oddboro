@@ -29,7 +29,9 @@
   // The Projects window's New session form. ProjectSessions.svelte keeps every
   // piece of state and every action; this only shows them and reports clicks.
   // The one exception is which row's move confirm is open: nothing outside the
-  // form reads it, and it closes whenever the form does.
+  // form reads it, and it closes whenever the form does. The form also drops a
+  // setup question another window's Start closed, since only its stream hears it,
+  // and says why under Start until the owner presses Start or leaves the form.
   type Props = {
     folder: string;
     agent: ProjectAgent;
@@ -52,7 +54,8 @@
     place: ErrorPlace | undefined;
     /** The id of the conversation whose row the error shows under. */
     problemRow: string | undefined;
-    /** Claude Code's question before it works in a new folder, shown under Start. */
+    /** Claude Code's question before it works in a new folder, shown under Start. Bound,
+     * since one that another window's Start closed goes from here: the office ended it. */
     setup: SetupTerminal | undefined;
     /** The owner typed in the filter. */
     onfilter: () => void;
@@ -60,8 +63,8 @@
     onchange: (change: FormChange) => void;
     onpick: () => void;
     onpath: (p: SessionPath) => void;
-    /** Start, and Start again under Claude Code's question. */
-    onstart: () => void;
+    /** Start, chosen by the owner, or `after: 'trust'` once Claude Code's question ends. */
+    onstart: (how?: { after: 'trust' }) => void;
     onchoose: (c: Choice) => void;
     /** The owner confirmed moving a conversation out of its terminal and into the office. */
     onmove: (c: Choice) => void;
@@ -86,7 +89,7 @@
     problem,
     place,
     problemRow,
-    setup,
+    setup = $bindable(),
     onfilter,
     onchange,
     onpick,
@@ -103,18 +106,28 @@
   const problemRowShown = $derived(shownCandidates.some((c) => c.id === problemRow));
   /** The row whose move confirm is open. */
   let moving = $state<string>();
+  /** Another window's Start closed this form's setup question. */
+  let replaced = $state(false);
+  /** The line shown: the page's problem where it places it, else why the question closed. */
+  const line = $derived(
+    problem && place
+      ? { text: problem, at: place }
+      : replaced
+        ? { text: PROJECT_WORDS.replaced, at: 'start' as const }
+        : undefined
+  );
 </script>
 
-<!-- An error on the form, shown only at the place errorPlace gives it. It
-     scrolls itself into view as it appears: under a row at the pane's bottom
-     edge it would otherwise sit just below what the owner sees. -->
+<!-- A line on the form, shown only at its place: an error at the place errorPlace
+     gives it. It scrolls itself into view as it appears: under a row at the pane's
+     bottom edge it would otherwise sit just below what the owner sees. -->
 {#snippet alert(at: ErrorPlace)}
-  {#if problem && place === at}<p
+  {#if line && line.at === at}<p
       role="alert"
       class="text-coral"
       {@attach (n) => n.scrollIntoView({ block: 'nearest' })}
     >
-      {problem}
+      {line.text}
     </p>{/if}
 {/snippet}
 
@@ -192,7 +205,14 @@
         maxlength="200"
       /></label
     >
-    <button class="btn self-start" disabled={busy || !folder} onclick={onstart}>Start</button>
+    <button
+      class="btn self-start"
+      disabled={busy || !folder}
+      onclick={() => {
+        replaced = false;
+        onstart();
+      }}>Start</button
+    >
     {@render alert('start')}
     {#if setup}
       <p class="text-ink">{PROJECT_WORDS.trustLine}</p>
@@ -203,15 +223,30 @@
             id={setup.id}
             view={setup.view}
             onerror={onsetuperror}
-            onstream={() => {
-              // Nothing to attach: a setup terminal is Claude Code's own trust
-              // question, with no session whose view the stream would update.
+            onstream={(stream, id) => {
+              // Claude Code quits once the owner answers its question. Only the
+              // question still shown starts again: one closed since was for a form
+              // that changed, or a Start that already ran.
+              const ended = () => {
+                if (setup?.id === id) onstart({ after: 'trust' });
+              };
+              stream.addEventListener('end', ended);
+              // A stream refused for good found the terminal gone: Claude Code quit
+              // before the stream connected. One the browser reconnects is a blip.
+              // A listener, since the terminal sets the stream's onerror itself.
+              stream.addEventListener('error', () => {
+                if (stream.readyState === EventSource.CLOSED) ended();
+              });
+              // Closed by another window's Start, not answered: the form goes back
+              // to how it was before Start, says why, and nothing starts here.
+              stream.addEventListener('replaced', () => {
+                if (setup?.id !== id) return;
+                setup = undefined;
+                replaced = true;
+              });
             }}
           />{/key}
       </div>
-      <button class="btn self-start" disabled={busy || !folder} onclick={onstart}
-        >{PROJECT_WORDS.startAgain}</button
-      >
     {/if}
   {/if}
   {#if fields.list}

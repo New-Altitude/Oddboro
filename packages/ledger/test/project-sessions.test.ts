@@ -26,7 +26,8 @@ const {
   projectOverview,
   projectConnections,
   connection,
-  SESSION_REMOVED
+  SESSION_REMOVED,
+  OTHER_PROJECT
 } = await import('../src/project-sessions.ts');
 const { setOwnerName } = await import('../src/office.ts');
 await setOwnerName('Tester');
@@ -63,7 +64,7 @@ test('one native ID has one project and a retried instruction has one delivery',
   const uuid = randomUUID();
   const s = await connectProject('claude', uuid, '/one', 'One');
   assert.equal((await connectProject('claude', uuid, '/one', 'Again')).id, s.id);
-  await assert.rejects(connectProject('claude', uuid, '/two', 'Two'), /different project/);
+  await assert.rejects(connectProject('claude', uuid, '/two', 'Two'), { message: OTHER_PROJECT });
 });
 
 test('sharing, a run ceiling, a later downgrade and owner takeover govern dispatch', async () => {
@@ -82,6 +83,22 @@ test('sharing, a run ceiling, a later downgrade and owner takeover govern dispat
   assert.equal(await claimProject(later.sessionId), undefined);
   await assert.rejects(requestProject({ ...later, id: randomUUID() }), /not been shared/);
   await assert.rejects(requestProject(await fixture('read')), /Draft or Act/);
+});
+
+test('a claim reports the state it took the request from, so putting it back asks the owner nothing again', async () => {
+  const queued = await fixture('act');
+  await requestProject(queued);
+  const fromQueue = await claimProject(queued.sessionId);
+  assert.equal(fromQueue?.state, 'sending');
+  assert.equal(fromQueue?.claimedFrom, 'queued');
+
+  const approved = await fixture('act', false);
+  assert.equal((await requestProject(approved)).state, 'proposed');
+  await changeProjectRequest(approved.id, approved.sessionId, ['proposed'], 'authorized');
+  const fromApproval = await claimProject(approved.sessionId);
+  assert.equal(fromApproval?.claimedFrom, 'authorized');
+  await changeProjectRequest(approved.id, approved.sessionId, ['sending'], 'authorized');
+  assert.equal((await claimProject(approved.sessionId))?.id, approved.id, 'claimed again, unasked');
 });
 
 test('a repeated provider callback delivers one report and one pickup on the assigning thread', async () => {
@@ -332,7 +349,7 @@ test('connecting again with a Claude folder moves the row there, and another pro
   await hideProject(s.id);
   // A different project leaves the row hidden, with its words.
   await assert.rejects(connectProject('claude', nativeId, '/two', 'Two'), {
-    message: 'This conversation belongs to a different project.'
+    message: OTHER_PROJECT
   });
   assert.ok((await connection(s.id))?.hiddenAt);
   const found = await connectProject('claude', nativeId, '/one', 'One', '/work/.claude-b');

@@ -94,12 +94,15 @@ export class ProjectTerminal {
     if (!this.ended) this.child.resize(cols, rows);
   }
   /**
-   * Draws the program again for this window at the size it already has: one
-   * column wider, then back to `cols` 30 ms later. An equal size sends the
-   * program no resize signal. A program that draws again when the size it
-   * reads changes sees no change if the wider size is undone in the same
-   * moment, as terminal.test.ts shows with a Node child, so the wider size is
-   * held. A size that comes during the hold is newer and replaces the restore.
+   * Takes the session's size back for this window after another window may
+   * have changed it: one column wider, then back to `cols` 30 ms later. An
+   * equal size sends no resize signal, so the wider one is held. `claude
+   * attach` passes a resize on about 50 ms after it comes, so when the session
+   * already has this window's size the 30 ms hold never reaches it and nothing
+   * redraws. When another window left the session at another size, the size
+   * that reaches it is new, and Claude Code draws for this window (measured
+   * with real Claude Code, 2026-11-17). A size that comes during the hold is
+   * newer and replaces the restore.
    */
   redraw(cols: number, rows: number) {
     this.resize(cols + 1, rows);

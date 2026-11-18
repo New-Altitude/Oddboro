@@ -78,16 +78,25 @@ export async function startInBackground(where: ClaudeWhere, args: string[]): Pro
 }
 
 /**
- * Runs `claude stop` or `claude rm` on the background session `short`. A
- * failure is logged, not thrown: each caller is already on its way to a
- * refusal of its own, which the owner reads.
+ * Runs `claude stop` or `claude rm` on the background session `short`, and
+ * says whether it came back ok. A failure is logged, not thrown, so each
+ * caller decides what the owner reads.
  */
-async function endInBackground(verb: 'stop' | 'rm', where: ClaudeWhere, short: string) {
+async function endInBackground(
+  verb: 'stop' | 'rm',
+  where: ClaudeWhere,
+  short: string
+): Promise<boolean> {
   const r = await claude(where, [verb, short], 10_000);
   if (r.status !== 'ok') console.error(`claude ${verb} ${short} came back ${r.status}`);
+  return r.status === 'ok';
 }
 
-/** Stops the background session `short`, which this office just started. */
+/**
+ * Stops the background session `short` of a session of this office, and says
+ * whether it came back ok. Start ignores the answer when it stops a session it
+ * just started, since it is already on its way to a refusal of its own.
+ */
 export const stopInBackground = (where: ClaudeWhere, short: string) =>
   endInBackground('stop', where, short);
 

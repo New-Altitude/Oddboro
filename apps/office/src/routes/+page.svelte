@@ -33,6 +33,7 @@
     openLessons,
     openProject,
     openReport,
+    panelFolded,
     wins
   } from '#lib/ui/windows.svelte.ts';
   import type { AskRow } from '@oddboro/ledger';
@@ -115,6 +116,8 @@
   /** The start panel is open while it holds windows and the owner has not folded it away. */
   const leftOpen = $derived(wins.shown && wins.list.length > 0);
   const front = $derived(wins.list.find((w) => w.id === wins.active));
+  /** Focus in the front Projects window gives its terminal the panel's height. */
+  const focusFolds = $derived(panelFolded(front));
   let deskFocus = $state<string | undefined>();
   let notify = $state(false);
   // The two side panels. Widths are remembered per viewer by SidePanel.
@@ -722,6 +725,7 @@
       {innerWidth}
       min={officeMin}
       reach={projectsReach}
+      {focusFolds}
       {desk}
       {deskCount}
       {deskFocus}

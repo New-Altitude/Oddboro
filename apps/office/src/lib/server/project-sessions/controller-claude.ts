@@ -6,10 +6,12 @@ import {
   claudeFolderFound,
   defaultClaudeFolder,
   isClaudeFolder,
+  shownFolder,
   type ProjectSession
 } from '@oddboro/ledger';
 import { canMoveHere, nativeEnv, UUID } from './native.ts';
 import {
+  CLAUDE_LIST_FAILED,
   claudeAgents,
   claudeProjects,
   claudeProjectsIn,
@@ -19,15 +21,18 @@ import {
 import { endTerminalSession, stopInBackground, type ClaudeWhere } from './claude-background.ts';
 import { PROJECT_WORDS } from '../../project-words.ts';
 import { claudeFolderMark } from '../claude.ts';
+import { versionOf } from '../versions.ts';
 
 /**
  * What connect tells the owner about a Claude session's folder, by folder
  * marks (`claudeFolderMark`): `newer` and `to` name the folder holding the
- * conversation's newest copy, `from` the one the session left, and `terminal`
- * the folder of the terminal session connect's `move` ended. A session moves only
- * when its own folder lacks the conversation, or to that terminal's folder.
- * One notice shows: the terminal's when both apply, since the owner was using
- * that copy.
+ * conversation's newest copy, and `terminal` the folder of the terminal
+ * session connect's `move` ended. `from`, the folder the session left, is
+ * named by its path alone (`shownFolder`): a mark's login and Setup state are
+ * for a folder the owner can pick, and the office's default folder may sit
+ * outside Setup. A session moves only when its own folder lacks the
+ * conversation, or to that terminal's folder. One notice shows: the
+ * terminal's when both apply, since the owner was using that copy.
  */
 export const FOLDER_NOTICE = {
   newer: (mark: string) =>
@@ -58,9 +63,13 @@ export function runnableClaudeFolder(dir: string): string {
 
 /** `dir`, unless it is a folder other than `~/.claude` that is not on the disk now. */
 function foundClaudeFolder(dir: string): string {
-  if (claudeConfigDir(dir) !== undefined && !claudeFolderFound(dir))
-    throw new Error('That Claude folder is not found.');
+  if (!claudeFolderThere(dir)) throw new Error('That Claude folder is not found.');
   return dir;
+}
+
+/** Whether `dir` is `~/.claude`, which is always tried, or a folder on the disk now. */
+function claudeFolderThere(dir: string): boolean {
+  return claudeConfigDir(dir) === undefined || claudeFolderFound(dir);
 }
 
 /**
@@ -83,6 +92,44 @@ export const sessionFolder = (s: ProjectSession) =>
   s.configDir === null
     ? foundClaudeFolder(officeClaudeFolder())
     : runnableClaudeFolder(s.configDir);
+
+/**
+ * Why no `claude` can run to stop a session's background job: its Claude
+ * folder is one the office may not run in now (out of Setup, or gone), or
+ * Claude Code is not installed. The message is the words the office already
+ * shows for that case. Remove still hides such a session, since nothing could
+ * stop its job; Stop shows the words.
+ */
+export class JobOutOfReach extends Error {}
+
+/**
+ * Stops the running background job of the Claude session `s`, if it has one,
+ * in the Claude folder the session runs in (`sessionFolder`, as its terminal
+ * does). Only a background row counts: a conversation open in a plain terminal
+ * is not the office's to end. Throws `JobOutOfReach` when no `claude` can
+ * run for it, and the stop-failed words when listing or stopping fails, which
+ * trying again can fix.
+ */
+export async function stopSessionJob(s: ProjectSession): Promise<void> {
+  let dir: string;
+  try {
+    dir = sessionFolder(s);
+  } catch (e) {
+    // Only the folder checks throw here, before any `claude` runs.
+    throw new JobOutOfReach(e instanceof Error ? e.message : String(e));
+  }
+  if ((await versionOf('claude')) === undefined)
+    throw new JobOutOfReach(CLAUDE_LIST_FAILED.missing());
+  // Without --all, so only running sessions list: a stopped job is left alone.
+  const rows = await claudeAgents(s.folder, dir).catch((e: unknown) => {
+    console.error(`claude agents failed before stopping ${s.nativeId}:`, e);
+    throw new Error(PROJECT_WORDS.stopFailed);
+  });
+  const job = rows.find((r) => r.sessionId === s.nativeId && r.kind === 'background');
+  if (!job) return;
+  if (!job.id || !(await stopInBackground({ folder: s.folder, dir }, job.id)))
+    throw new Error(PROJECT_WORDS.stopFailed);
+}
 
 /**
  * The refusal of a Claude conversation open in a terminal: where `move`
@@ -143,17 +190,28 @@ export async function copyToOpen(
   // continue path's list, which moves it there, else its own (`sessionFolder`).
   const ownDir = known && (configDir ?? sessionFolder(known));
   const find = (rows: ClaudeConversation[]) => rows.find((row) => row.id === id);
-  const [own, newest, newIdPick] = await Promise.all([
+  // A session with no folder of its own could run in the office's default
+  // folder, which `claudeProjects` never reads when it is outside Setup. A
+  // gone one is skipped rather than refused, so it never blocks a good pick,
+  // and no `claude` command creates it.
+  const defaultDir = known?.configDir === null ? officeClaudeFolder() : undefined;
+  const readsDefault =
+    defaultDir !== undefined &&
+    configDir !== undefined &&
+    !isClaudeFolder(defaultDir) &&
+    claudeFolderThere(defaultDir);
+  const [own, newest, newIdPick, stays] = await Promise.all([
     ownDir ? claudeProjectsIn(folder, ownDir).then(find) : undefined,
     claudeProjects(folder).then(find),
     // A new id's pick is looked up only for the refusal below, so it
     // never gets a notice; a known session's pick is its `ownDir`.
-    !known && configDir !== undefined ? claudeProjectsIn(folder, configDir).then(find) : undefined
+    !known && configDir !== undefined ? claudeProjectsIn(folder, configDir).then(find) : undefined,
+    readsDefault ? claudeProjectsIn(folder, defaultDir).then(find) : undefined
   ]);
-  // A pick that lacks a conversation some folder holds is a stale list.
-  // Refused before anything is stored or spawned, so no terminal starts
-  // that id afresh while a copy of it exists.
-  if (configDir !== undefined && !(known ? own : newIdPick) && newest)
+  // A pick that lacks a conversation some folder the session could run in
+  // holds is a stale list. Refused before anything is stored or spawned, so
+  // no terminal starts that id afresh while a copy of it exists.
+  if (configDir !== undefined && !(known ? own : newIdPick) && (newest ?? stays))
     throw new Error(PICK_LACKS_IT(await claudeFolderMark(configDir, { fresh: true })));
   // Only a session whose own folder lacks the conversation takes the
   // folder holding its newest copy, so one connected before its folder
@@ -188,12 +246,11 @@ export async function copyToOpen(
   // login. A copy running in two folders has no folder to name.
   if (terminalDir)
     folderNotice = FOLDER_NOTICE.terminal(await claudeFolderMark(terminalDir, { fresh: true }));
-  else if (movedTo && ownDir) {
-    const [from, to] = await Promise.all(
-      [ownDir, movedTo].map((dir) => claudeFolderMark(dir, { fresh: true }))
-    );
-    folderNotice = FOLDER_NOTICE.moved({ from, to });
-  }
+  else if (movedTo && ownDir)
+    folderNotice = FOLDER_NOTICE.moved({
+      from: shownFolder(ownDir),
+      to: await claudeFolderMark(movedTo, { fresh: true })
+    });
   // A session with its own copy still opens it, so the owner never
   // lands in an older one without being told.
   else if (own && newest?.configDir && newest.configDir !== ownDir && newest.updated > own.updated)
