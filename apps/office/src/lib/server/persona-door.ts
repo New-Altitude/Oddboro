@@ -39,7 +39,13 @@ export type DoorAnswer =
   | { outcome: 'answered'; frame?: string; reply: string; caveat?: string }
   | { outcome: 'refused_content'; decline?: string }
   | { outcome: 'refused_budget'; retryAfterSeconds?: number }
-  | { outcome: Exclude<DoorOutcome, 'answered' | 'refused_content' | 'refused_budget'> }
+  | { outcome: 'interrupted'; partialReply?: string }
+  | {
+      outcome: Exclude<
+        DoorOutcome,
+        'answered' | 'refused_content' | 'refused_budget' | 'interrupted'
+      >;
+    }
   | { outcome: 'grant' };
 
 /** One earlier exchange, in the door's own shape: it drops any other silently. */
@@ -89,6 +95,8 @@ function answerOf(outcome: DoorOutcome, b: Record<string, unknown>): DoorAnswer 
     }
     case 'refused_content':
       return { outcome, decline: text((b.presentation as { text?: unknown } | undefined)?.text) };
+    case 'interrupted':
+      return { outcome, partialReply: text(b.partialReply) };
     case 'refused_budget': {
       const after = (b.refusal as { retryAfterSeconds?: unknown } | undefined)?.retryAfterSeconds;
       return { outcome, ...(typeof after === 'number' ? { retryAfterSeconds: after } : {}) };
@@ -103,13 +111,14 @@ function answerOf(outcome: DoorOutcome, b: Record<string, unknown>): DoorAnswer 
  * conversation: its earlier answered exchanges go with it, and an answered
  * turn joins them under the id the door gave back. A turn the door did not
  * answer adds nothing, so a note of the office's is never sent back as the
- * persona's words.
+ * persona's words. `signal`, the run's Stop, ends the wait as its time limit does.
  */
 export async function askDoor(turn: {
   url: string;
   token: string;
   message: string;
   chat?: { odd: string; ownerSaid: string };
+  signal?: AbortSignal;
 }): Promise<DoorAnswer> {
   const session = turn.chat
     ? readSession(turn.chat.odd)
@@ -128,7 +137,10 @@ export async function askDoor(turn: {
         ...(turn.chat ? { priorTurns: session.priorTurns.slice(-PRIOR_TURNS_MAX) } : {}),
         locale: 'en-US'
       }),
-      signal: AbortSignal.timeout(DOOR_TIMEOUT_MS)
+      signal: AbortSignal.any([
+        AbortSignal.timeout(DOOR_TIMEOUT_MS),
+        ...(turn.signal ? [turn.signal] : [])
+      ])
     });
     if (res.status === 401) return { outcome: 'grant' };
     // A slow turn's answer starts with keep-alive spaces, which JSON.parse skips.

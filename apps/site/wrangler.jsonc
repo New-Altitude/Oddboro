@@ -1,11 +1,15 @@
 // The website on Cloudflare: Workers serving the static build in build/, at
-// oddboro.com. The other Oddboro domains redirect here with zone rules, not
-// from this Worker. Deploy with `npm run deploy -w @oddboro/site`.
+// oddboro.com. worker.ts runs only for /ingest/*, the analytics it forwards to
+// PostHog; every other path is a static file. The other Oddboro domains
+// redirect here with zone rules, not from this Worker. Deploy with
+// `npm run deploy -w @oddboro/site`.
 {
   "name": "oddboro-site",
   "compatibility_date": "2026-10-15",
+  "main": "worker.ts",
   "assets": {
-    "directory": "./build"
+    "directory": "./build",
+    "run_worker_first": ["/ingest/*"]
   },
   "routes": [{ "pattern": "oddboro.com", "custom_domain": true }],
   "workers_dev": false

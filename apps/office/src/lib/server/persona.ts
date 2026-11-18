@@ -400,12 +400,12 @@ export async function installGrantedPersonas(): Promise<void> {
  * One turn of a persona Odd's persona, with its own sign-in. `chat` carries on
  * the Odd's conversation there. A sign-in that is gone, or whose refresh New
  * Altitude refused, is `grant`; one New Altitude could not be reached to
- * refresh is `failed`, and stays.
+ * refresh is `failed`, and stays. `signal` (the run's Stop) ends the wait.
  */
 export async function askPersona(
   who: StaffRow,
   message: string,
-  chat?: { ownerSaid: string }
+  o: { chat?: { ownerSaid: string }; signal?: AbortSignal } = {}
 ): Promise<DoorAnswer> {
   const slug = who.package?.slug;
   const issuer = accountIssuer();
@@ -415,7 +415,13 @@ export async function askPersona(
   const token = await freshAccess(p, { serverUrl: () => url, scope: PERSONA_SCOPE });
   // A refused refresh clears the tokens (`invalidateCredentials`); an unreachable one keeps them.
   if (!token) return { outcome: p.tokens() ? 'failed' : 'grant' };
-  const answer = await askDoor({ url, token, message, chat: chat && { odd: who.id, ...chat } });
+  const answer = await askDoor({
+    url,
+    token,
+    message,
+    chat: o.chat && { odd: who.id, ...o.chat },
+    signal: o.signal
+  });
   if (answer.outcome === 'grant') await dropRefused(slug, token);
   return answer;
 }

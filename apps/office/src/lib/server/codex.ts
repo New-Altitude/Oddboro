@@ -4,8 +4,8 @@
 //
 // Codex keeps its sign-in and sessions in the office's own Codex home
 // (CODEX_HOME), never the owner's ~/.codex. Every switch the office sets goes
-// on each run's arguments (`-c`), which beat that home's config.toml; the
-// office writes a config.toml only into a home with none, since once the owner
+// on each run's arguments (`-c`) or in its own settings file (`RUN_FILE`), and
+// both beat that home's config.toml; the office writes a config.toml only into a home with none, since once the owner
 // signs in, that file is the sign-in's to keep. A Codex Odd reads and changes
 // files through the office's file tools (files-server.ts in the ledger), with
 // Codex's own shell off, so the office holds its folders on every system. With
@@ -141,6 +141,16 @@ const SELF_SHUT = ['.codex', '.agents'];
 
 /** The one permission profile each run defines and uses. */
 const PROFILE = 'odd';
+
+/**
+ * Each run's settings file in its Codex home, `<key>-run.config.toml`, which
+ * `-p <key>-run` layers over the home's config.toml. The values that grow (the
+ * instructions, the servers, the folders) go there, never on the command line,
+ * which holds 32,767 characters on Windows ("spawn ENAMETOOLONG", #139). The
+ * switches that keep a run shut stay on `-c`: Codex quietly skips a profile
+ * whose file is gone, and `default_permissions` without its table stops the run.
+ */
+const RUN_FILE = '-run.config.toml';
 
 /** What one Codex run needs from run(). */
 type CodexRun = {
@@ -451,6 +461,29 @@ export function codexLaunch(r: CodexRun): CodexLaunch {
   mkdirSync(shell.GIT_TEMPLATE_DIR, { mode: 0o700 });
   const set = (key: string, value: Toml) => ['-c', `${key}=${toml(value)}`];
   const model = r.model ?? process.env[OFFICE_MODEL_VAR.codex];
+  const windows = currentPlatform() === 'win32';
+  sweep(h.dir, RUN_FILE, r.key);
+  const runFile = join(h.dir, `${r.key}${RUN_FILE}`);
+  const settings: Record<string, Toml> = {
+    // One `shell_environment_policy.set` only: a second would replace the first.
+    // Here, not in `env`: the shell inherits only the core variables.
+    'shell_environment_policy.set': shell,
+    developer_instructions: r.system,
+    ...(windows
+      ? {}
+      : {
+          permissions: {
+            [PROFILE]: { filesystem: filesystem(r, temp), network: { enabled: r.network } }
+          }
+        }),
+    mcp_servers: mcpServers(r.servers, r.allowed)
+  };
+  replace(
+    runFile,
+    Object.entries(settings)
+      .map(([k, v]) => `${k} = ${toml(v)}\n`)
+      .join('')
+  );
   const args = [
     'exec',
     '--json',
@@ -460,20 +493,15 @@ export function codexLaunch(r: CodexRun): CodexLaunch {
     '--strict-config',
     '--ignore-rules',
     ...Object.entries(SWITCHES).flatMap(([k, v]) => set(k, v)),
-    // Here, not in `env`: the shell inherits only the core variables. One
-    // `set` only, since a second would replace the first.
-    ...set('shell_environment_policy.set', shell),
+    '-p',
+    `${r.key}-run`,
     ...set('web_search', r.web ? 'live' : 'disabled'),
-    ...set('developer_instructions', r.system),
     // The shell only with Run commands; the office's file tools are the way to files.
     ...set('features.shell_tool', r.commands),
     ...set('features.unified_exec', r.commands),
-    ...(currentPlatform() === 'win32'
+    ...(windows
       ? set('sandbox_mode', 'read-only')
       : [
-          ...set('permissions', {
-            [PROFILE]: { filesystem: filesystem(r, temp), network: { enabled: r.network } }
-          }),
           ...set('default_permissions', PROFILE),
           // No AGENTS.md read at the start. On Linux Codex reads it through the
           // run's sandbox, where the office shuts it; one run in two then met
@@ -482,7 +510,6 @@ export function codexLaunch(r: CodexRun): CodexLaunch {
           // come in `developer_instructions`, never in a file.
           ...(currentPlatform() === 'linux' ? set('project_doc_max_bytes', 0) : [])
         ]),
-    ...set('mcp_servers', mcpServers(r.servers, r.allowed)),
     ...(r.effort ? set('model_reasoning_effort', r.effort) : []),
     ...(model ? ['-m', model] : []),
     // "-" reads the message from stdin, so one that starts with a dash is never a flag.
@@ -502,7 +529,10 @@ export function codexLaunch(r: CodexRun): CodexLaunch {
       ...(gatewayToken(r.servers) ? { [GATEWAY_TOKEN]: gatewayToken(r.servers) } : {})
     },
     stdin: r.input,
-    done: () => rmSync(temp, { recursive: true, force: true })
+    done: () => {
+      rmSync(temp, { recursive: true, force: true });
+      rmSync(runFile, { force: true });
+    }
   };
 }
 
@@ -525,9 +555,12 @@ const count = (n: unknown) => (typeof n === 'number' ? n : 0);
  */
 export function codexReader(model: string): (e: Record<string, unknown>) => RunEvent[] {
   const seen = new Set<string>();
+  let thread: string | undefined;
   return (e) => {
-    if (e.type === 'thread.started' && typeof e.thread_id === 'string')
-      return [{ type: 'session', id: e.thread_id }];
+    if (e.type === 'thread.started' && typeof e.thread_id === 'string') {
+      thread = e.thread_id;
+      return [{ type: 'session', id: thread }];
+    }
     if (e.type === 'item.started' || e.type === 'item.completed') {
       const item = (e.item ?? {}) as Record<string, unknown>;
       const tool = toolOf(item);
@@ -553,7 +586,9 @@ export function codexReader(model: string): (e: Record<string, unknown>) => RunE
               cacheReadInputTokens: cached,
               cacheCreationInputTokens: written
             }
-          }
+          },
+          // Codex counts the whole thread, earlier runs of a resumed one included.
+          ...(thread ? { session: thread } : {})
         },
         { type: 'done' }
       ];

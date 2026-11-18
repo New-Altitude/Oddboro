@@ -1,14 +1,17 @@
 // Token usage, the owner's plan and its window, and the owner's name and welcome.
-import { eq } from 'drizzle-orm';
+import { and, eq, sum } from 'drizzle-orm';
 import { db, sql as pg } from './db.ts';
 import { fixedError } from './errors.ts';
 import { type Db } from './threads.ts';
-import { owner, planLimits, usage, type UsageKind } from './schema.ts';
+import { asks, owner, planLimits, usage, type UsageKind } from './schema.ts';
 import { zone } from './time.ts';
 
 // Usage and the plan
 
-/** One run's token counts, per model, as Claude Code's result reports them. */
+/**
+ * Token counts per model, in the shape of Claude Code's result: one run's, or
+ * the whole session's so far on a tool that reports a running total.
+ */
 export type ModelUsage = Record<
   string,
   {
@@ -20,20 +23,108 @@ export type ModelUsage = Record<
   }
 >;
 
-/** `staffId` is null for a run as the office itself. */
-export async function recordUsage(staffId: string | null, kind: UsageKind, byModel: ModelUsage) {
-  const rows = Object.entries(byModel).map(([model, u]) => ({
-    staffId,
-    kind,
-    model,
-    inputTokens: u.inputTokens ?? 0,
-    outputTokens: u.outputTokens ?? 0,
-    cacheReadTokens: u.cacheReadInputTokens ?? 0,
-    cacheWriteTokens: u.cacheCreationInputTokens ?? 0,
-    costUsd: u.costUSD ?? 0
-  }));
+/** One model's counts, as a usage row keeps them. */
+export type UsageCounts = {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  costUsd: number;
+};
+const TOKENS = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens'] as const;
+
+const countsOf = (u: ModelUsage[string]): UsageCounts => ({
+  inputTokens: u.inputTokens ?? 0,
+  outputTokens: u.outputTokens ?? 0,
+  cacheReadTokens: u.cacheReadInputTokens ?? 0,
+  cacheWriteTokens: u.cacheCreationInputTokens ?? 0,
+  costUsd: u.costUSD ?? 0
+});
+
+/**
+ * A run's own share of a session's running total: the total less what the
+ * session's earlier runs already counted. A total below what was counted means
+ * the tool began counting again, so the whole total is the run's own.
+ */
+export function runShare(total: UsageCounts, counted: UsageCounts | undefined): UsageCounts {
+  if (!counted || TOKENS.some((k) => total[k] < counted[k])) return total;
+  return {
+    inputTokens: total.inputTokens - counted.inputTokens,
+    outputTokens: total.outputTokens - counted.outputTokens,
+    cacheReadTokens: total.cacheReadTokens - counted.cacheReadTokens,
+    cacheWriteTokens: total.cacheWriteTokens - counted.cacheWriteTokens,
+    costUsd: Math.max(0, total.costUsd - counted.costUsd)
+  };
+}
+
+/** Each session's latest recording, so the next one reads the session after it is written. */
+const recording = new Map<string, Promise<void>>();
+
+/**
+ * Keep one run's tokens. `staffId` is null for a run as the office itself.
+ * `session` names the session when the tool reports a running total for it,
+ * as Claude Code and Codex do once a session is resumed. Each row then holds
+ * the run's own share (`runShare`), so no earlier run counts twice.
+ */
+export function recordUsage(
+  staffId: string | null,
+  kind: UsageKind,
+  byModel: ModelUsage,
+  session?: string
+): Promise<void> {
+  if (!session) return keepUsage(staffId, kind, byModel);
+  const next = (recording.get(session) ?? Promise.resolve())
+    .catch(() => {})
+    .then(() => keepUsage(staffId, kind, byModel, session));
+  recording.set(session, next);
+  const done = () => {
+    if (recording.get(session) === next) recording.delete(session);
+  };
+  next.then(done, done);
+  return next;
+}
+
+async function keepUsage(
+  staffId: string | null,
+  kind: UsageKind,
+  byModel: ModelUsage,
+  session?: string
+): Promise<void> {
+  const counted = new Map<string, UsageCounts>();
+  if (session)
+    for (const { model, ...c } of await db
+      .select({
+        model: usage.model,
+        inputTokens: sum(usage.inputTokens).mapWith(Number),
+        outputTokens: sum(usage.outputTokens).mapWith(Number),
+        cacheReadTokens: sum(usage.cacheReadTokens).mapWith(Number),
+        cacheWriteTokens: sum(usage.cacheWriteTokens).mapWith(Number),
+        costUsd: sum(usage.costUsd).mapWith(Number)
+      })
+      .from(usage)
+      .where(eq(usage.session, session))
+      .groupBy(usage.model))
+      counted.set(model, c);
+  const rows = Object.entries(byModel).flatMap(([model, u]) => {
+    const own = runShare(countsOf(u), counted.get(model));
+    // A model only an earlier run of the session used adds nothing now.
+    if (counted.has(model) && TOKENS.every((k) => own[k] === 0)) return [];
+    return [{ staffId, kind, model, session: session ?? null, ...own }];
+  });
   if (rows.length) await db.insert(usage).values(rows);
 }
+
+/** The plan's one row in plan_limits: the owner's Claude plan, whose windows each run reports. */
+export const PLAN_ROW = 'claude';
+/** The plan's 5-hour window: one that resets at a time began this long before it. */
+export const WINDOW_MS = 5 * 3_600_000;
+
+/**
+ * When the window that resets at `resets` began. A window ask raised after
+ * it is this window's ask. The loader (`windowNow` in work/load.ts) tests that
+ * in SQL and the office clock (`windowAsksDue`) in code, both against this.
+ */
+export const windowBegan = (resets: Date): Date => new Date(resets.getTime() - WINDOW_MS);
 
 export type PlanWindows = {
   fiveHour: number;
@@ -46,8 +137,31 @@ export type PlanWindows = {
 export async function setPlanLimits(w: Partial<PlanWindows>): Promise<void> {
   await db
     .insert(planLimits)
-    .values({ id: 'claude', fiveHour: 0, sevenDay: 0, ...w, updatedAt: new Date() })
+    .values({ id: PLAN_ROW, fiveHour: 0, sevenDay: 0, ...w, updatedAt: new Date() })
     .onConflictDoUpdate({ target: planLimits.id, set: { ...w, updatedAt: new Date() } });
+}
+
+/** Why the office takes a window ask nobody answered off the desk at its window's reset. */
+export const WINDOW_ASK_LAPSED = 'The window reset before an answer.';
+
+/**
+ * Each open window ask, and when its window resets, for the office clock to
+ * take it off the desk then: the ask is about that window, so it leaves when
+ * the window does, whatever work it still holds. This window's ask (raised
+ * after `windowBegan`) is due at the reset; one from an older window is due
+ * already; with no reset reported, a window lasts `WINDOW_MS` at most.
+ */
+export async function windowAsksDue(): Promise<{ id: number; at: Date }[]> {
+  const [row] = await db.select().from(planLimits).where(eq(planLimits.id, PLAN_ROW));
+  const resets = row?.fiveHourResetsAt ?? null;
+  const open = await db
+    .select({ id: asks.id, createdAt: asks.createdAt })
+    .from(asks)
+    .where(and(eq(asks.kind, 'window'), eq(asks.status, 'open')));
+  return open.map(({ id, createdAt }) => {
+    if (!resets) return { id, at: new Date(createdAt.getTime() + WINDOW_MS) };
+    return { id, at: createdAt > windowBegan(resets) ? resets : createdAt };
+  });
 }
 
 /** What the staff call the owner. "the owner" until the install sets a name. */
@@ -80,7 +194,7 @@ export async function setOwnerName(name: string): Promise<void> {
 
 /** The plan windows as last reported. A window past its reset reads as unused. */
 export async function plan() {
-  const [row] = await db.select().from(planLimits).where(eq(planLimits.id, 'claude'));
+  const [row] = await db.select().from(planLimits).where(eq(planLimits.id, PLAN_ROW));
   if (!row) return null;
   const now = new Date();
   const fresh = (used: number, resetsAt: Date | null) => (resetsAt && resetsAt <= now ? 0 : used);

@@ -28,6 +28,7 @@ export function toProfile(r: StaffRow, guesses = 0): StaffProfile {
   return {
     id: r.id,
     name: r.name,
+    ...(r.claudeAgentName && { claudeAgentName: r.claudeAgentName }),
     role: r.role,
     office: r.office,
     sprite: r.sprite,
@@ -35,6 +36,7 @@ export function toProfile(r: StaffRow, guesses = 0): StaffProfile {
     portrait: r.portrait,
     hired: officeDay(new Date(r.hiredAt)),
     permission: r.permission,
+    actsOnHandOffs: r.actsOnHandOffs,
     agent: r.agent,
     ...(r.account ? { account: r.account } : {}),
     model: modelFor(r.agent, r.model),

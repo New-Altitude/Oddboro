@@ -1,8 +1,8 @@
 # Privacy Policy
 
-Effective date: November 9, 2026
+Effective date: November 15, 2026
 
-> **The short version.** Oddboro is open source software that runs on your own computer: a Mac, Windows or Linux. Its database lives on that computer. New Altitude, Inc. operates no server that stores your office's data. Signing in to a New Altitude account is optional. If you sign in and turn on error reports in Setup, the software sends reports of what broke through our relay to Sentry, without your account. If you also add a New Altitude persona as an Odd, your conversations with it go to New Altitude. When you connect the software to Anthropic or another service, your data goes to that service under your own account and its own terms, never through us. This website is static files: no cookies, no analytics, no forms, no third-party requests. The only personal data we can hold about you is the approximate location in error reports you turned on, and New Altitude's records of your sign-in and of your conversations with any persona you add. If that ever changes, we will update this policy, say so in the repository and on this site, and change the effective date above.
+> **The short version.** Oddboro is open source software that runs on your own computer: a Mac, Windows or Linux. Its database lives on that computer. New Altitude, Inc. operates no server that stores your office's data. Signing in to a New Altitude account is optional. If you sign in and turn on error reports in Setup, the software sends reports of what broke through our relay to Sentry, without your account. If you also add a New Altitude persona as an Odd, your conversations with it go to New Altitude. When you connect the software to Anthropic or another service, your data goes to that service under your own account and its own terms, never through us. This website asks before it counts your visit. If you click Allow, PostHog sets a cookie and records the pages you view and what you click on oddboro.com. It covers this website only: the Oddboro app sends it nothing. Cloudflare, which hosts the site, also counts page views, without cookies. The only personal data we can hold about you is what PostHog recorded on this site if you allowed it, the approximate location in error reports you turned on, and New Altitude's records of your sign-in and of your conversations with any persona you add. If that ever changes, we will update this policy, say so in the repository and on this site, and change the effective date above.
 
 ## 1. Who we are
 
@@ -23,7 +23,7 @@ This policy covers two things, and they work differently.
 It does not cover:
 
 - **GitHub.** When you visit, clone, star, or open an issue in the repository, GitHub collects what GitHub collects under [GitHub's privacy statement](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement).
-- **Anthropic, Ollama and any other service you connect the software to.** Each one handles your data under its own terms and privacy policy. Section 5 lists them.
+- **Anthropic and any other service you connect the software to or download from.** Each one handles your data under its own terms and privacy policy. Section 5 lists them.
 - **Your New Altitude account.** If you have one, New Altitude holds it under the [New Altitude Privacy Policy](https://newaltitude.ai/privacy) and the terms you accepted for it.
 
 ### Definitions
@@ -36,17 +36,32 @@ It does not cover:
 
 ## 3. The website
 
-This website is a set of static files. We built it to collect nothing.
+This website is a set of static files. It has no forms and no accounts. It counts visits in the two ways below and collects nothing else.
 
-- **No cookies.** The site sets none and reads none.
-- **No analytics or tracking.** No page views, no events, no pixels, no fingerprinting.
-- **No third-party requests.** The site serves its own fonts, styles, scripts and images. Your browser contacts no other company to show a page.
-- **No forms or accounts.** There is nothing to fill in and nowhere to sign up.
+### Analytics
+
+We use PostHog to learn how people use oddboro.com: which pages they read, where they came from and what they click. It covers this website only. The Oddboro app sends PostHog nothing, and nothing you do in the app reaches it.
+
+- **Only with your yes.** On your first visit, the site asks. Until you click Allow, PostHog does not load, sets no cookie and receives nothing. If you click No thanks, it stays off.
+- **What it records.** Each page you view and leave, the links and buttons you click, the page that sent you here, your browser, operating system and screen size, and the approximate location (country and city) your IP address points to. It records no screen recordings and no typing.
+- **What it stores in your browser.** A cookie and a local storage entry whose names start with `ph_`, holding a random ID, so PostHog can tell a returning visitor from a new one.
+- **Where it goes.** Your browser sends these events to oddboro.com, and the site passes them to PostHog, which stores them in the United States and processes them for us. We use them only to understand and improve this website. We do not sell them, share them for advertising, or combine them with anything that names you.
+- **Changing your mind.** Click Cookie settings at the bottom of any page. Choosing No thanks there stops the counting and removes PostHog's cookie and storage from your browser.
+- **Global Privacy Control and Do Not Track.** If your browser sends either signal, the site does not ask and never loads PostHog.
+- **Your answer.** The site remembers Allow or No thanks in your browser's local storage, under `oddboro.analytics`, so it does not ask on every page.
+
+### Cloudflare Web Analytics
+
+Cloudflare, which hosts the site, counts page views and how fast pages load with Cloudflare Web Analytics. It loads a small script from Cloudflare (`static.cloudflareinsights.com`), and that script is the one request your browser makes to another company to show a page. Cloudflare says it sets no cookie, stores nothing in your browser and does not fingerprint visitors for it. We see only totals, such as page views per page, referring sites and countries.
+
+### Other things the site keeps or sees
+
 - **One setting, kept on your device.** If you pick the day or night look in the header, the site remembers it in your browser's local storage. That value never leaves your device, and clearing the site's data removes it.
+- **Fonts, styles, scripts and images** all come from oddboro.com itself.
 
 **Server logs.** The provider that hosts the site may keep standard server logs for security and to keep the service running. A typical log line holds the IP address a request came from, the browser's user agent string, the time, and the page requested. We do not add to those logs, we do not use them to identify or profile anyone, and we do not combine them with anything else. The provider keeps them for its own standard period under its own policy.
 
-**Links.** The site links to GitHub, Anthropic, Ollama and others. Once you follow a link, the site you land on governs.
+**Links.** The site links to GitHub, Anthropic and others. Once you follow a link, the site you land on governs.
 
 ## 4. The software runs on your computer
 
@@ -60,7 +75,7 @@ Everything Oddboro stores, it stores on the computer you run it on. We verified 
 | Each Odd's working files                                                                                                                                                                                                                                                            | `~/.oddboro/staff/<id>/`                                                                                                                                                                                     |
 | Each Odd's Claude Code transcripts: the chats and runs Claude Code keeps so it can pick up where it left off                                                                                                                                                                        | `~/.claude/projects/`, in a folder named after the Odd's folder                                                                                                                                              |
 | Your Anthropic API key (if you use one), your Google sign-ins, your New Altitude sign-in with your account's id, name and email (if you sign in), the sign-in of each New Altitude persona you add as an Odd and a list of which ones have one, and sign-ins for other hosted tools | Your system's secret store: the Keychain on a Mac (service `com.oddboro.office`, locked to Oddboro), the Credential Manager on Windows and the desktop keyring (Secret Service) on Linux (service `oddboro`) |
-| Office settings (which model, plan or key, time zone, and your answer about error reports)                                                                                                                                                                                          | The `.env` file: in the app, `~/.oddboro/.env`; from source, the one in your copy of the repository. Git ignores it.                                                                                         |
+| Office settings (which model, plan or key, time zone, your answer about error reports, and your weather place if you turned weather on)                                                                                                                                             | The `.env` file: in the app, `~/.oddboro/.env`; from source, the one in your copy of the repository. Git ignores it.                                                                                         |
 | Backups made by `npm run reset`                                                                                                                                                                                                                                                     | `~/.oddboro/backups/<date>/`                                                                                                                                                                                 |
 
 You may point the office at a different Postgres database by setting `DATABASE_URL` in `.env`. If you choose a database hosted by someone else, your ledger goes to that provider under your agreement with them. That is your choice, and we are not part of it.
@@ -92,9 +107,9 @@ If you run Oddboro from source, it sends no reports unless you name your own Sen
 
 To stop: open Setup and turn off "Send error and tracing reports to New Altitude". The office stops at once. Signing out stops them too.
 
-### Local search embeddings
+### Ledger search
 
-If you install [Ollama](https://ollama.com) and the `nomic-embed-text` model, the office turns ledger text into vectors so Odds can search decisions by meaning. That request goes to Ollama at `127.0.0.1:11434` on your computer and nowhere else. Without Ollama, search works by words only and nothing changes about where data lives.
+If you click Download on the ledger search line in Setup, the office downloads a search model (Nomic Embed Text v1.5, about 140 MB) from Oddboro's own releases on GitHub, once, and keeps it in the office's folder on your computer. The office then turns ledger text into vectors itself, so Odds can search decisions by meaning. That text, and what an Odd searches for, never leaves your computer. Without the model, search works by words only and nothing changes about where data lives.
 
 ### System features the software uses
 
@@ -143,13 +158,11 @@ If New Altitude offers your account a persona, such as Nate, you can add it as a
 - New Altitude keeps these conversations under the [New Altitude Privacy Policy](https://newaltitude.ai/privacy), may let its staff read them, and sends them to the AI providers it uses.
 - To stop, choose Disconnect next to the persona under Setup, Account, or sign out. It stays in your office, quiet.
 
-### Ollama
-
-Local only. See section 4.
-
 ### GitHub
 
-You clone the software from GitHub. If you choose the `https://local.oddboro.com` address during setup and your computer has no [Caddy](https://caddyserver.com), the office downloads the official Caddy release from GitHub (`api.github.com` and GitHub's release files) and checks it against the published checksum. GitHub sees those download requests.
+You clone the software from GitHub. The search model also comes from Oddboro's own GitHub releases, once, when you turn on ledger search by clicking Download in Setup. GitHub sees that download request as it sees the app's update checks: your IP address and the files asked for, and nothing of yours. The office checks each file against a checksum fixed in the software before it uses it. See section 4.
+
+If you choose the `https://local.oddboro.com` address during setup and your computer has no [Caddy](https://caddyserver.com), the office downloads the official Caddy release from GitHub (`api.github.com` and GitHub's release files) and checks it against the published checksum. GitHub sees those download requests.
 
 An Odd may also ask for your GitHub, through GitHub's own MCP server. You approve or deny it, and you sign in to GitHub yourself, in your browser. GitHub shows you what Oddboro asks for: `repo` (the repositories you can reach, public and private), `read:org` (your organizations) and `read:user` (your profile). GitHub has no narrower way to read private repositories, so the access you give each Odd sets what it may do, as for any other tool: at Read it gets only GitHub's tools that read.
 
@@ -197,6 +210,15 @@ An Odd may ask to read your LegalZoom physical mailbox, through LegalZoom's own 
 - **What an Odd reads goes to the AI service it runs on**, as with Google above.
 - **Disconnecting.** Revoking the last grant removes the sign-in from your computer.
 
+### Weather (only if you turn it on)
+
+Weather is off until you turn it on in Setup, under Weather. Then the office shows the weather where you are, beside your desk count.
+
+- **Your country goes to GeoNames, once.** When you press Show weather, the office downloads the postal code list for the country you picked from GeoNames (`download.geonames.org`). Your postal code never leaves your computer: the office looks it up in that list, keeps only the match, and does not keep the list. GeoNames sees the country and your IP address.
+- **Rounded coordinates go to MET Norway, about once an hour.** While the office is open on your screen, it asks MET Norway, the Norwegian Meteorological Institute (`api.met.no`), for the forecast at your place's latitude and longitude rounded to one decimal, about 11 km. It asks no more often than MET Norway's answer allows, and not at all while no window of the office is on screen. MET Norway sees the coordinates, Oddboro's name and version, and your IP address.
+- **What the office keeps.** Your country, the postal code as you typed it, the place it matched, the rounded coordinates and °C or °F, in the office's `.env` file. Your Odds do not get it. Turn off in Setup removes it and stops the checks.
+- **Credits.** Weather data from [MET Norway](https://www.met.no/en), under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Places from [GeoNames](https://www.geonames.org), under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+
 ### Other tools you connect
 
 An Odd may ask for a hosted tool (a service reached over the network). You approve or deny every connection, and you sign in to the service yourself. The office keeps the sign-in tokens in your system's secret store and refreshes them before each run. Data the Odd reads from or writes to that service goes to that service under its own terms. Each Odd gets only the access you give it: a tool connects read only, or with write from the Draft level. At Draft, each change through a write grant waits for your yes. At Act, a write-level grant to one Odd for one tool is your standing permission for that Odd to use that tool without asking each time. You can lower the Odd's level, which pauses the grant, or revoke the grant from the Odd's Settings, under Services, at any time.
@@ -205,7 +227,7 @@ An Odd may ask for a hosted tool (a service reached over the network). You appro
 
 ### What we keep
 
-New Altitude keeps no personal data about users of the software except error and tracing reports from people who turned them on, held by Sentry for a limited time as section 4 describes, and, for people who sign in to a New Altitude account, the record of that sign-in, kept with the account under the New Altitude Privacy Policy, and, for people who add a New Altitude persona as an Odd, their conversations with it, kept under the New Altitude Privacy Policy. The only data that can exist about your visit to this site is the hosting provider's server log described in section 3.
+New Altitude keeps no personal data about users of the software except error and tracing reports from people who turned them on, held by Sentry for a limited time as section 4 describes, and, for people who sign in to a New Altitude account, the record of that sign-in, kept with the account under the New Altitude Privacy Policy, and, for people who add a New Altitude persona as an Odd, their conversations with it, kept under the New Altitude Privacy Policy. About your visit to this site, there can be the hosting provider's server log and Cloudflare Web Analytics' totals, and, if you clicked Allow, the events PostHog recorded, as section 3 describes. PostHog keeps those events for the period our PostHog plan sets, then deletes them.
 
 ### What is on your computer, and how to delete it
 
@@ -244,13 +266,13 @@ No software is perfectly secure. Your computer's own security (its login, disk e
 
 ## 8. Children
 
-Oddboro and this website are not directed to children. We do not knowingly collect personal data from anyone under 13, or under 16 where the law sets that age. The only personal data we can hold is the approximate location in error reports people chose to send, the record of a New Altitude sign-in people chose to make, and their conversations with a New Altitude persona they chose to add as an Odd. If you believe a child has given us personal data somehow, email privacy@oddboro.com and we will delete it.
+Oddboro and this website are not directed to children. We do not knowingly collect personal data from anyone under 13, or under 16 where the law sets that age. The only personal data we can hold is what PostHog recorded on this website for visitors who clicked Allow, the approximate location in error reports people chose to send, the record of a New Altitude sign-in people chose to make, and their conversations with a New Altitude persona they chose to add as an Odd. If you believe a child has given us personal data somehow, email privacy@oddboro.com and we will delete it.
 
 ## 9. International users
 
-New Altitude is a company in the United States. This website is static files served by a hosting provider, which may serve them from locations around the world. The software runs on your computer in whatever country you are in, and we move nothing from it. The one exception is error and tracing reports, if you turn them on: they go through our relay on Cloudflare to Sentry, which stores them in the United States. A New Altitude sign-in, if you make one, goes to New Altitude, whose privacy policy says where it is processed. So do your conversations with a New Altitude persona you add as an Odd; New Altitude's privacy policy says where they are processed and which AI providers handle them. If you connect the software to Anthropic or another service, that service's own policy explains where it processes data and on what legal basis.
+New Altitude is a company in the United States. This website is static files served by a hosting provider, which may serve them from locations around the world. If you allow analytics, PostHog stores what it records in the United States. The software runs on your computer in whatever country you are in, and we move nothing from it. The one exception is error and tracing reports, if you turn them on: they go through our relay on Cloudflare to Sentry, which stores them in the United States. A New Altitude sign-in, if you make one, goes to New Altitude, whose privacy policy says where it is processed. So do your conversations with a New Altitude persona you add as an Odd; New Altitude's privacy policy says where they are processed and which AI providers handle them. If you connect the software to Anthropic or another service, that service's own policy explains where it processes data and on what legal basis.
 
-If you are in the European Economic Area, the United Kingdom or Switzerland: when you run the software, you decide what data goes in and where it goes, so you are the controller of that data (or you use it for purely personal or household purposes, which the GDPR does not cover). New Altitude is neither a controller nor a processor of it. For the website, the only processing is the hosting provider's server log, which rests on legitimate interest in keeping the site secure and running (GDPR Article 6(1)(f)). For error and tracing reports you agreed to send, New Altitude is the controller, the legal basis is your consent (GDPR Article 6(1)(a)), and you can withdraw it in Setup at any time. Sentry and Cloudflare process them for us. For your New Altitude account, its sign-ins and your conversations with a New Altitude persona you add as an Odd, New Altitude is the controller under the New Altitude Privacy Policy.
+If you are in the European Economic Area, the United Kingdom or Switzerland: when you run the software, you decide what data goes in and where it goes, so you are the controller of that data (or you use it for purely personal or household purposes, which the GDPR does not cover). New Altitude is neither a controller nor a processor of it. For the website, the hosting provider's server log and Cloudflare Web Analytics' cookieless totals rest on legitimate interest in keeping the site secure, running and useful (GDPR Article 6(1)(f)). PostHog analytics rests on your consent (GDPR Article 6(1)(a)): New Altitude is the controller, PostHog processes the data for us, and you can withdraw consent at any time under Cookie settings at the bottom of any page. For error and tracing reports you agreed to send, New Altitude is the controller, the legal basis is your consent (GDPR Article 6(1)(a)), and you can withdraw it in Setup at any time. Sentry and Cloudflare process them for us. For your New Altitude account, its sign-ins and your conversations with a New Altitude persona you add as an Odd, New Altitude is the controller under the New Altitude Privacy Policy.
 
 ## 10. Your privacy rights
 
@@ -258,7 +280,7 @@ Laws including the EU and UK GDPR, the California Consumer Privacy Act as amende
 
 We respect all of these. Honestly stated, here is how they apply:
 
-- **We hold almost no personal data about you.** If you turned on error reports, Sentry holds them for us, each with an approximate location. Reports carry no name, account or IP address, so we cannot tell which ones are yours. Sentry deletes every report after a limited time. If you signed in to a New Altitude account, New Altitude holds the account, its sign-in records and your conversations with any New Altitude persona you added as an Odd under the New Altitude Privacy Policy.
+- **We hold almost no personal data about you.** If you clicked Allow on this website, PostHog holds the events it recorded, tied to the random ID in its cookie, not to your name. To have them deleted, email us the ID from the `ph_` cookie if you can, or click Cookie settings and choose No thanks to stop further counting. If you turned on error reports, Sentry holds them for us, each with an approximate location. Reports carry no name, account or IP address, so we cannot tell which ones are yours. Sentry deletes every report after a limited time. If you signed in to a New Altitude account, New Altitude holds the account, its sign-in records and your conversations with any New Altitude persona you added as an Odd under the New Altitude Privacy Policy.
 - **We do not sell personal information, we do not share it for cross-context behavioral advertising, and we do not use it for targeted advertising or profiling.** We have not done so in the preceding twelve months. There is no sale or sharing to opt out of. Error reports are a separate choice, and you can turn them off in Setup at any time.
 - **We do not collect sensitive personal information** as those laws define it.
 - **We do not discriminate** against anyone for exercising a privacy right.
@@ -271,7 +293,7 @@ If you are in the EEA or the UK, you have the right to complain to your data pro
 
 ## 11. Do Not Track and Global Privacy Control
 
-The website tracks nothing, so a Do Not Track header and a Global Privacy Control signal change nothing: there is no tracking to turn off. We treat both as honored.
+If your browser sends a Do Not Track header or a Global Privacy Control signal, the website treats it as No thanks: it does not ask to count your visit and never loads PostHog. Cloudflare Web Analytics, which stores nothing in your browser and counts only totals, still counts the page view.
 
 ## 12. Future features and changes to this policy
 
@@ -285,6 +307,10 @@ When we change this policy:
 4. A material change does not apply retroactively to data collected under an earlier version without your consent, where the law requires consent.
 
 The version at oddboro.com is the current one. Earlier versions stay in the repository's history.
+
+### Changes
+
+- **November 13, 2026.** The website now counts visits: PostHog, only after you click Allow, and Cloudflare Web Analytics, without cookies. Section 3 describes both. Nothing changed in the software.
 
 ## 13. Contact
 

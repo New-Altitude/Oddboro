@@ -36,6 +36,8 @@
   /** Counts sign-ins, so one that was started over or cancelled no longer changes the card. */
   let attempt = 0;
   let problem = $state('');
+  /** The sign-in page Claude Code printed, for when no browser opened on its own. */
+  let page = $state<string>();
   const waiting = $derived(switching || !!settings?.signingIn);
 
   const tell = (s: Settings) => {
@@ -86,13 +88,17 @@
     problem = '';
     const mine = ++attempt;
     switching = true;
+    page = undefined;
     try {
-      await stream<{ done?: boolean }>('/api/setup/claude', { action: 'sign-in' }, () => {});
+      await stream<{ url?: string }>('/api/setup/claude', { action: 'sign-in' }, (o) => {
+        if (o.url && mine === attempt) page = o.url;
+      });
     } catch (e) {
       if (mine === attempt) problem = e instanceof Error ? e.message : String(e);
     } finally {
       if (mine === attempt) {
         switching = false;
+        page = undefined;
         await load();
       }
     }
@@ -102,6 +108,7 @@
   async function cancelSignIn() {
     attempt++;
     switching = false;
+    page = undefined;
     problem = '';
     try {
       await call('/api/setup/claude', undefined, 'DELETE');
@@ -187,6 +194,15 @@
       <div class="text-[10px] tracking-[0.14em] text-muted uppercase">Signed in as</div>
       {#if waiting}
         <p class="mt-1 text-sm text-muted">Finish signing in on the page that opened.</p>
+        {#if page}
+          <!-- Claude Code opens the page itself, and a computer with no browser it can reach gets none (#281). -->
+          <a
+            class="mt-1 inline-block text-sm text-sea underline underline-offset-2"
+            href={page}
+            target="_blank"
+            rel="noopener noreferrer">No page opened? Open the sign-in page</a
+          >
+        {/if}
       {:else if settings?.account}
         <p class="mt-1 font-medium break-all">{settings.account.email ?? 'Your account'}</p>
         {#if plan}
@@ -214,7 +230,7 @@
       <button class="wide" onclick={cancelSignIn}>Cancel signing in</button>
     {:else}
       <button class="wide" onclick={switchAccount}
-        >{settings?.account ? 'Switch account' : 'Sign in with Claude'}</button
+        >{settings?.account ? 'Switch account' : 'Sign in to Claude Code'}</button
       >
       {#if settings?.account}
         <button class="wide" disabled={saving} onclick={signOut}>Sign out</button>

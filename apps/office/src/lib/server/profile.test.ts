@@ -18,6 +18,7 @@ const { holdNetwork, resetHeldNetwork } = await import('@oddboro/ledger');
 const row = (o: Partial<StaffRow> = {}): StaffRow => ({
   id: 'penny',
   name: 'Penny',
+  claudeAgentName: null,
   role: 'Writer',
   office: 'Main Street',
   sprite: 'staff',
@@ -25,6 +26,7 @@ const row = (o: Partial<StaffRow> = {}): StaffRow => ({
   portrait: 'a',
   room: 'workspace',
   permission: 'draft',
+  actsOnHandOffs: false,
   agent: 'claude',
   account: null,
   model: null,

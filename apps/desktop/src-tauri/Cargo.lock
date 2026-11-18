@@ -2628,6 +2628,7 @@ dependencies = [
  "libc",
  "mac-notification-sys",
  "reqwest",
+ "ring",
  "rustls",
  "security-framework",
  "sentry",
@@ -2639,6 +2640,8 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
  "tauri-winrt-notification",
+ "tempfile",
+ "webkit2gtk",
  "windows-sys 0.61.2",
  "zbus",
 ]

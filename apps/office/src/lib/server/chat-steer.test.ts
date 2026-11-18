@@ -112,7 +112,7 @@ test('words added after the result of a Claude Code chat still end with Claude C
   const claude = await addAtStep('sam');
   assert.equal(claude.added, true);
   assert.equal(gaveOf(claude.text).message.trimEnd().split('\n').at(-1), 'Hello.');
-  // Grok reads its message once (`--single`), so its chat takes nothing more.
+  // Grok reads its message once, from its prompt file, so its chat takes nothing more.
   const grok = await addAtStep('gus');
   assert.equal(grok.added, false, grok.text);
   assert.equal(
@@ -218,4 +218,23 @@ test('a message about work tells the lead which work it changes, and nothing els
     })
   );
   assert.deepEqual(aboutBrief(line), []);
+});
+
+test('a chat reply tells every page who is replying as it starts, and again as it ends', async (t) => {
+  const id = 'cleo';
+  const ready = join(folder, 'reply-ready');
+  const told: string[][] = [];
+  const hear = (e: { type: string; chatting?: string[] }) => {
+    if (e.type === 'working') told.push(e.chatting ?? []);
+  };
+  bus.on('event', hear);
+  t.after(() => {
+    bus.off('event', hear);
+    rmSync(ready, { force: true });
+  });
+  const stream = await send(id, { turnId: randomUUID(), message: `Hold until ${ready} exists.` });
+  await t.waitFor(() => assert.ok(told.some((c) => c.includes(id))), { timeout: 20_000 });
+  writeFileSync(ready, '');
+  assert.equal((await last(stream)).type, 'done');
+  assert.deepEqual(told.at(-1), []);
 });

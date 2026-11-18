@@ -27,7 +27,6 @@
 // outlast it (`grokSignedOut`). Where the Mac's Docker socket is a link, the
 // run gets a home of its own so Grok's sandbox can start (`runHome`).
 // Windows has no Grok sandbox, so there the office's tools are the wall.
-import { execFile, spawn } from 'node:child_process';
 import {
   accessSync,
   chmodSync,
@@ -53,8 +52,11 @@ import {
   runsGoing,
   toolHome,
   currentPlatform,
+  probe,
   type Effort
 } from '@oddboro/ledger';
+import type { Launch } from './cli.ts';
+import { claudeReader } from './claude.ts';
 import { andBelow, denyRules, instructionPaths } from './files.ts';
 import { mcpGrant, NOT_SIGNED_IN, replace, sweep, vendorEnv, type RunImage } from './launch.ts';
 import { runEnv } from './run-env-allow.ts';
@@ -232,14 +234,20 @@ type GrokRun = {
 };
 
 /**
- * The message as Grok takes it, joined to its flag, so a message or job
- * description that starts with "-" is never read as a flag: grok takes no
- * "--" before a value and reads no input (both measured on Grok 1.0.46).
- * With pictures, the message goes as ACP content blocks, each picture an
- * `image` block of base64 and its type (the shape grok 1.0.62 accepts).
+ * The run's message, in a file beside its agent file, for `--prompt-file`: on
+ * the command line, a long message or a picture passed the 32,767 characters
+ * Windows allows. A `.txt` file is plain text. A `.json` file is ACP content
+ * blocks, each picture an `image` block of base64 and its type, then the
+ * message (both measured on Grok 1.0.77: Grok reads blocks only from `.json`).
+ * Only the owner may read it, and it goes when the run ends.
  */
-function messageArg(message: string, images: RunImage[] = []): string {
-  if (!images.length) return `--single=${message}`;
+function promptFile(h: GrokHome, key: string, message: string, images: RunImage[] = []): string {
+  for (const end of PROMPT_ENDS) sweep(h.runs, end, key);
+  if (!images.length) {
+    const file = join(h.runs, `${key}${PROMPT_ENDS[0]}`);
+    replace(file, message);
+    return file;
+  }
   const blocks = [
     ...images.map((i) => ({
       type: 'image',
@@ -248,10 +256,14 @@ function messageArg(message: string, images: RunImage[] = []): string {
     })),
     { type: 'text', text: message }
   ];
-  return `--prompt-json=${JSON.stringify(blocks)}`;
+  const file = join(h.runs, `${key}${PROMPT_ENDS[1]}`);
+  replace(file, JSON.stringify(blocks));
+  return file;
 }
+const PROMPT_ENDS = ['.prompt.txt', '.prompt.json'] as const;
 
-type GrokLaunch = { args: string[]; env: NodeJS.ProcessEnv; done: () => void };
+/** Grok reads its message from its prompt file, so its launch has no input (`LAUNCHES.grok` in cli.ts). */
+type GrokLaunch = Omit<Launch, 'stdin'>;
 
 /** A sandbox profile, kept in the Grok home's sandbox.toml. */
 type Profile = { readOnly: string[]; readWrite: string[]; deny: string[] };
@@ -303,12 +315,21 @@ function mcpRule(allowed: string): string {
 const EDITS = ['Edit', 'Write'];
 
 /**
- * The agent file that gives the run its MCP servers. Its frontmatter is YAML,
- * and a JSON object is YAML. It holds the connectors' secrets, so only the
+ * The agent file that gives the run its MCP servers and its system prompt.
+ * Its frontmatter is YAML, and a JSON object is YAML. With `prompt_mode:
+ * extend`, its body is added to Grok's own prompt, as `--rules` adds it, and
+ * a resumed session keeps its first run's, as with `--rules` (both measured
+ * on Grok 1.0.77). On the command line, the prompt helped pass the 32,767
+ * characters Windows allows. It holds the connectors' secrets, so only the
  * owner may read it, and it goes when the run ends. A file a run that died
  * with the office left behind goes at the next Grok run.
  */
-function agentFile(h: GrokHome, key: string, servers: Record<string, unknown>): string {
+function agentFile(
+  h: GrokHome,
+  key: string,
+  servers: Record<string, unknown>,
+  system: string
+): string {
   mkdirSync(h.runs, { recursive: true, mode: 0o700 });
   sweep(h.runs, '.md', key);
   const file = join(h.runs, `${key}.md`);
@@ -316,7 +337,7 @@ function agentFile(h: GrokHome, key: string, servers: Record<string, unknown>): 
   const list = Object.entries(servers).map(([name, server]) => ({ [name]: server }));
   replace(
     file,
-    `---\nname: odd\ndescription: An Oddboro staffer's run\nmcpServers: ${JSON.stringify(list)}\n---\n`
+    `---\nname: odd\ndescription: An Oddboro staffer's run\nprompt_mode: extend\nmcpServers: ${JSON.stringify(list)}\n---\n${system}\n`
   );
   return file;
 }
@@ -399,10 +420,12 @@ export function grokLaunch(r: GrokRun): GrokLaunch {
       readWrite: [h.temp, ...r.writes.filter((w) => w !== r.dir)],
       deny: [...instructionPaths(r.writes), ...shut()].flatMap(andBelow)
     });
-  const agent = agentFile(h, r.key, ownersHome(r.servers));
+  const agent = agentFile(h, r.key, ownersHome(r.servers), r.system);
+  const prompt = promptFile(h, r.key, r.message, r.images);
   const model = r.model ?? process.env[OFFICE_MODEL_VAR.grok];
   const args = [
-    messageArg(r.message, r.images),
+    '--prompt-file',
+    prompt,
     '--output-format',
     'streaming-messages-json',
     '--include-partial-messages',
@@ -439,7 +462,6 @@ export function grokLaunch(r: GrokRun): GrokLaunch {
     // Browse the web on is the owner's yes. web_search never asks.
     ...(r.web && !r.bare ? ['--allow', 'web_fetch'] : []),
     ...(model ? ['-m', model] : []),
-    `--rules=${r.system}`,
     ...(r.resume ? ['-r', r.resume] : ['-s', r.newSession])
   ];
   // web_fetch is off in every other grok the office starts (`grokEnv`).
@@ -447,7 +469,16 @@ export function grokLaunch(r: GrokRun): GrokLaunch {
   if (r.web) env.GROK_WEB_FETCH = '1';
   const runsIn = kernel ? runHome(h) : undefined;
   if (runsIn) env.HOME = runsIn;
-  return { args, env, done: () => rmSync(agent, { force: true }) };
+  return {
+    args,
+    env,
+    done: () => {
+      rmSync(agent, { force: true });
+      rmSync(prompt, { force: true });
+    },
+    // Grok streams in Claude Code's shape, naming its own tools.
+    read: claudeReader('grok')
+  };
 }
 
 /**
@@ -455,24 +486,35 @@ export function grokLaunch(r: GrokRun): GrokLaunch {
  * --json`) on the office's home and leader socket, or nothing when it cannot
  * say.
  */
-export function grokLatest(): Promise<string | undefined> {
+export async function grokLatest(): Promise<string | undefined> {
   const h = grokHome();
   grokHomeReady(h);
-  return new Promise((done) =>
-    execFile(
-      grokCommand() ?? 'grok',
-      ['update', '--check', '--json', '--leader-socket', h.leader],
-      { cwd: h.dir, env: grokEnv(h), timeout: 15_000, windowsHide: true },
-      (_e, out) => {
-        try {
-          const v = (JSON.parse(String(out)) as { latestVersion?: unknown }).latestVersion;
-          done(typeof v === 'string' && v ? v : undefined);
-        } catch {
-          done(undefined);
-        }
-      }
-    )
+  const r = await probe(
+    grokCommand() ?? 'grok',
+    ['update', '--check', '--json', '--leader-socket', h.leader],
+    { cwd: h.dir, env: grokEnv(h), timeout: 15_000 }
   );
+  let out: string;
+  switch (r.status) {
+    // Grok may exit with an error and still print its answer.
+    case 'ok':
+    case 'failed':
+      out = r.out;
+      break;
+    case 'missing':
+    case 'timeout':
+      return undefined;
+    default: {
+      const missed: never = r;
+      throw new Error(`Grok's update check came back as ${JSON.stringify(missed)}`);
+    }
+  }
+  try {
+    const v = (JSON.parse(out) as { latestVersion?: unknown }).latestVersion;
+    return typeof v === 'string' && v ? v : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -612,23 +654,16 @@ const renewing = new Map<string, Promise<void>>();
 function renew(h: GrokHome): Promise<void> {
   const going = renewing.get(h.dir);
   if (going) return going;
-  const next = new Promise<void>((done) => {
-    // Outside the sandbox, so on the home's own leader socket, never the owner's.
-    const child = spawn(grokCommand() ?? 'grok', ['models', '--leader-socket', h.leader], {
-      cwd: h.dir,
-      env: grokEnv(h),
-      stdio: 'ignore'
-    });
-    // Its own timer rather than spawn's `timeout`, which a test's mock timers
-    // cannot reach, so the test need not wait the 30 seconds out.
-    const limit = setTimeout(() => child.kill('SIGKILL'), RENEW_MS);
-    const end = () => {
-      clearTimeout(limit);
-      done();
-    };
-    child.on('error', end);
-    child.on('close', end);
-  }).finally(() => renewing.delete(h.dir));
+  // Outside the sandbox, so on the home's own leader socket, never the owner's.
+  // How it ended does not matter: the caller reads `expires_at` either way.
+  const next = probe(grokCommand() ?? 'grok', ['models', '--leader-socket', h.leader], {
+    cwd: h.dir,
+    env: grokEnv(h),
+    timeout: RENEW_MS,
+    killSignal: 'SIGKILL'
+  })
+    .then(() => {})
+    .finally(() => renewing.delete(h.dir));
   renewing.set(h.dir, next);
   return next;
 }

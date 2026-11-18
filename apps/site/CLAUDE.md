@@ -82,11 +82,21 @@ site in the same change.
 
 ## The promise
 
-The site makes no third-party request. The fonts ship with it
+The site serves everything from oddboro.com. The fonts ship with it
 (`@fontsource/geist-pixel`, `@fontsource-variable/inter`), and there are no
-analytics, cookies, trackers, embeds or forms. It holds no secrets and collects
-nothing. The privacy policy says so, so a change that adds a request to another
-host is a change to the policy first.
+embeds or forms. It counts visits two ways, and the privacy policy's section 3
+describes both:
+
+- **PostHog**, only after the visitor clicks Allow in `ConsentBanner.svelte`.
+  `src/lib/analytics.svelte.ts` loads it then, never before, and never for a
+  browser that sends Global Privacy Control or Do Not Track. Events go to
+  `/ingest`, which `worker.ts` forwards to PostHog's US cloud. The footer's
+  Cookie settings asks again.
+- **Cloudflare Web Analytics**, cookieless, turned on in Cloudflare's
+  dashboard, not in this code. Its beacon is the one request to another host.
+
+The policy says exactly this, so a change that adds a request, a cookie or an
+event is a change to the policy first.
 
 ## Theme
 
