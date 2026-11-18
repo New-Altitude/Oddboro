@@ -8,11 +8,7 @@
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { fileURLToPath } from 'node:url';
-import { PGlite } from '@electric-sql/pglite';
-import { vector } from '@electric-sql/pglite-pgvector';
-import { drizzle } from 'drizzle-orm/pglite';
-import { migrate } from 'drizzle-orm/pglite/migrator';
+import { db } from './pglite.ts';
 
 const folder = new URL('../migrations/', import.meta.url);
 
@@ -62,13 +58,6 @@ test("every migration's journal time is later than the one before it, and every 
 });
 
 test('0038_project_session_folders runs again with no error on a database that already has its columns, as on an office that ran its earlier form under 0036', async () => {
-  const client = await PGlite.create({ extensions: { vector } });
-  try {
-    await client.exec('create extension if not exists vector');
-    await migrate(drizzle(client), { migrationsFolder: fileURLToPath(folder) });
-    // exec, since the file holds two statements, which one prepared query refuses.
-    await client.exec(readFileSync(new URL('0038_project_session_folders.sql', folder), 'utf8'));
-  } finally {
-    await client.close();
-  }
+  // exec, since the file holds two statements, which one prepared query refuses.
+  await db.$client.exec(readFileSync(new URL('0038_project_session_folders.sql', folder), 'utf8'));
 });
