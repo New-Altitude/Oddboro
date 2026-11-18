@@ -75,12 +75,20 @@ const queue = (s: ProjectSession) =>
 const stateOf = async (s: ProjectSession) => (await L.projectWork(s.id))[0].state;
 /** The readiness check's probe in the inbox of `s`, which its plugin's receivers answer. */
 const probe = (s: ProjectSession) => join(L.home('project-sessions', s.id, 'inbox'), 'probe.json');
-/** Answers the readiness check waiting for `s`, as both of its plugin's receivers do. */
+/**
+ * Answers the readiness check waiting for `s`, as both of its plugin's
+ * receivers do, and returns once the check has ended, which removes its probe.
+ */
 async function answerProbe(s: ProjectSession) {
   await until(() => existsSync(probe(s)), 'no readiness check began');
   const { key } = JSON.parse(readFileSync(probe(s), 'utf8')) as { key: string };
   for (const receiver of L.PROJECT_RECEIVERS)
     writeFileSync(join(probe(s), '..', `${key}.${receiver}`), '');
+  // The check hears the answers through a folder watch, which a busy machine
+  // delivers late, so this sets no limit of its own. The check's own 30-second
+  // limit removes the probe too, inside the test's 60 seconds, and fails the
+  // work, which each caller's next assertion catches.
+  while (existsSync(probe(s))) await new Promise((resolve) => setTimeout(resolve, 10));
 }
 /** Whether the offer of an assignment was posted to the inbox of `s`, for its Claude to take. */
 const offered = (s: ProjectSession) =>
@@ -534,9 +542,9 @@ async function claimWhile<T>(s: ProjectSession, press: () => Promise<T>) {
   const unlock = await lockRow(s);
   try {
     const sending = c.work(s.id);
+    // The claim begins with no wait after the check passes, so once the check
+    // has ended the claim is under way, held on the row's lock.
     await answerProbe(s);
-    // The check removes its probe as it passes, and the claim begins with no wait between.
-    await until(() => !existsSync(probe(s)), 'the readiness check never passed');
     const pressed = await press();
     await unlock();
     await sending;
