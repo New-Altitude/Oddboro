@@ -518,23 +518,59 @@ test('One trust question that ends twice starts Start again only once', async ()
   }
 });
 
-test("A trust question another window's Start replaced goes, and starts nothing here", async () => {
-  const shown = await askedToTrust(() => ({ setup: 'setup-2' }));
-  try {
-    setupStream('setup-1').send('replaced', true);
-    await settled(shown);
-    assert.equal(setupShown(shown.target), false, 'the line and its terminal are gone');
-    assert.equal(button(shown.target, 'Start').disabled, false, 'Start is ready again');
-    assert.deepEqual(asked('disconnect'), [], 'the office already closed it');
-    assert.deepEqual(alerts(shown.target), [], 'no error');
+test("A trust question another window's Start replaced goes, says why under Start, and starts nothing here", async (t) => {
+  await t.test(
+    'the line shows in place of the question, and its stream ending starts nothing',
+    async () => {
+      const shown = await askedToTrust(() => ({ setup: 'setup-2' }));
+      try {
+        setupStream('setup-1').send('replaced', true);
+        await settled(shown);
+        assert.equal(setupShown(shown.target), false, 'the trust line and its terminal are gone');
+        assert.equal(button(shown.target, 'Start').disabled, false, 'Start is ready again');
+        assert.deepEqual(asked('disconnect'), [], 'the office already closed it');
+        assert.deepEqual(alerts(shown.target), [PROJECT_WORDS.replaced], 'why it closed');
 
-    // Its stream ending after that, as an end or a refusal, starts nothing.
-    answered('setup-1');
-    setupStream('setup-1').fail(true);
-    await settled(shown);
-    assert.equal(asked('connect').length, 1, 'no Start');
-    assert.equal(says(shown.target, PROJECT_WORDS.notTrusted), false, 'no line');
-  } finally {
-    await shown.unmount();
-  }
+        // Its stream ending after that, as an end or a refusal, starts nothing.
+        answered('setup-1');
+        setupStream('setup-1').fail(true);
+        await settled(shown);
+        assert.equal(asked('connect').length, 1, 'no Start');
+        assert.equal(says(shown.target, PROJECT_WORDS.notTrusted), false, 'no line');
+        assert.deepEqual(alerts(shown.target), [PROJECT_WORDS.replaced], 'the line stays');
+      } finally {
+        await shown.unmount();
+      }
+    }
+  );
+
+  await t.test('pressing Start takes the line away', async () => {
+    const shown = await askedToTrust(() => ({ setup: 'setup-2' }));
+    try {
+      setupStream('setup-1').send('replaced', true);
+      await settled(shown);
+      button(shown.target, 'Start').click();
+      await settled(shown);
+      assert.equal(asked('connect').length, 2, 'Start ran');
+      assert.deepEqual(alerts(shown.target), [], 'the line is gone');
+      assert.ok(setupShown(shown.target), 'the new question shows');
+    } finally {
+      await shown.unmount();
+    }
+  });
+
+  await t.test('a problem the window shows takes its place', async () => {
+    const shown = await askedToTrust(() => ({ setup: 'setup-2' }), {
+      picked: { unavailable: 'No folder picker here.' }
+    });
+    try {
+      setupStream('setup-1').send('replaced', true);
+      await settled(shown);
+      button(shown.target, 'Choose folder').click();
+      await settled(shown);
+      assert.deepEqual(alerts(shown.target), ['No folder picker here.']);
+    } finally {
+      await shown.unmount();
+    }
+  });
 });

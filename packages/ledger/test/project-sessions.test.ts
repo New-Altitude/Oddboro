@@ -85,6 +85,22 @@ test('sharing, a run ceiling, a later downgrade and owner takeover govern dispat
   await assert.rejects(requestProject(await fixture('read')), /Draft or Act/);
 });
 
+test('a claim reports the state it took the request from, so putting it back asks the owner nothing again', async () => {
+  const queued = await fixture('act');
+  await requestProject(queued);
+  const fromQueue = await claimProject(queued.sessionId);
+  assert.equal(fromQueue?.state, 'sending');
+  assert.equal(fromQueue?.claimedFrom, 'queued');
+
+  const approved = await fixture('act', false);
+  assert.equal((await requestProject(approved)).state, 'proposed');
+  await changeProjectRequest(approved.id, approved.sessionId, ['proposed'], 'authorized');
+  const fromApproval = await claimProject(approved.sessionId);
+  assert.equal(fromApproval?.claimedFrom, 'authorized');
+  await changeProjectRequest(approved.id, approved.sessionId, ['sending'], 'authorized');
+  assert.equal((await claimProject(approved.sessionId))?.id, approved.id, 'claimed again, unasked');
+});
+
 test('a repeated provider callback delivers one report and one pickup on the assigning thread', async () => {
   const work = await fixture('act');
   const [thread] = await db

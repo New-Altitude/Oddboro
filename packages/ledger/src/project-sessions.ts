@@ -349,7 +349,12 @@ export async function nextProjectRequest(id: string, q: Db = db) {
   return row;
 }
 
-/** A claim is durable before the prompt leaves, and reads the owner's current grants. */
+/**
+ * A claim is durable before the prompt leaves, and reads the owner's current
+ * grants. It returns the request as `sending`, with the state it was claimed
+ * from, so a caller that lets the session go before the prompt leaves can put
+ * it back exactly: an approved request put back as queued would ask the owner again.
+ */
 export async function claimProject(id: string) {
   return db.transaction(async (tx) => {
     const [s] = await tx
@@ -393,7 +398,7 @@ export async function claimProject(id: string) {
       .set({ state: 'sending' })
       .where(eq(projectRequests.id, next.id))
       .returning();
-    return row;
+    return { ...row, claimedFrom: next.state };
   });
 }
 export async function changeProjectRequest(

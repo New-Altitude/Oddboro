@@ -145,8 +145,9 @@ export class ProjectController {
   private setups = new Map<string, { folder: string; dir: string; terminal: ProjectTerminal }>();
   /**
    * The sessions a Stop or Remove is stopping, from its check until the stop
-   * settles: meanwhile nothing is claimed for one and no connect reaches it,
-   * since the stop would end what they start.
+   * settles: meanwhile nothing is claimed for one, no terminal opens and no
+   * connect reaches it, since the stop would end what they start. A claim
+   * already under way when the stop began goes back as it was (`dispatch`).
    */
   private ending = new Set<string>();
   constructor() {
@@ -538,6 +539,8 @@ export class ProjectController {
    */
   async terminal(id: string, view?: string) {
     const c = this.runtime(id);
+    // Launched now, it would attach to, or restart, the job the stop is ending.
+    if (this.ending.has(id)) throw new Error(PROJECT_WORDS.stopping);
     const t = c.terminal?.running
       ? c.terminal
       : await (c.openingTerminal ??= this.launchTerminal(c).finally(() => {
@@ -622,6 +625,12 @@ export class ProjectController {
   }
   private async dispatch(c: Runtime) {
     const before = c.note;
+    /** Nothing was claimed, so the readiness note no longer applies. */
+    const unclaimed = () => {
+      if (c.note === before) return;
+      c.note = before;
+      this.changed(c);
+    };
     if (c.session.agent === 'claude') {
       const next = await nextProjectRequest(c.session.id);
       if (!next) return;
@@ -631,6 +640,9 @@ export class ProjectController {
         await this.terminal(c.session.id);
         await checkClaudeReceiver(c.session);
       } catch (e) {
+        // A Stop that began meanwhile refused the terminal: the work waits as it
+        // was, not failed, and a stop that fails pumps again.
+        if (this.ending.has(c.session.id)) return unclaimed();
         // No offer has been written: retry can safely use the same saved request.
         const failed = await changeProjectRequest(
           next.id,
@@ -647,13 +659,12 @@ export class ProjectController {
     }
     // A Stop that began during the check claims nothing; one that fails pumps again.
     const r = this.ending.has(c.session.id) ? undefined : await claimProject(c.session.id);
-    if (!r) {
-      // Nothing was claimed, so the readiness note no longer applies.
-      if (c.note !== before) {
-        c.note = before;
-        this.changed(c);
-      }
-      return;
+    if (!r) return unclaimed();
+    // A Stop or Disconnect pressed during the claim found no request to refuse
+    // it, and goes ahead: the request goes back to the state it came from.
+    if (this.ending.has(c.session.id) || !c.connected) {
+      await changeProjectRequest(r.id, c.session.id, ['sending'], r.claimedFrom);
+      return unclaimed();
     }
     c.request = r;
     c.reply = '';
@@ -887,7 +898,7 @@ export class ProjectController {
   }
   /** Marks the session `id` as ending, or refuses while another Stop or Remove ends it. */
   private markEnding(id: string) {
-    if (this.ending.has(id)) throw new Error(PROJECT_WORDS.stopping);
+    if (this.ending.has(id)) throw new Error(PROJECT_WORDS.alreadyEnding);
     this.ending.add(id);
   }
   private async release(c: Runtime) {

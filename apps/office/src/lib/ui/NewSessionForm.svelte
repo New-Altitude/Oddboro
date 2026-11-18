@@ -30,7 +30,8 @@
   // piece of state and every action; this only shows them and reports clicks.
   // The one exception is which row's move confirm is open: nothing outside the
   // form reads it, and it closes whenever the form does. The form also drops a
-  // setup question another window's Start closed, since only its stream hears it.
+  // setup question another window's Start closed, since only its stream hears it,
+  // and says why under Start until the owner presses Start or leaves the form.
   type Props = {
     folder: string;
     agent: ProjectAgent;
@@ -105,18 +106,28 @@
   const problemRowShown = $derived(shownCandidates.some((c) => c.id === problemRow));
   /** The row whose move confirm is open. */
   let moving = $state<string>();
+  /** Another window's Start closed this form's setup question. */
+  let replaced = $state(false);
+  /** The line shown: the page's problem where it places it, else why the question closed. */
+  const line = $derived(
+    problem && place
+      ? { text: problem, at: place }
+      : replaced
+        ? { text: PROJECT_WORDS.replaced, at: 'start' as const }
+        : undefined
+  );
 </script>
 
-<!-- An error on the form, shown only at the place errorPlace gives it. It
-     scrolls itself into view as it appears: under a row at the pane's bottom
-     edge it would otherwise sit just below what the owner sees. -->
+<!-- A line on the form, shown only at its place: an error at the place errorPlace
+     gives it. It scrolls itself into view as it appears: under a row at the pane's
+     bottom edge it would otherwise sit just below what the owner sees. -->
 {#snippet alert(at: ErrorPlace)}
-  {#if problem && place === at}<p
+  {#if line && line.at === at}<p
       role="alert"
       class="text-coral"
       {@attach (n) => n.scrollIntoView({ block: 'nearest' })}
     >
-      {problem}
+      {line.text}
     </p>{/if}
 {/snippet}
 
@@ -194,8 +205,13 @@
         maxlength="200"
       /></label
     >
-    <button class="btn self-start" disabled={busy || !folder} onclick={() => onstart()}
-      >Start</button
+    <button
+      class="btn self-start"
+      disabled={busy || !folder}
+      onclick={() => {
+        replaced = false;
+        onstart();
+      }}>Start</button
     >
     {@render alert('start')}
     {#if setup}
@@ -222,9 +238,11 @@
                 if (stream.readyState === EventSource.CLOSED) ended();
               });
               // Closed by another window's Start, not answered: the form goes back
-              // to how it was before Start, and nothing starts here.
+              // to how it was before Start, says why, and nothing starts here.
               stream.addEventListener('replaced', () => {
-                if (setup?.id === id) setup = undefined;
+                if (setup?.id !== id) return;
+                setup = undefined;
+                replaced = true;
               });
             }}
           />{/key}
