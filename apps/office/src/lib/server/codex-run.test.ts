@@ -8,6 +8,7 @@
 // run's process tree stops with it. Run with `npm test -w @oddboro/office`.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -19,7 +20,7 @@ import {
   symlinkSync,
   writeFileSync
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
@@ -43,10 +44,11 @@ import {
   withEnv
 } from './office-under-test.ts';
 
-const { mcpServers, GATEWAY_TOKEN } = await import('./codex.ts');
+const { codexLaunch, mcpServers, GATEWAY_TOKEN } = await import('./codex.ts');
 const { stopGroups } = await import('./launch.ts');
 const { processGone } = await import('./drive.ts');
 const { deniedEdits } = await import('./files.ts');
+const { agentCommand } = await import('./agent-sign-in.ts');
 
 await L.pg`insert into staff ${L.pg([
   { ...odd('cody', 'Cody'), agent: 'codex' },
@@ -86,14 +88,6 @@ const shut = (w: string, platform: NodeJS.Platform = 'darwin') =>
 /** A profile's paths with this machine's folder and each run's id as stand-ins. */
 const plainPaths = (fs: Record<string, string>) =>
   Object.fromEntries(Object.entries(fs).map(([p, v]) => [plain([p])[0], v]));
-/** The `-c` values too long to compare whole, as stand-ins. */
-const hideSets = (args: string[]) =>
-  args.map((a, i) =>
-    args[i - 1] === '-c' &&
-    /^(developer_instructions|permissions|mcp_servers|shell_environment_policy\.set)=/.test(a)
-      ? `${a.slice(0, a.indexOf('='))}=<…>`
-      : a
-  );
 /** One chat message's error, for a run that never replies. */
 async function chatError(id: string, message = 'Hello.'): Promise<string> {
   let error = '';
@@ -111,7 +105,7 @@ const forget = (id: string) => {
 test("a Codex Odd's first chat starts codex exec with every switch the office sets, its message on stdin, and the office's file tools in place of a shell", async () => {
   // The Mac's switches; Linux adds one (`project_doc_max_bytes`, tested below).
   const run = await onPlatform('darwin', () => chatOf('cody'));
-  assert.deepEqual(plain(hideSets(run.args)), [
+  assert.deepEqual(plain(run.args), [
     'exec',
     '--json',
     '--skip-git-repo-check',
@@ -147,17 +141,18 @@ test("a Codex Odd's first chat starts codex exec with every switch the office se
         'workspace_dependencies',
         'tool_suggest',
         'sleep_tool'
-      ].map((f) => `features.${f}=false`),
-      'shell_environment_policy.set=<…>',
+      ].map((f) => `features.${f}=false`)
+    ].flatMap((c) => ['-c', c]),
+    // The run's own settings file: its instructions, servers, folders and shell variables.
+    '-p',
+    '<id>-run',
+    ...[
       // Browse the web is off for a new Odd.
       'web_search="disabled"',
-      'developer_instructions=<…>',
       // Run commands is off for a new Odd: no shell, so files go through the office's file tools.
       'features.shell_tool=false',
       'features.unified_exec=false',
-      'permissions=<…>',
       'default_permissions="odd"',
-      'mcp_servers=<…>',
       // No level picked: Medium (`effortFor`).
       'model_reasoning_effort="medium"'
     ].flatMap((c) => ['-c', c]),
@@ -411,8 +406,11 @@ test("a Codex run's shell gets the office's git settings and npm's cache in its 
     npm_config_userconfig: join(temp, 'npmrc'),
     npm_config_globalconfig: join(temp, 'npmrc-global')
   });
-  // A second set would replace the first.
-  assert.equal(run.args.filter((a) => a.startsWith('shell_environment_policy.set=')).length, 1);
+  // In the run's settings file, where no `-c` replaces it.
+  assert.ok(
+    !run.args.some((a) => a.startsWith('shell_environment_policy.set=')),
+    run.args.join(' ')
+  );
   assert.equal(run.gitTemplate, true, 'the git template was missing or not empty as the run went');
   // The shell inherits only the core variables, so one set on codex itself never reaches it.
   assert.deepEqual(
@@ -421,12 +419,65 @@ test("a Codex run's shell gets the office's git settings and npm's cache in its 
   );
 });
 
-test("a Codex run's temp folder goes when it ends, and one a run that died with the office left goes at the next run", async () => {
+test("a Codex run's temp folder and settings file go when it ends, and those a run that died with the office left go at the next run", async () => {
+  const runFiles = () => readdirSync(CODEX_HOME).filter((f) => f.endsWith('-run.config.toml'));
   await chatOf('cody');
   assert.deepEqual(readdirSync(join(folder, 'codex-tmp')), []);
+  assert.deepEqual(runFiles(), []);
   mkdirSync(join(folder, 'codex-tmp', 'died-with-the-office'));
+  writeFileSync(join(CODEX_HOME, 'died-with-the-office-run.config.toml'), '');
   await chatOf('cody');
   assert.deepEqual(readdirSync(join(folder, 'codex-tmp')), []);
+  assert.deepEqual(runFiles(), []);
+});
+
+test('a codex on PATH that is a link starts by its real path, so its sandbox can start it again (#197)', async () => {
+  const links = join(folder, 'codex-link');
+  mkdirSync(links, { recursive: true });
+  symlinkSync(join(bin, 'codex'), join(links, 'codex'));
+  try {
+    await withEnv({ PATH: [links, process.env.PATH ?? ''].join(delimiter) }, async () => {
+      assert.deepEqual(agentCommand('codex'), [realpathSync(join(bin, 'codex')), []]);
+      const run = await chatOf('cody');
+      assert.match(run.system, /You are Cody\./);
+    });
+  } finally {
+    rmSync(links, { recursive: true, force: true });
+  }
+});
+
+test("a Codex run's command line stays short however long its instructions, which go in its settings file", async () => {
+  const dir = join(folder, 'staff', 'cody');
+  const system = 'Long. '.repeat(10_000);
+  for (const platform of ['win32', 'darwin', 'linux'] as const)
+    await onPlatform(platform, () => {
+      const launch = codexLaunch({
+        key: randomUUID(),
+        account: L.OFFICE_ACCOUNT,
+        dir,
+        reads: [],
+        writes: [dir],
+        system,
+        input: 'Hello.',
+        servers: {},
+        allowed: [],
+        web: false,
+        commands: false,
+        network: false
+      });
+      const file = launch.args[launch.args.indexOf('-p') + 1];
+      const settings = join(CODEX_HOME, `${file}.config.toml`);
+      try {
+        assert.ok(
+          launch.args.join(' ').length < 4000,
+          `${platform}: ${launch.args.join(' ').length}`
+        );
+        assert.ok(readFileSync(settings, 'utf8').includes(system.trim()), platform);
+      } finally {
+        launch.done();
+      }
+      assert.equal(existsSync(settings), false, `${platform}: the settings file stayed`);
+    });
 });
 
 test('a message that starts with a dash reaches codex whole on stdin, never as a flag', async () => {
@@ -435,7 +486,7 @@ test('a message that starts with a dash reaches codex whole on stdin, never as a
   const run = await chatOf('cody', said);
   assert.ok(run.message.endsWith(said), run.message);
   assert.equal(run.args.at(-1), '-');
-  // The owner's words also reach the office's tool server, inside `-c mcp_servers`; never as an argument of their own.
+  // The owner's words also reach the office's tool server, inside the run's settings file; never as an argument.
   assert.ok(!run.args.some((a) => a.startsWith('- buy milk')), 'the message went on argv');
 });
 

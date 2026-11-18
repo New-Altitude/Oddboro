@@ -115,3 +115,10 @@ test('web and catalog servers become asks, and a command or unknown name is only
   );
   assert.deepEqual(map.servers, [{ name: 'notes', url: 'https://mcp.example.com/mcp' }]);
 });
+
+test('the original agent name survives a shortened display name', () => {
+  const sourceName = 'fact-checker-'.repeat(5);
+  const draft = readClaudeAgent(agent.replace('name: fact-checker', 'name: ' + sourceName));
+  assert.equal(draft.sourceName, sourceName);
+  assert.equal(draft.name, sourceName.slice(0, LIMITS.name));
+});

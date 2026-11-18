@@ -142,6 +142,8 @@
   /** The ask this one reworks, when the owner sent that one back. */
   let reworks = $state<AskRow | null>(null);
   let secret = $state<Record<number, string>>({});
+  /** Each sign-in step's page once Sign in made one, for when no browser opened. */
+  let signInPage = $state<Record<number, string>>({});
   let toolList = $state<Record<number, { name: string; description: string; readOnly: boolean }[]>>(
     {}
   );
@@ -173,6 +175,7 @@
     reworks = null;
     skip = {};
     secret = {};
+    signInPage = {};
     changing = false;
     folderWarning = '';
     const asked = i?.kind === 'ask' ? i.row : undefined;
@@ -272,11 +275,17 @@
   /** Dismiss the While you were away card: every job on it leaves it. */
   const dismissAway = () => act(() => call('/api/jobs/away', undefined, 'DELETE'));
 
-  /** The service's sign-in page opens in a new tab; the step ticks when the owner comes back. */
+  /**
+   * The service's sign-in page opens in a new tab; the step ticks when the
+   * owner comes back. A browser can block a window opened after an await, so
+   * the step also links to the same page.
+   */
   async function hostedSignIn(t: TaskRow, index: number) {
     await act(async () => {
       const r = await call<{ url?: string }>(`/api/tasks/${t.id}`, { op: 'oauth', index });
-      if (r.url) window.open(r.url, '_blank', 'noopener');
+      if (!r.url) return;
+      signInPage[index] = r.url;
+      window.open(r.url, '_blank', 'noopener');
     });
   }
 
@@ -820,6 +829,14 @@
                     disabled={busy}
                     onclick={() => hostedSignIn(t, index)}>Sign in</button
                   >
+                  {#if signInPage[index]}
+                    <a
+                      class="ms-2 text-xs text-sea underline underline-offset-2"
+                      href={signInPage[index]}
+                      target="_blank"
+                      rel="noopener noreferrer">No page opened? Open the sign-in page</a
+                    >
+                  {/if}
                   <details class="mt-2 text-xs text-muted">
                     <summary class="cursor-pointer">The service won't let me sign in</summary>
                     <p class="mt-2">

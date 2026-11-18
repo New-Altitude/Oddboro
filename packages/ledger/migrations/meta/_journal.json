@@ -257,8 +257,15 @@
     {
       "idx": 36,
       "version": "7",
-      "when": 1794823557532,
-      "tag": "0036_project_session_folders",
+      "when": 1794974615861,
+      "tag": "0036_claude_agent_name",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1794978187027,
+      "tag": "0037_project_session_folders",
       "breakpoints": true
     }
   ]

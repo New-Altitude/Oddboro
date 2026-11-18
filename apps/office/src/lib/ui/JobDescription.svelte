@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import DocEditor from './DocEditor.svelte';
   import AgentFileServers from './AgentFileServers.svelte';
   import { call } from './api.ts';
@@ -6,11 +7,29 @@
   import type { ImportedServer, SortedServers } from '../staff/claude-agent.ts';
 
   // The staffer's job description, the text every run starts from, in the
-  // document editor. Folded until the owner opens it.
-  type Props = { profile: StaffProfile; version: number };
-  let { profile, version }: Props = $props();
+  // document editor. Folded until the owner opens it, or open on `proposal`:
+  // an agent file Hire already read, for the owner to review against it.
+  type Props = {
+    profile: StaffProfile;
+    version: number;
+    proposal?: { desk: string; servers: ImportedServer[] };
+    /** True while Save is on its way, so a roster holds its Skip until it lands. */
+    saving?: boolean;
+    /** Saved: a roster of agent files goes on to the next file. */
+    onupdated?: () => void;
+    /** The saved instructions already match the agent file under review. */
+    oncurrent?: () => void;
+  };
+  let {
+    profile,
+    version,
+    proposal,
+    saving = $bindable(false),
+    onupdated,
+    oncurrent
+  }: Props = $props();
 
-  let shown = $state(false);
+  let shown = $state(untrack(() => proposal !== undefined));
   let text = $state<string | undefined>();
   let mode = $state<'view' | 'edit'>('view');
   let dirty = $state(false);
@@ -23,6 +42,15 @@
   // Saved or undone, the file's servers go with it.
   $effect(() => {
     if (!dirty) fromFile = undefined;
+  });
+
+  // Hire already read the file. Review it once the editor opens.
+  let reviewed = false;
+  $effect(() => {
+    if (!editor || !proposal || reviewed) return;
+    reviewed = true;
+    const agent = proposal;
+    untrack(() => void reviewAgent(agent));
   });
 
   // Reload when the staffer changes it, unless the owner is mid-edit.
@@ -46,16 +74,26 @@
   });
 
   async function reviewFile(file: File) {
-    const opened = editor;
-    if (!opened) return;
     reading = true;
     fileMessage = '';
     try {
       const { readClaudeAgentFile } = await import('../staff/claude-agent.ts');
-      const agent = await readClaudeAgentFile(file);
-      if (editor !== opened) return;
+      await reviewAgent(await readClaudeAgentFile(file));
+    } catch (e) {
+      fileMessage = e instanceof Error ? e.message : String(e);
+    } finally {
+      reading = false;
+    }
+  }
+
+  /** Open an agent file's instructions as unsaved changes, with the servers Save would ask for. */
+  async function reviewAgent(agent: { desk: string; servers: ImportedServer[] }) {
+    const opened = editor;
+    if (!opened) return;
+    try {
       if (agent.desk === text) {
         fileMessage = 'The saved instructions match this file.';
+        oncurrent?.();
         return;
       }
       const sorted = agent.servers.length
@@ -68,19 +106,23 @@
       else fileMessage = 'Finish your current edit, then choose the file again.';
     } catch (e) {
       if (editor === opened) fileMessage = e instanceof Error ? e.message : String(e);
-    } finally {
-      reading = false;
     }
   }
 
   async function save(draft: string): Promise<string> {
-    const r = await call<{ text: string }>(
-      `/api/staff/${profile.id}/description`,
-      { text: draft, was: text, servers: fromFile?.servers },
-      'PUT'
-    );
-    text = r.text;
-    return r.text;
+    saving = true;
+    try {
+      const r = await call<{ text: string }>(
+        `/api/staff/${profile.id}/description`,
+        { text: draft, was: text, servers: fromFile?.servers },
+        'PUT'
+      );
+      text = r.text;
+      onupdated?.();
+      return r.text;
+    } finally {
+      saving = false;
+    }
   }
 </script>
 
@@ -120,7 +162,7 @@
       {:else if text === undefined}
         <p class="py-4 text-center text-sm text-muted">Opening</p>
       {:else}
-        {#if !profile.persona && !profile.manager}
+        {#if !profile.persona && !profile.manager && !proposal}
           <label class="mb-2 block text-xs text-muted">
             Review job instructions from a Claude agent file
             <input
@@ -134,16 +176,16 @@
               }}
             />
           </label>
-          {#if fileMessage}<p class="mb-2 text-xs text-muted" role="status">{fileMessage}</p>{/if}
-          {#if fromFile && dirty}
-            <div class="mb-2 flex flex-col gap-1 text-xs text-ink">
-              <AgentFileServers
-                sorted={fromFile.sorted}
-                once="saved"
-                note="Only the instructions change. Its tools and permission stay as they are."
-              />
-            </div>
-          {/if}
+        {/if}
+        {#if fileMessage}<p class="mb-2 text-xs text-muted" role="status">{fileMessage}</p>{/if}
+        {#if fromFile && dirty}
+          <div class="mb-2 flex flex-col gap-1 text-xs text-ink">
+            <AgentFileServers
+              sorted={fromFile.sorted}
+              once="saved"
+              note="Only the instructions change. Its tools and permission stay as they are."
+            />
+          </div>
         {/if}
         {#if dirty}
           <details class="mb-2 text-xs text-muted">

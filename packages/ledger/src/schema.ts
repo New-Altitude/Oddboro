@@ -37,6 +37,8 @@ const id = () => integer().primaryKey().generatedAlwaysAsIdentity();
 export const staff = pgTable('staff', {
   id: text().primaryKey(),
   name: text().notNull(),
+  /** Original name in a Claude agent file, even when the owner names the hire differently. */
+  claudeAgentName: text(),
   role: text().notNull(),
   office: text().notNull().default('Main Street'),
   sprite: text().notNull().default('staff'),

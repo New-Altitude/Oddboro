@@ -48,7 +48,8 @@ import type { AgentTool, LaterTool } from '../../routes/api/agents/+server.ts';
 const route = await import('../../routes/api/agents/[tool]/+server.ts');
 const claudeRoute = await import('../../routes/api/setup/claude/+server.ts');
 const { geminiKeyMissing, clearGeminiKey, setGeminiKey } = await import('./gemini.ts');
-const { SLOTS } = await import('./agent-sign-in.ts');
+const { SLOTS, claudeSignIn } = await import('./agent-sign-in.ts');
+const { vendorEnv } = await import('./launch.ts');
 
 // A test that fails or runs out of time leaves its install or sign-in running,
 // and every test after it would find that tool still busy.
@@ -1173,5 +1174,28 @@ test('an office run on a tool that is not installed says so, not that it is not 
     });
   } finally {
     process.env.PATH = path;
+  }
+});
+
+test("in the Linux app, a sign-in starts with the computer's own libraries, so it can open the browser", () => {
+  const names = ['APPIMAGE', 'APPDIR', 'LD_LIBRARY_PATH', 'APPIMAGE_ORIGINAL_LD_LIBRARY_PATH'];
+  const before = Object.fromEntries(names.map((k) => [k, process.env[k]]));
+  Object.assign(process.env, {
+    APPIMAGE: '/opt/Oddboro.AppImage',
+    APPDIR: '/tmp/.mount_Oddboro',
+    LD_LIBRARY_PATH: '/tmp/.mount_Oddboro/usr/lib'
+  });
+  delete process.env.APPIMAGE_ORIGINAL_LD_LIBRARY_PATH;
+  try {
+    // Claude Code's sign-in, and every other tool's (vendorEnv), lose the AppImage's glib.
+    assert.equal(claudeSignIn().env.LD_LIBRARY_PATH, undefined);
+    assert.equal(vendorEnv(['CODEX_']).LD_LIBRARY_PATH, undefined);
+    // A library path from before the app started comes back.
+    process.env.APPIMAGE_ORIGINAL_LD_LIBRARY_PATH = '/opt/nvidia';
+    assert.equal(claudeSignIn().env.LD_LIBRARY_PATH, '/opt/nvidia');
+  } finally {
+    for (const k of names)
+      if (before[k] === undefined) delete process.env[k];
+      else process.env[k] = before[k];
   }
 });

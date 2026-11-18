@@ -462,12 +462,15 @@ function answer() {
     fs.writeFileSync(sleeper, String(s.pid));
     s.unref();
   }
-  // The office writes each -c value with JSON strings, so an inline table is JSON once its " = " is ": ".
+  // The office writes each -c value, and each line of the run's settings file
+  // (-p), with JSON strings, so an inline table is JSON once its " = " is ": ".
   const set = {};
+  const take = (k, v) => (set[k] = JSON.parse(v.startsWith('{') ? v.replaceAll('" = ', '": ') : v));
   args.forEach((a, i) => {
-    if (args[i - 1] !== '-c') return;
-    const v = a.slice(a.indexOf('=') + 1);
-    set[a.slice(0, a.indexOf('='))] = JSON.parse(v.startsWith('{') ? v.replaceAll('" = ', '": ') : v);
+    if (args[i - 1] === '-c') take(a.slice(0, a.indexOf('=')), a.slice(a.indexOf('=') + 1));
+    if (args[i - 1] === '-p')
+      for (const line of fs.readFileSync(home + '/' + a + '.config.toml', 'utf8').split('\\n'))
+        if (line) take(line.slice(0, line.indexOf(' = ')), line.slice(line.indexOf(' = ') + 3));
   });
   const gave = {
     args,

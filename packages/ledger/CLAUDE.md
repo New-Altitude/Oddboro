@@ -217,7 +217,7 @@ office offers work. `src/project-terminal.ts` opens the native terminal
 through node-pty, an optional dependency loaded on the first open. Migration
 `0027_project_sessions` adds `project_sessions` and `project_requests` with
 their change triggers; `0028_advanced_mode` adds `owner.advanced_at` and
-`project_sessions.sends_unasked`; `0036_project_session_folders` adds
+`project_sessions.sends_unasked`; `0037_project_session_folders` adds
 `project_sessions.hidden_at` (Remove) and `project_sessions.config_dir` (the
 Claude folder a session runs in). `src/claude-folders.ts` holds the known Claude
 folders: `~/.claude` and each one named in Setup. See `docs/project-sessions.md`.

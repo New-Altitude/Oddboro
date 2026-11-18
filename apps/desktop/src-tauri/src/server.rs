@@ -1,6 +1,8 @@
 //! The office server: Node running the SvelteKit build. The shell starts it,
 //! waits for it to answer, restarts it when it dies, and stops it on quit.
 
+#[cfg(target_os = "linux")]
+use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
@@ -11,6 +13,8 @@ use std::sync::atomic::{AtomicBool, AtomicI32, Ordering::SeqCst};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, sleep};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+#[cfg(target_os = "linux")]
+use zbus::zvariant::Value as BusValue;
 
 use serde_json::Value;
 
@@ -510,7 +514,7 @@ static AWAKE: Mutex<Option<Child>> = Mutex::new(None);
 /// laptop's lid still suspends it: logind ignores this lock for the lid.
 #[cfg(target_os = "linux")]
 fn keep_awake(_pid: u32) {
-    let spawned = Command::new("systemd-inhibit")
+    let spawned = crate::host::host_command("systemd-inhibit")
         .args([
             "--what=sleep",
             "--mode=block",
@@ -667,19 +671,59 @@ fn notify(title: &str, text: &str) {
     let _ = send_notification(title, None, text, Some(Notification::new().sound("Glass")));
 }
 
-/// Show a notification as Oddboro's through the desktop's notification
-/// service, the way the office's own login service does.
+/// Show a notification as Oddboro's. The desktop's notification service gets
+/// it on the session bus, filed under the `oddboro` desktop entry. A failure
+/// is one line in the office log. The call never blocks the log relay.
 #[cfg(target_os = "linux")]
 fn notify(title: &str, text: &str) {
-    let spawned = Command::new("notify-send")
-        .args(["--app-name=Oddboro", "--", title, text])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn();
-    if let Ok(mut child) = spawned {
-        thread::spawn(move || child.wait());
-    }
+    let title = title.to_string();
+    let text = text.to_string();
+    thread::spawn(move || {
+        if let Err(service) = session_notify(&title, &text) {
+            note(
+                &crate::env::log_file(),
+                &format!("notify failed: notification service: {service}"),
+            );
+        }
+    });
+}
+
+/// `org.freedesktop.Notifications.Notify` on the session bus. zbus speaks the
+/// bus itself, so this does not load the host's libnotify or the bundle's glib.
+#[cfg(target_os = "linux")]
+fn session_notify(title: &str, text: &str) -> Result<(), String> {
+    let bus =
+        zbus::blocking::Connection::session().map_err(|error| one_line(&error.to_string()))?;
+    let hints = HashMap::from([("desktop-entry", BusValue::from("oddboro"))]);
+    bus.call_method(
+        Some("org.freedesktop.Notifications"),
+        "/org/freedesktop/Notifications",
+        Some("org.freedesktop.Notifications"),
+        "Notify",
+        &(
+            "Oddboro",
+            0u32,
+            "",
+            title,
+            text,
+            &[] as &[&str],
+            &hints,
+            -1i32,
+        ),
+    )
+    .map(|_| ())
+    .map_err(|error| one_line(&error.to_string()))
+}
+
+/// Spaces for line breaks, and cut so one log line stays one line.
+#[cfg(target_os = "linux")]
+fn one_line(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(300)
+        .collect()
 }
 
 /// Show a notification as Oddboro's. Windows finds the app by the id the

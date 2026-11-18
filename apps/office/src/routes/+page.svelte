@@ -1442,8 +1442,10 @@
                   />
                 {/await}
               {:else if w.kind === 'hire'}
-                {#await import('#lib/ui/HireDrawer.svelte') then { default: HireDrawer }}
-                  <HireDrawer
+                {#await import('#lib/ui/HireRoster.svelte') then { default: HireRoster }}
+                  <HireRoster
+                    {staff}
+                    {version}
                     id={w.id}
                     rooms={hireRooms}
                     from={w.from}

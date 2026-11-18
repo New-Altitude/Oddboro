@@ -151,6 +151,8 @@ export function readClaudeAgent(file: string) {
   const imported = new Set(['name', 'description', 'mcpServers']);
   if (model || fields.model === 'inherit') imported.add('model');
   return {
+    /** The whole `name`, so a later import of the same agent finds this hire. */
+    sourceName: name.slice(0, 200),
     name: name.slice(0, LIMITS.name),
     role: name.replaceAll('-', ' ').slice(0, LIMITS.role),
     remit: description.slice(0, LIMITS.remit),

@@ -520,6 +520,7 @@ export type Hire = Pick<
   StaffRow,
   'name' | 'role' | 'variant' | 'portrait' | 'room' | 'remit' | 'desk'
 > & {
+  claudeAgentName?: string;
   /** Its level; `HIRE_DEFAULTS` when left out. */
   permission?: Level;
   /** At Act, the owner's choice for work another Odd hands it: true lets it act on its own there. */

@@ -758,7 +758,9 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    office writes its `config.toml` only into a home with none, before the
    sign-in check, so the sign-in from the office's page (item 18), where a run
    without one points, is kept as a file. Every run
-   passes the office's switches as `-c` (`SWITCHES`) under `--strict-config`.
+   passes the office's switches as `-c` (`SWITCHES`) under `--strict-config`,
+   and its instructions, servers, folders and shell variables in its own
+   settings file (`RUN_FILE`, `-p`), so the command line fits Windows' limit.
    With Run commands on (a Mac or Linux), a Codex Odd has a shell, held by
    one kernel permission profile per run
    (`filesystem` in `codex.ts`): everything shut but the system's own folders
@@ -1000,7 +1002,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    and `core.excludesFile` and `core.attributesFile` set to nothing) and
    a Codex Odd's `git init` copies no sample hooks (`GIT_TEMPLATE_DIR`, an
    empty folder in the run's temp folder). Codex takes `shellEnv` through one
-   `-c shell_environment_policy.set`, since its shell inherits only the core
+   `shell_environment_policy.set` in the run's settings file, since its shell inherits only the core
    variables and a second `set` would replace the first. Nor does it write the file a run
    reading the owner's edit is reading. It gets no skills, no
    plugins, none of the owner's own CLAUDE.md files, no Claude Code
@@ -1192,7 +1194,11 @@ pieces under 3,900 bytes a line, so no value is on a command line.
     less any tool the Odd already holds or has asked for (`sortFor`). Save
     updates the same Odd through the description route, then raises those
     access asks at read, as a hire does; a refused save raises none. The file's
-    tools and permission mode are never taken. A local Odd's Skills tab, under
+    tools and permission mode are never taken. A hire from an agent file keeps the
+    file's `name` (`claude_agent_name`). Importing that name again opens on the
+    Odds hired from it (or, hired before the office kept it, an Odd of the
+    same name) and a separate new hire; choosing one reviews its job
+    description here against the file. A local Odd's Skills tab, under
     Knowledge, lists the SKILL.md files the owner attached, each by name with
     when to use it and Remove (`src/lib/ui/StaffSkills.svelte`, the ledger's
     `staff_skills`). Add a skill reads the name and when to use it from the
@@ -1239,7 +1245,10 @@ pieces under 3,900 bytes a line, so no value is on a command line.
     connects without the owner's yes. The form's lines about the file are
     `src/lib/ui/AgentFileServers.svelte`. A server that runs a command is listed in
     the form and never run or asked for. Picking another choice clears the
-    import. Step one makes the person's look
+    import. Choosing several files opens the same form for each in turn
+    (`src/lib/ui/HireRoster.svelte`): a file an Odd came from offers that Odd
+    first, as one file does, each hire or update saves as it happens, Skip
+    leaves a file out, and the last file ends on a count. Step one makes the person's look
     (`src/lib/ui/LookStudio.svelte`), drawn or built. Drawn: the owner
     describes them, LookStudio asks `/api/looks`, and
     the owner sees the portrait and the walk, then redraws with a note or keeps it.

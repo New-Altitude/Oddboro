@@ -21,6 +21,7 @@ import {
   claudeFolderFound,
   drawsLooks,
   home,
+  hostEnv,
   isClaudeFolder,
   MODELS as AGENT_MODELS,
   OFFICE_ACCOUNT,
@@ -123,10 +124,12 @@ export function modelArgs(): string[] {
  * `GIT_DIR` or `GIT_CONFIG_PARAMETERS`), since the owner's git settings never
  * shape an Odd's git: a run with a shell gets the office's own (`gitEnv`).
  * Nor `ODDBORO_SECRETS`: only the office itself holds the pipes to the app's
- * Keychain.
+ * Keychain. In the Linux app it starts from the computer's own library path
+ * (`hostEnv`): a sign-in opens the browser with `xdg-open`, which fails on the
+ * AppImage's older glib, so Sign in did nothing (#281).
  */
 export function cleanEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
+  const env = { ...hostEnv() };
   for (const k of Object.keys(env))
     if (
       k === 'CLAUDECODE' ||

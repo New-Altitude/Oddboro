@@ -48,6 +48,9 @@ tauri-plugin-single-instance = "=2.5.3"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = "=5.19.0"
+# The webview Tauri already builds on Linux, named so the shell can set one
+# of its settings (`open_windows_after_a_wait` in src/main.rs).
+webkit2gtk = "=2.0.2"
 
 [target.'cfg(windows)'.dependencies]
 tauri-winrt-notification = "=0.8.1"
