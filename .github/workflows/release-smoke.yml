@@ -1,0 +1,80 @@
+# The release's smoke test of one system's builds, each installed and run as an
+# owner would on its own kind of machine (apps/desktop/CLAUDE.md, "Smoke
+# tests"). release.yml calls it once per system, as soon as that system's builds
+# are made, so a failed build elsewhere hides nothing here. No secrets: it only
+# reads what the builds uploaded.
+name: Release smoke
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+      # The builds to test and the machines to test them on, as JSON:
+      # [{"build": <artifact>, "runner": <runner>}].
+      machines:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: smoke (${{ matrix.build }}, ${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.machines) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.build }}
+          path: ${{ runner.temp }}/built
+
+      # A display, a session bus with an unlocked keyring, FUSE for the
+      # AppImage (libfuse2t64 on 24.04), and WebDriver to drive its window.
+      - name: Install what Linux needs to run the app
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          fuse=libfuse2; if [ "$(lsb_release -rs)" = "24.04" ]; then fuse=libfuse2t64; fi
+          sudo apt-get install -y --no-install-recommends xvfb xauth dbus-x11 gnome-keyring \
+            libsecret-tools "$fuse" webkit2gtk-driver imagemagick xdotool
+          rustup toolchain install stable --profile minimal
+          cargo install tauri-driver --locked --version 2.1.0
+
+      - name: Smoke test the build
+        if: runner.os != 'Linux'
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        run: >
+          node apps/desktop/scripts/smoke.ts --from "$RUNNER_TEMP/built" --version "$VERSION"
+          --signed --out "$RUNNER_TEMP/smoke"
+
+      - name: Smoke test the build
+        if: runner.os == 'Linux'
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          dbus-run-session -- bash -c '
+            echo -n smoke | gnome-keyring-daemon --unlock --components=secrets > /dev/null
+            xvfb-run -a -s "-screen 0 1440x900x24" node apps/desktop/scripts/smoke.ts \
+              --from "$RUNNER_TEMP/built" --version "$VERSION" --out "$RUNNER_TEMP/smoke"'
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-${{ matrix.build }}-${{ matrix.runner }}
+          path: ${{ runner.temp }}/smoke
+          if-no-files-found: warn

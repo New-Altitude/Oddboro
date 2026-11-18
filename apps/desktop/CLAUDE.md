@@ -404,9 +404,11 @@ lockfile-only update, so run it by hand for one that should ship. Six jobs:
    SmartScreen warns before it runs.
    Before it signs, `release.ts` checks the build's own version: the Windows
    app and installer's file version, and the Mac app's `Info.plist`.
-5. `smoke` installs each build and runs it on its own kind of machine, plus
-   the x86_64 AppImage on Ubuntu 24.04 (see "Smoke tests"). No secrets. One
-   failure, and no draft.
+5. `smoke-mac`, `smoke-linux` and `smoke-windows` each start once that
+   system's builds are made, and install each build and run it on its own
+   kind of machine, plus the x86_64 AppImage on Ubuntu 24.04 (see "Smoke
+   tests"). The steps are `release-smoke.yml`'s. So one system's failed build
+   still leaves the others tested. No secrets. One failure, and no draft.
 6. `draft` tests and runs `scripts/check-release.ts` on what the five builds
    uploaded, and creates nothing unless every build passes: exactly the files
    this version should have, each site copy byte for byte the versioned file,
