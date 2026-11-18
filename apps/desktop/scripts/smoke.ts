@@ -391,23 +391,29 @@ let currentRun: ReturnType<typeof makeRun> | undefined;
 
 /**
  * The page's own api.ts, run from Node against the release build with only
- * the Origin a browser adds. SvelteKit's origin check runs only in a release
- * build, which is how 0.0.5's bodiless DELETE passed every test and failed in
- * the app (#25). That request is the control: a server that takes it runs no
- * check, and the row proves nothing.
+ * what a browser adds: the Origin and the owner's key cookie. SvelteKit's
+ * origin check runs only in a release build, which is how 0.0.5's bodiless
+ * DELETE passed every test and failed in the app (#25). That request, key
+ * and all, is the control: it must meet SvelteKit's own refusal, not the
+ * key check's, or the row proves nothing.
  */
-async function pageWrites(): Promise<string> {
+async function pageWrites(key: string): Promise<string> {
+  const cookie = `oddboro-key=${key}`;
   const control = await fetch(`${BASE}/api/pokes/999999`, {
     method: 'DELETE',
-    headers: { origin: BASE }
+    headers: { origin: BASE, cookie }
   });
-  if (control.status !== 403)
-    throw new Error(`0.0.5's bodiless DELETE got ${control.status}, not 403: no origin check here`);
+  const refusal = await control.text();
+  if (control.status !== 403 || !/cross-site/i.test(refusal))
+    throw new Error(
+      `0.0.5's bodiless DELETE got ${control.status} ${refusal.slice(0, 120)}, not SvelteKit's cross-site 403: no origin check here`
+    );
   const seen: string[] = [];
   const nodeFetch = globalThis.fetch;
   globalThis.fetch = (async (input: string | URL | Request, init: RequestInit = {}) => {
     const headers = new Headers(init.headers);
     headers.set('origin', BASE);
+    headers.set('cookie', cookie);
     const res = await nodeFetch(new URL(String(input), BASE), { ...init, headers });
     seen.push(`${init.method ?? 'GET'} ${String(input)}: ${res.status}`);
     return res;
@@ -565,7 +571,7 @@ async function smokeStage(): Promise<void> {
   await step(
     "the page's own writes reach their routes, and 0.0.5's would not (api.ts, #25)",
     true,
-    pageWrites
+    () => pageWrites(key)
   );
   await step('quits when asked, as the app asks', true, () => stop(server));
   server = start();
