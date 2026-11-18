@@ -1,5 +1,6 @@
 // How the office opens a file on this computer, with the opener stubbed, so no
-// test starts a browser. Run with `npm test -w @oddboro/ledger`.
+// test starts a browser, and how it compares a path's case on each system. Run
+// with `npm test -w @oddboro/ledger`.
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { mock, test } from 'node:test';
@@ -28,7 +29,8 @@ mock.module('node:child_process', {
     }
   }
 });
-const { OPENER_FAILS_WITHIN_MS, hostEnv, openFile } = await import('../src/platform.ts');
+const { OPENER_FAILS_WITHIN_MS, foldPathCase, hostEnv, openFile } =
+  await import('../src/platform.ts');
 // The failures below are logged on purpose; keep them out of the test output.
 mock.method(console, 'error', () => {});
 
@@ -77,4 +79,17 @@ test('an opener that stays up, as xdg-open may, counts as opened once the wait i
   // A failure after the wait reaches only the log.
   child.emit('exit', 1, null);
   assert.equal(opened, true);
+});
+
+test('a path compares in lower case on Windows, whose disks ignore case, and as written on a Mac and Linux', async (t) => {
+  const path = 'C:\\Work\\.Claude-B';
+  for (const [platform, compared] of [
+    ['win32', 'c:\\work\\.claude-b'],
+    ['darwin', path],
+    ['linux', path]
+  ] as const)
+    await t.test(platform, (t) => {
+      t.mock.property(process, 'platform', platform);
+      assert.equal(foldPathCase(path), compared);
+    });
 });

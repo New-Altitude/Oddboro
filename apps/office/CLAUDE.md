@@ -876,9 +876,10 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    `~/.aws`, `~/.gnupg`, `~/.config`, `~/Library`, `~/AppData`,
    `~/.claude.json`, `~/.google_workspace_mcp` (where
    that MCP server keeps its sign-ins for other apps on the Mac), `~/.grok`,
-   `~/.codex`, `~/.gemini`, `~/.docker` and `~/.kube`, and the Linux
-   browsers' and keyrings' folders `~/.mozilla`, `~/.local/share/keyrings`,
-   `~/.pki`, `~/snap` and `~/.var/app`, everything
+   `~/.codex`, `~/.gemini`, `~/.docker` and `~/.kube`, and each Claude folder
+   the owner named in Setup (`claudeFolders()` in the ledger, beside
+   `~/.claude`), and the Linux browsers' and keyrings' folders `~/.mozilla`,
+   `~/.local/share/keyrings`, `~/.pki`, `~/snap` and `~/.var/app`, everything
    in `~/.oddboro` besides `staff/` and `data/` (and `threads/<id>/` for a
    run on that thread), every other
    Odd's folder, and everything in `~/.claude` besides this run's sessions.
@@ -925,7 +926,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    commands can still read an env file or a project's git config there, and
    an entry made during the run. Whether Codex shuts a whole folder
    (`init.d`) was not measured, so each script in it is listed by name too. A
-   credential file that is on no list is read. A folder or link target in or holding a secret store, the
+   credential file that is on no list is read. A folder or link target in or holding a secret store, a named Claude folder, the
    office's home or Oddboro's code is left out, as `checkFolder` refuses one,
    and so is one whose real path holds a glob character (`GLOB`); a link
    that leads outside the home adds nothing, so one into `/Users`, `/Volumes`
@@ -2213,12 +2214,17 @@ history. Access cards come from database deliveries, never the Odd's chat
 file.
 
 The Projects window and its local controller live in
-`src/lib/ui/ProjectSessions.svelte` and `src/lib/server/project-sessions/`.
+`src/lib/ui/ProjectSessions.svelte` (its New session form in
+`NewSessionForm.svelte`, whose rules are `project-form.ts`, and its Details
+drawer in `SessionDetails.svelte`) and
+`src/lib/server/project-sessions/`.
 Projects is a window in the start panel (`openProject` in
 `windows.svelte.ts`). While it is in front on a wide screen, the panel
-stretches to 8 px short of the Odd's panel, else of the Odds rail
-(`projectsReach` in `+page.svelte`, `reach` on `SidePanel.svelte`), the desk
-pill hides, and the music keeps its usual width. Its handle still drags: the
+stretches to 8 px short of the Odd's panel, else of the Odds rail. On a
+narrow screen it stretches to 8 px short of the closed rail, and an Odd's card
+or the opened rail overlays it (`projectsReach` in `+page.svelte`, `reach` on
+`SidePanel.svelte`). The desk
+pill hides, and the music keeps its usual width. Focus folds the plate, the tabs and the music bar too (`projectsFocus` in `windows.svelte.ts`). Its handle still drags: the
 width it leaves is Projects' own (`reachWidth`, kept beside the panel's usual
 width), from `min` up to that reach, and dragged all the way it follows the
 reach again. Another tab in front brings the usual width back. While the rail is wide
@@ -2226,15 +2232,21 @@ reach again. Another tab in front brings the usual width back. While the rail is
 back to the wide rail's edge, in the rail's own 200 ms, so every Odd stays in
 view. Its sessions run down the start side as a listbox; the selected one's
 terminal fills the rest, and its details fold out over the terminal. The
-terminal refits at once and sends the session its size only once it settles
-(`ProjectTerminal.svelte`).
+terminal refits only once its box settles, in the same step as it sends the
+session its size, and once more, to redraw, when the owner comes back to it after it or the
+browser window lost focus (`ProjectTerminal.svelte`).
 They sit behind Advanced mode (`owner.advanced_at`), which the owner turns on
 in Setup's Advanced section (`AdvancedSection.svelte`, `PUT
 /api/setup/advanced`) after one warning. The page holds it in `advanced` in
 `windows.svelte.ts`: off, the top bar and the chat's plus menu offer no
 Projects. Off, `/api/project-sessions` and its event stream answer 403
 (`ADVANCED_OFF`), and turning it off ends every open stream
-(`detachProjectViews`). Find existing reads Claude Code's own session files
-(`claude-sessions.ts`); the terminal loads `node-pty` only when it opens. See
+(`detachProjectViews`). Setup's folder list (`PUT /api/setup/claude-folders`,
+`advanced.folders` on the page) names the owner's other Claude folders. Setup keeps
+each as the owner typed it, not by its real path. The continue path's list reads Claude Code's
+own session files in every known Claude folder (`claude-sessions.ts`,
+`claudeProjects` in `claude-project.ts`); a session keeps the folder it runs in
+(`config_dir`), and Remove stops its background job and hides a disconnected one (`hidden_at`). A connected Claude session's Stop button ends it for every window. While Stop or Remove is stopping a session, nothing is claimed for it and no terminal opens: a claim already under way goes back to the state it was claimed from, as it does after a Disconnect, a connect or a terminal open is refused (`stopping`), and a second Stop or Remove is refused (`alreadyEnding`). Claude sessions run in Claude Code's background service and the terminal
+attaches to them (`claude-background.ts`). The terminal loads `node-pty` only when it opens. See
 [project sessions](../../docs/project-sessions.md) for native clients,
 handover and recovery.

@@ -4,6 +4,8 @@ import { z } from 'zod';
 // refuse while Advanced mode is off.
 import {
   advancedMode,
+  claudeFolderFound,
+  claudeFolders,
   connection,
   letSendUnasked,
   projectOverview,
@@ -13,6 +15,9 @@ import {
   changeProjectRequest
 } from '@oddboro/ledger';
 import { ADVANCED_OFF, projectController } from '#lib/server/project-sessions/controller.ts';
+import { folderMarks } from '#lib/server/project-sessions/claude-project.ts';
+import { ClaudeNeedsTrust } from '#lib/server/project-sessions/claude-background.ts';
+import { claudeFolderMark } from '#lib/server/claude.ts';
 import type { RequestHandler } from './$types';
 const id = z.string().uuid(),
   agent = z.enum(['codex', 'claude']),
@@ -22,6 +27,7 @@ const file = z.string().min(1).max(4096).optional();
 const prompt = z.string().trim().min(1).max(64000);
 const command = z.discriminatedUnion('action', [
   z.object({ action: z.literal('connections') }),
+  z.object({ action: z.literal('folders') }),
   z.object({ action: z.literal('find'), agent, folder, socket }),
   z.object({
     action: z.literal('connect'),
@@ -30,7 +36,9 @@ const command = z.discriminatedUnion('action', [
     socket,
     nativeId: id.optional(),
     title: z.string().max(200).optional(),
-    handedOver: z.boolean().optional()
+    handedOver: z.boolean().optional(),
+    configDir: z.string().min(1).max(4096).optional(),
+    move: z.boolean().optional()
   }),
   z.object({ action: z.literal('history'), id }),
   z.object({ action: z.literal('send'), id, key: id, prompt, file }),
@@ -38,7 +46,7 @@ const command = z.discriminatedUnion('action', [
   z.object({ action: z.literal('unasked'), id, staffId: z.string().min(1).max(100).nullable() }),
   z.object({ action: z.literal('decide'), id, key: id, approve: z.boolean() }),
   z.object({ action: z.literal('resolve'), id, key: id }),
-  z.object({ action: z.literal('terminal'), id }),
+  z.object({ action: z.literal('terminal'), id, view: id }),
   z.object({ action: z.literal('control'), id, view: id }),
   z.object({ action: z.literal('keys'), id, view: id, data: z.string().max(100000) }),
   z.object({
@@ -46,7 +54,10 @@ const command = z.discriminatedUnion('action', [
     id,
     view: id,
     cols: z.number().int().min(10).max(500),
-    rows: z.number().int().min(4).max(200)
+    rows: z.number().int().min(4).max(200),
+    // Set when another window may have taken the session's size since this
+    // one last sent it, so the session draws for this window again.
+    redraw: z.boolean().optional()
   }),
   z.object({ action: z.literal('steer'), id, turn: z.string(), prompt, file }),
   z.object({ action: z.literal('stop'), id, expected: z.string() }),
@@ -58,7 +69,10 @@ const command = z.discriminatedUnion('action', [
     pick: z.enum(['accept', 'decline']),
     answers: z.record(z.string(), z.array(z.string())).optional()
   }),
-  z.object({ action: z.literal('disconnect'), id })
+  z.object({ action: z.literal('disconnect'), id }),
+  // Stop on a connected Claude session; `stop` withdraws an assignment.
+  z.object({ action: z.literal('end'), id }),
+  z.object({ action: z.literal('remove'), id })
 ]);
 export const POST: RequestHandler = async ({ request }) => {
   if (!(await advancedMode())) error(403, ADVANCED_OFF);
@@ -68,19 +82,43 @@ export const POST: RequestHandler = async ({ request }) => {
     c = projectController();
   try {
     switch (a.action) {
-      case 'connections':
+      case 'connections': {
+        const sessions = await projectOverview();
+        // Through the login cache: this view reloads on every change to the office's records.
+        const marks = await folderMarks(
+          sessions.map((s) => s.configDir),
+          { fresh: false }
+        );
         return json(
-          (await projectOverview()).map((s) => ({
+          sessions.map((s) => ({
             ...s,
             status: c.status(s.id, s.status),
-            connected: c.view(s.id).connected
+            connected: c.view(s.id).connected,
+            mark: s.configDir === null ? null : (marks.get(s.configDir) ?? null)
           }))
+        );
+      }
+      case 'folders':
+        // The folders a new conversation can start in: those on the disk now.
+        return json(
+          await Promise.all(
+            claudeFolders()
+              .filter(claudeFolderFound)
+              .map(async (path) => ({ path, mark: await claudeFolderMark(path) }))
+          )
         );
       case 'find':
         return json(await c.list(a.agent, a.folder, a.socket));
       case 'connect':
         return json(
-          await c.connect(a.agent, a.folder, a.nativeId, a.title, a.handedOver, a.socket)
+          await c.connect(a.agent, a.folder, {
+            nativeId: a.nativeId,
+            title: a.title,
+            handedOver: a.handedOver,
+            socket: a.socket,
+            configDir: a.configDir,
+            move: a.move
+          })
         );
       case 'history':
         return json({
@@ -116,7 +154,7 @@ export const POST: RequestHandler = async ({ request }) => {
         await c.resolve(a.id, a.key);
         break;
       case 'terminal':
-        await c.terminal(a.id);
+        await c.terminal(a.id, a.view);
         break;
       case 'control':
         c.openTerminal(a.id).take(a.view, true);
@@ -124,9 +162,12 @@ export const POST: RequestHandler = async ({ request }) => {
       case 'keys':
         c.openTerminal(a.id).requireControl(a.view).write(a.data);
         break;
-      case 'size':
-        c.openTerminal(a.id).requireControl(a.view).resize(a.cols, a.rows);
+      case 'size': {
+        const t = c.openTerminal(a.id).requireControl(a.view);
+        if (a.redraw) t.redraw(a.cols, a.rows);
+        else t.resize(a.cols, a.rows);
         break;
+      }
       case 'steer':
         await c.steer(a.id, a.turn, a.prompt, a.file);
         break;
@@ -139,9 +180,22 @@ export const POST: RequestHandler = async ({ request }) => {
       case 'disconnect':
         await c.disconnect(a.id);
         break;
+      case 'end':
+        await c.end(a.id);
+        break;
+      case 'remove':
+        await c.remove(a.id);
+        break;
+      default: {
+        const missed: never = a;
+        throw new Error(`No project action ${JSON.stringify(missed)}`);
+      }
     }
     return json({ ok: true });
   } catch (e) {
+    // Claude Code asks a terminal to trust a new folder first: Start answers
+    // with that terminal, which the page shows.
+    if (e instanceof ClaudeNeedsTrust && e.setup) return json({ setup: e.setup });
     error(
       409,
       e instanceof Error ? e.message : 'The project session could not complete that action.'

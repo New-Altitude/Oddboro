@@ -24,7 +24,9 @@ import { TEMP_IN_APPDATA } from './store-states.ts';
 // A home of the test's own, with the office's home and code inside it, set
 // before office.ts loads: home.ts fixes both at import.
 const HOME = realpathSync(mkdtempSync(join(tmpdir(), 'own-tools-')));
+// homedir() reads HOME on a Mac and Linux, and USERPROFILE on Windows.
 process.env.HOME = HOME;
+process.env.USERPROFILE = HOME;
 process.env.ODDBORO_HOME = join(HOME, '.oddboro');
 process.env.ODDBORO_CODE = join(HOME, 'code', 'oddboro');
 after(() => rmSync(HOME, { recursive: true, force: true }));
@@ -393,6 +395,17 @@ test('the secret stores are the ones the office keeps shut', () => {
     'snap',
     '.var/app'
   ]);
+});
+
+test('a leading ~ reads as the home folder on every system, and ~other stays as typed', async () => {
+  for (const platform of ['darwin', 'linux', 'win32'] as const)
+    await onPlatform(platform, async () => {
+      assert.equal(O.expandHome('~'), HOME, platform);
+      assert.equal(O.expandHome('~/work'), join(HOME, 'work'), platform);
+      assert.ok(O.expandHome('~\\folder').startsWith(HOME), platform);
+      assert.equal(O.expandHome('~other'), '~other', platform);
+      assert.equal(O.expandHome('/srv/work'), '/srv/work', platform);
+    });
 });
 
 test(

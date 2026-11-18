@@ -29,6 +29,12 @@ export const GET: RequestHandler = async ({ request, params, url }) => {
         off = () => {
           ended();
           abort();
+        },
+        // Another window's Start closed this trust terminal: its exit is not the
+        // owner's answer, so it sends no `end`.
+        replaced = () => {
+          send('replaced', true);
+          abort();
         };
       c.events.on(id, state);
       c.events.on('list', refresh);
@@ -38,6 +44,7 @@ export const GET: RequestHandler = async ({ request, params, url }) => {
       terminal?.events.on('control', control);
       terminal?.events.on('data', bytes);
       terminal?.events.on('exit', ended);
+      terminal?.events.on('replaced', replaced);
       let closed = false;
       close = () => {
         if (closed) return;
@@ -49,6 +56,7 @@ export const GET: RequestHandler = async ({ request, params, url }) => {
         terminal?.release(view);
         terminal?.events.off('data', bytes);
         terminal?.events.off('exit', ended);
+        terminal?.events.off('replaced', replaced);
         request.signal.removeEventListener('abort', abort);
       };
       const abort = () => {

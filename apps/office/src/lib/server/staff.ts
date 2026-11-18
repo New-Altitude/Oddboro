@@ -32,6 +32,7 @@ import {
   chatSession,
   type ChatCard,
   claimPoke,
+  claudeFolders,
   clockTime,
   currentPlatform,
   DATABASE_URL,
@@ -646,8 +647,9 @@ function sessionsOf(dir: string): string {
 /**
  * What no staffer may read, even when the owner's own Claude Code settings
  * allow it: a deny rule beats every allow. Secret stores, the rest of the
- * office's folder and other staffers' folders, and the rest of Claude Code's
- * folder, sessions included. Each is denied with everything under it (`denyRules`).
+ * office's folder and other staffers' folders, the rest of Claude Code's
+ * folder, sessions included, and every Claude folder the owner named in Setup.
+ * Each is denied with everything under it (`denyRules`).
  */
 function unreadable(
   id: string,
@@ -670,6 +672,8 @@ function unreadable(
     // ~/.claude among them, which this run's sessions folder, read, keeps open:
     // the two lines at the end shut the rest of it.
     ...SECRET_STORES.map((p) => join(homedir(), p)),
+    // Every Claude folder the owner named in Setup holds their own sessions and login.
+    ...claudeFolders(),
     ...besides(home(), ['staff', 'data', ...(threads.length ? ['threads'] : [])]),
     ...besides(HOMES, [id]),
     // Every other thread's folder. Claude Code takes a read rule on a folder

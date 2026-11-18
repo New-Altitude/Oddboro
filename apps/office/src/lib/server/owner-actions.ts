@@ -175,6 +175,7 @@ export const OWNER_ACTIONS = {
   'POST /api/setup/search': { notAnAction: SETUP },
   // The owner's yes to Advanced mode's warning, and turning it off again.
   'PUT /api/setup/advanced': { records: 'decision' },
+  'PUT /api/setup/claude-folders': { notAnAction: SETUP },
   // The owner's answers to the Act check (`passActCheck`).
   'POST /api/act-check': {
     mayRecord: ['decision'],

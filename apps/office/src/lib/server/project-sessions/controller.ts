@@ -2,9 +2,16 @@
 // unsubscribes that page; only an explicit action stops a session or a turn.
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import type { FSWatcher } from 'node:fs';
+import { rmSync, type FSWatcher } from 'node:fs';
 import {
+  claudeConfigDir,
+  defaultClaudeFolder,
+  home,
+  connection,
   connectProject,
+  OTHER_PROJECT,
+  PAIR_SELF,
+  hideProject,
   claimProject,
   nextProjectRequest,
   changeProjectRequest,
@@ -20,7 +27,9 @@ import { ProjectTerminal } from './terminal.ts';
 import { startCodex, joinCodex, type CodexRpc, type RpcMessage } from './codex-rpc.ts';
 import { projectFolder, projectInput, UUID } from './native.ts';
 import {
-  claudeProjects,
+  claudeProjectsIn,
+  inTerminal,
+  markedClaudeProjects,
   prepareClaude,
   checkClaudeReceiver,
   postClaude,
@@ -28,6 +37,22 @@ import {
   correctClaude,
   hearClaude
 } from './claude-project.ts';
+import {
+  ClaudeNeedsTrust,
+  requireBackground,
+  resumeInBackground,
+  startInBackground
+} from './claude-background.ts';
+import {
+  copyToOpen,
+  JobOutOfReach,
+  openInTerminal,
+  runnableClaudeFolder,
+  sessionFolder,
+  startedSession,
+  stopSessionJob
+} from './controller-claude.ts';
+import { PROJECT_WORDS } from '../../project-words.ts';
 import { bus, listen } from '../events.ts';
 
 type Thread = {
@@ -56,6 +81,11 @@ type Runtime = {
   reply: string;
   questions: Map<number | string, Question>;
   note: string;
+  /**
+   * What the last connect told the owner about the session's Claude folder
+   * (`FOLDER_NOTICE`), or null. Its own field, since later events overwrite `note`.
+   */
+  folderNotice: string | null;
   socket?: string;
   market?: string;
   plugin?: string;
@@ -73,20 +103,53 @@ type View = {
   question?: Question;
   account?: string;
   note: string;
+  folderNotice: string | null;
   reply: string;
   market?: string;
 };
-type Listed = { id: string; title: string; updated: number; live: boolean; job?: string };
+type Listed = {
+  id: string;
+  title: string;
+  updated: number;
+  live: boolean;
+  job?: string;
+  /** Claude only: the Claude folder that holds it, null while not known. */
+  configDir?: string | null;
+  /** Claude only, the continue path's list only: that folder's name and login. */
+  mark?: string | null;
+  /** Claude only: the process of a running one, and what it is doing. */
+  pid?: number;
+  status?: string;
+  /** Claude only: open in a terminal, and connect's `move` can bring it in on this computer. */
+  movable?: boolean;
+};
 /** What every project route answers while Advanced mode is off. */
 export const ADVANCED_OFF =
   'Project sessions need advanced mode. Turn it on in Setup, under Advanced.';
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+/** The header note of a session just connected. */
+const CONNECTED = 'Connected';
+/** The header note once the session's terminal closed, until it opens again. */
+const TERMINAL_CLOSED = 'Terminal closed. You can reopen the conversation.';
 
 export class ProjectController {
   readonly events = new EventEmitter().setMaxListeners(100);
   private sessions = new Map<string, Runtime>();
   private servers = new Map<string, Promise<CodexRpc>>();
   private creating = new Map<string, Promise<Runtime>>();
+  /**
+   * Terminals opened only so Claude Code can ask the owner to trust a folder,
+   * by an id of their own, which the terminal routes take as a session's. One
+   * another window's Start closes emits `replaced` on its terminal first.
+   */
+  private setups = new Map<string, { folder: string; dir: string; terminal: ProjectTerminal }>();
+  /**
+   * The sessions a Stop or Remove is stopping, from its check until the stop
+   * settles: meanwhile nothing is claimed for one, no terminal opens and no
+   * connect reaches it, since the stop would end what they start. A claim
+   * already under way when the stop began goes back as it was (`dispatch`).
+   */
+  private ending = new Set<string>();
   constructor() {
     listen();
     bus.on('event', (e) => {
@@ -117,6 +180,7 @@ export class ProjectController {
       reply: c?.reply ?? '',
       question: c?.questions.values().next().value,
       note: c?.note ?? 'Disconnected',
+      folderNotice: c?.folderNotice ?? null,
       account: c?.account,
       market: c?.market
     };
@@ -154,7 +218,7 @@ export class ProjectController {
   }
   async list(agent: ProjectAgent, path: string, socket?: string): Promise<Listed[]> {
     const cwd = await projectFolder(path);
-    if (agent === 'claude') return claudeProjects(cwd);
+    if (agent === 'claude') return markedClaudeProjects(cwd);
     const rpc = await this.codex(socket);
     const live = new Set((await rpc.request<{ data: string[] }>('thread/loaded/list')).data);
     const rows: Listed[] = [];
@@ -197,46 +261,69 @@ export class ProjectController {
     }
     return rows;
   }
+  /**
+   * Connect a session of the project at `path`: the conversation `nativeId`,
+   * else a new one. `configDir` is the Claude folder the page picked, in the
+   * continue path's list or in Account when starting one. For a known session, its own stored folder
+   * is no pick: Reconnect sends it back. `move` is the owner's yes to end a
+   * Claude conversation's terminal session so it opens here; it is ignored for
+   * one not open in a terminal.
+   */
   async connect(
     agent: ProjectAgent,
     path: string,
-    id?: string,
-    title?: string,
-    handedOver = false,
-    socket?: string
+    options: {
+      nativeId?: string;
+      title?: string;
+      handedOver?: boolean;
+      socket?: string;
+      configDir?: string;
+      move?: boolean;
+    } = {}
   ) {
+    const { handedOver = false, socket, move = false } = options;
+    let { nativeId: id, title, configDir } = options;
+    // Projects runs every Claude conversation in the background, so a Claude
+    // Code without background sessions is refused before anything is read.
+    if (agent === 'claude') await requireBackground();
     const folder = await projectFolder(path);
+    const titled = (t?: string) =>
+      (t || 'New ' + (agent === 'codex' ? 'Codex' : 'Claude Code') + ' session').slice(0, 200);
+    /** The session row's id, when it must match a plugin prepared before the row exists. */
+    let key: string | undefined;
     let started: Thread | undefined;
+    let folderNotice: string | null = null;
+    // Codex keeps no Claude folder: the one sent is neither checked nor used.
+    if (agent === 'codex') configDir = undefined;
+    else if (configDir !== undefined) runnableClaudeFolder(configDir);
 
     if (id && !UUID.test(id)) throw new Error('Choose a valid conversation ID.');
     if (id) {
       let saved: Listed | undefined;
+      const known = (await projectConnections()).find(
+        (s) => s.agent === agent && s.folder === folder && s.nativeId === id
+      );
       if (agent === 'codex') {
         const rpc = await this.codex(socket);
         const [{ thread }, loaded] = await Promise.all([
           rpc.request<{ thread: Thread }>('thread/read', { threadId: id }),
           rpc.request<{ data: string[] }>('thread/loaded/list')
         ]);
-        if (thread.cwd !== folder)
-          throw new Error('That conversation belongs to a different project.');
+        if (thread.cwd !== folder) throw new Error(OTHER_PROJECT);
         saved = {
           id: thread.id,
           title: thread.name || thread.preview || 'Codex',
           updated: thread.updatedAt * 1000,
           live: loaded.data.includes(id)
         };
-      } else saved = (await claudeProjects(folder)).find((row) => row.id === id);
-      const known = (await projectConnections()).find(
-        (s) => s.agent === agent && s.folder === folder && s.nativeId === id
-      );
+      } else {
+        ({ saved, configDir, folderNotice } = await copyToOpen(folder, id, {
+          known,
+          configDir,
+          move
+        }));
+      }
       if (!saved && !known) throw new Error('That conversation was not found in this project.');
-      if (
-        agent === 'claude' &&
-        saved?.live &&
-        !saved.job &&
-        !this.sessions.get(known?.id ?? '')?.terminal?.running
-      )
-        throw new Error('In that Claude terminal, enter /bg, then choose Connect again.');
       if (agent === 'codex' && !saved?.live && !handedOver)
         throw new Error(
           'Finish or stop the turn in its original window, then choose Hand over this conversation.'
@@ -248,21 +335,76 @@ export class ProjectController {
       ).request<{ thread: Thread }>('thread/start', { cwd: folder });
       id = thread.id;
       started = thread;
-    } else id = randomUUID();
-    const s = await connectProject(
-      agent,
-      id,
-      folder,
-      (title || 'New ' + (agent === 'codex' ? 'Codex' : 'Claude Code') + ' session').slice(0, 200)
-    );
-    await this.attach(s, socket, started);
+    } else {
+      configDir ??= defaultClaudeFolder();
+      title = titled(title);
+      ({ id, key } = await this.startClaude(folder, configDir, title));
+    }
+    const s = await connectProject(agent, id, folder, titled(title), configDir, { id: key });
+    const c = await this.attach(s, socket, started);
+    // Opening emitted its view before this was known, and connecting again
+    // emits none: emit it now. The next connect replaces or clears it.
+    c.folderNotice = folderNotice;
+    this.changed(c);
     return s;
   }
+  /**
+   * Starts a new Claude conversation in the background in `folder`, under the
+   * Claude folder `dir`, and returns its id and the key its plugin was
+   * prepared under, which becomes the session row's id. The plugin pairs with
+   * the session that loads it, since the conversation has no id until it runs.
+   */
+  private async startClaude(folder: string, dir: string, title: string) {
+    for (const [id, setup] of this.setups)
+      if (setup.folder === folder && setup.dir === dir) {
+        // Its window must not read this close as the owner's answer and start again.
+        setup.terminal.events.emit('replaced');
+        await this.closeSetup(id);
+      }
+    const key = randomUUID();
+    const p = prepareClaude({ id: key, nativeId: PAIR_SELF, folder });
+    try {
+      const where = { folder, dir };
+      const short = await startInBackground(where, ['-n', title, '--plugin-dir', p.plugin]);
+      return { id: await startedSession(where, short), key };
+    } catch (e) {
+      // No session will read this plugin.
+      rmSync(home('project-sessions', key), { recursive: true, force: true });
+      if (e instanceof ClaudeNeedsTrust) e.setup = await this.trustTerminal(folder, dir);
+      throw e;
+    }
+  }
+  /**
+   * Opens Claude Code in a terminal in `folder`, under the Claude folder
+   * `dir`, so it can ask the owner to trust the folder, and returns the
+   * terminal's id. Its first prompt is `/exit`, so once the owner answers,
+   * Claude Code quits by itself and the terminal ends, which tells the page
+   * to start again. No message is sent, so it saves no conversation.
+   */
+  private async trustTerminal(folder: string, dir: string): Promise<string> {
+    const id = randomUUID();
+    const terminal = await ProjectTerminal.open('claude', ['/exit'], folder, {
+      CLAUDE_CONFIG_DIR: claudeConfigDir(dir)
+    });
+    this.setups.set(id, { folder, dir, terminal });
+    terminal.events.on('exit', () => {
+      if (this.setups.get(id)?.terminal === terminal) this.setups.delete(id);
+    });
+    return id;
+  }
+  private async closeSetup(id: string) {
+    const setup = this.setups.get(id);
+    this.setups.delete(id);
+    await setup?.terminal.releaseProcess();
+  }
   private attach(s: ProjectSession, socket?: string, started?: Thread) {
+    if (this.ending.has(s.id)) throw new Error(PROJECT_WORDS.stopping);
     const existing = this.sessions.get(s.id);
     if (existing?.connected) {
       if (existing.socket !== socket)
         throw new Error('Disconnect the previous Codex server first.');
+      // Connect may have just stored the session's Claude folder: the terminal reads this row.
+      existing.session = s;
       return Promise.resolve(existing);
     }
     const inflight = this.creating.get(s.id);
@@ -276,7 +418,8 @@ export class ProjectController {
       session: s,
       connected: false,
       reply: '',
-      note: 'Connected',
+      note: CONNECTED,
+      folderNotice: null,
       tail: Promise.resolve(),
       questions: new Map(),
       socket
@@ -285,6 +428,7 @@ export class ProjectController {
     try {
       c.request = await activeProjectRequest(s.id);
       if (s.agent === 'claude') {
+        const dir = sessionFolder(s);
         const p = prepareClaude(s);
         c.market = p.market;
         c.plugin = p.plugin;
@@ -317,7 +461,7 @@ export class ProjectController {
           (e) => this.warn(c, e)
         );
         if (c.request) {
-          const active = (await claudeProjects(s.folder)).find(
+          const active = (await claudeProjectsIn(s.folder, dir)).find(
             (row) => row.id === s.nativeId && row.live
           );
           if (!active)
@@ -387,12 +531,23 @@ export class ProjectController {
     if (!c?.connected) throw new Error('Connect this session first.');
     return c;
   }
-  async terminal(id: string) {
+  /**
+   * The session's running terminal, opened if need be. `view` is the window
+   * that asked: it takes the typing before any window's stream connects, so a
+   * second window on the session cannot win the race to it and set its size.
+   * Work an Odd sends names no window, and the first stream takes it.
+   */
+  async terminal(id: string, view?: string) {
     const c = this.runtime(id);
-    if (c.terminal?.running) return c.terminal;
-    return (c.openingTerminal ??= this.launchTerminal(c).finally(() => {
-      c.openingTerminal = undefined;
-    }));
+    // Launched now, it would attach to, or restart, the job the stop is ending.
+    if (this.ending.has(id)) throw new Error(PROJECT_WORDS.stopping);
+    const t = c.terminal?.running
+      ? c.terminal
+      : await (c.openingTerminal ??= this.launchTerminal(c).finally(() => {
+          c.openingTerminal = undefined;
+        }));
+    if (view) t.take(view, true);
+    return t;
   }
   private async launchTerminal(c: Runtime) {
     const s = c.session;
@@ -400,27 +555,39 @@ export class ProjectController {
       const start = (await this.codex(c.socket)).terminal(s.nativeId);
       c.terminal = await ProjectTerminal.open('codex', start.args, s.folder, start.env);
     } else {
-      const saved = await claudeProjects(s.folder);
-      const row = saved.find((r) => r.id === s.nativeId);
-      if (row?.live && !row.job)
-        throw new Error('In the current Claude terminal enter /bg, then reconnect.');
-      const args = row?.job
-        ? ['attach', row.job]
-        : [
-            '--plugin-dir',
-            c.plugin!,
-            ...(row ? ['--resume', s.nativeId] : ['--session-id', s.nativeId])
-          ];
-      c.terminal = await ProjectTerminal.open('claude', args, s.folder);
+      await requireBackground();
+      const dir = sessionFolder(s);
+      const row = (await claudeProjectsIn(s.folder, dir)).find((r) => r.id === s.nativeId);
+      if (inTerminal(row)) throw openInTerminal();
+      // A conversation with a background session attaches to it, running or
+      // stopped; any other resumes as one first. The plugin was prepared as
+      // this session opened.
+      const short =
+        row?.job ||
+        (await resumeInBackground({ folder: s.folder, dir }, s.nativeId, c.plugin!).catch(
+          (e: unknown) => {
+            // A saved conversation whose folder this account no longer trusts
+            // gets no trust question, only the line that it could not start:
+            // the trust terminal belongs to Start's new sessions.
+            throw e instanceof ClaudeNeedsTrust ? new Error(PROJECT_WORDS.startFailed) : e;
+          }
+        ));
+      c.terminal = await ProjectTerminal.open('claude', ['attach', short], s.folder, {
+        CLAUDE_CONFIG_DIR: claudeConfigDir(dir)
+      });
     }
+    if (c.note === TERMINAL_CLOSED) c.note = CONNECTED;
     c.terminal.events.on('exit', () => {
-      c.note = 'Terminal closed. You can reopen the conversation.';
+      c.note = TERMINAL_CLOSED;
       this.changed(c);
     });
     this.changed(c);
     return c.terminal;
   }
+  /** The running terminal of `id`: a folder's trust terminal, else the session's. */
   openTerminal(id: string) {
+    const setup = this.setups.get(id)?.terminal;
+    if (setup?.running) return setup;
     const t = this.runtime(id).terminal;
     if (!t?.running) throw new Error('Open the native terminal first.');
     return t;
@@ -448,7 +615,8 @@ export class ProjectController {
     return this.pump(this.runtime(id));
   }
   private pump(c: Runtime): Promise<void> {
-    if (!c.connected || c.turn || c.request) return Promise.resolve();
+    if (!c.connected || c.turn || c.request || this.ending.has(c.session.id))
+      return Promise.resolve();
     if (c.busy) return c.busy;
     c.busy = this.dispatch(c).finally(() => {
       c.busy = undefined;
@@ -457,6 +625,12 @@ export class ProjectController {
   }
   private async dispatch(c: Runtime) {
     const before = c.note;
+    /** Nothing was claimed, so the readiness note no longer applies. */
+    const unclaimed = () => {
+      if (c.note === before) return;
+      c.note = before;
+      this.changed(c);
+    };
     if (c.session.agent === 'claude') {
       const next = await nextProjectRequest(c.session.id);
       if (!next) return;
@@ -466,6 +640,9 @@ export class ProjectController {
         await this.terminal(c.session.id);
         await checkClaudeReceiver(c.session);
       } catch (e) {
+        // A Stop that began meanwhile refused the terminal: the work waits as it
+        // was, not failed, and a stop that fails pumps again.
+        if (this.ending.has(c.session.id)) return unclaimed();
         // No offer has been written: retry can safely use the same saved request.
         const failed = await changeProjectRequest(
           next.id,
@@ -480,14 +657,14 @@ export class ProjectController {
       }
       if (!c.connected) return;
     }
-    const r = await claimProject(c.session.id);
-    if (!r) {
-      // The claim sent nothing, so the readiness note no longer applies.
-      if (c.note !== before) {
-        c.note = before;
-        this.changed(c);
-      }
-      return;
+    // A Stop that began during the check claims nothing; one that fails pumps again.
+    const r = this.ending.has(c.session.id) ? undefined : await claimProject(c.session.id);
+    if (!r) return unclaimed();
+    // A Stop or Disconnect pressed during the claim found no request to refuse
+    // it, and goes ahead: the request goes back to the state it came from.
+    if (this.ending.has(c.session.id) || !c.connected) {
+      await changeProjectRequest(r.id, c.session.id, ['sending'], r.claimedFrom);
+      return unclaimed();
     }
     c.request = r;
     c.reply = '';
@@ -664,16 +841,72 @@ export class ProjectController {
     c.questions.delete(request);
     this.changed(c);
   }
+  /** Disconnect the session `id`, or close the trust terminal `id`. */
   async disconnect(id: string) {
+    if (this.setups.has(id)) return this.closeSetup(id);
     const c = this.sessions.get(id);
     if (!c) return;
     if (c.request || c.turn)
       throw new Error('Finish or stop the active work before disconnecting.');
+    await this.release(c);
+  }
+  /**
+   * Stop the connected Claude session `id`: its background job ends for every
+   * window joined to it, then the office lets its view go, as Disconnect does.
+   * The stop goes first, so one that fails leaves the session as it was.
+   */
+  async end(id: string) {
+    const c = this.runtime(id);
+    if (c.session.agent !== 'claude') throw new Error('Only a Claude Code session has Stop.');
+    if (c.request || c.turn) throw new Error(PROJECT_WORDS.stopBusy);
+    this.markEnding(id);
+    try {
+      await stopSessionJob(c.session);
+      await this.release(c);
+    } finally {
+      this.ending.delete(id);
+      // A failed stop leaves the session connected: work held back meanwhile goes now.
+      void this.pump(c).catch((e) => this.warn(c, e));
+    }
+  }
+  /**
+   * Remove a disconnected session from the owner's list (`hideProject`), and
+   * stop a Claude session's background job first, so a failed stop hides
+   * nothing. A runtime kept after its Codex server closed is let go first,
+   * active work or not: with the server gone, the owner has no way to stop
+   * that turn.
+   */
+  async remove(id: string) {
+    if (this.creating.has(id) || this.sessions.get(id)?.connected)
+      throw new Error('Disconnect it first.');
+    this.markEnding(id);
+    try {
+      const s = await connection(id);
+      if (s?.agent === 'claude')
+        await stopSessionJob(s).catch((e: unknown) => {
+          // No `claude` may run for it (its folder left Setup or is gone, or
+          // Claude Code is not installed), so nothing can stop its job: the
+          // owner still removes the session.
+          if (!(e instanceof JobOutOfReach)) throw e;
+        });
+      const c = this.sessions.get(id);
+      if (c) await this.release(c);
+      await hideProject(id);
+    } finally {
+      this.ending.delete(id);
+    }
+  }
+  /** Marks the session `id` as ending, or refuses while another Stop or Remove ends it. */
+  private markEnding(id: string) {
+    if (this.ending.has(id)) throw new Error(PROJECT_WORDS.alreadyEnding);
+    this.ending.add(id);
+  }
+  private async release(c: Runtime) {
     c.connected = false;
     clearTimeout(c.arrival);
     c.watch?.close();
     await c.terminal?.releaseProcess();
-    this.sessions.delete(id);
+    this.sessions.delete(c.session.id);
     this.changed(c);
   }
 }

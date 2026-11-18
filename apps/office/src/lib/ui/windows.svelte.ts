@@ -47,9 +47,25 @@ export const wins = $state<{
 
 /**
  * Advanced mode, as this page last heard it (`+page.server.ts`, then Setup).
- * While it is off, nothing on the page offers Projects.
+ * While it is off, nothing on the page offers Projects. `folders` counts the
+ * changes Setup made to the owner's Claude folders, so an open Projects window
+ * lists them again: they live in .env, whose changes reach the page no other way.
  */
-export const advanced = $state({ on: false });
+export const advanced = $state({ on: false, folders: 0 });
+
+/**
+ * Focus in the Projects window is on and a terminal shows. ProjectSessions
+ * decides it; the office panel only reads it, through `panelFolded`.
+ */
+export const projectsFocus = $state({ on: false });
+
+/**
+ * Whether the office panel folds its header, tabs and music bar so the
+ * terminal gets the height. Every window stays mounted, so Focus stays on while
+ * another window comes to the front; that window shows the panel whole.
+ */
+export const panelFolded = (front: Win | undefined): boolean =>
+  projectsFocus.on && front?.kind === 'projects';
 
 /**
  * An item a window wants opened on the desk, such as the task a service's

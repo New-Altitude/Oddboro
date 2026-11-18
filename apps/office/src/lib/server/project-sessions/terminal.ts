@@ -12,6 +12,8 @@ export class ProjectTerminal {
   private history = '';
   private ended = false;
   private writer?: string;
+  /** A redraw's restore to the page's size, while it holds the wider one. */
+  private restore?: ReturnType<typeof setTimeout>;
   take(view: string, replace = false) {
     if (!this.writer || replace) {
       this.writer = view;
@@ -39,18 +41,27 @@ export class ProjectTerminal {
   get running() {
     return !this.ended;
   }
-  /** Open the native client in a terminal. The terminal library loads here, the first time. */
+  /**
+   * Open the native client in a terminal. The terminal library loads here, the
+   * first time. A key `extra` sets to undefined is taken out of the office's
+   * own environment, so the client never sees it.
+   */
   static async open(
     agent: 'codex' | 'claude',
     args: string[],
     cwd: string,
-    extra: Record<string, string> = {}
+    extra: Record<string, string | undefined> = {}
   ) {
     const [exe, prefix] = nativeCommand(agent);
+    const env = Object.fromEntries(
+      Object.entries({ ...nativeEnv(), ...extra, TERM: 'xterm-256color' }).filter(
+        (e): e is [string, string] => e[1] !== undefined
+      )
+    );
     return new ProjectTerminal(
       await openProjectTerminal(exe, [...prefix, ...args], {
         cwd,
-        env: { ...nativeEnv(), ...extra, TERM: 'xterm-256color' },
+        env,
         cols: 100,
         rows: 30,
         name: 'xterm-256color'
@@ -76,7 +87,26 @@ export class ProjectTerminal {
     this.child.write(text);
   }
   resize(cols: number, rows: number) {
+    // A size from the page is the newest, so a redraw's pending restore to an
+    // older one is dropped.
+    clearTimeout(this.restore);
+    this.restore = undefined;
     if (!this.ended) this.child.resize(cols, rows);
+  }
+  /**
+   * Takes the session's size back for this window after another window may
+   * have changed it: one column wider, then back to `cols` 30 ms later. An
+   * equal size sends no resize signal, so the wider one is held. `claude
+   * attach` passes a resize on about 50 ms after it comes, so when the session
+   * already has this window's size the 30 ms hold never reaches it and nothing
+   * redraws. When another window left the session at another size, the size
+   * that reaches it is new, and Claude Code draws for this window (measured
+   * with real Claude Code, 2026-11-17). A size that comes during the hold is
+   * newer and replaces the restore.
+   */
+  redraw(cols: number, rows: number) {
+    this.resize(cols + 1, rows);
+    this.restore = setTimeout(() => this.resize(cols, rows), 30);
   }
   async releaseProcess() {
     if (this.ended) return;
@@ -89,6 +119,7 @@ export class ProjectTerminal {
     }
   }
   close() {
+    clearTimeout(this.restore);
     if (!this.ended) this.child.kill();
   }
 }

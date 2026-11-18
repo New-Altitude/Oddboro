@@ -345,7 +345,8 @@ test('an unhandled rejection still ends the server', async () => {
       [
         '--input-type=module',
         '-e',
-        `await import(${JSON.stringify(instrumentation)}); Promise.reject(new TypeError('notDefinedInT8 is not defined'));`
+        "await import(process.argv[1]); Promise.reject(new TypeError('notDefinedInT8 is not defined'));",
+        instrumentation
       ],
       { env: { ...process.env, OFFICE_DIAGNOSTICS: 'yes' }, timeout: 30_000 }
     );

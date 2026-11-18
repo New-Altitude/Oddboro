@@ -6,7 +6,7 @@
 import { existsSync, readdirSync, realpathSync } from 'node:fs';
 import { homedir, hostname, networkInterfaces } from 'node:os';
 import { dirname, join, sep } from 'node:path';
-import { CODE, GLOB, home, SECRET_STORES, within } from '@oddboro/ledger';
+import { claudeFolders, CODE, GLOB, home, SECRET_STORES, within } from '@oddboro/ledger';
 import { sandboxPaths } from './sandbox-paths.ts';
 import { gitEnv } from './launch.ts';
 
@@ -220,7 +220,8 @@ const FOLDER_GLOBS = ['**/.env', '**/.env.*', '**/.git/config'];
  * The home is read when called, never at import, since tests move it.
  *
  * A folder or link target is left out when it is in or holds a secret store,
- * the office's home or Oddboro's code (as `checkFolder` refuses one), so a
+ * a Claude folder the owner named in Setup, the office's home or Oddboro's
+ * code (as `checkFolder` refuses one), so a
  * link never opens `~/.claude` and a folder never the whole home. One whose real path holds `*`,
  * `?`, `[` or `]` is left out too, with its denies: Codex reads such a path
  * as a glob and will not start (`GLOB`). A deny names the file whether it
@@ -229,8 +230,8 @@ const FOLDER_GLOBS = ['**/.env', '**/.env.*', '**/.git/config'];
  */
 export function devReads(): { reads: string[]; denies: string[]; globDenies: string[] } {
   const h = realpathSync.native(homedir());
-  const shut = [...SECRET_STORES.map((s) => join(h, s)), home(), CODE].map((p) =>
-    existsSync(p) ? realpathSync.native(p) : p
+  const shut = [...SECRET_STORES.map((s) => join(h, s)), home(), CODE, ...claudeFolders()].map(
+    (p) => (existsSync(p) ? realpathSync.native(p) : p)
   );
   const reads: string[] = [];
   /** Reads `p` unless it is left out; whether commands read it, here or by a folder already read. */

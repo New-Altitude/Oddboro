@@ -27,7 +27,7 @@ These folders would let an Odd past the limits you set for it, so Oddboro refuse
 
 - **Your whole home folder.** Pick a folder inside it instead.
 - **Your keys and sign-ins.** Folders like `.ssh`, `.aws` and `.gnupg`, and folders that hold one.
-- **Other AI tools' homes.** The folders where Claude Code, Codex, Grok and Gemini keep their sign-ins and history, such as `~/.claude` and `~/.codex`.
+- **Other AI tools' homes.** The folders where Claude Code, Codex, Grok and Gemini keep their sign-ins and history, such as `~/.claude` and `~/.codex`. Any other Claude Code folder you name in Setup is refused too.
 - **Oddboro itself.** The office's own folder, `~/.oddboro`, and Oddboro's code. An Odd that could change these could change its own access.
 
 Oddboro knows the ones at the top of your home folder by name; everywhere else, inside your home or on another drive, it looks in the folder you pick, the folders it sits in, and the folders directly inside it for the files only these folders hold. It does not look deeper. Before you give a folder, make sure nothing deeper inside it holds keys or sign-ins.

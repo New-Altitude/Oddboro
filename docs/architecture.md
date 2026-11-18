@@ -161,8 +161,9 @@ change.
   `launch-contract.test.ts` launches the tool there. `scripts/check-platform.ts`
   fails a `process.platform` read anywhere but `currentPlatform()`.
 - **A secret store.** Start at `STORE_MARKS` in `packages/ledger/src/office-folders.ts`;
-  `SECRET_STORES` is its keys, so one list says what a run and a given folder
-  stay out of. Each entry says how the store is found anywhere but
+  `SECRET_STORES` is its keys, and `claudeFolders()` in `claude-folders.ts`
+  adds the Claude folders the owner named in Setup, so these two lists say what
+  a run and a given folder stay out of. Each entry says how the store is found anywhere but
   the top of the home, where its name is enough.
   `own-tools.test.ts` walks every entry.
 - **A variable a run needs.** Start at `RUN_ENV_ALLOW` in

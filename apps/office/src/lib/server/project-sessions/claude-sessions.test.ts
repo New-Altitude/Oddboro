@@ -1,12 +1,12 @@
-// Find existing reads Claude Code's own session files, as the Agent SDK's
-// listSessions did, from fixture files in a throwaway Claude folder.
+// The continue path's list reads Claude Code's own session files, as the Agent
+// SDK's listSessions did, from fixture files in a throwaway Claude folder.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, mkdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { claudeHome, savedClaudeSessions } from './claude-sessions.ts';
+import { savedClaudeSessions } from './claude-sessions.ts';
 
 const lines = (...rows: unknown[]) => rows.map((r) => JSON.stringify(r)).join('\n') + '\n';
 const user = (content: unknown, extra: object = {}) => ({
@@ -110,9 +110,4 @@ test('a long folder finds its hashed key, and only its own folder counts', async
   } finally {
     await rm(home, { recursive: true, force: true });
   }
-});
-
-test("Claude's folder follows CLAUDE_CONFIG_DIR, as the native client does", () => {
-  assert.equal(claudeHome({ CLAUDE_CONFIG_DIR: '/accounts/work' }), '/accounts/work');
-  assert.match(claudeHome({}), /\.claude$/);
 });

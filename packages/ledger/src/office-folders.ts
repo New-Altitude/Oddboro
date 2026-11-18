@@ -9,7 +9,8 @@ import { accountsHome, CODE, home } from './home.ts';
 import { type Db } from './threads.ts';
 import { staff } from './schema.ts';
 import { AGENT_NAMES, commandsHow } from './agents.ts';
-import { currentPlatform } from './platform.ts';
+import { currentPlatform, foldPathCase } from './platform.ts';
+import { claudeFolders } from './claude-folders.ts';
 import { SWITCH_NAMES, switchesSaid, type FolderAccess, type OwnSwitch } from './access-words.ts';
 import type { StaffRow } from './office.ts';
 import { staffer } from './office-staff.ts';
@@ -162,6 +163,17 @@ export const switchesOff = (
 ): OwnSwitch[] => wanted.filter((s) => !who[s]);
 
 /**
+ * What Claude Code keeps in an account folder, its own or a second home's: the
+ * conversations and the prompt history. A project's `.claude`, its settings,
+ * holds neither.
+ */
+export const CLAUDE_ACCOUNT_MARKS = ['history.jsonl', 'projects'];
+
+/** Whether `folder` holds every account mark, so it is surely a Claude account folder. */
+export const isClaudeAccount = (folder: string): boolean =>
+  CLAUDE_ACCOUNT_MARKS.every((m) => existsSync(join(folder, m)));
+
+/**
  * Secret stores, by name, each with how it is found anywhere but the top of
  * the home, where the name alone is enough (`touchesSecretStore`). An empty
  * list means the name alone everywhere. A list names what marks the real
@@ -203,7 +215,7 @@ export const STORE_MARKS: Record<string, string[]> = {
   '.config': ['gcloud', 'gh/hosts.yml'],
   Library: ['Keychains/login.keychain-db', 'Cookies'],
   AppData: ['Roaming', 'Local'],
-  '.claude': ['.credentials.json', 'history.jsonl', 'projects'],
+  '.claude': ['.credentials.json', ...CLAUDE_ACCOUNT_MARKS],
   '.claude.json': [],
   '.google_workspace_mcp': [],
   '.grok': ['auth.json', 'sessions'],
@@ -252,8 +264,10 @@ export const FOLDER_WARNING =
 /**
  * Whether `p` is a secret store by `STORE_MARKS`. By its own folder's name, a
  * key's last segment, so `keyrings` anywhere is `.local/share/keyrings`.
+ * Setup's Claude folders route asks it too, to tell an account's `.claude`
+ * from a project's.
  */
-function marksStore(p: string): boolean {
+export function marksStore(p: string): boolean {
   const name = basename(p).toLowerCase();
   const marks = Object.entries(STORE_MARKS).find(
     ([store]) => basename(store).toLowerCase() === name
@@ -325,10 +339,18 @@ export const GLOB = /[*?[\]]/;
  */
 const real = (p: string): string => (existsSync(p) ? realpathSync.native(p) : p);
 
+/**
+ * Whether the folder at `real` (a real path) is a whole drive, or holds one of
+ * `holds` (real paths too): what Setup refuses as a Claude folder, since a
+ * named one is shut to every Odd with everything in it.
+ */
+export function holdsTooMuch(real: string, holds: readonly string[]): boolean {
+  return dirname(real) === real || holds.some((q) => within(q, real));
+}
+
 /** Whether `p` is `parent` or sits inside it. A Windows disk ignores case. */
 export function within(p: string, parent: string): boolean {
-  const [a, b] =
-    currentPlatform() === 'win32' ? [p.toLowerCase(), parent.toLowerCase()] : [p, parent];
+  const [a, b] = [foldPathCase(p), foldPathCase(parent)];
   return a === b || a.startsWith(b.endsWith(sep) ? b : b + sep);
 }
 
@@ -341,9 +363,10 @@ export function shownFolder(path: string): string {
 
 /**
  * Whether the folder at `path`, by its real path, is a secret store at the
- * top of the home (`SECRET_STORES`, by name) or the office's own accounts
- * folder, where each tool's sign-ins live (`accountsHome`), sits in one or
- * holds one, or anywhere else is, sits in or directly holds a store found by
+ * top of the home (`SECRET_STORES`, by name), the office's own accounts
+ * folder, where each tool's sign-ins live (`accountsHome`), or a Claude folder
+ * the owner named in Setup (`claudeFolders`, read at each call, so one named a
+ * moment ago counts), sits in one or holds one, or anywhere else is, sits in or directly holds a store found by
  * what it holds (`inOrHoldsStore`). `checkFolder` refuses such a folder as it
  * is given, and `ownTools` leaves out one stored before its store was listed,
  * or written past `setFolder`, so no run is given it. By real path, so on a
@@ -352,12 +375,22 @@ export function shownFolder(path: string): string {
 export function touchesSecretStore(path: string): boolean {
   const p = real(path);
   const h = real(homedir());
-  const known = [...SECRET_STORES.map((s) => join(h, s)), accountsHome()].some((s) => {
-    const store = real(s);
-    return within(p, store) || within(store, p);
-  });
+  const known = [...SECRET_STORES.map((s) => join(h, s)), accountsHome(), ...claudeFolders()].some(
+    (s) => {
+      const store = real(s);
+      return within(p, store) || within(store, p);
+    }
+  );
   return known || inOrHoldsStore(p);
 }
+
+/**
+ * `typed` with a leading `~` read as the home folder, as a shell reads it: `~`
+ * alone or followed by a slash of either kind. Any other path, `~other`
+ * included, comes back as typed, so the absolute-path check after it refuses it.
+ */
+export const expandHome = (typed: string): string =>
+  /^~(?=$|[\\/])/.test(typed) ? join(homedir(), typed.slice(1)) : typed;
 
 /**
  * Whether `path`, as the owner typed it, may be given to an Odd, and its real
@@ -378,7 +411,7 @@ export function checkFolder(
   accept = false
 ): { real: string } | { refused: string } | { warning: string } {
   const typed = path.trim();
-  const expanded = /^~(?=$|[\\/])/.test(typed) ? join(homedir(), typed.slice(1)) : typed;
+  const expanded = expandHome(typed);
   if (!isAbsolute(expanded) || !existsSync(expanded)) return { refused: FOLDER_REFUSED.missing };
   const p = real(expanded);
   if (!statSync(p).isDirectory()) return { refused: FOLDER_REFUSED.missing };

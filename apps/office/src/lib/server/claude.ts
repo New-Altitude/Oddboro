@@ -17,14 +17,18 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
   AGENT_NAMES,
+  claudeConfigDir,
+  claudeFolderFound,
   drawsLooks,
   home,
   hostEnv,
+  isClaudeFolder,
   MODELS as AGENT_MODELS,
   OFFICE_ACCOUNT,
   OFFICE_MODEL_VAR,
   officeAgent,
   rulePath,
+  shownFolder,
   toolHome,
   type Agent,
   type ModelUsage
@@ -213,25 +217,74 @@ function readStatus(
   );
 }
 
-/** Each account's sign-in, as last read, for a minute: every run asks before it starts. */
+/** How long a sign-in as read stands before it is read again. */
+const LOGIN_KEPT_MS = 60_000;
+/**
+ * Each folder's sign-in, as last read, for a minute: every run asks before it
+ * starts, and Projects as it lists. Keyed by folder: an account's
+ * (`claudeHome`), or a Claude folder the owner named, which Setup never takes
+ * from the accounts folder.
+ */
 const status = new Map<string, { at: number; account?: ClaudeAccount }>();
 
 /** Who `account`'s Claude Code is signed in as, read at most once a minute unless `fresh`. */
-export async function claudeAccountOf(
+export const claudeAccountOf = (
   account: string = OFFICE_ACCOUNT,
   fresh = false
-): Promise<ClaudeAccount | undefined> {
-  const dir = claudeHome(account);
+): Promise<ClaudeAccount | undefined> => claudeFolderLogin(claudeHome(account), fresh);
+
+/** Each Claude folder's sign-in being read now, so lists opened together start one `claude auth status`. */
+const reading = new Map<string, Promise<ClaudeAccount | undefined>>();
+
+/**
+ * Who the Claude folder `dir` is signed in as, read at most once a minute
+ * unless `fresh`. A fresh read joins one already under way, unless a sign-in
+ * or sign-out forgot it since (`forgetClaudeAccount`): that read may have
+ * started before the change, so it answers only the calls that joined it.
+ */
+function claudeFolderLogin(dir: string, fresh: boolean): Promise<ClaudeAccount | undefined> {
   const was = status.get(dir);
-  if (!fresh && was && Date.now() - was.at < 60_000) return was.account;
-  const now = await claudeAccount(dir);
-  status.set(dir, { at: Date.now(), account: now });
-  return now;
+  if (!fresh && was && Date.now() - was.at < LOGIN_KEPT_MS) return Promise.resolve(was.account);
+  const under = reading.get(dir);
+  if (under) return under;
+  // claudeAccount never rejects: a login it cannot read comes back undefined.
+  const read: Promise<ClaudeAccount | undefined> = claudeAccount(claudeConfigDir(dir)).then(
+    (account) => {
+      if (reading.get(dir) === read) {
+        status.set(dir, { at: Date.now(), account });
+        reading.delete(dir);
+      }
+      return account;
+    }
+  );
+  reading.set(dir, read);
+  return read;
 }
 
-/** Forget an account's sign-in as read, after a sign-in or sign-out changed it. */
-export const forgetClaudeAccount = (account: string = OFFICE_ACCOUNT): void =>
-  void status.delete(claudeHome(account));
+/**
+ * How Projects names a Claude folder: its name, then the email it is signed in
+ * as now, such as `~/.claude-personal · owner@example.com`. A folder not in
+ * Setup, or not on the disk, says so. No `claude` runs in a stored folder
+ * outside Setup, since `claude auth status` writes into the folder it reads.
+ * A session with no stored folder runs where its terminal runs.
+ */
+export async function claudeFolderMark(
+  dir: string,
+  { fresh = false }: { fresh?: boolean } = {}
+): Promise<string> {
+  const name = shownFolder(dir);
+  if (!isClaudeFolder(dir)) return `${name} · not in Setup`;
+  if (!claudeFolderFound(dir)) return `${name} · not found`;
+  const login = await claudeFolderLogin(dir, fresh);
+  // Signed in with no email is an API key, say.
+  return `${name} · ${login ? (login.email ?? 'signed in') : 'signed out'}`;
+}
+
+/** Forget an account's sign-in as read, and any read under way, after a sign-in or sign-out changed it. */
+export function forgetClaudeAccount(account: string = OFFICE_ACCOUNT): void {
+  status.delete(claudeHome(account));
+  reading.delete(claudeHome(account));
+}
 
 /**
  * The folder a Claude Code run uses for `account`, or nothing for the owner's

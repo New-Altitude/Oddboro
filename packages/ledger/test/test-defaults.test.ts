@@ -13,7 +13,8 @@ test('a test that reads a secret with no stand-in fails and says which stand-in 
   assert.throws(() => getSecret('x', 'Y'), /office-under-test/);
 });
 
-test('a test runs in a home of its own and finds none of the AI tools', () => {
+test('a test runs in a home of its own, with no Claude folder named, and finds none of the AI tools', () => {
   assert.notEqual(homedir(), userInfo().homedir, "HOME is still the developer's own");
+  assert.ok(!('CLAUDE_CONFIG_DIR' in process.env), "CLAUDE_CONFIG_DIR is still the developer's");
   assert.deepEqual(toolsOnPath(AGENTS), [], 'an AI tool a test process could start');
 });

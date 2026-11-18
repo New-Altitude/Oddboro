@@ -13,12 +13,15 @@ import { randomUUID } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { answerProjectProbes } from './project-receiver.ts';
+import { answerProjectProbes, pairedSessionId } from './project-receiver.ts';
 const [box, nativeId, cwd] = process.argv.slice(2);
+const expected = pairedSessionId(nativeId);
 const server = new McpServer({ name: 'oddboro_project', version: '1.0.0' });
 const text = (s: string) => ({ content: [{ type: 'text' as const, text: s }] });
+// With no expected id, an unset session id must not match it.
 const isPaired = () =>
-  process.env.CLAUDE_CODE_SESSION_ID === nativeId &&
+  expected !== undefined &&
+  process.env.CLAUDE_CODE_SESSION_ID === expected &&
   realpathSync(process.cwd()) === realpathSync(cwd);
 function paired() {
   if (!isPaired()) throw new Error('This conversation is not paired with that office project.');

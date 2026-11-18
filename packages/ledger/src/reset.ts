@@ -10,6 +10,7 @@
 import { copyFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
+import { CLAUDE_FOLDERS_KEY } from './claude-folders.ts';
 import { ENV_FILE, readEnv, writeEnv } from './env.ts';
 import { home } from './home.ts';
 import { stopServiceSync } from './platform.ts';
@@ -25,7 +26,8 @@ const CLEARED = [
   'OFFICE_MODEL',
   'OFFICE_AUTH',
   'OFFICE_AGENT',
-  'OFFICE_DIAGNOSTICS'
+  'OFFICE_DIAGNOSTICS',
+  CLAUDE_FOLDERS_KEY
 ].filter((k) => k in readEnv());
 const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 const BACKUP = join(HOME, 'backups', stamp);

@@ -22,12 +22,14 @@ const TIMERS = file('./diagnostics-idle-timers.ts');
 
 // One traced request and one error, 7 s on the office's clock for the SDK's
 // 5 s span flush, then a 15 s idle window: the intervals still running, and
-// the timeouts made in it.
+// the timeouts made in it. The files it imports go as arguments, never into
+// the code (`MODULES`, in order).
 const office = `
-const { pass, timers } = await import(${JSON.stringify(TIMERS)});
-await import(${JSON.stringify(file('../../instrumentation.server.ts'))});
-const { sender, throwing, traceHeader } = await import(${JSON.stringify(file('./diagnostics-harness.ts'))});
-const hooks = await import(${JSON.stringify(file('../../hooks.server.ts'))});
+const [timersAt, instrumentation, harness, hooksAt] = process.argv.slice(1);
+const { pass, timers } = await import(timersAt);
+await import(instrumentation);
+const { sender, throwing, traceHeader } = await import(harness);
+const hooks = await import(hooksAt);
 const send = sender(hooks.handle);
 await send({ route: '/api/ledger', headers: { 'sentry-trace': traceHeader() } });
 await send({ route: '/api/goals', resolve: throwing(() => new Error('T13 idle')) });
@@ -39,6 +41,13 @@ console.log('TIMERS ' + JSON.stringify({ intervals: now.intervals, timeouts: now
 process.exit(0);
 `;
 
+const MODULES = [
+  TIMERS,
+  file('../../instrumentation.server.ts'),
+  file('./diagnostics-harness.ts'),
+  file('../../hooks.server.ts')
+];
+
 type Count = { intervals: number; timeouts: number };
 
 /** Start an office with these settings, and read its count once it has been idle. */
@@ -47,7 +56,7 @@ function idle(env: Record<string, string>): Promise<Count> {
     // Not execFileSync: the door runs in this process and must answer the child.
     execFile(
       process.execPath,
-      ['--import', TIMERS, '--input-type=module', '-e', office],
+      ['--import', TIMERS, '--input-type=module', '-e', office, ...MODULES],
       { env: { ...process.env, ...env }, timeout: 60_000 },
       (error, stdout) => {
         const line = stdout.split('\n').find((l) => l.startsWith('TIMERS '));
