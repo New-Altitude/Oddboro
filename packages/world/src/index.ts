@@ -15,3 +15,4 @@ export {
   type Ambient
 } from './light.ts';
 export * from './generate.ts';
+export * from './building.ts';

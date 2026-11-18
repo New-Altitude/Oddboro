@@ -19,7 +19,8 @@ import { hexToRgba, renderFrame, spriteMeta } from '@oddboro/sprites/px';
 import { createImage, drawImage, encodePng, scaleImage } from '@oddboro/sprites/png';
 import { composeWorld } from '../src/compose.ts';
 import { paintWorld } from '../src/render.ts';
-import { generateOffice, type OfficeSpec } from '../src/generate.ts';
+import { generateOffice } from '../src/building.ts';
+import type { OfficeSpec } from '../src/generate.ts';
 import { TILE, type FloorPlan, type SpriteCatalog } from '../src/types.ts';
 import {
   BLOOM_REACH,

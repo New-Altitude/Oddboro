@@ -1,6 +1,6 @@
 // How a staffer's run starts on Gemini CLI instead of Claude Code: the
 // arguments, the environment and the input `gemini` gets, the policy that is
-// its only write wall, and how run() in staff.ts reads what it prints. Server
+// its only write wall, and how run() in run-tool.ts reads what it prints. Server
 // only.
 //
 // Gemini keeps its sessions in the office's own Gemini home

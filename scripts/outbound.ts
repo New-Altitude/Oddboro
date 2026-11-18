@@ -100,7 +100,7 @@ export const OUTBOUND: readonly Outbound[] = [
     yes: 'The owner opening the office; nothing leaves this computer.'
   },
   {
-    file: 'apps/office/src/lib/ui/ChatPanel.svelte',
+    file: 'apps/office/src/lib/ui/chat-session.svelte.ts',
     calls: 2,
     to: 'The office, on this computer: the chat route.',
     sends: "The owner's chat messages, to the office that runs the Odd.",

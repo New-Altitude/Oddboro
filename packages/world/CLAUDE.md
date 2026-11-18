@@ -27,7 +27,7 @@ lamps a few tiles off the building. Lights in an outdoor room (the street)
 stop only at its top edge, the building front, and spill past its sides and
 bottom onto the grounds.
 
-`generate.ts` furnishes a room from what each prop says about itself (its
+`furnish.ts` furnishes a room from what each prop says about itself (its
 `clear-<n>` and `any-side` tags, a `side` frame, its spots; see the sprites
 `FORMAT.md`): nothing solid stands where a shelf, a screen or a spot needs the
 floor open, a prop on a side wall turns to face the room or goes elsewhere,
@@ -98,7 +98,7 @@ Placing by hand (room edits) may stand a thing on a rug or a mat, and put a rug
 under standing things; only a rug on a rug is refused. The furnisher still keeps
 them apart, so a refurnish lays out the same as before.
 
-An owner's own office comes from `src/generate.ts`. Claude writes an
+An owner's own office comes from `src/generate.ts` and `src/building.ts`. Claude writes an
 `OfficeSpec` (rooms by kind, size, desks and what stands on each desk,
 walls, floors, accent, extras, grounds, and an optional porch outside the
 front door) and `generateOffice` builds the plan, the room templates, the street
@@ -121,19 +121,23 @@ spec, so a preview and the office it becomes match tile for tile.
 
 To add a kind of room, start at `ROOM_KINDS` in `src/generate.ts`. The type
 checker then names `KIND_ABOUT` and `ROOM_ID`. Nothing names its furnishing:
-add its case to `recipe()`'s switch, or the kind gets no furniture of its own.
+add its case to `recipe()`'s switch in `src/recipe.ts`, or the kind gets no furniture of its own.
 The room an Odd names in a hire proposal (`room` in `hireFields`,
 `packages/ledger/src/mcp-run.ts`) lists Main Street's rooms by hand.
 
-| File                | What it does                                               |
-| ------------------- | ---------------------------------------------------------- |
-| `src/types.ts`      | Every shape: templates, plans, cells, draw commands, spots |
-| `src/compose.ts`    | Plan to world, with walls fitted to their neighbours       |
-| `src/generate.ts`   | A spec to a plan and rooms, with the limits, and checks    |
-| `src/path.ts`       | A* over the walkable grid                                  |
-| `src/render.ts`     | Paints a world from its sprites, Node only (`./render`)    |
-| `src/light.ts`      | Ambient light and sky colour by hour                       |
-| `src/load.ts`       | Reads rooms and plans from disk (server only)              |
-| `scripts/render.ts` | Renders a plan, room or `spec:<file>` to `out/`            |
+| File                | What it does                                                    |
+| ------------------- | --------------------------------------------------------------- |
+| `src/types.ts`      | Every shape: templates, plans, cells, draw commands, spots      |
+| `src/compose.ts`    | Plan to world, with walls fitted to their neighbours            |
+| `src/generate.ts`   | The spec's words and shapes, its limits, and checking a spec    |
+| `src/building.ts`   | A checked spec to a plan and rooms, and checking the world      |
+| `src/furnish.ts`    | Furnishing one room: the pieces it holds and where each stands  |
+| `src/recipe.ts`     | What each kind of room holds at each size, and how big it is    |
+| `src/areas.ts`      | The street and the grounds around the building, and their edits |
+| `src/path.ts`       | A* over the walkable grid                                       |
+| `src/render.ts`     | Paints a world from its sprites, Node only (`./render`)         |
+| `src/light.ts`      | Ambient light and sky colour by hour                            |
+| `src/load.ts`       | Reads rooms and plans from disk (server only)                   |
+| `scripts/render.ts` | Renders a plan, room or `spec:<file>` to `out/`                 |
 
 Everything except `load.ts` and the renderer is browser-safe.

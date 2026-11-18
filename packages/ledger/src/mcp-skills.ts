@@ -1,5 +1,5 @@
 // read_skill: an Odd reads the full text of a skill the owner attached to it.
-// Its prompt lists only each skill's name and when to use it (staff.ts), so the
+// Its prompt lists only each skill's name and when to use it (run-prompt.ts), so the
 // text costs nothing until the Odd needs it. It reads only this Odd's own
 // skills, sends nothing out and needs no grant.
 import { z } from 'zod';

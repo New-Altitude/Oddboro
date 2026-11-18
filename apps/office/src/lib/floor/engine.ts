@@ -9,7 +9,6 @@ import {
   Assets,
   Container,
   Graphics,
-  Rectangle,
   Sprite,
   Spritesheet,
   Texture,
@@ -25,17 +24,17 @@ import {
   glowAlpha,
   INDOOR_GLOW,
   OUTDOOR_GLOW,
-  GLOW_STOPS,
   nightTint,
-  PASS,
   skyAt,
   TILE,
-  type DrawCmd,
   type PlacedLight,
   type SpriteCatalog,
   type World
 } from '@oddboro/world';
+import { countryside, MEADOW, meadowPatch } from './countryside.ts';
+import { tapAt, type Anim, type Box, type Hit, type Switch } from './hits.ts';
 import { dimOf, lookOf, skyBand, type Look, type RGB } from './sky.ts';
+import { glowSprite, glowTexture, makeSprite, toHex } from './sprites.ts';
 import { WeatherLayer } from './weather-layer.ts';
 
 export type Atlas = { sheet: Spritesheet; catalog: SpriteCatalog };
@@ -64,159 +63,11 @@ const SETTLE_MS = 140;
 /** Milliseconds a sliding door shows each frame on its way open or shut. */
 const DOOR_STEP_MS = 70;
 
-/** A sprite the ambient clock animates, with its box in world pixels. */
-type Anim = { s: Sprite; frames: Texture[]; fps: number; start: number; box: Box };
-type Box = [number, number, number, number];
-/** Something a tap can land on: its box, and its place in draw order, so the one drawn on top wins. */
-type Hit = { box: Box; rank: number };
-/**
- * A prop that gives off light, which the owner can switch off: its sprites, the
- * glowing pixels over them, and its lights. Off, a sprite shows its off frame
- * (drawn, like a cold fireplace, or compiled with its glow colours unlit).
- */
-type Switch = Hit & {
-  obj: string;
-  on: boolean;
-  parts: { s: Sprite; lit: Texture; off?: Texture; anim?: Anim }[];
-  glows: { s: Sprite; anim?: Anim }[];
-  lights: Sprite[];
-};
-
-/** Of the hits whose box holds a world point, the one drawn on top. */
-function topAt<T extends Hit>(hits: Iterable<T>, [x, y]: [number, number]): T | undefined {
-  let best: T | undefined;
-  for (const h of hits) {
-    const [bx, by, bw, bh] = h.box;
-    if (x >= bx && x < bx + bw && y >= by && y < by + bh && (!best || h.rank > best.rank)) best = h;
-  }
-  return best;
-}
-
-/**
- * What a tap at a world point does: switch the prop drawn on top there, else
- * open the Lessons from a library shelf there. Switches come first, so the
- * library's own lamps and fire still switch.
- */
-export function tapAt(
-  switches: Iterable<Hit & { obj: string }>,
-  shelves: Iterable<Hit>,
-  at: [number, number]
-): { switch: string } | 'shelf' | undefined {
-  const sw = topAt(switches, at);
-  if (sw) return { switch: sw.obj };
-  return topAt(shelves, at) ? 'shelf' : undefined;
-}
-
-const toHex = (rgb: readonly number[]) =>
-  (Math.round(rgb[0]) << 16) | (Math.round(rgb[1]) << 8) | Math.round(rgb[2]);
-
-function glowTexture(): Texture {
-  const size = 128;
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
-  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  for (const [t, v] of GLOW_STOPS) g.addColorStop(t, `rgba(255,255,255,${v})`);
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, size, size);
-  const tex = Texture.from(canvas);
-  tex.source.scaleMode = 'linear';
-  return tex;
-}
-
-/**
- * One additive glow for a light, cut to the room it is in so it never shines
- * through a wall. `reach` scales the radius (the bloom uses a tighter one).
- */
-function glowSprite(tex: Texture, l: PlacedLight, reach: number): Sprite | undefined {
-  const r = l.radius * reach;
-  let x0 = l.x - r;
-  let y0 = l.y - r;
-  let x1 = l.x + r;
-  let y1 = l.y + r;
-  if (l.clip) {
-    x0 = Math.max(x0, l.clip.x);
-    y0 = Math.max(y0, l.clip.y);
-    x1 = Math.min(x1, l.clip.x + l.clip.w);
-    y1 = Math.min(y1, l.clip.y + l.clip.h);
-  }
-  if (x1 <= x0 || y1 <= y0) return undefined;
-  const k = tex.width / (2 * r);
-  const frame = new Rectangle(
-    (x0 - (l.x - r)) * k,
-    (y0 - (l.y - r)) * k,
-    (x1 - x0) * k,
-    (y1 - y0) * k
-  );
-  const s = new Sprite(new Texture({ source: tex.source, frame }));
-  s.position.set(x0, y0);
-  s.width = x1 - x0;
-  s.height = y1 - y0;
-  s.tint = l.color;
-  s.blendMode = 'add';
-  return s;
-}
-
-/**
- * Build one sprite for a draw command. When its sprite animates, its frames
- * go on `anims` for the ambient clock to turn. `suffix` "~e" picks the
- * emissive-only frames, which line up with the normal ones because the start
- * frame comes from the position.
- */
-function makeSprite(atlas: Atlas, d: DrawCmd, anims: Anim[], suffix = ''): Sprite | undefined {
-  const meta = atlas.catalog[d.sprite];
-  const prefix = d.variant ? `${d.sprite}@${d.variant}` : d.sprite;
-  const m = /^(.*)-(\d+)$/.exec(d.frame);
-  const frames =
-    m && meta.fps > 0 ? atlas.sheet.animations[`${prefix}/${m[1]}${suffix}`] : undefined;
-  let s: Sprite;
-  if (frames && frames.length > 1) {
-    const start = (Math.abs(d.x * 7 + d.y * 13) >> 4) % frames.length;
-    s = new Sprite(frames[start]);
-    anims.push({ s, frames, fps: meta.fps, start, box: [d.x, d.y, meta.width, meta.height] });
-  } else {
-    const tex = atlas.sheet.textures[`${prefix}/${d.frame}${suffix}`];
-    if (!tex) return undefined;
-    s = new Sprite(tex);
-  }
-  s.x = d.x;
-  s.y = d.y;
-  if (d.flip) {
-    s.scale.x = -1;
-    s.x += meta.width;
-  }
-  s.zIndex = d.z;
-  return s;
-}
-
-/**
- * Plain grass laid past the world's own grounds, in tiles on every side, so
- * the camera can pull back far enough to see the whole office beside open
- * panels without showing the edge of the world.
- */
-const MEADOW = 48;
 /** Lamps that follow the daylight, by sprite: out by day, lit from dusk. */
 const DAYLIGHT_LAMPS = new Set(['street-lamp']);
 /** Whether a placed prop, by its id `room/sprite@variant#n`, is a lamp that follows the daylight. */
 const byDaylight = (obj: string) =>
   DAYLIGHT_LAMPS.has(obj.split('/')[1]?.split('#')[0].split('@')[0] ?? '');
-/** What grows on the meadow, the common ones listed more than once. */
-const PLANTS = [
-  'park-tree',
-  'park-tree',
-  'park-tree-large',
-  'park-pine',
-  'park-pine',
-  'park-pine-large',
-  'park-tree-small',
-  'park-bush',
-  'park-bush',
-  'park-bush-large',
-  'park-tuft',
-  'park-tuft',
-  'park-flowers',
-  'park-rock'
-];
 
 export class Floor {
   readonly app: Application;
@@ -419,7 +270,7 @@ export class Floor {
     };
 
     // The meadow under everything, past the grounds' edge.
-    const grass = this.meadowPatch();
+    const grass = (this.patch ??= meadowPatch(this.atlas, this.app));
     if (grass) {
       const meadow = keep(
         new TilingSprite({
@@ -431,7 +282,18 @@ export class Floor {
       meadow.position.set(-MEADOW * TILE, -MEADOW * TILE);
       this.stage.addChildAt(meadow, 0);
       this.shaded.push(meadow);
-      this.stage.addChildAt(keep(this.countryside()), 1);
+      this.stage.addChildAt(
+        keep(
+          countryside({
+            world,
+            atlas,
+            shaded: this.shaded,
+            anims: this.anims,
+            addToBlock: (item, box) => this.addToBlock(item, box)
+          })
+        ),
+        1
+      );
     }
 
     const lightOf = new Set(world.lights.map((l) => l.obj));
@@ -567,155 +429,6 @@ export class Floor {
   }
 
   private patch: Texture | undefined;
-  /**
-   * A 16 by 16 tile patch of grass for the meadow to repeat, mixed the way the
-   * world mixes its grass: plain about 70% of the time, flecked the rest.
-   */
-  private meadowPatch(): Texture | undefined {
-    if (this.patch) return this.patch;
-    const frames = this.atlas.catalog['floor-grass']?.frames ?? [];
-    if (!frames.length) return undefined;
-    const patch = new Container();
-    const N = 16;
-    for (let y = 0; y < N; y++)
-      for (let x = 0; x < N; x++) {
-        let h = (x * 374761393 + y * 668265263) >>> 0;
-        h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0;
-        h = (h ^ (h >>> 16)) >>> 0;
-        const frame =
-          frames.length > 1 && h % 100 >= 70
-            ? frames[1 + ((h >>> 8) % (frames.length - 1))]
-            : frames[0];
-        const tex = this.atlas.sheet.textures[`floor-grass/${frame}`];
-        if (!tex) continue;
-        const sp = new Sprite(tex);
-        sp.position.set(x * TILE, y * TILE);
-        patch.addChild(sp);
-      }
-    this.patch = this.app.renderer.generateTexture({ target: patch, resolution: 1 });
-    patch.destroy({ children: true });
-    return this.patch;
-  }
-
-  /**
-   * The meadow's own things: the street's road rows and the river carried out
-   * to its edges, and trees, bushes and tufts scattered over the grass, kept
-   * clear of the road, the water and the world's own grounds. Drawn once per world, in
-   * the same order every time.
-   */
-  private countryside(): Container {
-    const { world, atlas } = this;
-    const out = new Container();
-    // Back to front, so a tree in front covers the one behind.
-    out.sortableChildren = true;
-    const add = (s: Sprite | TilingSprite) => {
-      out.addChild(s);
-      this.shaded.push(s);
-    };
-    const material = (x: number, y: number) => {
-      const c = world.cells[y * world.width + x];
-      return c?.kind === 'floor' ? c.material : undefined;
-    };
-    // The street's rows, whatever a theme paves them with: cobbles and a dirt
-    // road carry on as far as asphalt does. The grass between stays meadow.
-    const street = world.rooms.find((r) => r.id.startsWith('street'));
-    const grass = material(0, 0);
-    const texture = (m: string) => {
-      const name = `floor-${m}`;
-      const frame = atlas.catalog[name]?.frames.includes('0')
-        ? '0'
-        : atlas.catalog[name]?.frames[0];
-      return frame ? atlas.sheet.textures[`${name}/${frame}`] : undefined;
-    };
-    const road = new Set<number>();
-    for (let y = street?.y ?? 0; y < (street ? street.y + street.h : 0); y++)
-      for (const [edge, from] of [
-        [0, -MEADOW],
-        [world.width - 1, world.width]
-      ]) {
-        const m = material(edge, y);
-        const tex = m && m !== grass && texture(m);
-        if (!tex) continue;
-        road.add(y);
-        const strip = new TilingSprite({ texture: tex, width: MEADOW * TILE, height: TILE });
-        strip.position.set(from * TILE, y * TILE);
-        add(strip);
-      }
-    const W = world.width;
-    const H = world.height;
-    // Any other ground at the world's edge that is not grass (the river) runs
-    // straight on to the meadow's edge, tile by tile from the edge cell's own
-    // draws, so the water keeps its ripple and its banks. Only a bank along
-    // the way it runs carries on.
-    const edgeDraws = new Map<number, DrawCmd[]>();
-    for (const d of world.draws) {
-      const [x, y] = [d.x / TILE, d.y / TILE];
-      if (d.pass !== PASS.floor || (x > 0 && x < W - 1 && y > 0 && y < H - 1)) continue;
-      const key = y * W + x;
-      edgeDraws.set(key, [...(edgeDraws.get(key) ?? []), d]);
-    }
-    const wet = new Set<string>();
-    const sides = [
-      { cells: H, at: (i: number) => [0, i], step: [-1, 0], banks: ['n', 's'] },
-      { cells: H, at: (i: number) => [W - 1, i], step: [1, 0], banks: ['n', 's'] },
-      { cells: W, at: (i: number) => [i, 0], step: [0, -1], banks: ['e', 'w'] },
-      { cells: W, at: (i: number) => [i, H - 1], step: [0, 1], banks: ['e', 'w'] }
-    ];
-    for (const { cells, at, step, banks } of sides)
-      for (let i = 0; i < cells; i++) {
-        const [x, y] = at(i);
-        const m = material(x, y);
-        if (!m || m === grass || (step[1] === 0 && road.has(y))) continue;
-        const draws = (edgeDraws.get(y * W + x) ?? []).filter(
-          (d) =>
-            d.sprite === `floor-${m}` || (d.sprite === `fx-edge-${m}` && banks.includes(d.frame))
-        );
-        for (let k = 1; k <= MEADOW; k++) {
-          const [tx, ty] = [x + step[0] * k, y + step[1] * k];
-          wet.add(`${tx},${ty}`);
-          for (const d of draws) {
-            const s = makeSprite(atlas, { ...d, x: tx * TILE, y: ty * TILE }, this.anims);
-            if (!s) continue;
-            // Under every tree, whatever row it stands in.
-            s.zIndex = -Number.MAX_SAFE_INTEGER;
-            add(s);
-            this.addToBlock(s, [s.x, s.y, TILE, TILE]);
-          }
-        }
-      }
-    // Scatter, deterministic by tile so the meadow never changes between visits.
-    const hash = (x: number, y: number) => {
-      let h = (x * 374761393 + y * 668265263) >>> 0;
-      h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0;
-      return (h ^ (h >>> 16)) / 4294967296;
-    };
-    const near = (y: number) => [...road].some((r) => Math.abs(r - y) <= 2);
-    // A tree stands a tile clear of the water, its trunk and its width.
-    const ashore = (x: number, y: number) => {
-      for (let dy = -1; dy <= 1; dy++)
-        for (let dx = -2; dx <= 3; dx++) if (wet.has(`${x + dx},${y + dy}`)) return false;
-      return true;
-    };
-    for (let y = -MEADOW + 2; y < H + MEADOW - 1; y++)
-      for (let x = -MEADOW; x < W + MEADOW - 2; x++) {
-        // Stay off the world itself and a few tiles from it, so nothing tall
-        // reaches over its edge, and off the road and the water.
-        if (x > -4 && x < W + 1 && y > -1 && y < H + 4) continue;
-        if (near(y) || !ashore(x, y)) continue;
-        const r = hash(x, y);
-        if (r > 0.05) continue;
-        const name = PLANTS[Math.floor((r / 0.05) * PLANTS.length)];
-        const meta = atlas.catalog[name];
-        const frame = meta?.frames.includes('default') ? 'default' : meta?.frames[0];
-        const tex = frame && atlas.sheet.textures[`${name}/${frame}`];
-        if (!meta || !tex) continue;
-        const sp = new Sprite(tex);
-        sp.position.set(x * TILE - meta.origin[0], y * TILE - meta.origin[1]);
-        sp.zIndex = (y + 1) * TILE;
-        add(sp);
-      }
-    return out;
-  }
 
   /** How much sun comes through the windows, 0 at night to 1 at midday. */
   private daylight() {

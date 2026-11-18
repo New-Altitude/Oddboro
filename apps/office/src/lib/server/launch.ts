@@ -3,7 +3,7 @@
 // with the office left behind cleared away, an environment with nothing of the
 // office's own keys or node options in it, TOML values, and the MCP grants
 // read from access()'s names. The git and npm environment of every run with a
-// shell, Claude Code's too. What run() in staff.ts takes from a tool's own
+// shell, Claude Code's too. What run() in run-tool.ts takes from a tool's own
 // stream, how a run with a shell stops, and where a run refused for its
 // sign-in points the owner. Server only.
 import { execFileSync } from 'node:child_process';
@@ -44,7 +44,7 @@ export function toml(v: Toml): string {
 }
 
 /**
- * One MCP server a run gets, as `access()` in staff.ts builds it: the
+ * One MCP server a run gets, as `access()` in run-tool.ts builds it: the
  * office's tool server, a command the run starts, and each outside tool at
  * the office's gateway (gateway.ts), with the run's token as its header. A
  * run never gets an outside server itself, so a new kind of connector

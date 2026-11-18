@@ -101,7 +101,7 @@ export function drive(
       console.error('A run ended, but tidying up after it failed:', e);
     }
   };
-  // staff.ts's order: a stop the owner asked for wins over a deadline that also passed.
+  // run-tool.ts's order: a stop the owner asked for wins over a deadline that also passed.
   const over: RunEnd | undefined = o.signal.aborted
     ? stoppedBy(o.signal, '')
     : o.deadline <= Date.now()
@@ -142,7 +142,7 @@ export function drive(
     const heard = (): RunEnd | undefined => {
       if (failure) return { outcome: 'failed', why: failure, stderr };
       if (replies.length < 2) return replies[0] && { outcome: 'done', ...replies[0] };
-      // Words added too late got a turn of their own: each reply as staff.ts made it, joined.
+      // Words added too late got a turn of their own: each reply as run-tool.ts made it, joined.
       const text = replies.map((r) => (r.text ?? r.spoken).trim()).join('\n\n');
       return { outcome: 'done', text, spoken: spoken() };
     };

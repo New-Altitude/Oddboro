@@ -59,7 +59,7 @@ export const accountHome = (tool: string, account: string): string =>
 
 /**
  * The office's own files at the top of an Odd's folder, by what each holds:
- * the chat log (staff.ts), the chat's run session, a persona's session at
+ * the chat log (chat-turns.ts), the chat's run session, a persona's session at
  * its door (persona-door.ts), the bug report a chat run drafted
  * (bug-drafts.ts), and its update request (chat-updates.ts). Each writer takes its name from here, so an
  * Odd never mails one, the Storage tab never lists one, and a replay never
@@ -103,7 +103,7 @@ export function isWhereNamed(file: { realInside: string; named: string }): boole
   return real === asNamed(file.named);
 }
 
-/** An Odd's one chat session, which every chat resumes (staff.ts). */
+/** An Odd's one chat session, which every chat resumes (chat-run.ts). */
 export const chatSession = (id: string): string => home('staff', id, OFFICE_FILES.session);
 
 /** The code: this repo in development, the app's Resources/server folder in a release. */

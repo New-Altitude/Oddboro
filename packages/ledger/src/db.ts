@@ -7,7 +7,7 @@
 // A .env this process may not read is skipped: Grok's sandbox shows the file
 // to the staff tool server but refuses to open it, and loading it then threw
 // before the server offered a tool (seen 2026-11-05). The office passes that
-// server what it needs from .env instead (`access` in the office's staff.ts).
+// server what it needs from .env instead (`access` in the office's run-tool.ts).
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { drizzle } from 'drizzle-orm/postgres-js';

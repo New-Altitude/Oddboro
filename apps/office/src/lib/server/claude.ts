@@ -400,7 +400,7 @@ export function claudeInput(
 }
 
 /**
- * What a Claude Code run needs beyond `CliRun`, which run() in staff.ts works
+ * What a Claude Code run needs beyond `CliRun`, which run() in run-tool.ts works
  * out by an Odd's own rules. Each is optional, since the office's own run
  * (`bare`) needs only `toolDir` and its `pictures`.
  */

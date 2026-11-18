@@ -70,7 +70,7 @@ system's own store with its command stubbed).
    Never edit a migration that has run; add one. The chain starts at
    `0000_baseline`, which builds the whole schema at once and ends with the
    change triggers, written by hand. A trigger, function or row that
-   `schema.ts` cannot say goes in a migration by hand the same way.
+   `src/schema-*.ts` cannot say goes in a migration by hand the same way.
    `0002_hand-offs` is the one exception: it replaced a run of migrations
    that only trial offices ran. Drizzle runs a migration only when its
    journal time is later than the last one the office recorded
@@ -103,7 +103,7 @@ is `<home>/.env`, since every update replaces the app's own folder.
 A `.env` a process may not read is skipped (`db.ts`, `readEnv`): Grok's
 sandbox shows it to the staff tool server but will not open it. So the
 office sets on that server what it needs from `.env` (`DATABASE_URL`,
-`OFFICE_TIME_ZONE`, `OFFICE_AGENT`; `access` in the office's `staff.ts`), and
+`OFFICE_TIME_ZONE`, `OFFICE_AGENT`; `access` in the office's `run-tool.ts`), and
 the server does not depend on reading it. The one read it makes is the
 Claude folders the owner named in Setup (`claudeFolders()`, which
 `touchesSecretStore` reads); where `.env` cannot be opened that is no folder,
@@ -138,7 +138,10 @@ holds the floor's news of each hand-off and hand-back; `test/thread-access.test.
 holds what an Odd sees through a thread; `test/tell-lead.test.ts` holds
 the owner's words reaching a thread's lead; `test/pick-ups.test.ts` holds
 one run per Odd per thread, results and answers joining one pick-up, and a waiting
-result going back only while what it raised is open; and
+result going back only while what it raised is open; `test/parked-work.test.ts`,
+`test/lifted-parks.test.ts` and `test/task-ends.test.ts` hold work parked on a task
+or a time (a failed wake, a park that holds, a park lifted by a pick-up whose run
+then fails) and how a task on an Odd's own work ends; and
 `test/one-goal-thread.test.ts` walks one goal from plan to end on its one
 thread, with each hire as a colleague and only the lead handing on;
 `test/goal-thread-no-manager.test.ts` holds that with no manager the first
@@ -150,15 +153,18 @@ or its title (`workTitle`), the same whether it finished or a restart cut it off
 goal has a second thread or an Odd that serves a goal and has no job leads one. Each runs the office's own code
 on an in-memory PGlite with every migration, which `test/pglite.ts` puts in
 place of `db.ts` with `mock.module`, hence `--experimental-test-module-mocks`.
-`test/hand-off-tool.test.ts` and `test/goal-day-tool.test.ts` run `src/mcp.ts`
+`test/hand-off-tool.test.ts`, `test/hand-off-files.test.ts`, `test/offered-tools.test.ts`
+and `test/goal-day-tool.test.ts` run `src/mcp.ts`
 in its own process, as the office does for each run, over the office's own
 database (`local-db.ts`) in a throwaway folder, which `test/tool-server.ts`
-sets up and stops when the file ends, so the suite exits. The first holds
+sets up and stops when the file ends, so the suite exits. The first three
+share `test/hand-off-setup.ts`. The first holds
 which runs are offered `hand_off`, the run's key reaching the thread, a
 hand-off that hands nothing on coming back as an error, and a hand-off's
 result naming the work and saying when it starts a new round, `tell_lead` for
-a goal hire, the refusal of a goal's work in its chat, a lead naming the
-thread an ask is for, every tool refusing a key it does not take, every tool it registers being listed or riding with a listed one, each Odd's tools being exactly the ones every Odd has, the ones it holds and those riding with them, and a hire proposal naming every tool the owner can give; the second, the office's day in `my_goals`. `test/goal-statuses.test.ts` holds which goals a lead's chat and `my_goals` count as live, and `test/schedule-rule.test.ts` an Odd's schedule limit, through the tool server too.
+a goal hire, the refusal of a goal's work in its chat, and a lead naming the
+thread an ask is for; the second, the files a hand-off carries and where they
+land; the third, every tool refusing a key it does not take, every tool it registers being listed or riding with a listed one, each Odd's tools being exactly the ones every Odd has, the ones it holds and those riding with them, and a hire proposal naming every tool the owner can give; the fourth, the office's day in `my_goals`. `test/goal-statuses.test.ts` holds which goals a lead's chat and `my_goals` count as live, and `test/schedule-rule.test.ts` an Odd's schedule limit, through the tool server too.
 `test/named-tools.test.ts` runs the tool server for an Odd holding no office
 tool the owner gives and for one holding each alone, in a run and in a chat,
 and fails when a tool's description names an office tool that Odd does not
@@ -167,7 +173,7 @@ hold, unless `NAMES_UNHELD` declares it with the Linear row that owes the fix; t
 `test/grantable.test.ts` holds each line an Odd hears when it lacks a grant,
 word for word, through each function that says it, each PATCH key's class,
 and a hire's starting values.
-`test/desk-answers.test.ts` holds what reaches the Odd for each answer on the desk, row by row, and `test/live-tables.test.ts` each table's change trigger against its row.
+`test/desk-answers.test.ts` holds what reaches the Odd for each answer to an ask, row by row, `test/task-answers.test.ts` for each way a task ends and a goal's change of status, and `test/plan-answers.test.ts` a plan's yes (`test/desk-answers-setup.ts` is what the three share), and `test/live-tables.test.ts` each table's change trigger against its row.
 `test/owner-words.ts` is the check that a line the owner reads says no thread,
 hand-off or number, which ledger tests and the office's format test share.
 `test/deliveries.test.ts` holds when the owner decided each ask.
@@ -654,7 +660,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   place that says what one Odd lacks of others' tools: any grant they hold,
   against the reader's grants in force: those `accessOf` holds nothing back
   from, the same rule `capabilities` gives a run its tools by (`access()` in
-  the office's `staff.ts`). Browse the web and each folder the owner gave an
+  the office's `run-tool.ts`). Browse the web and each folder the owner gave an
   Odd count as tools too (`heldTools`), in force when `ownTools()` gives a run
   them, and a folder the reader has covers every folder inside it. A run
   below the Odd's level (`capped`) holds
@@ -863,7 +869,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   folder (`HandOff.files`, and on a held one through the owner's yes).
   `handOffBrief` lists each at its full path, and names one it cannot find
   there as no longer there: a hand-off a v0.0.9 office stored holds paths
-  in the giver's own folder, never copied. `test/hand-off-tool.test.ts`
+  in the giver's own folder, never copied. `test/hand-off-files.test.ts`
   holds it.
 - A held call (`HeldCall`) may carry `said`, what it does in the owner's
   words from the call alone, which `raiseCall` makes its title, and
@@ -916,7 +922,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   down: the manager never leaves, and an Odd whose look a later hire took
   comes back only once one of them is redrawn. `test/leaving.test.ts` holds it,
   with what each tool raises and `leave_office` offered only in a chat and
-  never to the manager. `test/hand-off-tool.test.ts` pins which rows are
+  never to the manager. `test/offered-tools.test.ts` pins which rows are
   `inChat`, `notToManager` and `prompt`.
 - A hire ask carries its proposal in `asks.hire`. It is approved only by
   hiring, never by a follow-up run. A proposal may name an intake file, which
@@ -983,7 +989,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   Gate on the grant, never on an Odd's id.
 - Where to touch. Each kind of thing starts at its one declaration; the type
   checker then names every other place.
-  - To add an ask kind, start at `ASK_KINDS` in `src/schema.ts`, then its row
+  - To add an ask kind, start at `ASK_KINDS` in `src/schema-asks.ts`, then its row
     in `OWNER_ANSWERS` (`src/desk-answers.ts`), which says what each answer
     does. The type checker then names the rest: `TWINS` (`src/work/twins.ts`),
     the repeat guard's switch in `raiseAsk` (`src/office-asks.ts`),
@@ -996,9 +1002,9 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   - To add a work event, start at `WorkEvent` in `src/work/events.ts`, then
     its row in `WorkResults` beside it and its decider in `DECIDERS`
     (`src/work/decide.ts`).
-  - To add a connector kind, start at `CONNECTOR_KINDS` in `src/schema.ts`.
+  - To add a connector kind, start at `CONNECTOR_KINDS` in `src/schema-runs.ts`.
   - To add a desk item, start at `DESK_ITEMS` in `src/desk-answers.ts`.
-  - To add a goal status, start at `GOAL_STATUSES` in `src/schema.ts`, then
+  - To add a goal status, start at `GOAL_STATUSES` in `src/schema-asks.ts`, then
     its row in `GOAL_IS_LIVE` (`src/goal-words.ts`).
   - To add an office tool, start at its row in `OFFICE_TOOLS` in
     `src/tools.ts`; a tool registered beside it goes in `RIDES_WITH`. When
@@ -1006,7 +1012,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
     one that only shapes the prompt and is never offered) is a field on its
     row, which `isOffered` in `src/tools.ts` reads for the tool server
     (`offered()` in `mcp-run.ts`), the Settings tab's Always on group
-    (`toolGroups` in the office), `test/hand-off-tool.test.ts` and the
+    (`toolGroups` in the office), `test/offered-tools.test.ts` and the
     office's `named-tools.test.ts`.
   - To add an owner control on an Odd's card (a key the staff PATCH route
     reads), start at `STAFF_PATCH_KEYS` in `src/grantable.ts`; the type
@@ -1023,7 +1029,7 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
     Manager's hire, a persona's hire (`hirePersona`) and the hire drawer read
     it. Run `npm run db:generate`
     after; a changed column default needs a migration.
-  - To add a table, start at its `pgTable` in `src/schema.ts`, then its row in
+  - To add a table, start at its `pgTable` in its `src/schema-*.ts` module (`src/schema-columns.ts` holds only the column helpers), then its row in
     `LIVE_TABLES` (`src/live-tables.ts`); the trigger that row names goes in a
     migration by hand.
   - To change how often a job may run, start at `SCHEDULE_RULE` in

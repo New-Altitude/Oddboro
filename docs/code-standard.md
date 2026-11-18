@@ -69,11 +69,11 @@ step (keep it)? Does the PR body say what a new mechanism replaces?
 grant. A function does one thing a reader can name in a sentence. Two adjacent
 arguments of one type whose swap changes the result, or a bare `true` or `false`
 argument, become a named object or distinct types. New behaviour gets its own
-module or component instead of landing in a file over about 1,000 lines.
+module or component; `scripts/check-size.ts` fails a code file over 1,000 lines.
 
 **Check.** Does each new name and signature say what it does? Could two arguments
-be swapped with every check green? Does a new concern land in a file over about
-1,000 lines (`wc -l`)?
+be swapped with every check green? Does a new concern land in a file near the
+1,000-line limit instead of a module of its own?
 
 ### Q5. Types say what is true.
 

@@ -2,7 +2,7 @@
 // `npm test -w @oddboro/office`.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { tapAt } from './engine.ts';
+import { tapAt } from './hits.ts';
 
 /** A shelf two tiles wide and three tall, drawn early, with a lamp standing on it drawn later. */
 const shelf = { box: [0, 0, 32, 48] as [number, number, number, number], rank: 1 };

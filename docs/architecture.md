@@ -14,17 +14,17 @@ Imports point one way. An app imports packages and a package never imports
 an app; `ledger` imports `world` and `sprites`, and `world` imports `sprites`.
 
 - `packages/ledger`. The office's records and every rule about them: the
-  tables (`src/schema.ts`), what the office does with them (`src/office.ts`),
+  tables (`src/schema.ts`, over the `src/schema-*.ts` table modules), what the office does with them (`src/office.ts`),
   the tool server an Odd runs with (`src/mcp.ts`), the AI tools
   (`src/agents.ts`), and what a run may reach (`src/capabilities.ts`). Server
   only, except the entries `packages/ledger/CLAUDE.md` names as the page's.
 - `apps/office`. The office server and its page: the floor (`src/lib/floor/`),
   the panels (`src/lib/ui/`), the routes (`src/routes/api/`, one folder per
-  thing), and running Odds (`src/lib/server/`: `staff.ts` runs one, `cli.ts`
+  thing), and running Odds (`src/lib/server/`: `run-tool.ts` runs one, `cli.ts`
   gets each AI tool's launch ready (`LAUNCHES`), `drive.ts` runs it and reads
   its stream, `sandbox.ts` walls commands).
 - `packages/world`. Rooms and offices as JSON (`rooms/`, `plans/`), an
-  owner's office built from a spec (`src/generate.ts`), and `composeWorld`.
+  owner's office built from a spec (`src/generate.ts`, `src/building.ts`), and `composeWorld`.
 - `packages/sprites`. The art as `.px` text, the palette, the compiler.
 - `apps/desktop`. The Tauri shell around the office. It imports no package;
   its contract with the server is in `apps/desktop/CLAUDE.md`.
@@ -107,13 +107,12 @@ Planned work starts where a "Later" line says, not here: the "Later" sections
 of `packages/ledger/CLAUDE.md`, `apps/office/src/lib/server/CLAUDE.md`,
 `apps/desktop/CLAUDE.md`, `scripts/CLAUDE.md` and `docs/CLAUDE.md` say what
 comes first for a run timeline (one row per run), Stop for a run, a new
-office tool or AI tool, a release smoke test, splitting a
-big file, the size guard and a long guide file. The page pass is the last line
+office tool or AI tool, a release smoke test and a long guide file. The page pass is the last line
 of "Rules for this app" in `apps/office/CLAUDE.md`. Whoever does a "Later" item
 deletes its line, and whoever finds this page wrong fixes it in the same
 change.
 
-- **An ask kind.** Start at `ASK_KINDS` in `packages/ledger/src/schema.ts`.
+- **An ask kind.** Start at `ASK_KINDS` in `packages/ledger/src/schema-asks.ts`.
   Check-types fails at `OWNER_ANSWERS.ask` in
   `packages/ledger/src/desk-answers.ts`, which says what each answer does. A
   kind the owner answers on its own card (a reply, a filter, a folder, a call)
@@ -138,7 +137,7 @@ change.
 - **A desk item.** Start at `DESK_ITEMS` in `desk-answers.ts`. Check-types
   fails at `OWNER_ANSWERS`, `Item` in `DeskDrawer.svelte`, `replyBrief` and
   `openDelivered`.
-- **A connector kind.** Start at `CONNECTOR_KINDS` in `schema.ts`. Check-types
+- **A connector kind.** Start at `CONNECTOR_KINDS` in `schema-runs.ts`. Check-types
   fails at each switch on it, each ending in a `never` default. `builtin`
   connectors (Gmail, Google Drive) are served by the office itself (`builtin`
   in `access.ts`).
@@ -182,20 +181,20 @@ change.
   skill to it, `inChat` only in a chat on the owner's words,
   `notToManager` never to the Office Manager.
   Whether the owner grants it is the `office_tools` row of `OWNER_GRANTS`.
-  `hand-off-tool.test.ts` fails a registered tool that is neither listed nor
+  `offered-tools.test.ts` fails a registered tool that is neither listed nor
   rides with one, check-types fails an id `OFFICE_TOOLS` lacks in
   `STARTER_TOOLS` or `has()`. The ledger's `named-tools.test.ts` fails a
   tool's description naming an office tool the Odd does not hold, and the
   office's `named-tools.test.ts` fails the same in `house()` and every
   follow-up's brief, unless that test's `NAMES_UNHELD` declares it with the
   Linear row that owes the fix.
-- **A table.** Start at its `pgTable` in `schema.ts`, then run
+- **A table.** Start at its `pgTable` in its `schema-*.ts` module, then run
   `npm run db:generate`. Its row in `LIVE_TABLES` in
   `packages/ledger/src/live-tables.ts` says whether the page hears it, and its
   trigger goes in a migration by hand. CI's "Migrations match the schema"
   fails a schema change with no migration, and `live-tables.test.ts` fails a
   table with no row or a trigger its row does not say.
-- **A goal status.** Start at `GOAL_STATUSES` in `schema.ts`. Check-types
+- **A goal status.** Start at `GOAL_STATUSES` in `schema-asks.ts`. Check-types
   fails at every `Record<GoalStatus, ...>`, `GOAL_IS_LIVE` in `goal-words.ts`
   among them.
 - **A page call or a route.** A route is a folder under
@@ -214,7 +213,7 @@ change.
   `scripts/check-outbound.ts` fails lint when a file's calls, by the names it
   counts, differ from its entry. It counts no child process, such as an AI
   tool's run.
-- **A kind of run.** Start at `UsageKind` in `schema.ts`. Check-types fails
+- **A kind of run.** Start at `UsageKind` in `schema-office.ts`. Check-types fails
   at `RUN_FAILURE` in `apps/office/src/lib/server/run-failures.ts`, and
   `failed-run.test.ts` holds where each failure lands. Live execution uses
   `runsGoing` in `run-registry.ts`, with a stop handle on each entry.

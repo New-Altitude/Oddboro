@@ -645,7 +645,7 @@ for (const row of ROWS)
   for (const tool of row.tools)
     test(`${row.does}, on ${L.AGENT_NAMES[tool]}`, () => driveRow(tool, row));
 
-// How each caller words a run's end (`toolEnded` in staff.ts, `officeEnded` in
+// How each caller words a run's end (`toolEnded` in run-tool.ts, `officeEnded` in
 // office-run.ts), through the stand-ins.
 
 /** The end of one chat message to Odd `id`: its reply, or its error. */
