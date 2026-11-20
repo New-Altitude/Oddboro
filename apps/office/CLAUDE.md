@@ -537,6 +537,52 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    `access.ts`), and lists each email's subject, sender and date on the
    desk (`call.shown`, never in an Odd's prompt), with the exact call
    folded under it. `update_labels` takes many `thread_ids` in one call.
+   Calendar's `create_event` and `update_event` (Google's names; no tool
+   deletes an event or a calendar) take what Google Calendar's own editor
+   offers: a repeat (Google's RRULE, EXDATE and RDATE lines), reminders,
+   a Google Meet call (`conferenceData.createRequest`, always with
+   `conferenceDataVersion=1`), busy or free, visibility, optional guests,
+   guest permissions, a colour, Drive file links (`supportsAttachments=true`,
+   never an upload), a separate end time zone, and for a change, a move to
+   another calendar (`events.move`) and a scope for one occurrence of a
+   repeating event: this one, this and following, or all. "This and
+   following" is two calls, as Google's own editor makes them: the series
+   ends the day before (UNTIL), and a new series starts there with the change,
+   carrying the guests, the same call and the rest (`splitSeries` in
+   `google/calendar-write.ts`). A Zoom or other add-on call cannot be made
+   through Google's API, so Oddboro never makes or takes one off and keeps it
+   on every change. The tools follow the level, except a call that would make
+   Google email anyone besides the owner: an event created with guests, or a
+   change to an event with guests on it, read from Google as the call comes
+   (`eventHold` in `google/calendar.ts`, through `eventHoldFor` in
+   `access.ts`). A change to only the owner's reminders or the colour emails
+   nobody and follows the level (`personalOnly`). The gateway holds a call
+   that emails anyone as a `call` ask at every level, Act and a standing yes
+   included, so both tools list `oddboro_title` and `oddboro_why` at Act too,
+   needed only then. The held call keeps `call.event`, read once as it is
+   held so the card never calls Google: the account, the calendars the owner
+   can write to with their colours and default reminders, Google's event
+   colours, and for a change the event as it stood and its series. The Desk
+   opens it in `src/lib/ui/EventReview.svelte`: who wants it and why, a
+   read-only summary like Google's event popup, Edit for the sections on one
+   icon grid (`RepeatPicker`, `ZonePicker`, `GuestField`), and a footer that
+   sticks to the bottom with the one box that says who Google emails and what
+   changes, then the buttons. Its rules (the form, the owner's version, the
+   words in the box) are in `src/lib/calendar/event-card.ts`, with the repeat
+   in `rrule.ts` and wall clocks in `zones.ts`, all tested without a page.
+   Google's event and calendar colours are the owner's data, not office
+   chrome: the card shows Google's own values only inside a swatch or dot,
+   with Google's names as labels, so hard rule 7 holds for everything else.
+   The owner's version posts as `arguments` to `/api/asks/[id]/call`, which
+   takes only the fields `ownerEdit` names (never the event) and only a
+   calendar the card offered. Only `makeCall` sets `OWNER_META`
+   (`google/http.ts`), and only with it does a Calendar call that emails
+   anyone go with `sendUpdates=all`; without it the tool refuses any call
+   that emails someone and sends `sendUpdates=none`. A new event's
+   description ends with "Added by Oddboro" and a link (`withEventFooter`),
+   added where the text is first written: as the gateway holds it, or as a
+   run's call goes. The owner's click never adds it, so a line they removed
+   stays removed.
    Its input grows with the text
    up to 60% of the chat, and the bar above it drags it taller; that height is
    remembered per viewer. Every run's system prompt opens with "Who you work
@@ -1128,12 +1174,15 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    error in the body, which the SDK would drop without a word, so `githubRefusal`
    hands the SDK a 400 and logs GitHub's reason, and `freshAccess` logs any
    renewal that did not take. The same provider signs the owner in to New
-   Altitude (see "A New Altitude account"). Gmail and Google
-   Drive are `builtin` connectors (migration `0009_google`): the office serves
+   Altitude (see "A New Altitude account"). Gmail, Google
+   Drive and Google Calendar are `builtin` connectors (migration `0009_google`;
+   Calendar from `BUILT_IN` in the ledger's `registry.ts`): the office serves
    their tools itself (`src/lib/server/google/`, connected in-process by
    `builtin` in `access.ts`), and signs each in on its own with New Altitude's
    Google Desktop client and its own scopes (`GOOGLE_SCOPES` in `oauth.ts`:
-   Gmail's `gmail.modify` and `gmail.settings.basic`, for filters; a stored
+   Gmail's `gmail.modify` and `gmail.settings.basic`, for filters;
+   Calendar's `calendar.readonly`, `calendar.events` and `userinfo.email`,
+   never the full `calendar` scope; a stored
    sign-in that lacks one signs in afresh, `covers`; the
    secret from `ODDBORO_GOOGLE_CLIENT_SECRET`, which the shell passes from the
    build, or `.env` in development). A hosted server that signs in through
@@ -1143,7 +1192,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    before the app. A build without either secret says so on Sign in
    (`BuiltWithout`). Each Google call asks `bearer` for a live
    token, so it never leaves the office process. One connector is one Google
-   account of one product, found by `config.google` (`gmail` or `drive`),
+   account of one product, found by `config.google` (`gmail`, `drive` or `calendar`),
    never by its id: scopes, the server `builtin` makes, and the reply and
    filter routes all go by it. A sign-in keeps the address
    (`config.account`) and renames the connector ("Gmail (ada@example.com)",
@@ -1155,7 +1204,7 @@ pieces under 3,900 bytes a line, so no value is on a command line.
    first (`revokeAtGoogle` in the ledger), unless another Google connector,
    either product, is signed in to the same account. A further account
    (`gmail-2`) no Odd holds leaves the catalog. On the Services tab, picking
-   Gmail or Google Drive once one is connected lists each connected account
+   Gmail, Google Drive or Google Calendar once one is connected lists each connected account
    and "Another Google account" (a connector still waiting on its sign-in,
    or a new one, `another` on the grant). A
    Claude Code run gets its servers as a file in `<home>/mcp/` only the owner

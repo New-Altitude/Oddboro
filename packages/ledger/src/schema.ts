@@ -249,8 +249,82 @@ export type HeldCall = {
    * the desk shows them.
    */
   before?: { tool: string; arguments: Record<string, unknown> }[];
+  /** A Google Calendar event the call makes or changes, which the desk shows as an event to edit. */
+  event?: HeldEvent;
   /** Set once the office made the call: whether the tool took it, and its words. */
   result?: { ok: boolean; text: string; at: string };
+};
+/**
+ * What the desk needs beside a held `create_event` or `update_event` call's
+ * own inputs: the account it goes through, the calendars and colours to pick
+ * from, and for a change, the event as Google had it when the call was held.
+ * Google emails everyone on an event about a change, so `others` is who gets
+ * an email besides anyone added. Read once, as the call is held, so the card
+ * never calls Google. Words from strangers: the page shows them, and no Odd's
+ * prompt carries them.
+ */
+export type HeldEvent = {
+  /** The calendar account's address, which is never emailed. */
+  account?: string;
+  /** For a change: the event's title as it stood. */
+  now?: string;
+  /** For a change: the people on the event besides the owner. */
+  others: string[];
+  /** For a change: the event as it stood, or the occurrence, for one of a repeating event's. */
+  before?: CalendarEvent;
+  /** For an occurrence of a repeating event: the series it belongs to. */
+  series?: { id: string; recurrence: string[]; start: GoogleTime };
+  /** The account's calendars the owner can add events to. */
+  calendars?: HeldCalendar[];
+  /** Google's event colours by id, as Google's own hex values: the owner's data, shown only in its swatch. */
+  colors?: Record<string, string>;
+};
+/** One end of a Google Calendar event: a date for an all-day event, else a time and its zone. */
+export type GoogleTime = { date?: string; dateTime?: string; timeZone?: string };
+/** One calendar the owner can write to, as the event card offers it. */
+export type HeldCalendar = {
+  id: string;
+  name: string;
+  primary?: boolean;
+  /** Google's own colour for it, shown only in its dot. */
+  color?: string;
+  timeZone?: string;
+  /** The calendar's default reminders, which "Use the calendar's default" means. */
+  reminders?: { method: string; minutes: number }[];
+  /** Whether Google Meet can be added on it (`allowedConferenceSolutionTypes`). */
+  meet?: boolean;
+};
+/** The parts of a Google Calendar event the desk shows, in Google's own names. */
+export type CalendarEvent = {
+  id: string;
+  summary?: string;
+  description?: string;
+  location?: string;
+  start: GoogleTime;
+  end: GoogleTime;
+  recurrence?: string[];
+  recurringEventId?: string;
+  originalStartTime?: GoogleTime;
+  attendees?: {
+    email: string;
+    displayName?: string;
+    optional?: boolean;
+    responseStatus?: string;
+    self?: boolean;
+    resource?: boolean;
+    organizer?: boolean;
+  }[];
+  organizer?: { email?: string; displayName?: string; self?: boolean };
+  reminders?: { useDefault?: boolean; overrides?: { method: string; minutes: number }[] };
+  /** The video call on it: Meet, or an add-on such as Zoom, which Oddboro never changes. */
+  conference?: { meet: boolean; name?: string; uri?: string };
+  transparency?: string;
+  visibility?: string;
+  colorId?: string;
+  guestsCanModify?: boolean;
+  guestsCanInviteOthers?: boolean;
+  guestsCanSeeOtherGuests?: boolean;
+  attachments?: { fileUrl: string; title?: string; mimeType?: string; fileId?: string }[];
 };
 /** What a catch_up ask fills: one job's missed scheduled times, ISO, oldest first. */
 export type CatchUp = { jobId: number; times: string[] };
@@ -726,7 +800,7 @@ export type ConnectorConfig = {
   account?: string;
 };
 /** The Google products the office serves itself. One connector is one account of one product. */
-export type GoogleProduct = 'gmail' | 'drive';
+export type GoogleProduct = 'gmail' | 'drive' | 'calendar';
 
 /** The role an AWS tool uses, and where. None of it is secret. */
 export type AwsConfig = {

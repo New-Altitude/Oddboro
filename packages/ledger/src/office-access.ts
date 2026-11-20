@@ -338,7 +338,7 @@ export async function addConnector(c: typeof connectors.$inferInsert): Promise<C
 
 /**
  * The Google products the office serves itself: the connector each starts
- * with (migration 0009_google), and its plain name before a sign-in names
+ * with, and its plain name before a sign-in names
  * the account. A further account of one is a connector of its own
  * (`addGoogleAccount`). Code looks a Google connector up by
  * `config.google`, never by its id.
@@ -348,6 +348,12 @@ export const GOOGLE: Record<GoogleProduct, { id: string; name: string; descripti
     id: 'gmail',
     name: 'Gmail',
     description: "Search, read, label, draft and send mail in the owner's Gmail."
+  },
+  calendar: {
+    id: 'google-calendar',
+    name: 'Google Calendar',
+    description:
+      "Read events, check availability, and create and change events in the owner's Google Calendar."
   },
   drive: {
     id: 'google-drive',
@@ -360,7 +366,7 @@ export const GOOGLE: Record<GoogleProduct, { id: string; name: string; descripti
 const sameAccount = (a: string | undefined, b: string | undefined) =>
   !!a && !!b && a.toLowerCase() === b.toLowerCase();
 
-/** Every connector of one Google product, or of both, oldest first. */
+/** Every connector of one Google product, or of all of them, oldest first. */
 export async function googleConnectors(product?: GoogleProduct): Promise<ConnectorRow[]> {
   const rows = await db
     .select()

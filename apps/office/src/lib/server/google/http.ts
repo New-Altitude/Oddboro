@@ -1,4 +1,4 @@
-// What the office's own Google tool servers (gmail.ts, drive.ts) share: one
+// What the office's own Google tool servers (gmail.ts, drive.ts, calendar.ts) share: one
 // way to call Google with the owner's token, one way to turn a failure into
 // a tool result the Odd can read, and the fence around text from strangers.
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -89,16 +89,27 @@ export const send = (method: string, body: unknown): RequestInit => ({
 export const ODD_META = 'oddboro/odd';
 
 /**
+ * The owner clicked this call on their desk, in the call's `_meta`. Only
+ * `makeCall` sets it, on a call it builds itself, so no run can. A calendar
+ * event that emails other people goes only with it (`create_event`).
+ */
+export const OWNER_META = 'oddboro/owner-said-yes';
+
+/**
  * A tool's work as a tool result. Whatever goes wrong comes back as an
  * error the Odd reads, never a throw that would drop the connection.
  */
-export function run<A>(work: (args: A, odd?: string) => Promise<string>) {
+export function run<A>(work: (args: A, odd?: string, ownerSaidYes?: boolean) => Promise<string>) {
   return async (args: A, extra?: { _meta?: Record<string, unknown> }): Promise<CallToolResult> => {
     try {
       const odd = extra?._meta?.[ODD_META];
+      const yes = extra?._meta?.[OWNER_META] === true;
       return {
         content: [
-          { type: 'text', text: await work(args, typeof odd === 'string' ? odd : undefined) }
+          {
+            type: 'text',
+            text: await work(args, typeof odd === 'string' ? odd : undefined, yes)
+          }
         ]
       };
     } catch (e) {

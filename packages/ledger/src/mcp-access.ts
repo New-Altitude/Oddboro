@@ -135,7 +135,7 @@ if (has('ask_for_access'))
   tool(
     'ask_for_access',
     {
-      description: `Ask ${OWNER} to connect a tool for you. Pass a catalog id or registry name from find_connectors, or the https address of a hosted MCP server. Ask for the lowest level that does the job: read to look, write to change things in the tool (needs Draft or Act; at Draft each change waits for ${OWNER}'s yes). For a second Google account of Gmail or Google Drive, pass that connector with another_account. If they approve, they get numbered steps to connect it, and it shows up in my_access when done. ${NOT_OWN_TOOLS}${raisedNote}`,
+      description: `Ask ${OWNER} to connect a tool for you. Pass a catalog id or registry name from find_connectors, or the https address of a hosted MCP server. Ask for the lowest level that does the job: read to look, write to change things in the tool (needs Draft or Act; at Draft each change waits for ${OWNER}'s yes). For a second Google account of Gmail, Google Drive or Google Calendar, pass that connector with another_account. If they approve, they get numbered steps to connect it, and it shows up in my_access when done. ${NOT_OWN_TOOLS}${raisedNote}`,
       inputSchema: {
         connector: z.string(),
         level: z
@@ -159,7 +159,7 @@ if (has('ask_for_access'))
           .boolean()
           .optional()
           .describe(
-            `Only for Gmail or Google Drive, for each Google account beyond the first. When ${OWNER} uses more than one, ask for all of them in one run: the first without another_account, then one ask with it for each further account. ${OWNER} signs in to each as a tool of its own.`
+            `Only for Gmail, Google Drive or Google Calendar, for each Google account beyond the first. When ${OWNER} uses more than one, ask for all of them in one run: the first without another_account, then one ask with it for each further account. ${OWNER} signs in to each as a tool of its own.`
           ),
         revises: revisesArg
       }
@@ -208,7 +208,7 @@ if (has('ask_for_access'))
         return refused('Physical mail only allows Read only access.');
       const product = conn.config.google;
       if (another_account && !product)
-        return refused(`another_account is only for Gmail and Google Drive.`);
+        return refused(`another_account is only for Gmail, Google Drive and Google Calendar.`);
       // Another account only beside a first one: connected, or on its way (this
       // Odd's open ask for it, or a grant still being connected). So an Odd that
       // needs two mailboxes can ask for both at once, on its first day.

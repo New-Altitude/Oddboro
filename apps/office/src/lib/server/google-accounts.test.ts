@@ -58,6 +58,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init: RequestInit = {}) => 
       expires_in: 3600,
       token_type: 'Bearer'
     });
+  if (url.endsWith('/oauth2/v2/userinfo')) return Response.json({ email: signsInAs });
   if (url.endsWith('/users/me/profile')) return Response.json({ emailAddress: signsInAs });
   if (url.includes('/drive/v3/about')) return Response.json({ user: { emailAddress: signsInAs } });
   if (url.endsWith('/messages/send')) return Response.json({ id: 'm-sent', threadId: 't1' });
@@ -213,4 +214,29 @@ test('a further account no Odd holds any more leaves the catalog', async () => {
   await L.revoke('wren', 'gmail-2');
   assert.equal(await L.connector('gmail-2'), undefined);
   assert.ok(google.some((g) => g.url === 'https://oauth2.googleapis.com/revoke'));
+});
+
+test('Calendar keeps two sign-ins separate and revokes the one disconnected', async () => {
+  const { connector } = await L.ensureConnector('google-calendar');
+  assert.equal(connector?.config.google, 'calendar');
+  await L.grantAccess('wren', { connector: 'google-calendar', level: 'read' });
+  signsInAs = 'calendar-reader@example.com';
+  const first = await startSignIn('google-calendar');
+  assert.match(new URL(first.url!).searchParams.get('scope')!, /calendar\.readonly/);
+  await finishSignIn(stateOf(first.url), 'test-code');
+  assert.equal((await L.connector('google-calendar'))?.config.account, signsInAs);
+
+  const other = await L.addGoogleAccount('calendar');
+  await L.grantAccess('otto', { connector: other.id, level: 'read' });
+  const duplicate = await startSignIn(other.id);
+  await assert.rejects(finishSignIn(stateOf(duplicate.url), 'test-code'), /already connected/);
+  signsInAs = 'second-calendar@example.com';
+  const second = await startSignIn(other.id);
+  await finishSignIn(stateOf(second.url), 'test-code');
+  assert.ok((await listTools(other.id)).every((tool) => tool.description.includes(signsInAs)));
+
+  await L.revoke('wren', 'google-calendar');
+  assert.ok(google.some((call) => call.url.endsWith('/revoke')));
+  assert.ok(secrets.has(other.id + ':oauth'));
+  await L.revoke('otto', other.id);
 });

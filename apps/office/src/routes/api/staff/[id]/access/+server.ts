@@ -1,6 +1,6 @@
 // A staffer's access: what the owner granted, grant more directly, or revoke.
 // Granting creates the task with the steps to connect it, unless it is already connected.
-// `another` on Gmail or Google Drive grants a new connector for one more
+// `another` on Gmail, Google Drive or Google Calendar grants a new connector for one more
 // Google account (`grantAccess` makes it). A PATCH with `tool` and `standing`
 // lets the Odd use that one tool without asking at Draft, or takes it back
 // (`setStanding`); one with `tool` and `askFirst` holds each call to it for
@@ -66,7 +66,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
   if (!found.connector) error(400, found.problem ?? 'No such tool');
   const product = found.connector.config.google;
   if (b.another === true && !product)
-    error(400, 'Only Gmail and Google Drive take another account');
+    error(400, 'Only Gmail, Google Drive and Google Calendar take another account');
   try {
     const { task } = await grantAccess(params.id, {
       connector: found.connector.id,

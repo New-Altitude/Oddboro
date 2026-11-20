@@ -10,7 +10,9 @@ export const GET: RequestHandler = async ({ url }) => {
   const saved = await catalog();
   const own = [
     ...saved,
-    ...BUILT_IN.filter((b) => b.id === POSTAL_ID && !saved.some((c) => c.id === b.id)).map((b) => ({
+    ...BUILT_IN.filter(
+      (b) => (b.id === POSTAL_ID || b.kind === 'builtin') && !saved.some((c) => c.id === b.id)
+    ).map((b) => ({
       ...b,
       config: b.config ?? {},
       readyAt: null

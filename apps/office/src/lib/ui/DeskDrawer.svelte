@@ -205,13 +205,17 @@
   const replies = $derived(desk.asks.filter((a) => a.kind === 'reply'));
   /** The open Gmail filters, oldest first, which their review steps through. */
   const filters = $derived(desk.asks.filter((a) => a.kind === 'filter'));
-  /** What the list calls an item: a reply or a filter by its kind, else what it is. */
+  /** The open calendar events a held call would make or change, oldest first. */
+  const events = $derived(desk.asks.filter((a) => a.kind === 'call' && !!a.call?.event));
+  /** What the list calls an item: a reply, a filter or an event by its kind, else what it is. */
   const labelOf = (i: Item) =>
     i.kind === 'ask' && i.row.kind === 'reply'
       ? 'Reply'
       : i.kind === 'ask' && i.row.kind === 'filter'
         ? 'Filter'
-        : LABEL[i.kind];
+        : i.kind === 'ask' && i.row.call?.event
+          ? 'Event'
+          : LABEL[i.kind];
   /** The colleague whose work the lead raised an item from, if any. */
   const viaOf = (i: Item) => (i.kind === 'report' ? null : i.row.via);
 
@@ -590,6 +594,22 @@
           {onstaff}
         />
       {/key}
+    {:else if open.kind === 'ask' && open.row.kind === 'call' && open.row.call?.event}
+      {@const a = open.row}
+      {@const event = open.row.call.event}
+      <!-- The event card loads when an event opens, so the page loads without it. -->
+      {#await import('./EventReview.svelte') then { default: EventReview }}
+        {#key a.id}
+          <EventReview
+            ask={{ ...a, call: { ...a.call!, event } }}
+            {events}
+            {staff}
+            {reworks}
+            ongo={(id) => go(id === undefined ? undefined : `ask-${id}`)}
+            {onstaff}
+          />
+        {/key}
+      {/await}
     {:else}
       {@const from = who(open.row.staffId)}
       {@const via = viaOf(open)}

@@ -6,6 +6,7 @@ import {
   AWS_READ_ID,
   AWS_SECRETS_ID,
   connector,
+  GOOGLE,
   reconfigureConnector,
   type ConnectorRow
 } from './office.ts';
@@ -144,6 +145,7 @@ const AWS_PICK =
   'If it is not clear what the owner wants in AWS, ask them before asking for any: use their secrets (AWS Secrets Manager), read their data (AWS, read only), or build in their account (AWS, builder).';
 
 export const BUILT_IN: (typeof connectors.$inferInsert)[] = [
+  { ...GOOGLE.calendar, kind: 'builtin', config: { oauth: 'google', google: 'calendar' } },
   {
     id: POSTAL_ID,
     name: POSTAL_NAME,
