@@ -25,6 +25,11 @@ on:
       - '!**/CLAUDE.md'
   workflow_dispatch:
 
+# onnxruntime-node (ledger search) downloads CUDA libraries from NuGet when
+# installed on Linux x64. Nothing uses them, and the download can time out.
+env:
+  ONNXRUNTIME_NODE_INSTALL: skip
+
 permissions:
   contents: write
 
