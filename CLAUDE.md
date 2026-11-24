@@ -75,6 +75,7 @@ docker-compose.yml  Postgres 17 with pgvector, on 127.0.0.1 only.
 .github/workflows/app-smoke.yml  Every pull request that changes the app, or a run by hand, installs it and smoke-tests it.
 .github/workflows/site.yml     A change to the site or the docs runs the guards and the site's checks and build, on Linux.
 .github/workflows/release.yml  Every merge to main that changes the app redrafts the next release, Mac, Linux and Windows.
+.github/workflows/release-smoke.yml  The release's smoke test of one system's builds, which release.yml calls per system.
 .github/workflows/codeql.yml   Code scanning, for only the languages a change touches.
 ```
 
