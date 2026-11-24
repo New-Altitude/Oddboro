@@ -73,6 +73,11 @@ const LEAVE_OUT = new Set([
   'drizzle.config.ts'
 ]);
 
+// The search runner keeps only its CPU files (search-runtime.ts). Its install
+// script would also fetch CUDA libraries from NuGet on Linux x64, which the
+// trim deletes, and that download can time out.
+process.env.ONNXRUNTIME_NODE_INSTALL ??= 'skip';
+
 const run = (cmd: string, args: string[], cwd = ROOT) =>
   execFileSync(cmd, args, { cwd, stdio: 'inherit' });
 /**
