@@ -13,7 +13,7 @@ test('a portrait sent again after a mistake is the one kept', () => {
   const broken = portrait(['7777', '7777', '7777777']);
   const fixed = portrait(['7777', '7777', '7k77']);
   const r = parseReply(
-    `${json('crop')}\n\n${broken}\n\nWait — that last row is wrong; here is the full corrected portrait:\n\n${fixed}`
+    `${json('crop')}\n\n${broken}\n\nWait, that last row is wrong: here is the full corrected portrait:\n\n${fixed}`
   );
   assert.deepEqual(r.problems, []);
   assert.match(r.drawn!.portraitPx, /7k77/);
