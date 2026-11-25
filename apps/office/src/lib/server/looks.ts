@@ -244,10 +244,14 @@ export function squareUp(px: string): string {
   return out.join('\n');
 }
 
-/** Pull the look, the portrait and any new parts out of a reply. */
+/**
+ * Pull the look, the portrait and any new parts out of a reply. Claude
+ * sometimes catches its own mistake mid-reply and sends a block again,
+ * corrected: the last block of each kind wins.
+ */
 export function parseReply(text: string): { drawn?: Drawn; problems: string[] } {
   const blocks = [...text.matchAll(/```(json|px)\s*\n([\s\S]*?)```/g)];
-  const json = blocks.find((b) => b[1] === 'json');
+  const json = blocks.findLast((b) => b[1] === 'json');
   const pxs = blocks.filter((b) => b[1] === 'px').map((b) => squareUp(b[2]));
   const problems: string[] = [];
   let look: LookSpec | undefined;
@@ -257,13 +261,14 @@ export function parseReply(text: string): { drawn?: Drawn; problems: string[] } 
     problems.push(`the json block does not parse: ${e instanceof Error ? e.message : e}`);
   }
   if (!json) problems.push('there is no json block with the look');
-  const portraitPx = pxs.find((p) => /^sprite portrait-/m.test(p));
+  const portraitPx = pxs.findLast((p) => /^sprite portrait-/m.test(p));
   if (!portraitPx) problems.push('there is no px block with sprite portrait-<name>');
-  const newParts: DrawnPart[] = [];
+  const parts = new Map<string, DrawnPart>();
   for (const px of pxs) {
     const m = /^sprite (hair|top|bottom)-([a-z0-9-]+)$/m.exec(px);
-    if (m) newParts.push({ kind: m[1] as PartKind, name: m[2], px });
+    if (m) parts.set(`${m[1]}-${m[2]}`, { kind: m[1] as PartKind, name: m[2], px });
   }
+  const newParts = [...parts.values()];
   if (!look || !portraitPx) return { problems };
   return { drawn: { look, portraitPx, newParts }, problems };
 }
