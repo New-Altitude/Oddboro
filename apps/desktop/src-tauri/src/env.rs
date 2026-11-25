@@ -242,7 +242,10 @@ mod tests {
     use std::path::PathBuf;
 
     fn joined(dirs: &[&str]) -> String {
-        env::join_paths(dirs).unwrap().to_string_lossy().into_owned()
+        env::join_paths(dirs)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned()
     }
 
     #[test]
@@ -253,7 +256,10 @@ mod tests {
             &joined(&["bin", "stand-ins", ""]),
             vec![PathBuf::from("local"), PathBuf::from("bin")],
         );
-        let names: Vec<_> = dirs.iter().map(|d| d.to_string_lossy().into_owned()).collect();
+        let names: Vec<_> = dirs
+            .iter()
+            .map(|d| d.to_string_lossy().into_owned())
+            .collect();
         assert_eq!(names, ["stand-ins", "more", "bin", "local"]);
     }
 
