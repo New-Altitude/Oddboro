@@ -736,9 +736,20 @@ async function smokeApp(): Promise<void> {
     }
   );
   await step('a screenshot', false, () => screenshot(join(OUT, 'screen.png')));
+  // What the office said of its database at each quit (NEW-1776). Not for the
+  // first quit on Linux: ending the WebDriver session can end the shell
+  // before Node's last line reaches the log.
+  const closing: string[] = [];
+  const databaseSaid = (from: number) =>
+    logText(r)
+      .slice(from)
+      .match(/office: database ([^\n]*)/)?.[1] ?? 'no "office: database" line';
   await step('quits with Node and both ports gone', true, async () => {
     if (stopDriven) return `${await stopDriven()}; the relaunches quit with SIGTERM`;
-    return `${await quit(app!, r, WIN ? exe : undefined)} ms${WIN ? ', by `oddboro --quit`' : ''}`;
+    const from = logText(r).length;
+    const ms = await quit(app!, r, WIN ? exe : undefined);
+    closing.push(databaseSaid(from));
+    return `${ms} ms${WIN ? ', by `oddboro --quit`' : ''}`;
   });
 
   // Windows quits by `oddboro --quit` each time; the Mac and Linux by SIGTERM,
@@ -750,10 +761,19 @@ async function smokeApp(): Promise<void> {
       const again = launch(exe, r);
       times.push(await ready(again, r));
       // Its data is checked on the staged server (--stage), which this run can give a key.
+      const from = logText(r).length;
       await quit(again, r, WIN || i === relaunches ? exe : undefined);
+      closing.push(databaseSaid(from));
     }
     return `starts (ms): ${times.join(', ')}; the last quit by \`oddboro --quit\``;
   });
+  // A build from before NEW-1776 says nothing of its database, so not for --installed.
+  if (!args.installed)
+    await step('each quit closes the office database first (NEW-1776)', true, () => {
+      if (!closing.length || closing.some((c) => c !== 'closed'))
+        throw new Error(`the office said, quit by quit: ${closing.join('; ') || 'nothing'}`);
+      return `closed at all ${closing.length} quits`;
+    });
   // A build from before --quit would start instead, so not for --installed.
   if (!args.installed)
     await step('`oddboro --quit` with nothing running starts nothing', true, async () => {

@@ -107,7 +107,11 @@ digits>`, answered with HMAC-SHA256 under the key of `oddboro-proof:` and
    one kills the shell at once. Windows has no SIGTERM: the shell closes
    Node's stdin, which the server takes as "quit", waits the same 10 seconds,
    then ends it with `TerminateProcess`. Node runs with `CREATE_NO_WINDOW`,
-   so neither it nor anything it starts opens a console window.
+   so neither it nor anything it starts opens a console window. The office
+   closes its own database before it exits (NEW-1776) and says so
+   (`office: database closed`); once Node is gone the shell waits up to 2
+   seconds for the threads that copy Node's output, so those last lines reach
+   the log.
 10. Keeps links to the office's own origin in the window. Links to any other
     origin, `mailto:` and `tel:`, and every `target="_blank"` or
     `window.open`, open in the default browser. The browser has no key, so a
@@ -483,8 +487,11 @@ and the office's own `office: port <n>, home <folder>` line name the port and
 home the run set (NEW-1694: each side works them out, and the shell hands them
 over); it quits with Node and both ports gone, by `oddboro --quit` on
 Windows and SIGTERM elsewhere; it starts twice more, the last quit by
-`oddboro --quit` on every system; `oddboro --quit` with nothing running starts
-nothing; on Windows it uninstalls. Its stand-in Claude Code sits in a folder
+`oddboro --quit` on every system; each of those quits closes the office's
+database first, by the log's `office: database closed` (NEW-1776; not the
+first quit on Linux, whose WebDriver session can end the shell before that
+line); `oddboro --quit` with nothing running starts nothing; on Windows it
+uninstalls. Its stand-in Claude Code sits in a folder
 of its own, first on the office's PATH through `ODDBORO_EXTRA_PATH`, and a
 row requires the office to have run it from there (the stand-in notes each
 call in `ran.txt`). Nothing goes into the owner's own folders, so it runs off

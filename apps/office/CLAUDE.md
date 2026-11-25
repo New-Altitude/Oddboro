@@ -14,7 +14,9 @@ check that catches a missed place: `docs/architecture.md`.
 in `vite.config.ts`), so each package finds its own files beside its code and
 the app ships them whole (`apps/desktop/scripts/stage.ts`). In the app
 (`ODDBORO_APP=1`) `hooks.server.ts` quits on SIGTERM and when stdin closes,
-and reads the app's key from stdin first (see "Who the office answers").
+closing its own database first (`stopLocalDatabase`, at most 5 seconds, then
+`office: database closed` in the log; NEW-1776), and reads the app's key from
+stdin first (see "Who the office answers").
 
 What the office says about itself, for the app's log and its smoke test
 (`apps/desktop/CLAUDE.md`, "Smoke tests"). `init` writes an `office:` line

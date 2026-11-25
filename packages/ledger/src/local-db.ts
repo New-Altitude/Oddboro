@@ -27,7 +27,7 @@ import { LOCAL_DATABASE_DIR, LOCAL_DATABASE_PORT, LOCAL_DATABASE_SOCKET } from '
 import { currentPlatform } from './platform.ts';
 
 type Listener = (channel: string, payload: string) => void;
-/** Closes the socket and the database. Only a test needs it: the office's own ends with its process. */
+/** Closes the socket and the database. */
 type Stop = () => Promise<void>;
 type Local = { ready: Promise<Stop>; listeners: Set<Listener>; db?: PGlite };
 const g = globalThis as unknown as { localDatabase?: Local };
@@ -36,6 +36,26 @@ const g = globalThis as unknown as { localDatabase?: Local };
 export function startLocalDatabase(): Promise<Stop> {
   g.localDatabase ??= { ready: open(), listeners: new Set() };
   return g.localDatabase.ready;
+}
+
+/**
+ * Closes the local database before the office exits, so its files are left
+ * as a clean shutdown leaves them and the backup a new version takes is a
+ * clean copy, not a crash image (NEW-1776). Waits at most `ms`: the app's
+ * shell gives Node 10 seconds, then ends it. Says how it went.
+ */
+export async function stopLocalDatabase(ms = 5000): Promise<'closed' | 'timed out' | 'not open'> {
+  if (!g.localDatabase) return 'not open';
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<'timed out'>((done) => {
+    timer = setTimeout(() => done('timed out'), ms);
+  });
+  const closed = g.localDatabase.ready.then((stop) => stop()).then(() => 'closed' as const);
+  try {
+    return await Promise.race([closed, late]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**

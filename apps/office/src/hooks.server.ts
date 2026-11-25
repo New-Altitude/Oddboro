@@ -8,7 +8,8 @@
 // Each step's time goes to the log and to /api/health (`#lib/server/health.ts`).
 // In the app (ODDBORO_APP) it also quits when the app does: on SIGTERM, once
 // the HTTP server has closed, and when the app's stdin pipe closes, which
-// happens however the app ends, Force Quit included. The first line on that
+// happens however the app ends, Force Quit included. It closes its own
+// database first, so the files and the next backup are clean. The first line on that
 // pipe is the app's key, which every request in the app must carry
 // (`#lib/server/app-key.ts`); the office waits for it before anything else.
 // On a Mac it keeps its secrets through the app's shell, over those same
@@ -31,7 +32,7 @@ import {
 } from '@oddboro/ledger';
 import { home, OFFICE_PORT } from '@oddboro/ledger/home';
 import { trustSystemCertificates } from '@oddboro/ledger/certificates';
-import { startLocalDatabase } from '@oddboro/ledger/local-db';
+import { startLocalDatabase, stopLocalDatabase } from '@oddboro/ledger/local-db';
 import { currentPlatform } from '@oddboro/ledger/platform';
 import { useShellSecrets } from '@oddboro/ledger/secrets';
 import { bringUpToDate } from '@oddboro/ledger/upgrade';
@@ -57,8 +58,22 @@ trustSystemCertificates();
 // Listening before the pipe flows, so the key's line is never dropped.
 const keyRead = IN_APP ? readKey(process.stdin) : Promise.resolve(true);
 if (process.env.ODDBORO_APP) {
-  process.on('sveltekit:shutdown', () => process.exit(0));
-  process.stdin.on('close', () => process.exit(0)).resume();
+  process.on('sveltekit:shutdown', quitOffice);
+  process.stdin.on('close', quitOffice).resume();
+}
+
+let quitting = false;
+/**
+ * The database closes before the office exits (NEW-1776), and the log says
+ * how that went before the exit: a write to a pipe can still be queued.
+ */
+function quitOffice() {
+  if (quitting) return;
+  quitting = true;
+  stopLocalDatabase().then(
+    (how) => process.stdout.write(`office: database ${how}\n`, () => process.exit(0)),
+    (e) => process.stdout.write(`office: database did not close: ${e}\n`, () => process.exit(0))
+  );
 }
 
 export const init: ServerInit = async () => {
