@@ -13,7 +13,7 @@
   import UpdatesSection from './UpdatesSection.svelte';
   import WeatherSection from './WeatherSection.svelte';
 
-  // The office's first screen for a new owner, and its Setup window after:
+  // The office's first screen for a new owner, and its Setup tab after:
   // the name staff call them, the office they work in, their first staffer,
   // what the office runs on (the same list as setup's Your AI card), and the
   // same checks `npm run setup` runs.
@@ -89,8 +89,7 @@
 
 <section class="flex h-full min-h-0 flex-col" aria-label={welcomed ? 'Setup' : 'Welcome'}>
   <header class="border-b border-hairline p-3">
-    <div class="font-pixel text-lg leading-none">{welcomed ? 'Setup' : 'Welcome'}</div>
-    <div class="mt-1 text-xs text-muted">
+    <div class="text-xs text-muted">
       {welcomed
         ? 'Your name, your office, and what this computer has.'
         : 'Three things, and the office is yours.'}
@@ -139,12 +138,12 @@
           You are in {office}, the sample office. Describe the one you want, with the rooms and the
           feel you like, and the office draws it.
         {:else}
-          You work in {office}. Redraw it whenever you like; your earlier layouts stay.
+          You work in {office}. Change it whenever you like under Layout, on the Office tab.
         {/if}
       </p>
       <button
         class="self-start rounded-lg bg-raise px-3 py-2 text-xs font-medium hover:bg-sea/20"
-        onclick={ondesign}>{setup?.sample ? 'Design my office' : 'Open the Office window'}</button
+        onclick={ondesign}>{setup?.sample ? 'Design my office' : 'Open Layout'}</button
       >
     </section>
 

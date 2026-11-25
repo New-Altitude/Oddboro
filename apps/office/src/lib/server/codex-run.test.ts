@@ -526,6 +526,34 @@ test("a Codex Odd's next chat resumes the session its last one started", async (
   assert.deepEqual(next.args.slice(-3), ['resume', '019a0000-0000-7000-8000-00000000c0de', '-']);
 });
 
+test('a Codex Odd whose session is not on this computer, as after moving to a new Mac, replies in a new one with the chat replayed (#352)', async () => {
+  forget('cole');
+  await chatOf('cole', 'The rota is on the fridge.');
+  const file = L.chatSession('cole');
+  writeFileSync(
+    file,
+    readFileSync(file, 'utf8').replace('019a0000-0000-7000-8000-00000000c0de', 'gone-thread')
+  );
+  const launches = () =>
+    readFileSync(join(CODEX_HOME, 'launches.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l) as string[]);
+  const from = launches().length;
+  const reply = await chatOf('cole', 'Where is the rota?');
+  const [lost, fresh] = launches().slice(from);
+  assert.deepEqual(lost.slice(-3), ['resume', 'gone-thread', '-']);
+  assert.ok(!fresh.includes('resume'), 'the second try resumed a session');
+  assert.ok(!reply.args.includes('resume'));
+  assert.match(
+    reply.message,
+    /The rota is on the fridge\./,
+    'the new session did not get the chat'
+  );
+  assert.match(readFileSync(file, 'utf8'), /019a0000-0000-7000-8000-00000000c0de/);
+  assert.equal(launches().length, from + 2);
+});
+
 test("a Codex Odd's chat gets the owner's pictures as --image, after resume on a resumed session, and is told where every attached file is", async () => {
   forget('cole');
   await chatOf('cole');

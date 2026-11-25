@@ -33,13 +33,16 @@
       if (!box?.contains(e.target as Node)) open = false;
     };
     const esc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') open = false;
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      open = false;
     };
     window.addEventListener('pointerdown', away);
-    window.addEventListener('keydown', esc);
+    // Capture, so it runs before the page's own Esc and claims the key.
+    window.addEventListener('keydown', esc, true);
     return () => {
       window.removeEventListener('pointerdown', away);
-      window.removeEventListener('keydown', esc);
+      window.removeEventListener('keydown', esc, true);
     };
   });
 </script>

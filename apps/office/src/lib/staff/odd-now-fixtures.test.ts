@@ -432,7 +432,6 @@ test("every reader of an Odd's status shows the same state for the same fixture"
               onschedule: none,
               onchatstart: none,
               onchatend: none,
-              oncollapse: none,
               onclose: none
             }
           })

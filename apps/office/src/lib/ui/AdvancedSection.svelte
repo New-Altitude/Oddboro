@@ -3,7 +3,7 @@
   import { call } from './api.ts';
   import { advanced } from './windows.svelte.ts';
 
-  // The Setup window's Advanced section: power features that work outside
+  // The Setup tab's Advanced section: power features that work outside
   // Oddboro's limits, off until the owner says yes to one plain warning.
   // Today that is Projects, Claude Code and Codex in the owner's own folders.
   let asking = $state(false);
@@ -30,8 +30,8 @@
   <h3 class="tracking-[0.16em] text-sea uppercase">Advanced</h3>
   {#if advanced.on}
     <p class="text-muted">
-      Advanced mode is on. Projects in the top bar opens Claude Code and Codex in your own folders,
-      with your permissions on this computer.
+      Advanced mode is on. The Projects tab at the top of the pane opens Claude Code and Codex in
+      your own folders, with your permissions on this computer.
     </p>
     <p class="text-faint">
       Turning it off takes every Odd off your project sessions and stops work still waiting. Work

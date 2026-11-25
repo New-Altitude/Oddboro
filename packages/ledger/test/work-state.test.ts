@@ -99,8 +99,10 @@ const ask = (over: Partial<AskRow> = {}): AskRow => ({
   via: null,
   status: 'open',
   reason: null,
+  needs: [],
   createdAt: MADE,
   decidedAt: null,
+  hiddenAt: null,
   ...over
 });
 
@@ -120,8 +122,10 @@ const task = (over: Partial<TaskRow> = {}): TaskRow => ({
   status: 'open',
   note: null,
   withdrawn: false,
+  needs: [],
   createdAt: MADE,
   doneAt: null,
+  hiddenAt: null,
   ...over
 });
 

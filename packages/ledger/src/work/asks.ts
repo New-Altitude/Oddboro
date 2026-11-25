@@ -6,7 +6,7 @@
 import { askReplaced, ASK_REPLACED, OWNER_ANSWERS, type AskAnswer } from '../desk-answers.ts';
 import { fixedError } from '../errors.ts';
 import type { Decision } from '../office-asks.ts';
-import type { AskKind, InChat, Outcome } from '../schema.ts';
+import type { AskKind, InChat, ItemRef, Outcome } from '../schema.ts';
 import { yesOrNo } from '../tools.ts';
 import type { After, Decided } from '../transition.ts';
 import {
@@ -114,7 +114,9 @@ export function askRaised(
     threadId: null,
     held: null,
     via: null,
-    reason: null
+    reason: null,
+    needs: [] as ItemRef[],
+    hiddenAt: null
   };
   putAll(d, [
     {

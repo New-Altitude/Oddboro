@@ -1,5 +1,5 @@
 import { parse } from 'yaml';
-import { MODELS } from '@oddboro/ledger/agents';
+import { MODELS, type Agent } from '@oddboro/ledger/agents';
 import { LIMITS } from './roster.ts';
 
 /**
@@ -33,12 +33,40 @@ const SETTING_WORDS: Record<string, string> = {
   effort: 'its thinking level',
   background: 'its background setting',
   isolation: 'its isolation setting',
-  initialPrompt: 'its first prompt'
+  initialPrompt: 'its first prompt',
+  promptMode: 'its prompt mode',
+  agentsMd: 'its AGENTS.md setting',
+  outputFormat: 'its output format',
+  bash: 'its shell settings',
+  completionRequirement: 'its finishing rule',
+  toolConfig: 'its tool settings'
 };
 
-/** The settings left in the file, in plain words: "its tool list, its skills". */
-export const skippedSaid = (keys: string[]) =>
-  keys.map((k) => SETTING_WORDS[k] ?? `its ${k} setting`).join(', ');
+/**
+ * The settings left in the file, in plain words: "its tool list, its skills
+ * (check-claims)". Skills are named, so the owner knows which SKILL.md to add.
+ */
+export const skippedSaid = (keys: string[], skills: string[] = []) =>
+  keys
+    .map((k) =>
+      k === 'skills' && skills.length
+        ? `its skills (${skills.join(', ')})`
+        : (SETTING_WORDS[k] ?? `its ${k} setting`)
+    )
+    .join(', ');
+
+/** The skill names a file lists, as a YAML list or one comma-separated line. */
+function skillNames(value: unknown): string[] {
+  const all = Array.isArray(value) ? value : typeof value === 'string' ? value.split(',') : [];
+  const names = all
+    .filter((v): v is string => typeof v === 'string')
+    .map((v) => v.trim().slice(0, 80))
+    .filter(Boolean);
+  return [...new Set(names)].slice(0, 20);
+}
+
+const TEMPLATE =
+  'This Grok Build agent fills in parts of its instructions as it runs. Replace each ${{ }} and ${% %} with plain words, then import it again.';
 
 const BROKEN =
   "The agent file's header, between the --- lines, could not be read. Check it for a typo and try again.";
@@ -122,7 +150,11 @@ export async function readClaudeAgentFile(file: File) {
   return readClaudeAgent(await file.text());
 }
 
-/** Read a Claude Code subagent file for the hire form. Only the owner grants tools. */
+/**
+ * Read a Claude Code or Grok Build agent file for the hire form. Grok Build
+ * reads the same format and adds a few settings, so one reader takes both.
+ * A Grok model starts the hire on Grok. Only the owner grants tools.
+ */
 export function readClaudeAgent(file: string) {
   const source = file.replace(/^﻿/, '').replaceAll('\r\n', '\n');
   const parts = /^---[ \t]*\n([\s\S]*?)\n---[ \t]*(?:\n|$)/.exec(source);
@@ -141,11 +173,14 @@ export function readClaudeAgent(file: string) {
   const description = typeof fields.description === 'string' ? fields.description.trim() : '';
   if (!name || !description) throw new Error('The agent header needs a name and a description.');
   const instructions = source.slice(parts[0].length).trim();
+  // A Grok Build agent with the full prompt mode fills in ${{ }} and ${% %} as it runs.
+  if (fields.promptMode === 'full' && /\$\{[{%]/.test(instructions)) throw new Error(TEMPLATE);
   const desk = [description, instructions].filter(Boolean).join('\n\n');
   if (desk.length > LIMITS.desk)
     throw new Error(`Shorten the agent description and instructions to ${LIMITS.desk} characters.`);
+  const agent: Agent = MODELS.grok.some((m) => m.id === fields.model) ? 'grok' : 'claude';
   const model =
-    MODELS.claude.find((m) => m.id === fields.model || m.id.startsWith(`claude-${fields.model}-`))
+    MODELS[agent].find((m) => m.id === fields.model || m.id.startsWith(`claude-${fields.model}-`))
       ?.id ?? null;
   // Its servers come over as access asks or a list (`sortServers`), so they are not left behind.
   const imported = new Set(['name', 'description', 'mcpServers']);
@@ -157,8 +192,11 @@ export function readClaudeAgent(file: string) {
     role: name.replaceAll('-', ' ').slice(0, LIMITS.role),
     remit: description.slice(0, LIMITS.remit),
     desk,
+    agent,
     model,
     servers: serversIn(fields.mcpServers),
+    /** Named for the owner only. No skill comes over until the owner adds one. */
+    skills: skillNames(fields.skills),
     skipped: Object.keys(fields).filter((key) => !imported.has(key))
   };
 }

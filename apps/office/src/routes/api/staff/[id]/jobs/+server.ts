@@ -24,6 +24,6 @@ export const POST: RequestHandler = async ({ params, request }) => {
       schedule,
       report: b.report === true,
       ...(missed ? { missed } : {})
-    })
+    }).catch((e: Error) => error(400, e.message))
   );
 };

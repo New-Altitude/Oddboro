@@ -33,8 +33,9 @@
     refusal,
     type ChatFile
   } from '#lib/attachments.ts';
-  import { when, workLine } from './format.ts';
+  import { compact, when, workLine } from './format.ts';
   import { chatRequest, takeDraft, type Delivered } from './chat-about.svelte.ts';
+  import { keepUnsent, unsentFor } from './chat-unsent.ts';
   import type { StaffProfile } from '../staff/roster.ts';
   import { handOffProgress, workItems, type ReaderProps } from '../staff/odd-now.ts';
   import { runningFor, toolWords, type WorkAbout } from '../staff/work.ts';
@@ -135,10 +136,13 @@
   const selected = $derived(
     chatRequest.focus?.staff === profile.id ? keyOf(chatRequest.focus.item) : undefined
   );
+  // What the owner left unsent here last time comes back: the words, the
+  // reply, the work and the files. A kept "yes" is no yes until typed again.
+  const kept = untrack(() => unsentFor(profile.id));
   /** The delivery the next message replies about. */
-  let replyTo = $state<Delivered | undefined>();
+  let replyTo = $state<Delivered | undefined>(kept?.replyTo);
 
-  let intent = $state<'reply' | 'proposal' | 'change'>('reply');
+  let intent = $state<'reply' | 'proposal' | 'change'>(kept?.intent ?? 'reply');
   let saving = $state(false);
   // Two plans can wait in the same chat. Each keeps its own checkboxes.
   let skipped = $state<Record<number, Record<number, boolean>>>({});
@@ -206,6 +210,13 @@
     box?.focus();
   }
 
+  // An Odd picked to talk to, from the ⌘K finder: the cursor goes in the box once the chat shows.
+  $effect(() => {
+    if (chatRequest.typing !== profile.id || !visible) return;
+    chatRequest.typing = undefined;
+    void tick().then(() => box?.focus());
+  });
+
   // Reply on the desk or a report window arrives here once the chat shows.
   $effect(() => {
     const r = chatRequest.reply;
@@ -223,7 +234,7 @@
         ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
     );
   });
-  let draft = $state('');
+  let draft = $state(kept?.text ?? '');
   /** What the bug report form starts with, while it is open. */
   let bugReport = $state<{ title?: string; body: string }>();
   // One live section per chat, even when the owner asked about updates before.
@@ -263,7 +274,7 @@
   let active = $state<{ runId: string; turnId: string }>();
   let stopping = $state(false);
   let adding = $state(false);
-  let about = $state<WorkAbout>();
+  let about = $state<WorkAbout | undefined>(kept?.about);
   let newest = 0;
 
   async function stop() {
@@ -435,14 +446,22 @@
 
   /** Pokes the staffer set that have not landed yet. */
   let upcoming = $state<PokeRow[]>([]);
+  /** How many tokens the chat's session holds, and where it starts fresh (chat-rollover.ts). */
+  let size = $state<{ tokens: number; limit: number } | undefined>();
 
   function load(id: string) {
     fetch(`/api/staff/${id}/chat` satisfies ApiUrl)
       .then((r) => r.json())
       .then(
-        (d: { history: ChatEntry[]; busy: boolean; reply?: { runId: string; turnId: string } }) => {
+        (d: {
+          history: ChatEntry[];
+          busy: boolean;
+          reply?: { runId: string; turnId: string };
+          size?: { tokens: number; limit: number };
+        }) => {
           // A message that started meanwhile is streaming into the list: keep it.
           if (sending) return;
+          size = d.size;
           remoteBusy = d.busy;
           active = d.reply;
           lines = d.history.map((h) => ({ ...h }));
@@ -865,8 +884,10 @@
   // Files the owner attaches. Pasting or dropping puts each one's tag, like
   // [Image #1], at the caret; Attach files in the plus menu adds them to the
   // tray alone. The tray over the plus button shows everything that will go.
-  let pending = $state<Pending[]>([]);
-  let nextKey = 0;
+  let pending = $state<Pending[]>(kept?.files ?? []);
+  let nextKey = Math.max(-1, ...(kept?.files ?? []).map((p) => p.key)) + 1;
+  // Whatever the box holds is kept as it changes, so leaving the Odd loses nothing.
+  $effect(() => keepUnsent(profile.id, { text: draft, replyTo, intent, about, files: pending }));
   let uploading = $state(false);
   const decisionMode = $derived(
     !pending.length && !about && !active && !sending && !remoteBusy && !uploading && !stopping
@@ -933,8 +954,11 @@
   function moreKey(e: KeyboardEvent) {
     const items = moreItems();
     const at = items.indexOf(document.activeElement as HTMLButtonElement);
-    if (e.key === 'Escape') closeMore(moreButton);
-    else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    if (e.key === 'Escape') {
+      // Taken here, so the page does not also step the pane up a level.
+      e.preventDefault();
+      closeMore(moreButton);
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       const step = e.key === 'ArrowDown' ? 1 : -1;
       items[(at + step + items.length) % items.length]?.focus();
     } else if (e.key === 'Home') items[0]?.focus();
@@ -1671,7 +1695,7 @@
     />
   {/if}
   <form
-    class="flex items-end gap-2 px-3 {refused ? 'pb-2' : 'pb-3'}"
+    class="flex items-end gap-2 px-3 {refused || size ? 'pb-2' : 'pb-3'}"
     novalidate
     onsubmit={send}
     {ondragover}
@@ -1688,6 +1712,7 @@
     />
     <textarea
       bind:this={box}
+      data-keeps-words
       class="min-h-[76px] flex-1 resize-none overflow-y-auto rounded-lg bg-raise px-3 py-2 text-sm leading-relaxed text-ink outline-none placeholder:text-faint {dragging
         ? 'ring-1 ring-sea'
         : ''}"
@@ -1787,6 +1812,18 @@
       </button>
     </div>
   </form>
+  {#if size}
+    <p class="px-3 text-[11px] text-faint {refused ? 'pb-1' : 'pb-3'}">
+      {#if size.tokens < size.limit}
+        This chat holds {compact.format(size.tokens)} of {compact.format(size.limit)} tokens. At {compact.format(
+          size.limit
+        )}, {profile.name} writes a note of where things stand and starts fresh.
+      {:else}
+        This chat holds {compact.format(size.tokens)} tokens. {profile.name} starts fresh with your next
+        message, from a note of where things stand.
+      {/if}
+    </p>
+  {/if}
   {#if refused}
     <p class="px-3 pb-3 text-xs text-coral" role="alert">{refused}</p>
   {/if}

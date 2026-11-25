@@ -6,7 +6,7 @@
 // with the problems listed. It runs as the office, so it works before anybody
 // is hired.
 import { writeFileSync } from 'node:fs';
-import { roster, type Destination, home } from '@oddboro/ledger';
+import { roster, type Destination, home, layoutKey } from '@oddboro/ledger';
 import {
   ART_LIMITS,
   artCatalog,
@@ -356,7 +356,7 @@ export function destination(
       desks: kinds ? kinds[t] === 'workspace' : t.startsWith('workspace')
     };
   }
-  return { id, key: id === null ? SAMPLE : `office-${id}`, name, rooms, seats: seatsIn(world) };
+  return { id, key: id === null ? SAMPLE : layoutKey(id), name, rooms, seats: seatsIn(world) };
 }
 
 /** Build a spec into an office, or say what is wrong with it. */

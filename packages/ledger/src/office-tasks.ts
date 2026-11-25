@@ -1,4 +1,5 @@
 // Tasks an Odd gives the owner, from giving one to finishing it.
+import { type ItemRef } from './schema.ts';
 import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import { db } from './db.ts';
 import { fixedError } from './errors.ts';
@@ -32,11 +33,13 @@ export async function giveTask(
     ownerSaid?: string;
     /** The office gives it in the Odd's name (a plan's steps), so it may repeat a title. */
     byOffice?: true;
+    /** Items open on the desk this one waits on, checked by `openNeeds`. */
+    needs?: ItemRef[];
   },
   q: Db = db
 ): Promise<TaskRow> {
   const steps = t.steps.map((s) => (typeof s === 'string' ? { text: s, done: false } : s));
-  const { title, why, response, handOffId, threadId, via, ownerSaid, attach, run } = t;
+  const { title, why, response, handOffId, threadId, via, ownerSaid, needs, attach, run } = t;
   const give = async (tx: Tx) => {
     // An Odd's own task may not repeat an item it already has on the desk.
     if (staffId && !t.byOffice) {
@@ -46,7 +49,7 @@ export async function giveTask(
     const went = await transitionWork(
       {
         kind: 'taskGiven',
-        task: { staffId, title, why, steps, response, handOffId, threadId, via, ownerSaid },
+        task: { staffId, title, why, steps, response, handOffId, threadId, via, ownerSaid, needs },
         attach,
         run
       },

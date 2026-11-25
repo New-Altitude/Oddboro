@@ -1,5 +1,5 @@
 <script lang="ts">
-  // The Services window: every outside service in the office, whether it is
+  // The Services section, on the Office tab: every outside service in the office, whether it is
   // connected, and which Odds hold it at what level. A click on an Odd opens
   // its card, where its own Services tab grants and revokes. Each service can
   // be renamed here, and an AWS tool moved to another role or Region.

@@ -49,8 +49,7 @@
   <header class="border-b border-hairline p-3">
     <div class="flex items-center">
       <div class="flex-1">
-        <div class="font-pixel text-lg leading-none">The ledger</div>
-        <div class="mt-1 text-xs text-muted">
+        <div class="text-xs text-muted">
           Every decision and every piece of work, by your Odds and by you.
         </div>
       </div>

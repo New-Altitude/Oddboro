@@ -325,7 +325,7 @@
                   act(() => call(`/api/jobs/${j.id}`, { op: 'update', enabled: !j.enabled }))}
                 >{j.enabled ? 'Pause' : 'Resume'}</button
               >
-              {#if !j.enabled && !j.lastRun}
+              {#if !j.enabled}
                 <button
                   class="rounded-lg px-2.5 py-1 text-xs text-muted hover:text-coral"
                   onclick={() => act(() => call(`/api/jobs/${j.id}`, { op: 'delete' }))}

@@ -154,6 +154,12 @@ const TOOLS = [
     inChat: true
   },
   {
+    id: 'search_chats',
+    name: 'Search past chats',
+    does: 'Searches what you and the Odd said in its earlier chats, and the chats that started work handed to it, so a long chat can start fresh without forgetting.',
+    always: true
+  },
+  {
     id: 'search_ledger',
     name: 'Search the ledger',
     does: 'Reads every decision you made and all work done, by anyone.'

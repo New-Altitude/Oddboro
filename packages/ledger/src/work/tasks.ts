@@ -5,7 +5,7 @@
 //
 // Pure: every import that reaches the database is a type.
 import { ownerAnswers, pickedUpLine } from '../desk-answers.ts';
-import type { InChat } from '../schema.ts';
+import type { InChat, ItemRef } from '../schema.ts';
 import { stepsToGo } from '../tools.ts';
 import type { After, Decided } from '../transition.ts';
 import {
@@ -83,7 +83,9 @@ export function taskGiven(
     threadId: null,
     via: null,
     ownerSaid: null,
-    response: null
+    response: null,
+    needs: [] as ItemRef[],
+    hiddenAt: null
   };
   putAll(d, [
     {

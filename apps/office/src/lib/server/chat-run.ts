@@ -27,6 +27,7 @@ import { attachedFiles, filesNow } from './chat-files.ts';
 import { replyBrief, savedTaskWords } from './chat-delivery.ts';
 import { missingChatSignIn } from './chat-sign-in.ts';
 import { sessionIdIn } from './resume.ts';
+import { handoverBrief, outgrown, rollOver } from './chat-rollover.ts';
 import { changedSince, replay, replayed, replayedAt, replaySince } from './replay.ts';
 import {
   chatPreface,
@@ -188,67 +189,83 @@ export async function replyToOwnerTurn(
       const past: RetoldEntry[] = before.map((e) =>
         e.files?.length ? { ...e, now: filesNow(id, e.files) } : e
       );
-      // A new session (the Odd moved to another tool, or its session is gone)
-      // never saw the chat: it gets the latest of it word for word. The preface
-      // leaves out the told, poke and failed run's owner lines the replay holds,
-      // and keeps those the budget cut, so each line since the owner last wrote
-      // is said once.
-      const resumed = !!sessionIdIn(chatSession(id), await runHomeOf(who));
-      const kept = resumed ? [] : replayed(past);
-      const since = replaySince(past, kept);
-      const session: Session = resumed ? 'resumed' : { replayed: new Set(replayedAt(past, kept)) };
-      // A missed line's pictures go to the run as a new message's do. A line the
-      // replay retells names its files by path alone, so a long replay never
-      // sends every picture the chat ever held.
-      const missed = missedAt(past, session).flatMap((i) => past[i].now ?? []);
-      // The Odd writes only its own folder and the given folders it may change, so only those are walked.
-      const writable = ownTools(who, currentPlatform())
-        .granted.filter((f) => f.write)
-        .map((f) => f.path);
-      const prompt = [
-        ...(since
-          ? [
-              replay(
-                past,
-                changedSince(
-                  home('staff', id),
-                  since,
-                  OFFICE_FILE_NAMES.map((f) => join(home('staff', id), f)),
-                  writable
+      // A session its tool no longer has, as after moving the office to a new
+      // computer (#352), is one run() forgets (`sessionGone`). The reply then
+      // goes again at once, in a new session that gets the chat replayed.
+      for (let again = true; ; again = false) {
+        // A new session (the Odd moved to another tool, or its session is gone)
+        // never saw the chat: it gets the latest of it word for word. The preface
+        // leaves out the told, poke and failed run's owner lines the replay holds,
+        // and keeps those the budget cut, so each line since the owner last wrote
+        // is said once.
+        const toolHome = await runHomeOf(who);
+        // A session grown too long ends with the Odd's handover note, so this
+        // reply starts a fresh one (chat-rollover.ts). A persona keeps its own.
+        if (!who.package && outgrown(id, toolHome)) await rollOver(who, live.key);
+        const resumed = !!sessionIdIn(chatSession(id), toolHome);
+        const kept = resumed ? [] : replayed(past);
+        const since = replaySince(past, kept);
+        const session: Session = resumed
+          ? 'resumed'
+          : { replayed: new Set(replayedAt(past, kept)) };
+        // A missed line's pictures go to the run as a new message's do. A line the
+        // replay retells names its files by path alone, so a long replay never
+        // sends every picture the chat ever held.
+        const missed = missedAt(past, session).flatMap((i) => past[i].now ?? []);
+        // The Odd writes only its own folder and the given folders it may change, so only those are walked.
+        const writable = ownTools(who, currentPlatform())
+          .granted.filter((f) => f.write)
+          .map((f) => f.path);
+        const prompt = [
+          ...(since
+            ? [
+                replay(
+                  past,
+                  changedSince(
+                    home('staff', id),
+                    since,
+                    OFFICE_FILE_NAMES.map((f) => join(home('staff', id), f)),
+                    writable
+                  )
                 )
-              )
-            ]
-          : []),
-        ...chatPreface(past, landed, session),
-        ...(re ? [re.brief] : []),
-        ...(/\b(bug|bugs|issue tracker)\b/i.test(message)
-          ? [
-              '(For an Oddboro bug, draft the report with draft_bug_report: a short title and the details. The owner gets a File this bug report button under your reply, which opens the report form with your draft to review, and nothing is filed until they choose there. Tell them to click File this bug report.)'
-            ]
-          : []),
-        ...aboutBrief(owner)
-      ].join('\n\n');
-      r = await run(who, prompt, {
-        kind: 'chat',
-        runId: live.key,
-        ownerSaid: message,
-        literal: [
-          message,
-          ...(files.length ? [attachedBrief(files).replaceAll('{owner}', await ownerName())] : []),
-          ...(re?.taskResponse ? [savedTaskWords(re.taskResponse)] : [])
-        ].join('\n\n'),
-        chatBefore: past,
-        ownerFiles: attached,
-        images: [...files, ...missed].flatMap((f: KeptFile) =>
-          'gone' in f || !isPicture(f.mediaType) ? [] : [{ path: f.path, mediaType: f.mediaType }]
-        ),
-        sessionFile: chatSession(id),
-        timeoutMs: CHAT_TIMEOUT_MS,
-        onEvent: (e) => {
-          if (e.type === 'tool') usedTool = true;
-          if (e.type !== 'done' && e.type !== 'error') onEvent(e);
-        }
-      });
+              ]
+            : []),
+          // The note the chat's last session wrote as it rolled over (chat-rollover.ts).
+          ...(resumed ? [] : handoverBrief(id)),
+          ...chatPreface(past, landed, session),
+          ...(re ? [re.brief] : []),
+          ...(/\b(bug|bugs|issue tracker)\b/i.test(message)
+            ? [
+                '(For an Oddboro bug, draft the report with draft_bug_report: a short title and the details. The owner gets a File this bug report button under your reply, which opens the report form with your draft to review, and nothing is filed until they choose there. Tell them to click File this bug report.)'
+              ]
+            : []),
+          ...aboutBrief(owner)
+        ].join('\n\n');
+        r = await run(who, prompt, {
+          kind: 'chat',
+          runId: live.key,
+          ownerSaid: message,
+          literal: [
+            message,
+            ...(files.length
+              ? [attachedBrief(files).replaceAll('{owner}', await ownerName())]
+              : []),
+            ...(re?.taskResponse ? [savedTaskWords(re.taskResponse)] : [])
+          ].join('\n\n'),
+          chatBefore: past,
+          ownerFiles: attached,
+          images: [...files, ...missed].flatMap((f: KeptFile) =>
+            'gone' in f || !isPicture(f.mediaType) ? [] : [{ path: f.path, mediaType: f.mediaType }]
+          ),
+          sessionFile: chatSession(id),
+          timeoutMs: CHAT_TIMEOUT_MS,
+          onEvent: (e) => {
+            if (e.type === 'tool') usedTool = true;
+            if (e.type !== 'done' && e.type !== 'error') onEvent(e);
+          }
+        });
+        if (!r.sessionGone || !again) break;
+      }
     } catch (err) {
       r = { ok: false, text: err instanceof Error ? err.message : String(err) };
     }

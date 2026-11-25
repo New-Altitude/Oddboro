@@ -91,7 +91,7 @@ export async function askForImported(
       const conn = found.connector;
       const { ask } = await raiseAsk(staffId, {
         title: `Connect ${conn.name} (read)`,
-        why: `${odd}'s Claude Code agent file lists the MCP server "${s.name}". Say yes to connect it at read, or no to leave it out.`,
+        why: `${odd}'s agent file lists the MCP server "${s.name}". Say yes to connect it at read, or no to leave it out.`,
         ifApproved: conn.readyAt
           ? `${odd} can use ${conn.name} at once: you connected it already, so there are no steps.`
           : `You get numbered steps to connect ${conn.name} for ${odd}.`,

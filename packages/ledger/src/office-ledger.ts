@@ -1,5 +1,5 @@
 // Writing a ledger row, searching the ledger, and making every row's vector
-// again once the search model arrives.
+// again once the search model arrives, the chat history's rows included.
 import { setImmediate as nextTurn } from 'node:timers/promises';
 import {
   and,
@@ -15,6 +15,7 @@ import {
   sql
 } from 'drizzle-orm';
 import { db } from './db.ts';
+import { reindexChats } from './chat-history.ts';
 import { embed, EMBED_MODEL } from './embed.ts';
 import { modelOnDisk } from './search-model.ts';
 import { type Db } from './threads.ts';
@@ -145,7 +146,8 @@ let reindexing: Promise<number> | undefined;
  * between batches. It runs when the model arrives and as the office starts,
  * and does nothing when every row is done. Each row says which model made its
  * vector, so a pass the office stopped picks up where it left off. A row the
- * model cannot read ends the pass; the next start tries again. Resolves to the
+ * model cannot read ends the pass; the next start tries again. The chat
+ * history's rows follow the ledger's (`reindexChats`). Resolves to the
  * number of rows it made. One pass runs at a time.
  */
 export function reindexLedger(): Promise<number> {
@@ -178,5 +180,5 @@ async function reindex(): Promise<number> {
     await nextTurn();
   }
   indexed = true;
-  return made;
+  return made + (await reindexChats());
 }

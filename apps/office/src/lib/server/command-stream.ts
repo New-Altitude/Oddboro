@@ -7,6 +7,7 @@
 // long a slow download takes, since one stopped halfway can leave a tool half
 // installed. Server only.
 import { spawn, type ChildProcess } from 'node:child_process';
+import { npmStart } from '@oddboro/ledger/platform';
 
 /** What a slot's command does: install a tool, update it, or sign it in on its page. An update runs to its end, as an install does. */
 export type Action = 'install' | 'update' | 'sign-in';
@@ -35,6 +36,14 @@ const PAGE_URL = /https:\/\/[^\s"'<>\x1b\x07]+/;
 const LONGEST_SIGN_IN_MS = 5 * 60_000;
 /** A sign-in's last line when the office stops it for taking too long. */
 const SIGN_IN_TOO_LONG = `The sign-in took longer than ${LONGEST_SIGN_IN_MS / 60_000} minutes, so the office stopped it. Try again.`;
+
+/**
+ * How a slot starts `cmd`: npm the way this system starts it (`npmStart`,
+ * through cmd on Windows), every other command as it is. A slot's words are
+ * the office's own, never the owner's.
+ */
+export const startable = (cmd: string, args: readonly string[]): [string, string[]] =>
+  cmd === 'npm' ? npmStart(args) : [cmd, [...args]];
 
 /** Every command a slot started that is still going. */
 const going = new Set<ChildProcess>();
@@ -81,7 +90,7 @@ export function commandSlot(longestSignInMs = LONGEST_SIGN_IN_MS): Slot {
           const send = (o: unknown) => {
             if (open) out.enqueue(encoder.encode(`${JSON.stringify(o)}\n`));
           };
-          const child = spawn(cmd, [...args], {
+          const child = spawn(...startable(cmd, args), {
             stdio: ['ignore', 'pipe', 'pipe'],
             env,
             windowsHide: true

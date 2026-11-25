@@ -4,7 +4,7 @@
 // so a sprite or room edit shows up on reload without restarting the server.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { activeOffice, drawnArt } from '@oddboro/ledger';
+import { activeOffice, drawnArt, layoutKey } from '@oddboro/ledger';
 import { artCatalog, artSheet, checkArt, type DrawnArt } from '@oddboro/sprites/art';
 import { DIST } from '@oddboro/sprites/load';
 import type { Palette, SpriteDef } from '@oddboro/sprites/px';
@@ -94,7 +94,7 @@ export async function currentOffice(opts: { lot?: boolean } = {}): Promise<Offic
   const active = await activeOffice();
   if (active)
     return {
-      id: `office-${active.id}`,
+      id: layoutKey(active.id),
       name: active.name,
       world: composeWorld(active.plan, active.templates, catalog, { actors: false }),
       catalog,

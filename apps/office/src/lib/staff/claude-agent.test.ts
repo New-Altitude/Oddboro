@@ -30,6 +30,18 @@ test('a Claude agent opens as an editable job with its other settings named', ()
   );
   assert.match(draft.model ?? '', /^claude-sonnet-/);
   assert.deepEqual(draft.skipped, ['tools', 'skills', 'permissionMode']);
+  assert.deepEqual(draft.skills, ['check-claims']);
+  assert.equal(
+    skippedSaid(draft.skipped, draft.skills),
+    'its tool list, its skills (check-claims), its permission mode'
+  );
+});
+
+test('skills listed on one line are named once each', () => {
+  const draft = readClaudeAgent(
+    agent.replace('skills: [check-claims]', 'skills: check-claims, house-style, check-claims')
+  );
+  assert.deepEqual(draft.skills, ['check-claims', 'house-style']);
 });
 
 test('an unsupported model is named and the job description is never silently cut', () => {
@@ -121,4 +133,27 @@ test('the original agent name survives a shortened display name', () => {
   const draft = readClaudeAgent(agent.replace('name: fact-checker', 'name: ' + sourceName));
   assert.equal(draft.sourceName, sourceName);
   assert.equal(draft.name, sourceName.slice(0, LIMITS.name));
+});
+
+test('a Grok Build agent opens on Grok, with its own settings named and templates refused', () => {
+  const grok = [
+    '---',
+    'name: orchard',
+    'description: Count the crates.',
+    'model: grok-4.7',
+    'promptMode: extend',
+    'tools: [read_file]',
+    '---',
+    'Check each batch.'
+  ].join('\n');
+  const draft = readClaudeAgent(grok);
+  assert.equal(draft.agent, 'grok');
+  assert.equal(draft.model, 'grok-4.7');
+  assert.equal(draft.desk, 'Count the crates.\n\nCheck each batch.');
+  assert.equal(skippedSaid(draft.skipped), 'its prompt mode, its tool list');
+  assert.equal(readClaudeAgent(agent).agent, 'claude');
+  assert.throws(
+    () => readClaudeAgent(grok.replace('extend', 'full') + '\nUse ${{ tools.by_kind.read }}.'),
+    /plain words/
+  );
 });

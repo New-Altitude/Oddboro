@@ -2,22 +2,33 @@
 // already uploaded and inline imports share the same saved-turn path.
 import { randomUUID } from 'node:crypto';
 import { error, json } from '@sveltejs/kit';
+import { staffer } from '@oddboro/ledger';
 import { DESK_ITEMS } from '@oddboro/ledger/desk-answers';
 import { FILES_MAX } from '#lib/attachments.ts';
 import { CHAT_BYTES, CHAT_REQUEST_BYTES, type OwnerInput } from '#lib/staff/chat-input.ts';
 import type { ChatEvent } from '#lib/staff/chat.ts';
 import { attachedFiles } from '#lib/server/chat-files.ts';
 import { keepOwnerTurn, ChatInputError } from '#lib/server/chat-turns.ts';
-import { chatLog, isBusy, isStaff } from '#lib/server/staff.ts';
+import { chatLog, isBusy, isStaff, runHomeOf } from '#lib/server/staff.ts';
+import { ROLLOVER_TOKENS, sessionTokens } from '#lib/server/chat-rollover.ts';
 import { replyToOwnerTurn, activeReply, addToReply, stopReply } from '#lib/server/chat-run.ts';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ params }) => {
-  if (!(await isStaff(params.id))) error(404, 'No such Odd');
+  const who = (await isStaff(params.id)) ? await staffer(params.id) : undefined;
+  if (!who) error(404, 'No such Odd');
+  // A persona keeps its own session, which never starts fresh here. A session
+  // file that cannot be read leaves the line out, never the chat.
+  const tokens = who.package
+    ? undefined
+    : await runHomeOf(who)
+        .then((home) => sessionTokens(who.id, home))
+        .catch(() => undefined);
   return json({
     history: await chatLog(params.id),
     busy: isBusy(params.id),
-    reply: activeReply(params.id)
+    reply: activeReply(params.id),
+    ...(tokens ? { size: { tokens, limit: ROLLOVER_TOKENS } } : {})
   });
 };
 

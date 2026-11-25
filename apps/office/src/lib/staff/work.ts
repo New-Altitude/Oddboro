@@ -115,6 +115,7 @@ export const OFFICE_TOOL_WORDS: Record<string, string> = {
   read_skill: 'Reading one of its skills',
   reconnect_access: 'Asking you to reconnect a tool',
   resume_at: 'Setting when to pick up again',
+  search_chats: 'Searching past chats',
   search_ledger: 'Searching the Ledger',
   tell_lead: 'Telling its lead',
   update_goal: 'Updating a goal',

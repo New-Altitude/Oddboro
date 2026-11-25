@@ -6,7 +6,7 @@ and shows it in a window. On a Mac: Apple Silicon, macOS 13 or later, a signed
 and notarized `.app` in a `.dmg`. On Linux: an AppImage for x86_64 or arm64,
 on a systemd desktop with a Secret Service keyring and a notification
 service. On Windows: a per-user installer (NSIS) for x64 or arm64, Windows 10
-or 11, not code-signed yet. No UI framework: the only page of its own is
+or 11, signed with New Altitude's certificate in Azure Artifact Signing. No UI framework: the only page of its own is
 `loading/index.html`.
 
 Where a new kind of thing starts, the shared function for each job, and the
@@ -346,6 +346,8 @@ Every update is required. `src-tauri/src/update.rs` runs them with
   Windows's own `tar`). `scripts/smoke.ts --stage` then checks the stage.
 - `scripts/smoke.ts` and `scripts/driver.ts`. The smoke test, and what
   drives the installed app for it. See "Smoke tests".
+- `scripts/sign-windows.ts`. Signs one Windows file through Azure Artifact
+  Signing, for Tauri's `signCommand` in a release.
 - `installer/`. The window the Mac `.dmg` opens to: the app and
   Applications on Oddboro's grass lot, an arrow between them.
   `lot.json` is the lot (a room stamp of grass and park props), `arrow.px`
@@ -399,9 +401,17 @@ lockfile-only update, so run it by hand for one that should ship. Six jobs:
    points Rust's build at a Windows Kits folder without `rc.exe`, and ring
    needs clang there), and runs
    `release.ts`: the installer, its signature, a copy under the site's name,
-   and a `latest.json` for `windows-x86_64` or `windows-aarch64`. Only the
-   updater key and the Google client's secret are needed. The installer is not code-signed, so Windows
-   SmartScreen warns before it runs.
+   and a `latest.json` for `windows-x86_64` or `windows-aarch64`. The app,
+   the installer and its uninstaller are signed through Azure Artifact
+   Signing (`scripts/sign-windows.ts`, Tauri's `signCommand`), and
+   `release.ts` checks the installer's with `signtool verify /pa`. Tauri
+   signs a patched copy of the app for the installer and puts the unsigned
+   original back in `target`, so the file there is never checked. No signing
+   secret is stored: the job's GitHub OIDC token, fetched fresh for each
+   file, signs in as the `AZURE_CLIENT_ID` app. The account, endpoint and
+   profile are `release` variables. The signing client is x64 only, so both
+   machines run the SDK's x64 signtool with an x64 .NET 10, under emulation
+   on arm64. A release built on GitHub without them stops.
    Before it signs, `release.ts` checks the build's own version: the Windows
    app and installer's file version, and the Mac app's `Info.plist`.
 5. `smoke` installs each build and runs it on its own kind of machine, plus
@@ -561,6 +571,8 @@ ODDBORO_RELEASE_URL=http://127.0.0.1:4598 \
   branding page: 120 by 120, as Google asks. The same script draws it.
 - No `signingIdentity` in the config: `release.ts` passes the Developer ID
   as `APPLE_SIGNING_IDENTITY`.
+- No `signCommand` in the config either: `release.ts` adds one for a
+  Windows release, pointing Tauri at `scripts/sign-windows.ts`.
 
 ## Commands
 
@@ -569,7 +581,7 @@ Run from the repo root.
 ```sh
 npm run shell -w @oddboro/desktop     # tauri dev against ODDBORO_SERVER_URL, default http://127.0.0.1:4500
 npm run bundle -w @oddboro/desktop    # tauri build for this machine: the .app and .dmg, the AppImage, or the installer
-npm run check-types -w @oddboro/desktop   # cargo check
+npm run check-types -w @oddboro/desktop   # tsc on scripts/ and test/, then cargo check
 npm run lint -w @oddboro/desktop      # cargo clippy -D warnings, cargo fmt --check, prettier
 ```
 

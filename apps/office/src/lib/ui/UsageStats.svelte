@@ -1,7 +1,7 @@
 <script lang="ts">
   import { zone } from '@oddboro/ledger/time';
   import { BarChart } from 'layerchart';
-  import type { UsageBucket, UsageTotals } from '@oddboro/ledger';
+  import type { RunUsage, UsageBucket, UsageTotals } from '@oddboro/ledger';
   import { call } from './api.ts';
   import { ago, compact, when } from './format.ts';
 
@@ -15,6 +15,7 @@
   type Usage = {
     totals: Record<'d1' | 'd7' | 'd30', UsageTotals>;
     series: Record<'d1' | 'd7' | 'd30', UsageBucket[]>;
+    runs: RunUsage[];
     plan: Plan;
   };
   type Props = { staffId: string; version: number };
@@ -62,6 +63,17 @@
   );
 
   const left = (used: number) => Math.max(0, Math.round((1 - used) * 100));
+
+  const KIND: Record<RunUsage['kind'], string> = {
+    chat: 'Chat',
+    job: 'Job',
+    'follow-up': 'Follow-up',
+    draft: 'Draft',
+    look: 'Drawing a look',
+    office: 'Office'
+  };
+  /** The biggest of the runs listed, which each run's bar is measured against. */
+  const biggest = $derived(Math.max(1, ...(usage?.runs ?? []).map((r) => r.tokens)));
 </script>
 
 <div class="flex flex-col gap-2.5 px-4">
@@ -153,6 +165,34 @@
       {/if}
     </div>
   </section>
+
+  {#if usage?.runs.length}
+    <section aria-label="Recent runs">
+      <div class="text-[11px] text-muted">Recent runs</div>
+      <ul class="mt-1 flex flex-col gap-1">
+        {#each usage.runs as r (r.at)}
+          <li class="rounded-lg bg-raise px-2 py-1.5">
+            <div class="flex items-baseline gap-2 text-xs">
+              <span class="min-w-0 flex-1 truncate text-ink" title={r.label ?? KIND[r.kind]}
+                >{r.label ?? KIND[r.kind]}</span
+              >
+              <span
+                class="shrink-0 font-pixel text-sm {r.tokens === biggest
+                  ? 'text-ember'
+                  : 'text-ink'}">{compact.format(r.tokens)}</span
+              >
+            </div>
+            <div class="mt-0.5 text-[10px] text-faint">
+              {r.label ? `${KIND[r.kind]} · ` : ''}{ago(r.at)}
+            </div>
+            <div class="meter mt-1">
+              <span style="inline-size: {(r.tokens / biggest) * 100}%"></span>
+            </div>
+          </li>
+        {/each}
+      </ul>
+    </section>
+  {/if}
 </div>
 
 <style>

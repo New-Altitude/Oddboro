@@ -1,6 +1,6 @@
 // The one action each coding tool's row offers for its install and sign-in,
 // in the list of what the office runs on (OfficeTools.svelte, on setup's Your
-// AI card and in the Setup window) and beside the "Runs on" picker
+// AI card and in the Setup tab) and beside the "Runs on" picker
 // (RunsOn.svelte), so every place offers the same one. Sign out is a control of
 // its own beside it. Plain TypeScript, so the office's node tests run it.
 import type { Agent } from '@oddboro/ledger/agents';

@@ -1,6 +1,6 @@
 // Tools for the ledger and the desk: searching, asks and tasks for the owner.
 import { z } from 'zod';
-import { asksFor, giveTask, raiseAsk, searchLedger, tasksFrom } from './office.ts';
+import { asksFor, giveTask, raiseAsk, searchChats, searchLedger, tasksFrom } from './office.ts';
 import { askReplaced, SAID_AS, taskSaid } from './desk-answers.ts';
 import { parseLevel, SWITCH_NAMES } from './access-words.ts';
 import { notLed, recentThreads, threadsOn } from './threads.ts';
@@ -19,12 +19,15 @@ import {
   RAISED_ON,
   HANDS_OFF,
   revisesArg,
+  afterArg,
+  waitsOn,
   attachArg,
   attachable,
   tool,
   text,
   json,
   line,
+  day,
   refused
 } from './mcp-run.ts';
 
@@ -80,6 +83,36 @@ if (offered('send_project_work'))
       return json({ id: row.id, state: row.state });
     }
   );
+if (has('search_chats'))
+  tool(
+    'search_chats',
+    {
+      description: `Search your earlier chats with ${OWNER}: what they asked and what you answered, including turns from before this session began, and the chats that started work handed to you. It searches by meaning when available, otherwise by keywords. Search here before you say you do not know something ${OWNER} told you, or ask them again.`,
+      inputSchema: {
+        query: z
+          .string()
+          .describe('What you are looking for, in plain words. Empty for the newest exchanges.'),
+        limit: z.number().int().min(1).max(50).optional()
+      }
+    },
+    async ({ query, limit }) => {
+      const rows = await searchChats(ME, query, limit);
+      return text(
+        rows.length
+          ? rows
+              .map((r) =>
+                [
+                  `- ${day(r.at)}${r.staffId === ME ? '' : ` (in ${r.staffId}'s chat)`}`,
+                  ...(r.owner ? [`  ${OWNER}: ${r.owner.slice(0, 600)}`] : []),
+                  ...(r.reply ? [`  Reply: ${r.reply.slice(0, 600)}`] : [])
+                ].join('\n')
+              )
+              .join('\n')
+          : 'Nothing found.'
+      );
+    }
+  );
+
 if (has('search_ledger'))
   tool(
     'search_ledger',
@@ -174,12 +207,15 @@ tool(
       if_approved: z.string().describe('What happens next if they say yes.'),
       attach: attachArg,
       revises: revisesArg,
+      after: afterArg,
       ...raisedArgs
     }
   },
-  async ({ title, why, if_approved, attach, revises, ...where }) => {
+  async ({ title, why, if_approved, attach, revises, after, ...where }) => {
     const on = await placed(where);
     if ('problem' in on) return refused(on.problem);
+    const wait = await waitsOn(after);
+    if ('problem' in wait) return refused(wait.problem);
     const files = await attachable(attach);
     if ('problem' in files) return text(files.problem);
     const { ask, precedent } = await raiseAsk(ME, {
@@ -189,7 +225,8 @@ tool(
       ifApproved: if_approved,
       revises,
       via: VIA,
-      attach: files.paths
+      attach: files.paths,
+      needs: wait.needs
     });
     return text(
       `Ask ${ask.id} is on ${OWNER}'s desk. Check my_asks later for their decision.\n` +
@@ -269,12 +306,15 @@ if (has('give_owner_a_task'))
           ),
         choices: z.array(z.string()).min(2).max(4).optional(),
         attach: attachArg,
+        after: afterArg,
         ...raisedArgs
       }
     },
-    async ({ title, why, steps, response, choices, attach, ...where }) => {
+    async ({ title, why, steps, response, choices, attach, after, ...where }) => {
       const on = await placed(where);
       if ('problem' in on) return refused(on.problem);
+      const wait = await waitsOn(after);
+      if ('problem' in wait) return refused(wait.problem);
       const files = await attachable(attach);
       if ('problem' in files) return text(files.problem);
       const all = [
@@ -297,6 +337,7 @@ if (has('give_owner_a_task'))
         attach: files.paths,
         via: VIA,
         ownerSaid: OWNER_SAID,
+        needs: wait.needs,
         ...on
       });
       return text(`Task ${t.id} is on ${OWNER}'s desk. The ledger records it when they finish it.`);

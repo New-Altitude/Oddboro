@@ -31,13 +31,14 @@ export const work = (id: number, label: string, more: Partial<Work> = {}): Work 
 });
 
 /**
- * A Desk with only the asks and tasks. oddNow reads only each one's Odd; the
- * rest of a Desk is the server's, so it is left out here.
+ * A Desk with only the asks and tasks, and no reports. oddNow reads only each
+ * one's Odd, and the card's Items group counts reports too; the rest of a Desk
+ * is the server's, so it is left out here.
  */
 export const deskOf = (
   asks: { id: number; staffId: string }[],
   tasks: { id: number; staffId: string | null }[]
-) => ({ asks, tasks }) as unknown as Desk;
+) => ({ asks, tasks, reports: [] }) as unknown as Desk;
 
 /** A hand-off Ada gave Bo, as the chat lists it; only the fields the words read matter. */
 export const handOff = (more: Partial<HandOffLine>): HandOffLine => ({

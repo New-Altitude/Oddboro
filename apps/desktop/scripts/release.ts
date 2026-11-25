@@ -24,8 +24,11 @@
 // signed with TAURI_SIGNING_PRIVATE_KEY (the key or its path) and
 // TAURI_SIGNING_PRIVATE_KEY_PASSWORD. latest.json points at
 // ODDBORO_RELEASE_URL (the release's download folder) and carries
-// ODDBORO_RELEASE_NOTES. Signing and notarizing are Mac only: the Windows
-// installer is not code-signed yet, so Windows warns before it runs.
+// ODDBORO_RELEASE_NOTES. On Windows the app, the installer and its
+// uninstaller are signed with New Altitude's certificate in Azure Artifact
+// Signing (scripts/sign-windows.ts), when ODDBORO_SIGN_METADATA names the
+// account. A release built on GitHub must be signed; a local or --test build
+// may be unsigned.
 //
 // With SENTRY_AUTH_TOKEN set (and SENTRY_ORG and SENTRY_PROJECT), the shell
 // keeps its line tables and they go to Sentry, as the office's page source
@@ -331,9 +334,28 @@ function buildLinux(version: string): void {
  * site. Tauri's updater runs the installer itself, so one file serves both.
  */
 function buildWindows(version: string): void {
+  const sign = !!process.env.ODDBORO_SIGN_METADATA;
+  if (!sign && !TEST && process.env.GITHUB_ACTIONS)
+    throw new Error(
+      'A Windows release built on GitHub must be signed: ODDBORO_SIGN_METADATA is not set'
+    );
   stage();
   const configs = ['src-tauri/tauri.bundle.conf.json'];
   if (TEST) configs.push('{"plugins":{"updater":{"dangerousInsecureTransportProtocol":true}}}');
+  // Tauri signs the app, the installer and its uninstaller, each through sign-windows.ts.
+  if (sign)
+    configs.push(
+      JSON.stringify({
+        bundle: {
+          windows: {
+            signCommand: {
+              cmd: process.execPath,
+              args: [join(DESKTOP, 'scripts', 'sign-windows.ts'), '%1']
+            }
+          }
+        }
+      })
+    );
   tauri(
     ['build', '--target', TARGET, '--bundles', 'nsis', ...configs.flatMap((c) => ['--config', c])],
     { RUSTFLAGS, ...SYMBOLS }
@@ -344,6 +366,12 @@ function buildWindows(version: string): void {
   const built = join(RELEASE, 'bundle', 'nsis');
   const setup = builtFile(built, version, '-setup.exe');
   checkFileVersion(join(built, setup), version);
+  // The installer's signature, checked the way Windows checks it on an
+  // owner's computer. Tauri signs a patched copy of the app for the installer
+  // and then puts the unsigned original back in RELEASE, so that one is not
+  // checked here. A failed signature of the app already stops the build.
+  if (sign)
+    run(process.env.ODDBORO_SIGNTOOL ?? 'signtool', ['verify', '/pa', '/v', join(built, setup)]);
 
   rmSync(OUT, { recursive: true, force: true });
   mkdirSync(OUT, { recursive: true });
@@ -364,8 +392,8 @@ function buildMac(version: string): void {
   stage();
 
   // The hardened Node sidecar loads only libraries carrying the app's team ID.
-  const stage = join(DESKTOP, 'stage');
-  for (const file of [...preparePty(stage), ...searchRuntimeFiles(stage)]) {
+  const staged = join(DESKTOP, 'stage');
+  for (const file of [...preparePty(staged), ...searchRuntimeFiles(staged)]) {
     run('codesign', ['--force', '--options', 'runtime', '--timestamp', '--sign', IDENTITY, file]);
     run('codesign', ['--verify', '--strict', file]);
   }

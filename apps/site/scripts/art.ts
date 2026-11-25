@@ -26,6 +26,7 @@ import {
   type GymLayers,
   type CurbLayers,
   type HallLayers,
+  type KnockLayers,
   type Persona
 } from './release-art.ts';
 import { shareCard } from './share.ts';
@@ -356,6 +357,60 @@ if (entranceWorld.missing.length) {
   process.exit(1);
 }
 const ENTRANCE_VIEW: Rect = { x: TILE, y: TILE + 2, w: 8 * TILE, h: 6 * TILE };
+
+/**
+ * The two rooms in 0.0.12's release art: the workspace's plaster and oak,
+ * nine tiles across with a wall down the middle, a desk and two windows on
+ * each side. The same rooms come again with the wall knocked through, where
+ * the back wall runs on unbroken and a winter wreath hangs in the middle of
+ * it. The view sits half a tile in, so the wall stands dead centre, and keeps
+ * KNOCK_MARGIN pixels spare on every side for the hammer to shake it.
+ */
+const KNOCK_STAMP = loadSpaces().rooms.workspace;
+const KNOCK_MARGIN = 2;
+const knockRoom = (walled: boolean): RoomTemplate => ({
+  ...KNOCK_STAMP,
+  map: [
+    'WWWWWWWWWWW',
+    'WWNNWWWNNWW',
+    'WWNNWWWNNWW',
+    `W....${walled ? 'W' : '.'}....W`,
+    `W....${walled ? 'W' : '.'}....W`,
+    `W....${walled ? 'W' : '.'}....W`,
+    `W....${walled ? 'W' : '.'}....W`,
+    `W....${walled ? 'W' : '.'}....W`,
+    'WWWWWWWWWWW'
+  ],
+  props: [
+    { sprite: 'desk', at: [2, 4] },
+    { sprite: 'desk-lamp', at: [2, 4] },
+    { sprite: 'chair', at: [3, 5] },
+    { sprite: 'desk', at: [7, 4], variant: 'walnut' },
+    { sprite: 'desk-lamp', at: [8, 4], variant: 'teal' },
+    { sprite: 'chair', at: [7, 5], variant: 'rust' },
+    { sprite: 'plant-small', at: [1, 3] },
+    { sprite: 'plant-tall', at: [9, 3] },
+    ...(walled ? [] : [{ sprite: 'winter-wreath', at: [5, 2] as [number, number] }])
+  ]
+});
+const knockWorlds = [true, false].map((walled) => {
+  const w = composeWorld(
+    { id: 'release-knock', name: KNOCK_STAMP.name, rooms: [{ room: 'workspace', at: [0, 0] }] },
+    { workspace: knockRoom(walled) },
+    catalog
+  );
+  if (w.missing.length) {
+    console.error(`Missing sprites in the knock-through: ${w.missing.join(', ')}`);
+    process.exit(1);
+  }
+  return w;
+});
+const KNOCK_VIEW: Rect = {
+  x: TILE + TILE / 2 - KNOCK_MARGIN,
+  y: TILE + 2 - KNOCK_MARGIN,
+  w: 8 * TILE + 2 * KNOCK_MARGIN,
+  h: 6 * TILE + 2 * KNOCK_MARGIN
+};
 
 /**
  * Nate, Michele and Sam Frank, the New Altitude personas 0.0.9 brings in, in
@@ -893,6 +948,36 @@ function renderSet(hour: number, dir: string): void {
     head: (frame) => personaLib.anchors[frame]?.head ?? [0, 0],
     shade: (img) => shade(img, 1)
   };
+  // The two rooms for 0.0.12, lit with the wall and without it. The glass is
+  // every window pixel the sky shows through, where the snow falls.
+  const knockLit = (w: World) =>
+    cropTo(light(paint(w.draws, true, w.width * TILE, w.height * TILE), w, w.draws), KNOCK_VIEW);
+  const glass: [number, number][] = [];
+  for (const d of knockWorlds[0].draws) {
+    if (!sprites.get(d.sprite)!.tags.includes('window')) continue;
+    const def = sprites.get(d.sprite)!;
+    const rows = (def.frames.find((f) => f.name === d.frame) ?? def.frames[0]).rows;
+    rows.forEach((row, y) =>
+      [...row].forEach((ch, x) => {
+        if (ch === '/' || ch === '(')
+          glass.push([
+            d.x + x - KNOCK_VIEW.x - KNOCK_MARGIN,
+            d.y + y - KNOCK_VIEW.y - KNOCK_MARGIN
+          ]);
+      })
+    );
+  }
+  const knock: KnockLayers = {
+    walled: knockLit(knockWorlds[0]),
+    open: knockLit(knockWorlds[1]),
+    view: { w: 8 * TILE, h: 6 * TILE },
+    margin: KNOCK_MARGIN,
+    wall: { x: 5 * TILE - KNOCK_VIEW.x - KNOCK_MARGIN, w: TILE },
+    glass,
+    ada: adaFrame,
+    theo: oddFrame(STAFF[2]),
+    shade: (img) => shade(img, 1)
+  };
   // The street in front of the door for 0.0.10's van: the door's view, run
   // on down across the sidewalk and the near lane.
   const curbAt: Rect = { ...doorAt, h: lane * TILE + 24 - doorAt.y };
@@ -911,6 +996,7 @@ function renderSet(hour: number, dir: string): void {
     {
       desk,
       curb,
+      knock,
       hall,
       gym,
       entrance,

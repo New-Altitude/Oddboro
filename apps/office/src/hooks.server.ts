@@ -21,7 +21,14 @@
 import { release } from 'node:os';
 import { sequence, type ServerInit } from '@sveltejs/kit/hooks';
 import { handleErrorWithSentry, sentryHandle } from '@sentry/sveltekit';
-import { IN_APP, LOCAL, makeHomePrivate, reindexLedger, whenOddLeaves } from '@oddboro/ledger';
+import {
+  IN_APP,
+  LOCAL,
+  loadChats,
+  makeHomePrivate,
+  reindexLedger,
+  whenOddLeaves
+} from '@oddboro/ledger';
 import { home, OFFICE_PORT } from '@oddboro/ledger/home';
 import { trustSystemCertificates } from '@oddboro/ledger/certificates';
 import { startLocalDatabase } from '@oddboro/ledger/local-db';
@@ -72,6 +79,9 @@ export const init: ServerInit = async () => {
   await timed('secrets', useShellSecrets);
   if (LOCAL) await timed('database', startLocalDatabase);
   await timed('tables', bringUpToDate);
+  // Each Odd's chat file into the searchable history, once, before anything
+  // writes a chat line. The re-index below makes the rows' vectors.
+  await timed('chat history', loadChats);
   // Before the clock: a poke that came due while the app updated still lands.
   await timed('update row', loadUpdate);
   startClock();

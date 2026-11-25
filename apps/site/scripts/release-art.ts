@@ -46,6 +46,19 @@
 //                 grows into a wide terminal titled PROJECTS, and lines of
 //                 code type out and scroll while the Odd works (0.0.11,
 //                 Claude Code and Codex projects behind Advanced mode)
+//   knock-through two rooms side by side, a wall between. Ada carries a
+//                 folder over and walks into the wall, BONK. Theo, next
+//                 door, gets a hard hat and a sledgehammer from the sky,
+//                 THUD, THUD, CRASH: the wall comes down in a cloud of dust,
+//                 and when it clears it is one room, a wreath in the middle
+//                 of the back wall and snow at the windows. OPEN PLAN! Ada
+//                 hands the folder straight over (0.0.12, one pane in place
+//                 of two panels)
+//   bug-vacuum    in the open-plan room, a beetle skitters in. Ada starts
+//                 and switches on her vacuum, and it runs, doubles back
+//                 behind her, and she chases it down. The vacuum pulls it
+//                 in, the bag puffs, and she turns to you and hops for joy.
+//                 No words, only what they do (0.0.13, bug fixes)
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { createImage, drawImage, encodePng, scaleImage, type Image } from '@oddboro/sprites/png';
@@ -150,8 +163,28 @@ export type CurbLayers = {
   shade: (img: Image) => Image;
 };
 
+/** Two rooms side by side, with the wall between them and without it. */
+export type KnockLayers = {
+  /** The rooms with the wall, lit, `margin` pixels wider than the view on every side. */
+  walled: Image;
+  /** The same rooms with the wall knocked through. */
+  open: Image;
+  view: { w: number; h: number };
+  margin: number;
+  /** The wall's columns, in the view's pixels. */
+  wall: { x: number; w: number };
+  /** Every pixel of window glass, in the view's pixels: where the snow shows. */
+  glass: [number, number][];
+  /** Ada and Theo in one sprite frame each, lit, 16 by 32. */
+  ada: (frame: string) => Image;
+  theo: (frame: string) => Image;
+  /** Lights an added sprite the way the rooms are lit. */
+  shade: (img: Image) => Image;
+};
+
 export type Layers = {
   curb: CurbLayers;
+  knock: KnockLayers;
   desk: DeskLayers;
   door: DoorLayers;
   hall: HallLayers;
@@ -1781,6 +1814,713 @@ function advanced(layers: DeskLayers): GifFrame[] {
   return frames;
 }
 
+// Theo's hard hat, side on (facing the way his side poses do) and from the
+// front, amber with an ink rim.
+const HARD_HAT = {
+  side: sprite([
+    '...kkkkk...',
+    '..kyyyyYk..',
+    '.kyyyyyyYk.',
+    '.kyyyyyyYk.',
+    'kYYYYYYYYYk',
+    '.kkkkkkkkkk'
+  ]),
+  down: sprite([
+    '...kkkkkk...',
+    '..kyyyyyYk..',
+    '.kyyyyyyyYk.',
+    '.kyyyyyyyYk.',
+    'kYYYYYYYYYYk',
+    '.kkkkkkkkkk.'
+  ])
+};
+// The sledgehammer: a walnut handle and a charcoal head, drawn for Theo facing
+// the way his side poses do. Raised, its head over his own; swung, straight
+// out in front at chest height; and resting, its head on the floor.
+const SLEDGE = {
+  raised: [
+    '..kkk...',
+    '.k55Kk..',
+    '.k55Kk..',
+    '..kWk...',
+    '..kWk...',
+    '..kWk...',
+    '..kWk...',
+    '..kWk...',
+    '..kWk...',
+    '..kWk...',
+    '..kWk...',
+    '..kWk...',
+    '..kWk...',
+    '..kWk...',
+    '..kWk...',
+    '..kWk...',
+    '..kWk...',
+    '...k....'
+  ],
+  swung: [
+    '............kkkk',
+    'kkkkkkkkkkkk55Kk',
+    'kWWWWWWWWWWW55Kk',
+    'kkkkkkkkkkkk55Kk',
+    '............kkkk'
+  ],
+  rest: [
+    '.k..',
+    'kWk.',
+    'kWk.',
+    'kWk.',
+    'kWk.',
+    'kWk.',
+    'kWk.',
+    'kWk.',
+    'kWk.',
+    'kWk.',
+    'k55k',
+    'k55k',
+    'kkkk'
+  ]
+};
+// Cracks spreading from where the hammer lands on the wall's top, in its own
+// pixels from its right edge: the first blow's, then the second's added.
+const CRACKS = [
+  [
+    [15, 0],
+    [14, 0],
+    [13, -1],
+    [12, -1],
+    [11, -2],
+    [14, 1],
+    [13, 2],
+    [12, 2],
+    [11, 3]
+  ],
+  [
+    [10, -2],
+    [9, -3],
+    [8, -3],
+    [7, -4],
+    [6, -5],
+    [10, 3],
+    [9, 4],
+    [8, 5],
+    [7, 5],
+    [6, 6],
+    [11, -1],
+    [10, 0],
+    [9, 0],
+    [8, 1],
+    [7, 1],
+    [6, 1],
+    [5, 2],
+    [4, 2],
+    [12, -3],
+    [12, -4],
+    [11, -5],
+    [11, 4],
+    [10, 6],
+    [10, 7]
+  ]
+];
+
+/** A sign of the noise: the word in ink on paper, boxed. */
+function noise(text: string): Image {
+  const w = width(text) + 4;
+  const img = createImage(w, 9);
+  box(img, 0, 0, w, 9, 'k');
+  box(img, 1, 1, w - 2, 7, '=');
+  print(img, text, 2, 2, 'k');
+  return img;
+}
+
+/**
+ * 0.0.12, one pane in place of two panels. Two rooms side by side, the wall
+ * between. Ada carries a folder over and walks into the wall. Theo, next
+ * door, hears it; a hard hat and a sledgehammer drop in from above. THUD,
+ * THUD, CRASH: the wall comes down in a cloud of dust, and as it clears it is
+ * one room, a wreath on the back wall where the wall met it, snow falling at
+ * the windows all along. OPEN PLAN! Ada walks the folder straight over.
+ */
+function knockThrough({
+  walled,
+  open,
+  view,
+  margin,
+  wall,
+  glass,
+  ada,
+  theo,
+  shade
+}: KnockLayers): GifFrame[] {
+  const frames: GifFrame[] = [];
+  // `shade` lights the image it is given, so each theme lights its own copy.
+  const lit = (src: Image) => {
+    const img = createImage(src.width, src.height);
+    drawImage(img, src, 0, 0);
+    return shade(img);
+  };
+  const hat = { side: lit(HARD_HAT.side), down: lit(HARD_HAT.down) };
+  const sledge = {
+    raised: lit(sprite(SLEDGE.raised)),
+    swung: lit(sprite(SLEDGE.swung)),
+    rest: lit(sprite(SLEDGE.rest))
+  };
+  const folder = lit(FOLDER);
+  const ink = hexToRgba(PALETTE.k.hex);
+
+  // Their sprite tops: feet on the floor in front of the desks.
+  const Y = 58;
+  const W = { x0: wall.x, x1: wall.x + wall.w };
+  // Where the hammer lands: the wall's near edge, at Theo's chest.
+  const hit = { x: W.x1 - 1, y: Y + 19 };
+  /** The first opaque row of a frame: where the head starts, for the hat. */
+  const crown = (img: Image) => {
+    for (let y = 0; y < img.height; y++)
+      for (let x = 0; x < img.width; x++) if (img.data[(y * img.width + x) * 4 + 3]) return y;
+    return 0;
+  };
+
+  type Who = { x: number; y: number; pose: string; flip: boolean; held?: Image };
+  const A: Who = { x: 12, y: Y, pose: 'idle-side', flip: false, held: folder };
+  const T: Who = { x: 92, y: Y, pose: 'idle-down', flip: false };
+  let wallUp = true;
+  let cracks = 0;
+  let hatOn = false;
+  let hatDrop: { x: number; y: number } | undefined;
+  let tool: 'none' | 'raised' | 'swung' | 'rest' = 'none';
+  let toolDrop: { x: number; y: number } | undefined;
+  const loose: { img: Image; x: number; y: number }[] = [];
+  let label: { img: Image; x: number; y: number } | undefined;
+  let bubbleOver: { text: string; who: Who } | undefined;
+  let shake = 0;
+  // The chunks and the dust, once the wall goes.
+  type Chunk = {
+    img: Image;
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    floor: number;
+    still: boolean;
+  };
+  const chunks: Chunk[] = [];
+  type Puff = { x: number; y: number; r: number; max: number };
+  const puffs: Puff[] = [];
+  let dust = 0;
+
+  /** A pose's frame: idles breathe on the clock, walks name their own step. */
+  const pose = (p: string) => (/-\d$/.test(p) ? p : `${p}-${Math.floor(frames.length / 3) % 4}`);
+
+  // Snow: flakes drifting down the glass, each its own column and pace. The
+  // glass hides them everywhere else, so the window frames stand in front.
+  const onGlass = new Set(glass.map(([x, y]) => y * view.w + x));
+  const panes = (() => {
+    const xs = [...new Set(glass.map(([x]) => x))].sort((a, b) => a - b);
+    const ys = glass.map(([, y]) => y);
+    return { xs, top: Math.min(...ys), bottom: Math.max(...ys) };
+  })();
+  const flakes = panes.xs
+    .filter((_, i) => i % 2 === 0)
+    .map((x, i) => ({ x, at: (i * 7) % 23, pace: 1 + (i % 3 === 0 ? 1 : 0) }));
+  const snow = createImage(view.w + 2 * margin, view.h + 2 * margin);
+  const snowAt = (t: number) => {
+    snow.data.fill(0);
+    const span = panes.bottom - panes.top + 6;
+    for (const f of flakes) {
+      const y = panes.top - 3 + ((f.at + Math.floor((t * f.pace) / 2)) % span);
+      const x = f.x + (Math.floor((t + f.at) / 6) % 2);
+      if (onGlass.has(y * view.w + x))
+        snow.data.set(hexToRgba(PALETTE['='].hex), ((y + margin) * snow.width + x + margin) * 4);
+    }
+    return shade(snow);
+  };
+
+  const person = (who: Who, src: (f: string) => Image, isTheo: boolean) => (img: Image) => {
+    const f = pose(who.pose);
+    const body = src(f);
+    const ox = who.x + margin;
+    const oy = who.y + margin;
+    // The hammer: raised behind his head, swung out ahead of him, or resting.
+    const front = who.flip ? -1 : 1;
+    const toolAt = (t: Image, dx: number, dy: number) =>
+      drawImage(img, t, who.flip ? ox + 16 - dx - t.width : ox + dx, oy + dy, who.flip);
+    if (isTheo && tool === 'raised') toolAt(sledge.raised, 4, -6);
+    drawImage(img, body, ox, oy, who.flip);
+    if (isTheo && tool === 'swung') toolAt(sledge.swung, 7, 19);
+    if (isTheo && tool === 'rest') toolAt(sledge.rest, 12, 18);
+    if (isTheo && hatOn) {
+      const top = crown(body);
+      if (f.includes('-side-')) toolAt(hat.side, 3, top - 3);
+      else drawImage(img, hat.down, ox + 2, oy + top - 3);
+    }
+    if (who.held) {
+      const hx = front > 0 ? ox + 11 : ox + 5 - who.held.width;
+      drawImage(img, who.held, hx, oy + 18 - (who.held.height >> 1));
+    }
+  };
+  const drawAda = person(A, ada, false);
+  const drawTheo = person(T, theo, true);
+
+  const shot = () => {
+    const t = frames.length;
+    const img = createImage(view.w + 2 * margin, view.h + 2 * margin);
+    drawImage(img, wallUp ? walled : open, 0, 0);
+    drawImage(img, snowAt(t), 0, 0);
+    if (wallUp && cracks)
+      for (let c = 0; c < cracks; c++)
+        for (const [dx, dy] of CRACKS[c]) {
+          const x = W.x0 + dx + margin;
+          const y = hit.y + dy + margin;
+          img.data.set(ink, (y * img.width + x) * 4);
+        }
+    for (const l of loose) drawImage(img, l.img, l.x + margin, l.y + margin);
+    for (const c of chunks.filter((c) => c.still))
+      drawImage(img, c.img, Math.round(c.x) + margin, Math.round(c.y) + margin);
+    // Front to back: whoever stands higher on the floor first.
+    const people = [
+      { y: A.y, draw: drawAda },
+      { y: T.y, draw: drawTheo }
+    ].sort((a, b) => a.y - b.y);
+    for (const p of people) p.draw(img);
+    if (hatDrop) drawImage(img, hat.down, hatDrop.x + margin, hatDrop.y + margin);
+    if (toolDrop) drawImage(img, sledge.raised, toolDrop.x + margin, toolDrop.y + margin);
+    for (const c of chunks.filter((c) => !c.still))
+      drawImage(img, c.img, Math.round(c.x) + margin, Math.round(c.y) + margin);
+    // The dust: puffs of plaster, thinning pixel by pixel as it settles.
+    if (dust) {
+      const cloud = createImage(img.width, img.height);
+      const light = hexToRgba(PALETTE.P.hex);
+      const mid = hexToRgba(PALETTE.p.hex);
+      const deep = hexToRgba(PALETTE.q.hex);
+      for (const p of puffs)
+        for (let y = Math.floor(p.y - p.r); y <= p.y + p.r; y++)
+          for (let x = Math.floor(p.x - p.r); x <= p.x + p.r; x++) {
+            const d = Math.hypot(x - p.x, y - p.y);
+            if (d > p.r) continue;
+            // A soft rim: every other pixel of the outer two.
+            if (d > p.r - 2 && (x + y) % 2) continue;
+            // Lit from above: the puff's top is plaster light, its belly
+            // plaster, and only its underside takes the shade.
+            const c = y > p.y + p.r / 2 ? (d > p.r - 3 ? deep : mid) : light;
+            const px = x + margin;
+            const py = y + margin;
+            if (px < 0 || py < 0 || px >= img.width || py >= img.height) continue;
+            cloud.data.set(c, (py * img.width + px) * 4);
+          }
+      drawImage(img, shade(cloud), 0, 0);
+    }
+    if (label) drawImage(img, label.img, label.x + margin, label.y + margin);
+    if (bubbleOver) {
+      const { text, who } = bubbleOver;
+      const w = width(text) + 6;
+      const head = who.x + 6;
+      const x = Math.max(1, Math.min(view.w - w - 1, head - 3));
+      const b = bubble(text.length, text, Math.max(1, Math.min(w - 5, head - x)));
+      drawImage(img, b, x + margin, who.y - b.height + 2 + margin);
+    }
+    // The hammer shakes the view: a pixel this way or that.
+    const dx = shake ? (t % 2 ? 1 : -1) : 0;
+    const dy = shake ? (t % 3 === 0 ? 1 : 0) : 0;
+    const out = createImage(view.w, view.h);
+    drawImage(out, img, -margin + dx, -margin + dy);
+    return out;
+  };
+  const add = (n = 1, step?: () => void) => {
+    for (let i = 0; i < n; i++) {
+      step?.();
+      frames.push({ image: shot(), delay: DELAY });
+      if (shake) shake--;
+    }
+  };
+  const walk = (who: Who, to: number) => {
+    const from = who.x;
+    who.flip = to < from;
+    for (let i = 1; who.x !== to; i++) {
+      who.x += Math.sign(to - who.x) * Math.min(2, Math.abs(to - who.x));
+      who.pose = `walk-side-${Math.floor(i / 2) % 4}`;
+      add();
+    }
+    who.pose = 'idle-side';
+  };
+  /** Theo's swing: the hammer up, a beat, then down onto the wall. */
+  const swing = () => {
+    tool = 'raised';
+    add(3);
+    T.x -= 1;
+    tool = 'swung';
+    shake = 3;
+  };
+
+  // A quiet afternoon, snow at the windows.
+  add(6);
+  // Ada carries the folder over to Theo, straight into the wall.
+  walk(A, W.x0 - 13);
+  add(1, () => {
+    A.x += 1;
+    label = { img: lit(BONK), x: W.x0 - 4, y: Y + 12 };
+  });
+  label = undefined;
+  A.x -= 3;
+  add(1);
+  bubbleOver = { text: '?', who: A };
+  add(10);
+  bubbleOver = undefined;
+  // Next door, Theo heard it. He turns to the wall.
+  T.pose = 'idle-side';
+  T.flip = true;
+  bubbleOver = { text: '!', who: T };
+  add(6);
+  bubbleOver = undefined;
+  // A hard hat drops onto his head, then the hammer into his hands.
+  const top = crown(theo('idle-side-0'));
+  for (const y of [-12, -2, 8, 18, 28, 38, 48, T.y + top - 3]) {
+    add(1, () => (hatDrop = { x: T.x + 2, y }));
+  }
+  hatDrop = undefined;
+  hatOn = true;
+  add(1, () => (label = { img: lit(BONK), x: T.x + 4, y: T.y - 6 }));
+  label = undefined;
+  add(4);
+  for (const y of [-20, -8, 4, 16, 28, T.y - 6]) add(1, () => (toolDrop = { x: T.x + 4, y }));
+  toolDrop = undefined;
+  tool = 'raised';
+  add(6);
+  // He steps up to the wall.
+  tool = 'rest';
+  walk(T, W.x1 + 3);
+  T.flip = true;
+  add(3);
+  // THUD.
+  swing();
+  cracks = 1;
+  label = { img: noise('THUD!'), x: W.x1 - 12, y: hit.y - 26 };
+  add(1, () => (A.y = Y - 2));
+  A.y = Y;
+  add(5);
+  label = undefined;
+  tool = 'rest';
+  T.x += 1;
+  add(4);
+  // THUD.
+  swing();
+  cracks = 2;
+  label = { img: noise('THUD!'), x: W.x1 - 16, y: hit.y - 30 };
+  add(1, () => (A.y = Y - 2));
+  A.y = Y;
+  add(5);
+  label = undefined;
+  tool = 'rest';
+  T.x += 1;
+  bubbleOver = { text: '!', who: A };
+  add(5);
+  bubbleOver = undefined;
+  // CRASH: the wall comes down.
+  tool = 'raised';
+  add(4);
+  T.x -= 1;
+  tool = 'swung';
+  shake = 6;
+  wallUp = false;
+  // The wall's own pixels, broken into chunks that fly and fall.
+  for (let y = 0; y < walled.height; y += 4)
+    for (let x = margin + W.x0; x < margin + W.x1; x += 4) {
+      let differs = false;
+      const img = createImage(4, 4);
+      for (let yy = 0; yy < 4; yy++)
+        for (let xx = 0; xx < 4; xx++) {
+          const i = ((y + yy) * walled.width + x + xx) * 4;
+          if (y + yy >= walled.height) continue;
+          const a = walled.data.subarray(i, i + 4);
+          const b = open.data.subarray(i, i + 4);
+          if (a[0] !== b[0] || a[1] !== b[1] || a[2] !== b[2]) differs = true;
+          img.data.set(a, (yy * 4 + xx) * 4);
+        }
+      // Every other piece is lost in the dust; the rest fly.
+      if (!differs || ((x + y) >> 2) % 2) continue;
+      const k = chunks.length;
+      const seed = ((k * 2654435761) >>> 0) % 1000;
+      chunks.push({
+        img,
+        x: x - margin,
+        y: y - margin,
+        // Away from the hammer, mostly: Theo struck from the right.
+        vx: -2.6 + (seed % 37) / 10 - 0.6,
+        vy: -2.5 - (seed % 23) / 10,
+        floor: Y + 26 + (seed % 9),
+        still: false
+      });
+    }
+  // Only a few crumbs stay on the floor; the rest break up in the dust.
+  chunks.forEach((c, i) => {
+    if (i % 8) c.floor = view.h + 20;
+    else c.vx /= 2;
+  });
+  // Billows: the biggest where the hammer struck, smaller up the wall and
+  // rolling out along the floor.
+  for (const [dx, y, max] of [
+    [8, 76, 17],
+    [-6, 84, 12],
+    [22, 86, 11],
+    [2, 52, 14],
+    [14, 32, 11],
+    [4, 14, 9],
+    [-14, 90, 8],
+    [30, 92, 7]
+  ])
+    puffs.push({ x: W.x0 + dx, y, r: 3, max });
+  dust = 1;
+  label = { img: noise('CRASH!'), x: W.x0 - 6, y: 6 };
+  const fly = () => {
+    for (const c of chunks) {
+      if (c.still) continue;
+      c.x += c.vx;
+      c.y += c.vy;
+      c.vy += 0.6;
+      if (c.y >= c.floor) {
+        c.y = c.floor;
+        c.still = c.floor < view.h;
+      }
+    }
+    for (const p of puffs) p.r = Math.min(p.max, p.r + Math.max(1, p.max / 5));
+  };
+  add(1, () => {
+    A.x -= 2;
+    fly();
+  });
+  add(8, fly);
+  label = undefined;
+  tool = 'rest';
+  // The dust thins away, and there is one room.
+  for (let i = 1; i <= 14; i++)
+    add(1, () => {
+      fly();
+      for (const p of puffs) {
+        p.r = p.max * (1 - i / 14);
+        p.y += 0.6;
+      }
+    });
+  dust = 0;
+  chunks.splice(0, chunks.length, ...chunks.filter((c) => c.still));
+  add(4);
+  // Open plan.
+  T.flip = true;
+  bubbleOver = { text: 'OPEN PLAN!', who: T };
+  add(18);
+  bubbleOver = undefined;
+  // Ada walks the folder straight over.
+  walk(A, T.x - 14);
+  add(2);
+  const from = { x: A.x + 11, y: A.y + 18 - (folder.height >> 1) };
+  const to = { x: T.x + 5 - folder.width, y: from.y };
+  A.held = undefined;
+  for (let i = 1; i <= 4; i++)
+    add(
+      1,
+      () =>
+        (label = {
+          img: folder,
+          x: Math.round(from.x + ((to.x - from.x) * i) / 4),
+          y: from.y - Math.round(3 * Math.sin((Math.PI * i) / 4))
+        })
+    );
+  label = undefined;
+  T.held = folder;
+  add(4);
+  // They turn to you.
+  A.pose = 'idle-down';
+  T.pose = 'idle-down';
+  A.flip = false;
+  T.flip = false;
+  add(14);
+  frames.push({ image: frames[SHARE_KNOCK].image, delay: 0 });
+  return frames;
+}
+// The share frame and the still: OPEN PLAN! over the open room.
+const SHARE_KNOCK = 140;
+
+// An upright vacuum, pushed ahead: the grip at the hand, the stick down to a
+// red bag, and the head on the floor in front. Facing right; drawn flipped
+// when its Odd faces left.
+const VACUUM_ROWS = [
+  'kk..........',
+  'kMk.........',
+  '.kMk........',
+  '..kMk.......',
+  '..kTTk......',
+  '.kTtTTk.....',
+  '.kTtTTk.....',
+  '.kTtTTk.....',
+  '.kTtTTk.....',
+  '.kTTTTk.....',
+  '..kMMk......',
+  '..kMk.......',
+  '..kMMkkkkkk.',
+  '.kMmmmmmmmMk',
+  '.kMMMMMMMMMk',
+  '..k5kkkkk5k.'
+];
+const VACUUM = sprite(VACUUM_ROWS);
+// The bag full of bug: one pixel wider on each side for a beat.
+const VACUUM_FULL = sprite(
+  VACUUM_ROWS.map((r, y) => (y >= 5 && y <= 9 ? r.replace('.kT', 'kTT').replace('Tk.', 'TTk') : r))
+);
+// A dark beetle, side on, facing right: its shell, its head with an eye and
+// feelers, and legs that swap with each step. Dark, so it shows on the oak.
+const BUG_BODY = ['..kkkk..k', '.kKIIKk.k', 'kKKIKKkkk', 'kKKKKKk=k', '.kkkkkkkk'];
+const BUG = [sprite([...BUG_BODY, '.k.k.k.k.']), sprite([...BUG_BODY, 'k.k.k.k..'])];
+const BUG_H = 6;
+const BUG_SUCKED = sprite(['.kk.', 'kKKk', '.kk.']);
+
+/**
+ * 0.0.13, a release of bug fixes. In the open-plan room, a beetle skitters in
+ * across the floor. Ada starts and switches on her vacuum. The bug runs,
+ * doubles back behind her, and she turns and chases it down. The vacuum pulls
+ * it in, the bag puffs, and she turns to you and hops for joy. No words.
+ */
+function bugVacuum({ open, view, margin, ada, shade }: KnockLayers): GifFrame[] {
+  const frames: GifFrame[] = [];
+  const lit = (src: Image) => {
+    const img = createImage(src.width, src.height);
+    drawImage(img, src, 0, 0);
+    return shade(img);
+  };
+  const vacuum = lit(VACUUM);
+  const full = lit(VACUUM_FULL);
+  const bugs = BUG.map(lit);
+  const sucked = lit(BUG_SUCKED);
+  const air = hexToRgba(PALETTE.m.hex);
+
+  // Ada's sprite top, feet on the floor in front of the desks.
+  const Y = 58;
+  const A = { x: 14, pose: 'idle-side', flip: false };
+  // The bug's top-left corner; its feet meet the floor at y + BUG_H.
+  const B = { x: view.w + 4, y: 84, flip: true, step: 0, shown: true, img: bugs[0] };
+  let on = false;
+  let bagFull = false;
+  /** How far Ada hops off the floor, in pixels. */
+  let hop = 0;
+
+  const pose = (p: string) => (/-\d$/.test(p) ? p : `${p}-${Math.floor(frames.length / 3) % 4}`);
+  /** The vacuum's top-left corner, and where its head sucks, in the view's pixels. */
+  const vac = () => {
+    const x = A.flip ? A.x + 5 - VACUUM.width : A.x + 11;
+    return { x, y: Y + 16 - hop, mouth: A.flip ? x : x + VACUUM.width - 1 };
+  };
+
+  const shot = () => {
+    const t = frames.length;
+    const img = createImage(view.w + 2 * margin, view.h + 2 * margin);
+    drawImage(img, open, 0, 0);
+    const bug = () =>
+      B.shown && drawImage(img, B.img, Math.round(B.x) + margin, B.y + margin, !B.flip);
+    // A bug further back on the floor than Ada's feet runs behind her.
+    if (B.y + BUG_H < Y + 31) bug();
+    drawImage(img, ada(pose(A.pose)), A.x + margin, Y - hop + margin, A.flip);
+    const v = vac();
+    // Running, the vacuum hums: its body shakes a pixel up and down.
+    const hum = on && t % 2 ? 1 : 0;
+    drawImage(img, bagFull ? full : vacuum, v.x + margin, v.y - hum + margin, A.flip);
+    // Running: air streaks at the head, flickering.
+    if (on)
+      for (let i = 0; i < 3; i++) {
+        const ax = v.mouth + (A.flip ? -2 - ((t + i) % 3) * 2 : 2 + ((t + i) % 3) * 2);
+        const ay = Y + 28 + i;
+        if ((t + i) % 2 === 0) img.data.set(air, ((ay + margin) * img.width + ax + margin) * 4);
+      }
+    if (B.y + BUG_H >= Y + 31) bug();
+    const out = createImage(view.w, view.h);
+    drawImage(out, img, -margin, -margin);
+    return out;
+  };
+  const add = (n = 1, step?: () => void) => {
+    for (let i = 0; i < n; i++) {
+      step?.();
+      frames.push({ image: shot(), delay: DELAY });
+    }
+  };
+  /** The bug scurries to `x`, `y`, `pace` pixels a frame, legs going. */
+  const scurry = (x: number, y: number, pace: number, each?: () => void) => {
+    B.flip = x < B.x;
+    while (Math.round(B.x) !== x || B.y !== y) {
+      const dx = x - B.x;
+      B.x += Math.sign(dx) * Math.min(pace, Math.abs(dx));
+      if (B.y !== y) B.y += Math.sign(y - B.y);
+      B.img = bugs[++B.step % 2];
+      add(1, each);
+    }
+  };
+  /** Ada pushes the vacuum to `x`, two pixels a frame. */
+  const walk = (to: number, each?: () => void) => {
+    A.flip = to < A.x;
+    for (let i = 1; A.x !== to; i++) {
+      A.x += Math.sign(to - A.x) * Math.min(2, Math.abs(to - A.x));
+      A.pose = `walk-side-${Math.floor(i / 2) % 4}`;
+      add(1, each);
+    }
+    A.pose = 'idle-side';
+  };
+
+  // A quiet afternoon. A bug skitters in from the right.
+  add(4);
+  scurry(78, 84, 3);
+  add(2);
+  // Ada sees it: a start.
+  add(1, () => (hop = 2));
+  hop = 0;
+  add(4);
+  // On goes the vacuum.
+  on = true;
+  add(6);
+  // She goes for it. It runs off to the right.
+  walk(52);
+  scurry(112, 85, 4, () => {
+    if (A.x < 64) A.x += 2;
+    A.pose = `walk-side-${Math.floor(frames.length / 2) % 4}`;
+  });
+  A.pose = 'idle-side';
+  add(3);
+  // It doubles back behind her and on past.
+  scurry(26, 79, 4, () => {
+    if (B.x < A.x + 4) A.flip = true;
+  });
+  scurry(22, 84, 2);
+  add(2);
+  // She chases it down.
+  walk(B.x + 20);
+  // The vacuum pulls it in.
+  const mouth = vac().mouth;
+  for (let i = 0; i < 3; i++) add(1, () => ((B.y = i % 2 ? 83 : 84), (B.img = bugs[i % 2])));
+  B.y = 84;
+  const share = frames.length;
+  if (share !== SHARE_VACUUM)
+    throw new Error(`bug-vacuum: set SHARE_VACUUM to ${share}, the bug at the vacuum's head`);
+  while (Math.round(B.x) + 9 < mouth - 1) add(1, () => (B.x += 3));
+  B.img = sucked;
+  B.x = mouth - 4;
+  B.y = 86;
+  add(1);
+  B.shown = false;
+  bagFull = true;
+  add(4);
+  bagFull = false;
+  add(3);
+  on = false;
+  add(4);
+  // She turns to you, and hops for joy, twice.
+  A.pose = 'idle-down';
+  A.flip = false;
+  add(4);
+  for (let i = 0; i < 2; i++) {
+    for (const h of [2, 3, 2, 0]) add(1, () => (hop = h));
+    add(2);
+  }
+  add(16);
+  frames.push({ image: frames[SHARE_VACUUM].image, delay: 0 });
+  return frames;
+}
+// The share frame and the still: the bug at the running vacuum's head.
+const SHARE_VACUUM = 109;
+
 /**
  * Every release's art. `share` is the GIF frame, counted from 0, that becomes
  * the link preview while that release is the newest one, and `shareLight` is
@@ -1814,7 +2554,16 @@ const ART: {
   // By day, a hunter side on in the mask beside the van, BUG HUNTERS in full.
   { name: 'bug-hunters', frames: (l) => bugHunters(l.curb), share: STILL_AT, shareLight: 'day' },
   // The terminal full of code, the switch on.
-  { name: 'advanced', frames: (l) => advanced(l.desk), share: 70, shareLight: 'night' }
+  { name: 'advanced', frames: (l) => advanced(l.desk), share: 70, shareLight: 'night' },
+  // OPEN PLAN! over the one room, the wreath on the wall, snow at the windows.
+  {
+    name: 'knock-through',
+    frames: (l) => knockThrough(l.knock),
+    share: SHARE_KNOCK,
+    shareLight: 'day'
+  },
+  // By day, the bug at the head of Ada's running vacuum.
+  { name: 'bug-vacuum', frames: (l) => bugVacuum(l.knock), share: SHARE_VACUUM, shareLight: 'day' }
 ];
 
 // The link preview's size, and the ink it sits on.

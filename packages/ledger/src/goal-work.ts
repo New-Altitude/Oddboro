@@ -7,7 +7,7 @@
 // rest are outside) is refused in its chat and pointed to tell_lead. An Odd
 // with a job of its own is told the rule and trusted with it. Opening a
 // thread has its own check where it happens (`assertMayLead`).
-import { and, eq, isNotNull, ne } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull, ne } from 'drizzle-orm';
 import { db } from './db.ts';
 import { jobs, threads } from './schema.ts';
 import { nextIsLeads, type ThreadOn } from './threads.ts';
@@ -24,7 +24,11 @@ export async function goalWork(staffId: string, on: ThreadOn[]): Promise<GoalWor
   const goalThreads = on.filter((t) => t.goalId !== null);
   if (!goalThreads.length) return undefined;
   const [[job], [leads]] = await Promise.all([
-    db.select({ id: jobs.id }).from(jobs).where(eq(jobs.staffId, staffId)).limit(1),
+    db
+      .select({ id: jobs.id })
+      .from(jobs)
+      .where(and(eq(jobs.staffId, staffId), isNull(jobs.removedAt)))
+      .limit(1),
     db
       .select({ id: threads.id })
       .from(threads)

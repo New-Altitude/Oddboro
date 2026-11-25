@@ -55,7 +55,7 @@
         <span class="text-[10px] tracking-[0.08em] text-sea uppercase">Default</span>
       </span>
       <span class="mt-1 block text-xs leading-snug text-muted">
-        Ready now. Redesign it any time from the Office window.
+        Ready now. Redesign it any time under Layout, on the Office tab.
       </span>
     </button>
   </div>

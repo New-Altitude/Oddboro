@@ -80,8 +80,10 @@
   function menuKey(e: KeyboardEvent) {
     const items = menuItems();
     const at = items.indexOf(document.activeElement as HTMLButtonElement);
-    if (e.key === 'Escape') closeMenu(true);
-    else if (e.key === 'Tab') return closeMenu();
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeMenu(true);
+    } else if (e.key === 'Tab') return closeMenu();
     else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       const step = e.key === 'ArrowDown' ? 1 : -1;
       items[(at + step + items.length) % items.length]?.focus();
@@ -110,14 +112,16 @@
     };
     const esc = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      e.preventDefault();
       volOpen = false;
       volButton?.focus();
     };
     window.addEventListener('pointerdown', away);
-    window.addEventListener('keydown', esc);
+    // Capture, so it runs before the page's own Esc and claims the key.
+    window.addEventListener('keydown', esc, true);
     return () => {
       window.removeEventListener('pointerdown', away);
-      window.removeEventListener('keydown', esc);
+      window.removeEventListener('keydown', esc, true);
     };
   });
 </script>

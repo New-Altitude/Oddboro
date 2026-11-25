@@ -113,7 +113,7 @@ function active(): boolean {
 }
 
 /**
- * What the shell and the Setup window see. `install` turns true once the time
+ * What the shell and the Setup tab see. `install` turns true once the time
  * has come, the Odds are held and nothing runs, or 20 minutes past it. When
  * the shell is the one asking and the answer is yes, the app goes down now.
  */

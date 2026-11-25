@@ -12,7 +12,7 @@
     "smoke": "node scripts/smoke.ts",
     "test": "node --test \"test/*.test.ts\" && cargo test --manifest-path src-tauri/Cargo.toml",
     "tauri": "tauri",
-    "check-types": "cargo check --manifest-path src-tauri/Cargo.toml --all-targets",
+    "check-types": "tsc -p tsconfig.json && cargo check --manifest-path src-tauri/Cargo.toml --all-targets",
     "lint": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings && cargo fmt --manifest-path src-tauri/Cargo.toml --check && prettier --check . --ignore-path ../../.prettierignore --ignore-path .gitignore"
   },
   "devDependencies": {

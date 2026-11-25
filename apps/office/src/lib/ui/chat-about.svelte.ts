@@ -20,6 +20,8 @@ export const chatRequest = $state<{
   focus?: { staff: string; item: Delivered };
   /** A reply waiting for a staffer's chat to take it. */
   reply?: { staff: string; item: Delivered };
+  /** A staffer whose chat takes the cursor once it shows, as after ⌘K. */
+  typing?: string;
 }>({
   drafts: {}
 });

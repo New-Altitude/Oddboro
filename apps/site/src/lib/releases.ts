@@ -26,6 +26,59 @@ export type Release = {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.0.15',
+    date: '2026-11-23',
+    title: 'Bug fixes for Windows, and for offices moved to a new computer.',
+    summary:
+      'On Windows, Odds on Claude Code sign in again, and Oddboro finds and runs Codex. Odds no longer fail after you move your office to a new computer. This release includes the fixes from 0.0.13 and 0.0.14.',
+    notes: [
+      'On Windows, Odds on Claude Code no longer fail with "Not logged in" when the computer has an Anthropic API key set.',
+      'On Windows, Install and Update for Codex work, in place of "spawn npm ENOENT".',
+      'On Windows, Oddboro finds a Codex you installed yourself, wherever npm, pnpm or Yarn put it.',
+      'On Windows, Oddboro finds Codex, Claude Code and Gemini wherever your PowerShell finds them.',
+      'On Windows, hiring an Odd, drawing a look and designing an office on Codex no longer fail partway.',
+      'Odds on Codex and Claude Code no longer fail with "no rollout found" after you move your office to a new computer.',
+      "Ledger search's download shows how much has arrived.",
+      'In Setup, Claude Code says Ready when it is signed in, whichever tool you pick for the office.'
+    ],
+    builds: ['mac', 'windows-x64', 'windows-arm64', 'linux-x86_64', 'linux-aarch64'],
+    art: {
+      name: 'bug-vacuum',
+      alt: 'In an open-plan office, a dark beetle skitters across the floor. Ada starts at the sight of it and switches on a teal vacuum. The beetle runs off, doubles back behind her, and she turns and chases it down. The vacuum pulls it in, the bag puffs out, and Ada turns to you and hops for joy.',
+      shareAlt: 'Ada in a pixel-art office, a dark beetle at the head of her running teal vacuum.'
+    }
+  },
+  {
+    version: '0.0.12',
+    date: '2026-11-19',
+    title: 'Your whole office works from one pane.',
+    summary:
+      'Your Odds, your office and Setup sit in one pane, in tabs, so you no longer go back and forth between two panels. You can back up your office to one file, and other computers and programs are kept out.',
+    notes: [
+      'Your Odds, your office and Setup sit in tabs in one pane. ⌘K, or Ctrl K, finds any Odd and opens its chat, and what you were writing to an Odd waits for you when you come back.',
+      'Back up your office to one file, and restore it on this computer or a new one.',
+      'More layers of protection around your office: it answers only this computer, keeps its records from other accounts on it, and in the app answers only Oddboro itself.',
+      'Long chats no longer grow slower and costlier with every message. An Odd carries a note of where things stand into a fresh session, and can search your past chats.',
+      "See where your AI plan goes: each Odd's recent runs and their tokens, how full each chat is, and which Odd uses the most.",
+      'Hire an Odd from a Claude Code or Grok Build agent file, or from several at once. A changed file updates the Odd you already have.',
+      'Ledger search runs on your computer after a one-time download, with no Ollama.',
+      'A change to your office saves over the layout you are in. Undo it, or remove a layout you no longer use.',
+      'Show your local weather at the office windows, play focus noise in place of the soundtrack, and hang a winter wreath.',
+      "Each of an Odd's jobs has its own name, so a job is never set up twice. An Odd can pause a job, with your yes.",
+      'An Odd can ask on your Desk for a higher level or an office tool. For each Odd at Act, you choose whether work another Odd hands it waits for your yes, and it starts at waiting.',
+      'Linear and Notion show up when you add a tool, and a tool that takes a key connects on the first try.',
+      'Codex Odds run on Windows. On Linux, sign-in pages open, notifications show, and Grok Odds reach their office tools.',
+      'Save a diagnostic report from Setup, or from the message when the office cannot start, to send with a bug report.'
+    ],
+    builds: ['mac', 'windows-x64', 'windows-arm64', 'linux-x86_64', 'linux-aarch64'],
+    art: {
+      name: 'knock-through',
+      alt: 'Two office rooms sit side by side with a wall between them. Ada carries a yellow folder over and walks into the wall. Next door, a hard hat and a sledgehammer drop on Theo from above. He hits the wall twice, THUD, THUD, and on the third swing it comes down, CRASH, in a cloud of dust. When the dust clears it is one room, with a wreath on the back wall and snow at the windows. Theo says OPEN PLAN! and Ada hands him the folder.',
+      shareAlt:
+        'Two Odds in one open pixel-art office, one in a hard hat saying OPEN PLAN!, with a winter wreath on the wall and snow at the windows.'
+    }
+  },
+  {
     version: '0.0.11',
     date: '2026-11-13',
     title: 'Work in your own projects with Claude Code and Codex, from the office.',

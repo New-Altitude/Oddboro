@@ -15,8 +15,8 @@
 // `GROK_HOME=<office> grok logout` removed the owner's own ~/.grok sign-in in
 // the same second. The session at xAI or OpenAI lasts until it ends or the
 // owner removes it in their account. Server only.
-import { realpathSync, rmSync } from 'node:fs';
-import { isAbsolute } from 'node:path';
+import { existsSync, realpathSync, rmSync } from 'node:fs';
+import { delimiter, isAbsolute, join } from 'node:path';
 import { OFFICE_ACCOUNT, type Agent } from '@oddboro/ledger';
 import {
   claudeCommand,
@@ -262,11 +262,17 @@ export function agentCommand(tool: Agent): Command | undefined {
  * Codex and Gemini install with npm, and so does Claude Code off Windows. The
  * app brings its own Node but not npm, so npm has to be on the PATH the
  * office started with. Without this check the page showed "spawn npm ENOENT".
- * Windows is left to the installer as before: its npm is a .cmd shim, which
- * `onPath` does not look for.
+ * Windows npm is npm.cmd, which `onPath` does not look for, since a spawn by
+ * name never starts it; a slot starts it through cmd (`startable`).
  */
 export function npmMissing(name: string): string | undefined {
-  if (currentPlatform() === 'win32' || onPath('npm')) return undefined;
+  const found =
+    currentPlatform() === 'win32'
+      ? (process.env.PATH ?? '')
+          .split(delimiter)
+          .some((dir) => dir && existsSync(join(dir, 'npm.cmd')))
+      : onPath('npm');
+  if (found) return undefined;
   return `${name} installs with npm, which comes with Node.js, and the office cannot find npm on this ${computerWord(currentSystem())}. Install Node.js from nodejs.org, then quit and reopen Oddboro.`;
 }
 

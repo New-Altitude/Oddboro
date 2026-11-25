@@ -45,7 +45,9 @@
       {@attach (n) => n.select()}
       bind:value={draft}
       onkeydown={(e) => {
-        if (e.key === 'Escape') editing = false;
+        if (e.key !== 'Escape') return;
+        e.preventDefault();
+        editing = false;
       }}
     />
     <button

@@ -16,7 +16,13 @@ import {
   serviceInstalled
 } from './platform.ts';
 import { modelProblem, modelReady } from './embed.ts';
-import { isDownloading, modelOnDisk, MODEL_MB, RUNS_HERE } from './search-model.ts';
+import {
+  isDownloading,
+  modelOnDisk,
+  MODEL_MB,
+  RUNS_HERE,
+  type DownloadProgress
+} from './search-model.ts';
 import { secretStore } from './secrets.ts';
 import { computerWord } from './system-words.ts';
 
@@ -32,6 +38,12 @@ export type Check = {
   /** A download in MB that fixes it, which Setup offers as a button. */
   download?: number;
 };
+
+/**
+ * One line of the search model download's answer: how far it has got, then
+ * the search line as it stands once it is done, or why it stopped.
+ */
+export type SearchLine = DownloadProgress | { check: Check } | { problem: string };
 
 /** Whether a command ran cleanly, and all it printed. */
 async function run(cmd: string, args: string[], timeout = 8000) {

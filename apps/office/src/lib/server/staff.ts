@@ -139,7 +139,7 @@ import { currentSystem } from '@oddboro/ledger/platform';
 import { computerWord } from '@oddboro/ledger/system-words';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, sep } from 'node:path';
 import type { ChatEntry, ChatEvent } from '../staff/chat.ts';
@@ -171,7 +171,7 @@ import { NOT_SIGNED_IN, SIGN_IN_WHERE, type McpServer, type RunImage } from './l
 import { notifyMac } from './notify.ts';
 import { OUTCOME_LINE, personaRun, voiced } from './persona-run.ts';
 import { offeredSection } from './persona-offered.ts';
-import { catchUp, NOW, parseSession, saveSession, sectionsOf } from './resume.ts';
+import { catchUp, NOW, parseSession, saveSession, sectionsOf, SESSION_GONE } from './resume.ts';
 import { toolServerEnv } from './run-env-allow.ts';
 import { cut, officeEnv } from './run-env.ts';
 import { sandboxPaths } from './sandbox-paths.ts';
@@ -577,6 +577,11 @@ export type Run = {
   text: string;
   saved?: true;
   interrupted?: true;
+  /**
+   * The saved session it resumed is not on this computer, so the run failed
+   * and the session file is gone: the next run starts a new session.
+   */
+  sessionGone?: true;
   /** A file job's check of what this run wrote (`CheckedFiles`, less the periods it started with). */
   checked?: Omit<CheckedFiles, 'periods'>;
 };
@@ -1138,6 +1143,13 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
   const [cmd, before] = agentCommand(who.agent) ?? [who.agent, []];
   /** Codex's and Gemini's whole messages, as the chat shows them. */
   let said = '';
+  // How big the session has grown, which a chat weighs to start a fresh one
+  // (chat-run.ts): the largest model call when the tool says each one's size
+  // (Claude Code), else the run's tokens read over its model calls, one more
+  // than its tool calls.
+  let largest = 0;
+  let calls = 1;
+  let tokensRead: Promise<number> | undefined;
   const sink: Sink = {
     event: (e) => {
       switch (e.type) {
@@ -1145,7 +1157,11 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
           // The end carries it.
           break;
         case 'tool':
+          calls++;
           opts.onEvent?.({ type: 'tool', name: floorTool(e.name) });
+          break;
+        case 'context':
+          largest = Math.max(largest, e.tokens);
           break;
         case 'delta':
           opts.onEvent?.({ type: 'delta', text: e.text });
@@ -1159,7 +1175,14 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
           break;
         }
         case 'usage':
-          void recordUsage(who.id, opts.kind, e.usage, e.session).catch(() => {});
+          tokensRead = recordUsage(
+            who.id,
+            opts.kind,
+            e.usage,
+            e.session,
+            // What the run is for, as the floor names it: a job's name or an ask's title.
+            opts.runId ? runsGoing.get(opts.runId)?.work?.label : undefined
+          ).catch(() => 0);
           break;
         case 'plan':
           void notePlan(e.info);
@@ -1210,14 +1233,22 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
   // chat run the owner sent nothing to.
   const line = NETWORK_REFUSED_LINE[opts.ownerSaid === undefined ? 'unsent' : 'sent'];
   const r = refused ? { ok: false, text: line.replaceAll('{name}', who.name) } : ended;
+  // The session it resumed is not on this computer (`SESSION_GONE`): forget it, so the next run starts anew.
+  const gone = !!prior && !ended.ok && SESSION_GONE.test(`${ended.text}\n${stderr}`);
   // Saved however the run ended: once the tool names a session, it holds the message.
-  const kept = !!(end.session && opts.sessionFile);
+  const kept = !gone && !!(end.session && opts.sessionFile);
   // The run ends whatever a step here throws: a throw that skipped its end
   // left the chat "still replying" until the office restarted.
   try {
     void closeGateway(gate);
-    if (end.session && opts.sessionFile)
-      saveSession(opts.sessionFile, { sessionId: end.session, seen: sections, home: toolDir });
+    if (gone && opts.sessionFile) rmSync(opts.sessionFile, { force: true });
+    else if (end.session && opts.sessionFile)
+      saveSession(opts.sessionFile, {
+        sessionId: end.session,
+        seen: sections,
+        home: toolDir,
+        context: largest || Math.round(((await tokensRead) ?? 0) / calls)
+      });
     // The time limit passed while it got ready, so the driver started nothing.
     if (end.outcome === 'timeout' && !started)
       console.error(
@@ -1229,7 +1260,7 @@ async function runTool(who: StaffRow, message: string, opts: RunOpts): Promise<R
   } catch (e) {
     console.error(`${who.name}'s run ended, but tidying up after it failed:`, e);
   }
-  return kept ? { ...r, saved: true } : r;
+  return gone ? { ...r, sessionGone: true } : kept ? { ...r, saved: true } : r;
 }
 
 /** What an Odd's run says when its tool's run ends (`drive`). */

@@ -108,6 +108,8 @@ export type RunEvent =
    * earlier runs of it included (`recordUsage` keeps this run's share).
    */
   | { type: 'usage'; usage: ModelUsage; session?: string }
+  /** How many tokens one model call read: what the session holds then. Claude Code's stream says it per call. */
+  | { type: 'context'; tokens: number }
   /** What the tool said of the plan's limits (Claude Code's `rate_limit_event`), as it said it. */
   | { type: 'plan'; info: unknown }
   /**

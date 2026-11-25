@@ -260,15 +260,28 @@ export function hearClaude(
       failure(e);
     }
   };
-  const w = watch(box, (_event, name) => {
+  // Not persistent: a watch left open must never keep the office from exiting.
+  const w = watch(box, { persistent: false }, (_event, name) => {
     if (name) check(name);
   });
   // A reply published while the office was down must still reach its request.
   const offer = join(box, 'offer.json');
-  if (existsSync(offer)) {
+  const answered = () => {
+    if (!existsSync(offer)) return;
     const { id } = JSON.parse(readFileSync(offer, 'utf8'));
     for (const suffix of ['accepted', 'reply'])
       if (existsSync(join(box, id + '.' + suffix))) check(id + '.' + suffix);
-  }
+  };
+  answered();
+  // On macOS a new watch starts a moment after watch() returns, and a file
+  // written in that moment raises no event. Look once more to catch it.
+  const again = setTimeout(() => {
+    try {
+      answered();
+    } catch (e) {
+      failure(e);
+    }
+  }, 1000).unref();
+  w.once('close', () => clearTimeout(again));
   return w;
 }

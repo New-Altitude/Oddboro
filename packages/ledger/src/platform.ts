@@ -8,7 +8,7 @@
 import { execFile, execFileSync, spawn, type ExecFileException } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { delimiter, join } from 'node:path';
+import { delimiter, join, resolve, sep } from 'node:path';
 
 export type System = 'mac' | 'linux' | 'windows';
 
@@ -351,29 +351,96 @@ export function claudeCommand(): [string, string[]] {
  * How to start an npm-installed tool on Windows, found on the PATH (and in
  * `extra` folders): its own .exe when there is one, else its .cmd shim's
  * script run under this Node, since Node will not start a .cmd without a
- * shell. `pkg` is the package's folder under node_modules. Undefined when
- * neither is there.
+ * shell. `pkg` is the package's folder under node_modules: beside the shim,
+ * where npm puts it, or wherever the shim's own script line names inside it,
+ * as pnpm, Yarn and a moved npm folder write it (#343). npm's own global
+ * folder (`npmPrefix`) is searched last, since the office's PATH can lack it
+ * even when the owner's terminal has it. Undefined when neither is there.
  */
 export function npmCommand(
   command: string,
   pkg: string[],
   extra: string[] = []
 ): [string, string[]] | undefined {
-  const dirs = [...(process.env.PATH ?? '').split(delimiter).filter(Boolean), ...extra];
+  const dirs = [...(process.env.PATH ?? '').split(delimiter), ...extra, npmPrefix()]
+    // cmd and PowerShell accept a PATH entry in quotes; join does not.
+    .map((d) => d.trim().replace(/^"(.*)"$/, '$1'))
+    .filter(Boolean);
   for (const dir of dirs) {
     const exe = join(dir, `${command}.exe`);
     if (existsSync(exe)) return [exe, []];
-    if (!existsSync(join(dir, `${command}.cmd`))) continue;
-    const folder = join(dir, 'node_modules', ...pkg);
-    try {
-      const { bin } = JSON.parse(readFileSync(join(folder, 'package.json'), 'utf8')) as {
-        bin?: string | Record<string, string>;
-      };
-      const entry = join(folder, typeof bin === 'string' ? bin : (bin?.[command] ?? 'cli.js'));
-      return /\.[cm]?js$/.test(entry) ? [process.execPath, [entry]] : [entry, []];
-    } catch {
-      // A shim with no package beside it: keep looking.
-    }
+    const shim = join(dir, `${command}.cmd`);
+    if (!existsSync(shim)) continue;
+    const entry = packageEntry(join(dir, 'node_modules', ...pkg), command) ?? shimEntry(shim, pkg);
+    // A shim with no package it names: keep looking.
+    if (entry) return /\.[cm]?js$/.test(entry) ? [process.execPath, [entry]] : [entry, []];
+  }
+  return undefined;
+}
+
+/**
+ * The folder where npm puts a global install's commands on Windows: the
+ * `prefix` npm is set to, from npm_config_prefix or the owner's .npmrc (where
+ * `npm config set prefix` writes it), else npm's own %APPDATA%\npm. An owner
+ * who points npm at D:\Tools\npm-global and adds it to PATH in a PowerShell
+ * profile only has Codex there, on a PATH the office never sees, so Install
+ * said "installed, but the office cannot find it yet" (#343).
+ */
+export function npmPrefix(): string {
+  const env = process.env;
+  const set =
+    env.npm_config_prefix ||
+    npmrcValue(env.npm_config_userconfig || join(homedir(), '.npmrc'), 'prefix');
+  return set ? resolve(set) : join(env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'npm');
+}
+
+/**
+ * One key's value in an .npmrc, as npm reads it: quotes off, `${NAME}` from
+ * the environment, and `~` for the home folder. Undefined when it is not set.
+ */
+function npmrcValue(file: string, key: string): string | undefined {
+  let text: string;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch {
+    return undefined;
+  }
+  const line = text.match(new RegExp(`^\\s*${key}\\s*=(.*)$`, 'm'))?.[1].trim();
+  if (!line) return undefined;
+  return line
+    .replace(/^"(.*)"$/, '$1')
+    .replace(/\$\{([^}?]+)\??\}/g, (_, name: string) => process.env[name] ?? '')
+    .replace(/^~(?=$|[\\/])/, homedir());
+}
+
+/** The file a package's package.json names for `command`, or undefined with no package there. */
+function packageEntry(folder: string, command: string): string | undefined {
+  try {
+    const { bin } = JSON.parse(readFileSync(join(folder, 'package.json'), 'utf8')) as {
+      bin?: string | Record<string, string>;
+    };
+    return join(folder, typeof bin === 'string' ? bin : (bin?.[command] ?? 'cli.js'));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The script a .cmd shim runs, when it is a file inside `pkg` that is there.
+ * A shim names it in quotes, from the shim's own folder (`%dp0%\` or
+ * `%~dp0\`) or as a full path.
+ */
+function shimEntry(shim: string, pkg: string[]): string | undefined {
+  let text: string;
+  try {
+    text = readFileSync(shim, 'utf8');
+  } catch {
+    return undefined;
+  }
+  const inside = `${sep}${join('node_modules', ...pkg)}${sep}`.toLowerCase();
+  for (const [, from, path] of text.matchAll(/"(%~dp0\\?|%dp0%\\?)?([^"%]+\.[cm]?js)"/gi)) {
+    const file = from ? resolve(join(shim, '..'), path) : path;
+    if (resolve(file).toLowerCase().includes(inside) && existsSync(file)) return file;
   }
   return undefined;
 }
@@ -384,6 +451,18 @@ export function npmCommand(
  */
 export function rulePath(path: string): string {
   return `/${path.replaceAll('\\', '/').replace(/^([A-Za-z]):/, (_, d: string) => `/${d.toLowerCase()}`)}`;
+}
+
+/**
+ * How to start npm with `args`. On Windows npm is npm.cmd, a batch file,
+ * which Node starts only through cmd, so a spawn by name said "spawn npm
+ * ENOENT" (#343). `/d` skips cmd's AutoRun commands. Only the office's own
+ * words go in `args`, since cmd reads them.
+ */
+export function npmStart(args: readonly string[]): [string, string[]] {
+  if (currentPlatform() !== 'win32') return ['npm', [...args]];
+  const system = process.env.SystemRoot ?? 'C:\\Windows';
+  return [join(system, 'System32', 'cmd.exe'), ['/d', '/c', 'npm', ...args]];
 }
 
 /**

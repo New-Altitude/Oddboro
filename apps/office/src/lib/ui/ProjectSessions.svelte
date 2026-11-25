@@ -14,7 +14,7 @@
   import { LOGOS } from './tool-logos.ts';
   import type { ProjectAsk } from './windows.svelte.ts';
 
-  // The Projects window, which widens the side panel while it is in front:
+  // The Projects section, which widens the pane while it is open on the Office tab:
   // every session down the start side as a tab list, and the selected one
   // filling the rest, its native terminal under a slim header. Details fold out over the terminal,
   // so the terminal never moves. "+ New session" opens the start form here.
@@ -302,9 +302,9 @@
   >
 {/snippet}
 
-<section class="flex h-full min-h-0 flex-col text-sm" aria-label="Projects">
+<!-- Esc belongs to the terminal and the tools in it, so the pane leaves it alone here. -->
+<section class="flex h-full min-h-0 flex-col text-sm" aria-label="Projects" data-own-esc>
   <header class="flex items-center gap-3 border-b border-hairline px-3 py-2">
-    <h2 class="font-pixel text-lg leading-none">Projects</h2>
     <span class="min-w-0 flex-1 truncate text-xs text-muted"
       >Claude Code and Codex in your own folders, with your permissions</span
     >

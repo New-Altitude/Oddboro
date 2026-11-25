@@ -56,13 +56,19 @@ const GOOGLE_CLIENT_ID = '143017077978-dd33kak7rf2m1praobmbc0olv7kjf5gp.apps.goo
 export const GOOGLE_SCOPES: Record<GoogleProduct, string> = {
   gmail:
     'https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.settings.basic',
-  drive: 'https://www.googleapis.com/auth/drive'
+  drive: 'https://www.googleapis.com/auth/drive',
+  // The calendar list and free/busy, events to read and write, and which
+  // account it is. Never the whole `calendar` scope, which can make and
+  // delete calendars.
+  calendar:
+    'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/userinfo.email'
 };
 
 /** Where each Google product says which account a token reaches. */
 const WHO: Record<GoogleProduct, string> = {
   gmail: 'https://gmail.googleapis.com/gmail/v1/users/me/profile',
-  drive: 'https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)'
+  drive: 'https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)',
+  calendar: 'https://www.googleapis.com/oauth2/v2/userinfo'
 };
 
 /**
@@ -554,8 +560,12 @@ async function googleAddress(product: GoogleProduct, token: string): Promise<str
   try {
     const res = await fetch(WHO[product], { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) return '';
-    const body = (await res.json()) as { emailAddress?: string; user?: { emailAddress?: string } };
-    return body.emailAddress ?? body.user?.emailAddress ?? '';
+    const body = (await res.json()) as {
+      emailAddress?: string;
+      email?: string;
+      user?: { emailAddress?: string };
+    };
+    return body.emailAddress ?? body.user?.emailAddress ?? body.email ?? '';
   } catch {
     return '';
   }

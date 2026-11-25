@@ -11,10 +11,18 @@
   // The owner describes the office they want and the office draws it: the
   // spec first, then each piece the library lacks, then a preview to pan
   // around. Redraw with a note until it is right, then move in. The office
-  // the owner is in changes the same way: a note redraws it from its spec.
-  // Earlier layouts stay, to move back to.
-  type Props = { id: string; catalog: SpriteCatalog; staffCount: number; current: string };
-  let { id, catalog, staffCount, current }: Props = $props();
+  // the owner is in changes the same way: a note redraws it from its spec, and
+  // saving the change saves over that layout, which keeps the version before
+  // to undo it. Other layouts stay, to move back to, until the owner removes one.
+  type Props = {
+    id: string;
+    catalog: SpriteCatalog;
+    staffCount: number;
+    current: string;
+    /** Bumps when a layout is removed, from this window or another, to read the list again. */
+    layouts: number;
+  };
+  let { id, catalog, staffCount, current, layouts: layoutsVersion }: Props = $props();
 
   type Drawn = {
     spec: OfficeSpec;
@@ -43,6 +51,8 @@
     description: string;
     active: boolean;
     movedInAt: string | null;
+    /** It has a version from before its last change to go back to. */
+    canUndo: boolean;
   };
 
   /** The words for a new office. */
@@ -52,8 +62,12 @@
   let changes = $state<string[]>([]);
   let note = $state('');
   /** The layout the owner is in, to change with a note. */
-  let here = $state<{ spec: OfficeSpec; description: string } | undefined>();
+  let here = $state<{ id: number; spec: OfficeSpec; description: string } | undefined>();
   let drawn = $state<Drawn | undefined>();
+  /** The layout the drawing changes, which moving in saves over. None for a new office. */
+  let changing = $state<number | undefined>();
+  /** The layout waiting on a second click to remove it. */
+  let removing = $state<number | undefined>();
   let drawing = $state(false);
   /** While drawing: the office's name once the spec is in, and each piece being drawn. */
   let progress = $state<
@@ -78,9 +92,10 @@
   };
 
   $effect(() => {
+    void layoutsVersion;
     void call<{
       layouts: Layout[];
-      current?: { spec: OfficeSpec; description: string };
+      current?: { id: number; spec: OfficeSpec; description: string };
       sample: { name: string; active: boolean };
     }>('/api/office/layouts').then((r) => {
       layouts = r.layouts;
@@ -92,7 +107,6 @@
   $effect(() => {
     wins.busy[id] = drawing || moving;
     wins.dirty[id] = !!drawn;
-    wins.titles[id] = drawn ? `Office: ${drawn.spec.name}` : 'Office';
   });
 
   /** The preview: the real floor, built from the drawing, at midday. */
@@ -195,6 +209,7 @@
       // The new pieces go in the atlas before the preview asks for them.
       await addArt(await sharedAtlas(catalog), done.artSheet, done.artCatalog);
       drawn = done;
+      changing = how === 'change' ? here?.id : how === 'new' ? undefined : changing;
       basis = from;
       changes = previous && ask ? [...asked, ask] : asked;
       note = '';
@@ -213,7 +228,8 @@
       await call('/api/office/move-in', {
         spec: drawn.spec,
         description: words(basis, changes),
-        art: drawn.art
+        art: drawn.art,
+        ...(changing === undefined ? { new: true } : { layout: changing })
       });
       location.reload();
     } catch (e) {
@@ -234,6 +250,29 @@
     }
   }
 
+  async function undo(l: Layout) {
+    problem = '';
+    moving = true;
+    try {
+      await call(`/api/office/layouts/${l.id}/undo`, {});
+      location.reload();
+    } catch (e) {
+      problem = e instanceof Error ? e.message : String(e);
+      moving = false;
+    }
+  }
+
+  async function remove(l: Layout) {
+    problem = '';
+    try {
+      await call(`/api/office/layouts/${l.id}`, undefined, 'DELETE');
+      layouts = layouts.filter((x) => x.id !== l.id);
+    } catch (e) {
+      problem = e instanceof Error ? e.message : String(e);
+    }
+    removing = undefined;
+  }
+
   const ART_KIND: Record<ArtKind, string> = {
     prop: 'furniture',
     'wall-prop': 'on the wall',
@@ -249,8 +288,7 @@
 
 <section class="flex h-full min-h-0 flex-col" aria-label="Design the office">
   <header class="border-b border-hairline p-3">
-    <div class="font-pixel text-lg leading-none">Office</div>
-    <div class="mt-1 text-xs text-muted">
+    <div class="text-xs text-muted">
       Say what you want and the office draws it. Nothing changes until you move in.
     </div>
   </header>
@@ -412,11 +450,20 @@
       <button
         class="rounded-lg bg-sea px-3 py-2 text-sm font-medium text-night disabled:opacity-40"
         disabled={drawing || moving}
-        onclick={moveIn}>{moving ? 'Moving in' : `Move into ${drawn.spec.name}`}</button
+        onclick={moveIn}
+        >{moving
+          ? changing === undefined
+            ? 'Moving in'
+            : 'Saving'
+          : changing === undefined
+            ? `Move into ${drawn.spec.name}`
+            : `Save changes to ${drawn.spec.name}`}</button
       >
       <p class="text-[11px] text-faint">
-        Odds whose room is gone move to the workspace with the most free desks. Your old layout
-        stays below, to move back to.
+        Odds whose room is gone move to the workspace with the most free desks. {changing ===
+        undefined
+          ? 'Your old layout stays below, to move back to.'
+          : 'This saves over the layout you are in. Undo last change, below, takes it back.'}
         <button
           class="text-muted underline underline-offset-2 hover:text-ink disabled:opacity-40"
           disabled={drawing || moving}
@@ -480,18 +527,49 @@
       <div class="mt-2 flex flex-col gap-1">
         <div class="text-xs text-muted">Your layouts</div>
         {#each layouts as l (l.id)}
-          <div class="flex items-center gap-2 rounded-lg bg-raise px-2.5 py-1.5 text-xs">
-            <span class="min-w-0 flex-1 truncate text-ink" title={l.description}>{l.name}</span>
-            {#if l.active}
-              <span class="text-faint">You are here</span>
-            {:else}
-              <button
-                class="text-sea underline underline-offset-2 disabled:opacity-40"
-                disabled={drawing || moving}
-                onclick={() => moveBack(l)}>Move back</button
-              >
-            {/if}
-          </div>
+          {#if removing === l.id}
+            <!-- Removing cannot be undone, so it takes a second click. -->
+            <div class="flex flex-col gap-2 rounded-lg bg-raise px-2.5 py-2 text-xs">
+              <p>
+                Remove {l.name}? Its room names go with it. Art drawn for it stays in the library.
+              </p>
+              <div class="flex gap-2">
+                <button
+                  class="rounded-lg bg-coral/25 px-3 py-1 text-ink hover:bg-coral/40"
+                  onclick={() => remove(l)}>Remove</button
+                >
+                <button
+                  class="rounded-lg px-3 py-1 text-muted hover:text-ink"
+                  onclick={() => (removing = undefined)}>Keep it</button
+                >
+              </div>
+            </div>
+          {:else}
+            <div class="flex items-center gap-3 rounded-lg bg-raise px-2.5 py-1.5 text-xs">
+              <span class="min-w-0 flex-1 truncate text-ink" title={l.description}>{l.name}</span>
+              {#if l.active}
+                {#if l.canUndo}
+                  <button
+                    class="text-sea underline underline-offset-2 disabled:opacity-40"
+                    disabled={drawing || moving}
+                    onclick={() => undo(l)}>Undo last change</button
+                  >
+                {/if}
+                <span class="text-faint">You are here</span>
+              {:else}
+                <button
+                  class="text-muted underline underline-offset-2 hover:text-coral disabled:opacity-40"
+                  disabled={drawing || moving}
+                  onclick={() => (removing = l.id)}>Remove</button
+                >
+                <button
+                  class="text-sea underline underline-offset-2 disabled:opacity-40"
+                  disabled={drawing || moving}
+                  onclick={() => moveBack(l)}>Move back</button
+                >
+              {/if}
+            </div>
+          {/if}
         {/each}
         {#if sample}
           <div class="flex items-center gap-2 rounded-lg bg-raise px-2.5 py-1.5 text-xs">

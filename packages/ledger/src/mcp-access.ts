@@ -15,7 +15,8 @@ import {
   grantsFor,
   reconnectTask,
   raiseAsk,
-  staffer
+  staffer,
+  tasksFrom
 } from './office.ts';
 import { accessInRun, askAboveLevel, capabilities, handOffsLine } from './capabilities.ts';
 import { standingAsked, standingSaid, standingTitle } from './standing.ts';
@@ -37,10 +38,12 @@ import {
 } from './access-words.ts';
 import {
   BUILT_IN,
+  carriesQuery,
   ensureConnector,
   GITHUB_ADDRESS,
   GITHUB_ID,
-  searchRegistry
+  searchRegistry,
+  takeKeyIn
 } from './registry.ts';
 import type { OwnSwitch as OwnSwitchName } from './access-words.ts';
 import {
@@ -67,6 +70,7 @@ import {
   refused
 } from './mcp-run.ts';
 import { raisedNote, placed } from './mcp-desk.ts';
+import { connects } from './work/tasks.ts';
 import './mcp-mail.ts';
 
 tool(
@@ -131,7 +135,7 @@ if (has('ask_for_access'))
   tool(
     'ask_for_access',
     {
-      description: `Ask ${OWNER} to connect a tool for you. Pass a catalog id or registry name from find_connectors, or the https address of a hosted MCP server. Ask for the lowest level that does the job: read to look, write to change things in the tool (needs Draft or Act; at Draft each change waits for ${OWNER}'s yes). For a second Google account of Gmail or Google Drive, pass that connector with another_account. If they approve, they get numbered steps to connect it, and it shows up in my_access when done. ${NOT_OWN_TOOLS}${raisedNote}`,
+      description: `Ask ${OWNER} to connect a tool for you. Pass a catalog id or registry name from find_connectors, or the https address of a hosted MCP server. Ask for the lowest level that does the job: read to look, write to change things in the tool (needs Draft or Act; at Draft each change waits for ${OWNER}'s yes). For a second Google account of Gmail, Google Drive or Google Calendar, pass that connector with another_account. If they approve, they get numbered steps to connect it, and it shows up in my_access when done. ${NOT_OWN_TOOLS}${raisedNote}`,
       inputSchema: {
         connector: z.string(),
         level: z
@@ -155,7 +159,7 @@ if (has('ask_for_access'))
           .boolean()
           .optional()
           .describe(
-            `Only for Gmail or Google Drive, for each Google account beyond the first. When ${OWNER} uses more than one, ask for all of them in one run: the first without another_account, then one ask with it for each further account. ${OWNER} signs in to each as a tool of its own.`
+            `Only for Gmail, Google Drive or Google Calendar, for each Google account beyond the first. When ${OWNER} uses more than one, ask for all of them in one run: the first without another_account, then one ask with it for each further account. ${OWNER} signs in to each as a tool of its own.`
           ),
         revises: revisesArg
       }
@@ -177,17 +181,34 @@ if (has('ask_for_access'))
       // Any address on GitHub's server is the catalog's GitHub, which signs in:
       // an Odd's key header there would have the owner make a token.
       const github = GITHUB_ADDRESS.test(wanted.trim());
+      if (!github && /^https:\/\/\S+$/.test(wanted) && carriesQuery(new URL(wanted)))
+        return refused(
+          `Leave out everything from "?" in the address: the office keeps keys in this computer's password store, never in an address. Pass key_header with the header the key goes in, from the server's setup guide, and ${OWNER} pastes the key on their desk. Never put the key in the address or in why.`
+        );
       const found = await ensureConnector(
         github ? GITHUB_ID : wanted,
         key_header && !github ? { keyHeader: key_header.trim() } : undefined
       );
       if (!found.connector) return text(`${found.problem} Use find_connectors.`);
       const conn = found.connector;
+      // A tool it holds at this level already needs no ask: a second yes
+      // would only put a second connect task on the desk (issue #305).
+      const held = another_account
+        ? undefined
+        : (await grantsFor(ME)).find((g) => g.connectorId === conn.id);
+      if (held && (held.level === 'act' || level === 'read')) {
+        const open = (await tasksFrom(ME)).find((t) => t.status === 'open' && connects(t, conn.id));
+        return refused(
+          open
+            ? `Task ${open.id} to connect ${conn.name} is already on ${OWNER}'s desk. Point them to it.`
+            : `You already hold ${conn.name}. If it stopped working, call reconnect_access with ${conn.id}.`
+        );
+      }
       if (conn.id === POSTAL_ID && level !== 'read')
         return refused('Physical mail only allows Read only access.');
       const product = conn.config.google;
       if (another_account && !product)
-        return refused(`another_account is only for Gmail and Google Drive.`);
+        return refused(`another_account is only for Gmail, Google Drive and Google Calendar.`);
       // Another account only beside a first one: connected, or on its way (this
       // Odd's open ask for it, or a grant still being connected). So an Odd that
       // needs two mailboxes can ask for both at once, on its first day.
@@ -400,10 +421,13 @@ tool(
 // lacks, reach the desk. Named by name in the description, since an Odd
 // reads an id only for a tool it holds.
 const lackedTools = OFFICE_TOOLS.filter((t) => isGrantable(t.id) && !me.tools.includes(t.id));
+// A tool that shapes the prompt is never in a run's tool list, held or not,
+// so an Odd that looked for it there thought it was missing (issue #291).
+const PROMPT_TOOL = `It is not a tool you call: with it, your instructions list the other Odds under "Who's in the office". It names no rooms.`;
 tool(
   'ask_for_office_tool',
   {
-    description: `Ask ${OWNER} to turn on office tools you lack when a job needs them. Ask with this instead of giving ${OWNER} steps for your ${SETTINGS_TAB} tab: they turn them on with one click. Ask only for what the work needs. You have them from your next run, which starts when they say yes. The office tools you lack:${lackedTools.map((t) => `\n${t.name}: ${t.does}`).join('')}${raisedNote}`,
+    description: `Ask ${OWNER} to turn on office tools you lack when a job needs them. Ask with this instead of giving ${OWNER} steps for your ${SETTINGS_TAB} tab: they turn them on with one click. Ask only for what the work needs. You have them from your next run, which starts when they say yes. The office tools you lack:${lackedTools.map((t) => `\n${t.name}: ${t.does}${t.prompt ? ` ${PROMPT_TOOL}` : ''}`).join('')}${raisedNote}`,
     inputSchema: {
       tools: z
         // GRANTABLE_TOOLS is never empty: setting-asks.test.ts pins it.
@@ -420,7 +444,10 @@ tool(
     if ('problem' in on) return refused(on.problem);
     const now = (await staffer(ME)) ?? me;
     const lacked = tools.filter((t) => !now.tools.includes(t));
-    if (!lacked.length) return refused(`You already have ${officeToolsSaid(tools)}.`);
+    if (!lacked.length)
+      return refused(
+        `You already have ${officeToolsSaid(tools)}.${tools.some((t) => OFFICE_TOOLS.find((o) => o.id === t)?.prompt) ? ` ${PROMPT_TOOL}` : ''}`
+      );
     const said = officeToolsSaid(lacked);
     const { ask } = await raiseAsk(ME, {
       ...on,
@@ -493,7 +520,7 @@ if (offered('ask_for_standing_yes'))
 tool(
   'reconnect_access',
   {
-    description: `A tool ${OWNER} already gave you stopped working: its tools fail to load, or it turns down its key or sign-in. This puts the office's own steps to connect it again on ${OWNER}'s desk, with a box for the new key or a Sign in button, then a Connect button, and no ask, since they said yes once. Never write those steps yourself with give_owner_a_task. Pass get_key only when the tool takes a key: how to get a new one, one action per step, naming the exact page and button.`,
+    description: `A tool ${OWNER} already gave you stopped working: its tools fail to load, or it turns down its key or sign-in. This puts the office's own steps to connect it again on ${OWNER}'s desk, with a box for the new key or a Sign in button, then a Connect button, and no ask, since they said yes once. Never write those steps yourself with give_owner_a_task. Pass get_key only when the tool takes a key: how to get a new one, one action per step, naming the exact page and button. For a server ${OWNER} added by its address that wants a key the office never asked for (it says the key is missing or invalid, and its task had no box for one), pass key_header too.`,
     inputSchema: {
       connector: z.string().describe('The id my_access lists.'),
       problem: z
@@ -506,10 +533,23 @@ tool(
         .optional()
         .describe(
           'How to get a new key, e.g. ["Open https://console.apify.com/settings/integrations.", "Copy your Personal API token. It starts with apify_api_."]'
+        ),
+      key_header: z
+        .string()
+        .max(64)
+        .optional()
+        .describe(
+          `Only for a server added by its address: the name of the header its key goes in, from its setup guide, e.g. x-api-key or Authorization. The task then has a box for the key. Never the key itself.`
         )
     }
   },
-  async ({ connector: id, problem, get_key = [] }) => {
+  async ({ connector: id, problem, get_key = [], key_header }) => {
+    if (key_header !== undefined) {
+      const held = (await grantsFor(ME)).find((g) => g.connectorId === id);
+      if (!held) return text(`You were never given ${id}. Use ask_for_access.`);
+      const way = await takeKeyIn(held.connector, key_header.trim());
+      if ('problem' in way) return refused(way.problem);
+    }
     const r = await reconnectTask(ME, id, problem, get_key);
     if ('problem' in r) return text(r.problem);
     if (r.already)

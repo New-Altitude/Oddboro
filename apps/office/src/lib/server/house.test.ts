@@ -68,7 +68,11 @@ test("the office's Odds are listed by name, id and role, a persona's with where 
     /You cannot hand them work\. If you need a colleague, name them and say that you lack hand-off access/
   );
   assert.doesNotMatch(cannot, /call hand_off/);
-  assert.equal(whoIsHereSection([], true), '', 'alone in the office, nothing');
+  // Alone, it is told so: a missing section read as a tool that never loaded (#291).
+  assert.match(
+    whoIsHereSection([], true),
+    /## Who's in the office\n\nNo other Odds work here yet\./
+  );
 });
 
 test('every run is told never to claim it sent, gave, brought or handed something no tool call did', () => {

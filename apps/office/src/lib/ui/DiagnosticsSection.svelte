@@ -1,7 +1,7 @@
 <script lang="ts">
   import { answerDiagnostics, diagnostics, shown } from './diagnostics.svelte.ts';
 
-  // The Setup window's Diagnostics section: the one place the owner turns
+  // The Setup tab's Diagnostics section: the one place the owner turns
   // error and trace reports on or off. With no answer the switch is off and
   // nothing is sent. Each flip keeps the answer at once; the office follows it
   // from the next report, with no restart. The switch appears only when reports

@@ -14,7 +14,10 @@
 // goes straight through, and a call held after it lists it on the desk
 // (`before`), so a commit shows the change it applies. At Act every call goes
 // through but those to a tool the owner set to ask first, held the same way.
-// Each list is the exception to its level (`waitsFor`). The tool a run goes through (Claude Code, Codex, Grok) still gets
+// Each list is the exception to its level (`waitsFor`). One more waits at
+// every level: a calendar event that would make Google email anyone besides
+// the owner (`eventHoldFor`), which goes only on the owner's click, as a
+// reply does. The tool a run goes through (Claude Code, Codex, Grok) still gets
 // its own per-tool allow list too, so either one alone holds.
 import { randomBytes } from 'node:crypto';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -45,9 +48,10 @@ import {
   type HeldCall,
   type Level
 } from '@oddboro/ledger';
-import { heldWordsFor, upstream } from './access.ts';
+import { eventHoldFor, heldWordsFor, mayEmail, upstream } from './access.ts';
+import type { EventHold } from './google/calendar.ts';
 import type { McpServer } from './launch.ts';
-import { ODD_META } from './google/http.ts';
+import { ODD_META, OWNER_META } from './google/http.ts';
 import { postalTools, postalArguments } from './postal.ts';
 
 export const GATEWAY_PATH = '/api/gateway';
@@ -265,10 +269,14 @@ const WHY = 'oddboro_why';
 /** The longest title the desk takes; a longer one is cut. */
 const TITLE_MAX = 80;
 
-/** A tool as a run at Draft lists it: one that changes something also takes `TITLE` and `WHY`. */
-function forOwner(t: Tool, c: ConnectorRow, owner: string): Tool {
+/**
+ * A tool as a run at Draft lists it: one that changes something also takes
+ * `TITLE` and `WHY`. `sometimes`: a tool that waits only when its call would
+ * email someone (`mayEmail`), so the two are needed only then.
+ */
+function forOwner(t: Tool, c: ConnectorRow, owner: string, sometimes = false): Tool {
   const schema = t.inputSchema;
-  const kept = `The office shows it to ${owner} and never sends it to ${c.name}.`;
+  const kept = `The office shows it to ${owner} and never sends it to ${c.name}.${sometimes ? ` Needed when the call emails anyone, since that waits on ${owner}'s desk.` : ''}`;
   return {
     ...t,
     inputSchema: {
@@ -284,24 +292,32 @@ function forOwner(t: Tool, c: ConnectorRow, owner: string): Tool {
           description: `Why you make this call, for ${owner} to read on their desk before it is made: what it changes and why, in one or two plain sentences written to them. ${kept}`
         }
       },
-      required: [...(schema.required ?? []), TITLE, WHY]
+      required: [...(schema.required ?? []), ...(sometimes ? [] : [TITLE, WHY])]
     }
   };
 }
 
 const words = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 
+/** A call's inputs without the title and reason the office added for the desk. */
+function withoutWords(given: Record<string, unknown>): Record<string, unknown> {
+  const { [TITLE]: _title, [WHY]: _why, ...args } = given;
+  return args;
+}
+
 /**
  * Hold one call that changes something for the owner's yes: it goes on their
  * desk as a call ask, with the Odd's title and reason, and the run hears that
- * nothing has happened yet. A call missing either is refused, and nothing is held.
+ * nothing has happened yet. A call missing either is refused, and nothing is
+ * held. A calendar event goes with what the desk shows of it (`event`).
  */
 async function hold(
   c: ConnectorRow,
   name: string,
   given: Record<string, unknown>,
   place: CallPlace | undefined,
-  h: Held
+  h: Held,
+  event?: EventHold
 ): Promise<CallToolResult> {
   if (!place)
     return refusal(
@@ -315,7 +331,7 @@ async function hold(
     return refusal(
       `Nothing was held. Call ${name} again with ${TITLE}, what it does in a few plain words, and ${WHY}, why you make it in one or two plain sentences, both for ${owner}, who reads them on their desk.`
     );
-  const read = await heldWordsFor(c, name, args);
+  const read = event ? undefined : await heldWordsFor(c, name, args);
   // The calls since the last held one go on this card, and the next card
   // starts from here. Taken now, so a call made while this one is raised
   // waits for the next card.
@@ -328,8 +344,9 @@ async function hold(
       {
         connector: c.id,
         tool: name,
-        arguments: args,
+        arguments: event?.args ?? args,
         ...(read ? { said: read.title, shown: read.items } : {}),
+        ...(event ? { said: event.said, event: await event.view() } : {}),
         ...(before.length ? { before } : {})
       },
       c.name,
@@ -344,11 +361,14 @@ async function hold(
     if (!raised || raised.already) h.made = [...before, ...h.made];
   }
   const { ask, already } = raised;
+  const emails = event?.emailed.length
+    ? ` Google emails ${event.emailed.join(', ')} only when ${owner} clicks it.`
+    : '';
   return {
     content: [
       {
         type: 'text',
-        text: `${already ? `This exact call is already on ${owner}'s desk as ask ${ask.id}` : `Held for ${owner}'s yes as ask ${ask.id}`}. Nothing has changed in ${c.name} yet. ${owner} sees this exact call on their desk. If they approve it, the office makes it, and you carry on in a new run with what it returned. Do not call it again, and do not say it is done. Carry on with anything that does not need it, then say in your reply what waits on their yes.`
+        text: `${already ? `This exact call is already on ${owner}'s desk as ask ${ask.id}` : `Held for ${owner}'s yes as ask ${ask.id}`}. Nothing has changed in ${c.name} yet.${emails} ${owner} sees this exact call on their desk. If they approve it, the office makes it, and you carry on in a new run with what it returned. Do not call it again, and do not say it is done. Carry on with anything that does not need it, then say in your reply what waits on their yes.`
       }
     ]
   };
@@ -356,11 +376,19 @@ async function hold(
 
 /**
  * Which Odd a call is for, told only to the office's own Google servers
- * (`ODD_META`), never to an outside one. The call is built here, so whatever
- * `_meta` the run sent never passes.
+ * (`ODD_META`), never to an outside one, and whether the owner clicked it
+ * (`OWNER_META`), which only `makeCall` says. The call is built here, so
+ * whatever `_meta` the run sent never passes.
  */
-const forOdd = (c: ConnectorRow, staffId: string | undefined) =>
-  c.kind === 'builtin' && staffId ? { _meta: { [ODD_META]: staffId } } : {};
+const forOdd = (c: ConnectorRow, staffId: string | undefined, ownerSaidYes = false) =>
+  c.kind !== 'builtin'
+    ? {}
+    : {
+        _meta: {
+          ...(staffId ? { [ODD_META]: staffId } : {}),
+          ...(ownerSaidYes ? { [OWNER_META]: true } : {})
+        }
+      };
 
 /**
  * The owner said yes to a held call: the office makes that exact call, as
@@ -379,7 +407,9 @@ export async function makeCall(
   const client = await upstream(c);
   try {
     const r = (await client.callTool(
-      { name: call.tool, arguments: call.arguments, ...forOdd(c, staffId) },
+      // The owner's yes covers only what the desk showed them: a calendar event
+      // held without its card (Google could not be read then) sends no email.
+      { name: call.tool, arguments: call.arguments, ...forOdd(c, staffId, !!call.event) },
       undefined,
       { timeout: 5 * 60_000 }
     )) as CallToolResult;
@@ -417,10 +447,18 @@ export async function gateway(request: Request, id: string): Promise<Response> {
   );
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const tools = await reachable(c, h);
-    if (!h.waits && !h.askFirst.size) return { tools };
+    if (!h.waits && !h.askFirst.size && !tools.some((t) => mayEmail(c, t.name))) return { tools };
     const owner = await ownerName();
     return {
-      tools: tools.map((t) => (onlyReads(c, t) || !waitsFor(h, t.name) ? t : forOwner(t, c, owner)))
+      tools: tools.map((t) =>
+        onlyReads(c, t)
+          ? t
+          : waitsFor(h, t.name)
+            ? forOwner(t, c, owner)
+            : mayEmail(c, t.name)
+              ? forOwner(t, c, owner, true)
+              : t
+      )
     };
   });
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
@@ -436,9 +474,13 @@ export async function gateway(request: Request, id: string): Promise<Response> {
     // owner lets this Odd use the tool without asking, at Act only if they set
     // it to ask first. At Draft a run with no place (a lesson run) changes
     // nothing, standing yes or not.
-    const args = req.params.arguments ?? {};
+    let args = req.params.arguments ?? {};
     if (!onlyReads(c, tool)) {
-      if (waitsFor(h, name) || (h.waits && !run.place)) return hold(c, name, args, run.place, h);
+      // An event that would email anyone waits for the owner's click at any level.
+      const event = mayEmail(c, name) ? await eventHoldFor(c, name, withoutWords(args)) : undefined;
+      if (event?.emailed.length || waitsFor(h, name) || (h.waits && !run.place))
+        return hold(c, name, args, run.place, h, event);
+      if (mayEmail(c, name)) args = withoutWords(args);
       h.made.push({ tool: name, arguments: args });
     }
     const client = await clientOf(c, h);
@@ -446,10 +488,7 @@ export async function gateway(request: Request, id: string): Promise<Response> {
     return (await client.callTool(
       {
         name,
-        arguments:
-          id === POSTAL_ID
-            ? postalArguments(c.config.pmb!, req.params.arguments)
-            : req.params.arguments,
+        arguments: id === POSTAL_ID ? postalArguments(c.config.pmb!, req.params.arguments) : args,
         ...forOdd(c, run.place?.staffId)
       },
       undefined,

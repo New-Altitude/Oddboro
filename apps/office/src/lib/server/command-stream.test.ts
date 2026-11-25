@@ -2,10 +2,12 @@
 // (command-stream.ts), with a shortened sign-in limit and `sh` commands that
 // stand in for an installer or a sign-in: an install runs to its end however
 // long it takes, a sign-in past its limit stops and says why, and a sign-in
-// that fails ends on its own last line. Run with `npm test -w @oddboro/office`.
+// that fails ends on its own last line. On Windows npm starts through cmd.
+// Run with `npm test -w @oddboro/office`.
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { test } from 'node:test';
-import { commandSlot, type Action } from './command-stream.ts';
+import { commandSlot, startable, type Action } from './command-stream.ts';
 
 /** Far shorter than the commands below take, so a cut would show. */
 const SHORT_MS = 200;
@@ -62,4 +64,33 @@ test('a sign-in whose command fails ends not done, on its own last line', async 
     { line: 'Could not sign in.' },
     { done: true, ok: false }
   ]);
+});
+
+test('npm starts through cmd on Windows, where it is a batch file a spawn by name never finds, and by name everywhere else', () => {
+  const real = Object.getOwnPropertyDescriptor(process, 'platform');
+  const on = (platform: NodeJS.Platform) =>
+    Object.defineProperty(process, 'platform', { value: platform });
+  const system = process.env.SystemRoot;
+  process.env.SystemRoot = 'C:\\Windows';
+  try {
+    on('win32');
+    assert.deepEqual(startable('npm', ['install', '-g', '@openai/codex']), [
+      join('C:\\Windows', 'System32', 'cmd.exe'),
+      ['/d', '/c', 'npm', 'install', '-g', '@openai/codex']
+    ]);
+    // Every other command starts as it is, as Claude Code's and Grok's installers do.
+    assert.deepEqual(startable('powershell.exe', ['-NoProfile']), [
+      'powershell.exe',
+      ['-NoProfile']
+    ]);
+    on('darwin');
+    assert.deepEqual(startable('npm', ['install', '-g', '@openai/codex']), [
+      'npm',
+      ['install', '-g', '@openai/codex']
+    ]);
+  } finally {
+    if (real) Object.defineProperty(process, 'platform', real);
+    if (system === undefined) delete process.env.SystemRoot;
+    else process.env.SystemRoot = system;
+  }
 });

@@ -1,7 +1,7 @@
 <script lang="ts">
   import RestoreBackup from './RestoreBackup.svelte';
 
-  // The Setup window's Backup section: one click makes one file of the whole
+  // The Setup tab's Backup section: one click makes one file of the whole
   // office, less the sign-ins, and Restore puts one back. In a browser the
   // file downloads as any does. In the app the window opens the address in
   // the owner's browser, which saves it (apps/desktop, step 10). An office on

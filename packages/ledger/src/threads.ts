@@ -104,7 +104,11 @@ export async function assertMayLead(q: Db, hubId: string): Promise<void> {
     .where(eq(staffGoals.staffId, hubId))
     .limit(1);
   if (!serves) return;
-  const [job] = await q.select({ id: jobs.id }).from(jobs).where(eq(jobs.staffId, hubId)).limit(1);
+  const [job] = await q
+    .select({ id: jobs.id })
+    .from(jobs)
+    .where(and(eq(jobs.staffId, hubId), isNull(jobs.removedAt)))
+    .limit(1);
   if (!job && (await manager(q))?.id !== hubId) throw new Error(LEADS_NONE);
 }
 

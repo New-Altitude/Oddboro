@@ -55,11 +55,18 @@ export type RunEnded = { outcome: Outcome; result: string; joined: number[] };
 
 /** The columns an Odd's new ask names. Every other column starts empty, as a new row's does. */
 export type NewAsk = Pick<AskBase, 'staffId' | 'kind' | 'title' | 'why' | 'ifApproved'> &
-  Partial<Omit<AskBase, 'id' | 'createdAt' | 'staffId' | 'kind' | 'title' | 'why' | 'ifApproved'>>;
+  Partial<
+    Omit<
+      AskBase,
+      'id' | 'createdAt' | 'hiddenAt' | 'staffId' | 'kind' | 'title' | 'why' | 'ifApproved'
+    >
+  >;
 
 /** The columns a new task names, its steps built by the entry. Every other column starts empty. */
 export type NewTask = Pick<TaskBase, 'staffId' | 'title' | 'why' | 'steps'> &
-  Partial<Pick<TaskBase, 'askId' | 'handOffId' | 'threadId' | 'via' | 'ownerSaid' | 'response'>>;
+  Partial<
+    Pick<TaskBase, 'askId' | 'handOffId' | 'threadId' | 'via' | 'ownerSaid' | 'response' | 'needs'>
+  >;
 
 /** What the office did with an ask the owner approved by doing it, kept on the ask with the yes. */
 export type AskDone = {

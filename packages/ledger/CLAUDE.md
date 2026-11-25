@@ -4,9 +4,10 @@
 `staff` table), asks, tasks for the owner, the files an Odd attaches to them,
 pokes (one-time chat messages an Odd sets for later), reports, connectors and grants, jobs and runs, token usage and the owner's plan
 windows, the names the owner gives the rooms, the owner's goals and who serves
-them, the lessons the owner teaches the Odds, the app's updates, and the ledger itself.
+them, the lessons the owner teaches the Odds, the app's updates, each Odd's
+chat as searchable rows (`chat-history.ts`), and the ledger itself.
 Drizzle ORM over the `postgres` driver. Server only, except `./time`,
-`./tools`, `./agents`, `./access`, `./grantable`, `./goals`, `./update-window`, `./work-paths`, `./desk-answers`, `./live-tables`, `./filters`, `./system-words` and `./lesson-rules`, which the page may import.
+`./tools`, `./agents`, `./access`, `./grantable`, `./goals`, `./update-window`, `./work-paths`, `./desk-answers`, `./live-tables`, `./desk-order`, `./filters`, `./system-words` and `./lesson-rules`, which the page may import.
 `./sequences` is for tests in any package, never the page.
 
 `src/run-registry.ts` holds each live run, its stop handle and its work in
@@ -354,6 +355,11 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
 - `usage.staff_id` is null for a run as the office (drafting a job
   description, drawing a look). `usage.tokens` is a generated column, the
   row's one token sum, which a staffer's usage (`usageFor`) adds up.
+  `usage.label` (migration `0041_usage_label`) says what the run was for: its
+  job's name or its ask's title, as the floor names the run, null for a chat.
+  A run's rows, one per model, share one `created_at`, so `recentRuns` groups
+  by it into one line per run. `officeUsage` ranks every Odd, an Odd that left
+  and the office itself included, over 24 hours and 7 days.
 - Two runs of one Odd can each raise an access ask for the same tool at once
   (a hire's first day and its lead's first hand-off). A later open ask for no
   more than an earlier one (same Odd, same tool, same level or lower:
@@ -946,6 +952,15 @@ FOLDER_WARNING }` until the owner accepts it (`accept`, which `giveFolder`
   serves or whose thread it leads (`logProgress`), so the lead planning a goal
   logs before any plan is approved, and refuses every other goal. `list_goals`
   is the Office Manager's.
+- One Odd never has two jobs of one name, whatever their case or spaces:
+  `addJob` and a rename refuse it (`refuseSameName`), and `propose_goal_plan`
+  refuses a new job whose name its Odd already uses. `my_jobs` lists each
+  job's id, and `edit_my_job` names a job by its id or its exact name, so a
+  pair from before the rule is told apart. It also pauses or resumes a job.
+  The owner removes any paused job (`deleteJob`): one that never ran goes,
+  and one that ran gets `removed_at` (migration `0039_job_removed`), so it
+  leaves every list, never runs, frees its name, and its runs keep their
+  record.
 - A job may name files on one piece of work. A plan binds them to its goal's
   thread. `edit_my_job` can attach an existing job to work the Odd serves or
   rename it in place. Sharing applies to the listed sources in that output.

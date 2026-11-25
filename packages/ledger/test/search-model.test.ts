@@ -2,6 +2,7 @@
 // checked against its pin, and nothing half-written when anything goes wrong.
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import {
@@ -13,6 +14,8 @@ import {
   partialDownloads,
   RELEASE,
   removeModel,
+  watchDownload,
+  type DownloadProgress,
   type ModelFile
 } from '../src/search-model.ts';
 import { standInFiles } from './stand-in-model.ts';
@@ -144,6 +147,53 @@ test('two clicks at once make one download', async () => {
   });
   await Promise.all([downloadModel(files, once), downloadModel(files, once)]);
   assert.equal(asked, files.length);
+});
+
+test('the download says how far it has got: at its start, each new megabyte, and the end', async () => {
+  // Two files over three megabytes together, sent 64 KB at a time as a network does.
+  const big = [2_500_000, 700_000].map((size, i) => {
+    const body = Buffer.alloc(size, i + 1);
+    const file: ModelFile = {
+      name: `part-${i}`,
+      asset: `part-${i}.bin`,
+      bytes: size,
+      sha256: createHash('sha256').update(body).digest('hex')
+    };
+    return { file, body };
+  });
+  const send: FetchUrl = async (url) => {
+    const part = big.find((p) => url.href === RELEASE + p.file.asset);
+    if (!part) return new Response('', { status: 404 });
+    const chunks: Buffer[] = [];
+    for (let at = 0; at < part.body.length; at += 65_536)
+      chunks.push(part.body.subarray(at, at + 65_536));
+    return new Response(
+      new ReadableStream({
+        start(out) {
+          for (const c of chunks) out.enqueue(new Uint8Array(c));
+          out.close();
+        }
+      })
+    );
+  };
+  const heard: DownloadProgress[] = [];
+  const stop = watchDownload((p) => heard.push(p));
+  try {
+    await downloadModel(
+      big.map((p) => p.file),
+      send
+    );
+  } finally {
+    stop();
+  }
+  // One report at the start, one in each new megabyte, and one at the very end.
+  assert.deepEqual(
+    heard.map((p) => Math.floor(p.got / 1_000_000)),
+    [0, 1, 2, 3, 3]
+  );
+  assert.equal(heard.at(-1)?.got, 3_200_000);
+  assert.ok(heard.every((p, i) => p.of === 3_200_000 && (i === 0 || p.got > heard[i - 1].got)));
+  removeModel();
 });
 
 test('a redirect away from GitHub is refused and keeps nothing', async () => {

@@ -1,9 +1,9 @@
 // One bus for everything the page should hear about: a table changed (from
 // Postgres NOTIFY, whichever process wrote it), a staffer started or stopped
 // working, an Odd kept or used a lesson, an Odd handed a colleague work or got
-// its result back, the New Altitude sign-in changed, or a persona was signed
-// in to or joined the office, or the weather setting changed. /api/events streams it to the page. Nothing
-// polls.
+// its result back, the New Altitude sign-in changed, a persona was signed in
+// to or joined the office, the weather setting changed, or the owner removed a
+// layout. /api/events streams it to the page. Nothing polls.
 import { EventEmitter } from 'node:events';
 import {
   LOCAL,
@@ -37,7 +37,9 @@ export type OfficeEvent =
   | HandOffEvent
   | { type: 'account'; status: AccountStatus }
   /** The owner changed the weather setting: each window asks for it again. */
-  | { type: 'weather' };
+  | { type: 'weather' }
+  /** The owner removed a layout: an open Layout section reads its list again. */
+  | { type: 'layouts' };
 
 type Bus = EventEmitter & { listening?: Promise<unknown> };
 const g = globalThis as unknown as { officeBus?: Bus };

@@ -11,7 +11,7 @@
   import { onMount } from 'svelte';
   import { call } from './api.ts';
 
-  // Skills, under a local Odd's Knowledge: each skill the owner attached, by
+  // Skills, under a local Odd's Brain: each skill the owner attached, by
   // name and when to use it, which every run lists, with Remove. Add a skill
   // reads a SKILL.md here, shows its text, and saves it once the owner says
   // when to use it. Read when the tab opens.

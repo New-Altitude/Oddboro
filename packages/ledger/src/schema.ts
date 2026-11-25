@@ -31,6 +31,9 @@ import type { PersonaLink } from './personas.ts';
 import type { OfficeToolId } from './tools.ts';
 
 const at = (name: string) => timestamp(name, { withTimezone: true });
+
+/** One thing on the owner's desk, by its kind and id. */
+export type ItemRef = { kind: 'ask' | 'task' | 'report'; id: number };
 const created = (name = 'created_at') => at(name).notNull().defaultNow();
 const id = () => integer().primaryKey().generatedAlwaysAsIdentity();
 
@@ -246,8 +249,82 @@ export type HeldCall = {
    * the desk shows them.
    */
   before?: { tool: string; arguments: Record<string, unknown> }[];
+  /** A Google Calendar event the call makes or changes, which the desk shows as an event to edit. */
+  event?: HeldEvent;
   /** Set once the office made the call: whether the tool took it, and its words. */
   result?: { ok: boolean; text: string; at: string };
+};
+/**
+ * What the desk needs beside a held `create_event` or `update_event` call's
+ * own inputs: the account it goes through, the calendars and colours to pick
+ * from, and for a change, the event as Google had it when the call was held.
+ * Google emails everyone on an event about a change, so `others` is who gets
+ * an email besides anyone added. Read once, as the call is held, so the card
+ * never calls Google. Words from strangers: the page shows them, and no Odd's
+ * prompt carries them.
+ */
+export type HeldEvent = {
+  /** The calendar account's address, which is never emailed. */
+  account?: string;
+  /** For a change: the event's title as it stood. */
+  now?: string;
+  /** For a change: the people on the event besides the owner. */
+  others: string[];
+  /** For a change: the event as it stood, or the occurrence, for one of a repeating event's. */
+  before?: CalendarEvent;
+  /** For an occurrence of a repeating event: the series it belongs to. */
+  series?: { id: string; recurrence: string[]; start: GoogleTime };
+  /** The account's calendars the owner can add events to. */
+  calendars?: HeldCalendar[];
+  /** Google's event colours by id, as Google's own hex values: the owner's data, shown only in its swatch. */
+  colors?: Record<string, string>;
+};
+/** One end of a Google Calendar event: a date for an all-day event, else a time and its zone. */
+export type GoogleTime = { date?: string; dateTime?: string; timeZone?: string };
+/** One calendar the owner can write to, as the event card offers it. */
+export type HeldCalendar = {
+  id: string;
+  name: string;
+  primary?: boolean;
+  /** Google's own colour for it, shown only in its dot. */
+  color?: string;
+  timeZone?: string;
+  /** The calendar's default reminders, which "Use the calendar's default" means. */
+  reminders?: { method: string; minutes: number }[];
+  /** Whether Google Meet can be added on it (`allowedConferenceSolutionTypes`). */
+  meet?: boolean;
+};
+/** The parts of a Google Calendar event the desk shows, in Google's own names. */
+export type CalendarEvent = {
+  id: string;
+  summary?: string;
+  description?: string;
+  location?: string;
+  start: GoogleTime;
+  end: GoogleTime;
+  recurrence?: string[];
+  recurringEventId?: string;
+  originalStartTime?: GoogleTime;
+  attendees?: {
+    email: string;
+    displayName?: string;
+    optional?: boolean;
+    responseStatus?: string;
+    self?: boolean;
+    resource?: boolean;
+    organizer?: boolean;
+  }[];
+  organizer?: { email?: string; displayName?: string; self?: boolean };
+  reminders?: { useDefault?: boolean; overrides?: { method: string; minutes: number }[] };
+  /** The video call on it: Meet, or an add-on such as Zoom, which Oddboro never changes. */
+  conference?: { meet: boolean; name?: string; uri?: string };
+  transparency?: string;
+  visibility?: string;
+  colorId?: string;
+  guestsCanModify?: boolean;
+  guestsCanInviteOthers?: boolean;
+  guestsCanSeeOtherGuests?: boolean;
+  attachments?: { fileUrl: string; title?: string; mimeType?: string; fileId?: string }[];
 };
 /** What a catch_up ask fills: one job's missed scheduled times, ISO, oldest first. */
 export type CatchUp = { jobId: number; times: string[] };
@@ -443,8 +520,12 @@ export const asks = pgTable(
     via: text(),
     status: text().$type<AskStatus>().notNull().default('open'),
     reason: text(),
+    /** Other items on the desk this one waits on (`after` on the tool that raised it). */
+    needs: jsonb().$type<ItemRef[]>().notNull().default([]),
     createdAt: created(),
-    decidedAt: at('decided_at')
+    decidedAt: at('decided_at'),
+    /** When the owner deleted it: gone from every view but its Odd's Deleted list. */
+    hiddenAt: at('hidden_at')
   },
   (t) => [
     // States no work change writes (work/state.ts), refused so a bug cannot store one.
@@ -508,8 +589,12 @@ export const tasks = pgTable(
      * brought back.
      */
     withdrawn: boolean().notNull().default(false),
+    /** Other items on the desk this one waits on (`after` on the tool that raised it). */
+    needs: jsonb().$type<ItemRef[]>().notNull().default([]),
     createdAt: created(),
-    doneAt: at('done_at')
+    doneAt: at('done_at'),
+    /** When the owner deleted it: gone from every view but its Odd's Deleted list. */
+    hiddenAt: at('hidden_at')
   },
   (t) => [
     // States no work change writes (work/state.ts), refused so a bug cannot store one.
@@ -525,7 +610,9 @@ export const reports = pgTable('reports', {
   title: text().notNull(),
   body: text().notNull(),
   createdAt: created(),
-  readAt: at('read_at')
+  readAt: at('read_at'),
+  /** When the owner deleted it: gone from every view but its Odd's Deleted list. */
+  hiddenAt: at('hidden_at')
 });
 
 /**
@@ -713,7 +800,7 @@ export type ConnectorConfig = {
   account?: string;
 };
 /** The Google products the office serves itself. One connector is one account of one product. */
-export type GoogleProduct = 'gmail' | 'drive';
+export type GoogleProduct = 'gmail' | 'drive' | 'calendar';
 
 /** The role an AWS tool uses, and where. None of it is secret. */
 export type AwsConfig = {
@@ -816,6 +903,11 @@ export const jobs = pgTable('jobs', {
   owed: jsonb().$type<string[]>(),
   /** The run a `latest` job skipped, while it waits on the desk's While you were away card. */
   skippedAt: at('skipped_at'),
+  /**
+   * When the owner removed a job that had run. It never runs or lists again,
+   * and its runs keep their record (`deleteJob`).
+   */
+  removedAt: at('removed_at'),
   createdAt: created()
 });
 
@@ -1074,11 +1166,49 @@ export const usage = pgTable(
     ),
     /** What the run would cost at API list prices. The owner's plan does not bill it. */
     costUsd: doublePrecision().notNull().default(0),
+    /** What the run was for: its job's name or its ask's title. Null for a chat, and for rows from before it was kept. */
+    label: text(),
     createdAt: created()
   },
   (t) => [
     index('usage_by_staff').on(t.staffId, t.createdAt),
     index('usage_by_session').on(t.session, t.model)
+  ]
+);
+
+/**
+ * An Odd's chat, one row per exchange: the owner's words and the Odd's reply,
+ * or a line the Odd said alone, like a hello or a poke. The chat's file
+ * (`chat.jsonl` in the Odd's folder) is what the page shows; this is what
+ * `search_chats` searches, so a chat that rolled into a fresh session can
+ * still find what was said before (chat-history.ts).
+ */
+export const chatHistory = pgTable(
+  'chat_history',
+  {
+    id: id(),
+    staffId: text()
+      .notNull()
+      .references(() => staff.id),
+    /** The owner's turn it answers, or `at:<time>` for a line the Odd said alone. One row each. */
+    key: text().notNull(),
+    /** The run that wrote the reply. A thread a chat started lists it in `threads.runs`. */
+    runId: text(),
+    at: at('at').notNull(),
+    owner: text().notNull().default(''),
+    reply: text().notNull().default(''),
+    embedding: vector({ dimensions: 768 }),
+    /** Which model made `embedding` (`EMBED_MODEL`). */
+    embeddingModel: text()
+  },
+  (t) => [
+    unique('chat_history_one_row').on(t.staffId, t.key),
+    index('chat_history_by_run').on(t.runId),
+    index('chat_history_embedding').using('hnsw', t.embedding.op('vector_cosine_ops')),
+    index('chat_history_words').using(
+      'gin',
+      sql`to_tsvector('english', ${t.owner} || ' ' || ${t.reply})`
+    )
   ]
 );
 
@@ -1126,6 +1256,16 @@ export const planLimits = pgTable('plan_limits', {
  * furniture in an office already lived in. `spec` is what Claude wrote, for
  * redrawing.
  */
+/** One version of a layout: everything a change to it replaces. */
+export type OfficeVersion = {
+  name: string;
+  description: string;
+  spec: OfficeSpec;
+  plan: FloorPlan;
+  templates: Record<string, RoomTemplate>;
+  kinds: Record<string, RoomKind>;
+};
+
 export const offices = pgTable('offices', {
   id: id(),
   name: text().notNull(),
@@ -1137,7 +1277,9 @@ export const offices = pgTable('offices', {
   kinds: jsonb().$type<Record<string, RoomKind>>().notNull(),
   active: boolean().notNull().default(false),
   createdAt: at('created_at').notNull().defaultNow(),
-  movedInAt: at('moved_in_at')
+  movedInAt: at('moved_in_at'),
+  /** The layout as it was before its last change, to undo it. Undoing swaps the two. */
+  previous: jsonb().$type<OfficeVersion>()
 });
 
 /**

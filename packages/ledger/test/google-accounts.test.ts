@@ -118,11 +118,12 @@ test('another account needs a first one, connected or asked for: alone it is ref
     arguments: { ...ANOTHER, connector: 'brain' }
   });
   assert.equal(brain.isError, true);
-  assert.match(said(brain), /only for Gmail and Google Drive/);
+  assert.match(said(brain), /only for Gmail, Google Drive and Google Calendar/);
   // A plain ask for Gmail is not a twin of one for another account.
+  // Jo holds Gmail to read, so the plain ask is for more.
   const plain = await c.callTool({
     name: 'ask_for_access',
-    arguments: { connector: 'gmail', level: 'read', why: 'w' }
+    arguments: { connector: 'gmail', level: 'write', why: 'w' }
   });
   const more = await c.callTool({ name: 'ask_for_access', arguments: ANOTHER });
   const shown = (await desk()).asks.map((x) => x.id);

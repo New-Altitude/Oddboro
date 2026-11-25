@@ -73,13 +73,15 @@ export function managerWork(pending: boolean): string {
 /**
  * The other Odds here, for an Odd that holds `see_office`: each by name, id
  * and job, a persona's with where its words go, and what this Odd can do
- * about them. Nothing for an Odd alone in the office.
+ * about them. An Odd alone in the office is told so, since a missing section
+ * read as a tool that never loaded (issue #291).
  */
 export function whoIsHereSection(
   odds: { id: string; name: string; role: string; remit: string; persona: boolean }[],
   canHandOff: boolean
 ): string {
-  if (!odds.length) return '';
+  if (!odds.length)
+    return ['', "## Who's in the office", '', 'No other Odds work here yet.', ''].join('\n');
   return [
     '',
     "## Who's in the office",

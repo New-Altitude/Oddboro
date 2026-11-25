@@ -112,6 +112,23 @@ let downloading: Promise<void> | undefined;
 /** True while a download runs in this process. */
 export const isDownloading = (): boolean => !!downloading;
 
+/** How far a download has got, in bytes, out of every file's bytes together. */
+export type DownloadProgress = { got: number; of: number };
+const watching = new Set<(p: DownloadProgress) => void>();
+
+/**
+ * Hear how far the download has got: at its start, at each new megabyte, and
+ * at the end. Returns the call that stops it.
+ */
+export function watchDownload(on: (p: DownloadProgress) => void): () => void {
+  watching.add(on);
+  return () => watching.delete(on);
+}
+const tell = (p: DownloadProgress) => {
+  for (const on of watching) on(p);
+};
+const MB = 1_000_000;
+
 /** Fetches one URL. `fetch` itself, or the network a test stands in. */
 export type FetchUrl = (url: URL, init: RequestInit) => Promise<Response>;
 
@@ -160,8 +177,18 @@ async function fetchAll(files: readonly ModelFile[], fetchUrl: FetchUrl): Promis
   for (const n of readdirSync(models))
     if (n.startsWith(PARTIAL)) rmSync(join(models, n), { recursive: true, force: true });
   const into = mkdtempSync(join(models, PARTIAL));
+  const of = files.reduce((n, f) => n + f.bytes, 0);
+  let before = 0;
+  tell({ got: 0, of });
   try {
-    for (const f of files) await fetchOne(f, join(into, f.name), fetchUrl);
+    for (const f of files) {
+      const start = before;
+      await fetchOne(f, join(into, f.name), fetchUrl, (bytes) => {
+        const got = start + bytes;
+        if (Math.floor(got / MB) > Math.floor(before / MB) || got === of) tell({ got, of });
+        before = got;
+      });
+    }
     rmSync(modelDir(), { recursive: true, force: true });
     renameSync(into, modelDir());
   } catch (e) {
@@ -170,7 +197,12 @@ async function fetchAll(files: readonly ModelFile[], fetchUrl: FetchUrl): Promis
   }
 }
 
-async function fetchOne(f: ModelFile, to: string, fetchUrl: FetchUrl): Promise<void> {
+async function fetchOne(
+  f: ModelFile,
+  to: string,
+  fetchUrl: FetchUrl,
+  arrived: (bytes: number) => void
+): Promise<void> {
   let res: Response;
   try {
     res = await fromRelease(f, fetchUrl);
@@ -186,6 +218,7 @@ async function fetchOne(f: ModelFile, to: string, fetchUrl: FetchUrl): Promise<v
     transform(chunk: Buffer, _encoding, done) {
       bytes += chunk.byteLength;
       hash.update(chunk);
+      if (bytes <= f.bytes) arrived(bytes);
       done(bytes > f.bytes ? new Error('too long') : null, chunk);
     }
   });

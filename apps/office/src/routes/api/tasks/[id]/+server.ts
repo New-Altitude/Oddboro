@@ -16,7 +16,13 @@ import {
 } from '@oddboro/ledger';
 import { readStaffFile } from '#lib/server/files.ts';
 import { workPath } from '@oddboro/ledger/work-paths';
-import { confirmTools, hostedSignIn, listTools, postalSetup } from '#lib/server/access.ts';
+import {
+  confirmTools,
+  connectProblem,
+  hostedSignIn,
+  listTools,
+  postalSetup
+} from '#lib/server/access.ts';
 import {
   awsRoles,
   awsSecretKeys,
@@ -33,6 +39,7 @@ import {
 } from '#lib/server/aws.ts';
 import { setSecret } from '#lib/server/keychain.ts';
 import type { TaskOp } from '#lib/server/owner-actions.ts';
+import { narrateNext } from '#lib/server/narrate.ts';
 import type { RequestHandler } from './$types';
 
 type Body = {
@@ -106,6 +113,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
         responseVersion: b.version
       });
       if (!finished) error(409, 'This task was already answered');
+      void narrateNext({ kind: 'task', id }).catch(() => {});
       return json({ ok: true });
     }
   } catch (e) {
@@ -187,11 +195,14 @@ export const POST: RequestHandler = async ({ params, request }) => {
         `From AWS: ${text(b.secret)}${text(b.key) ? `, ${text(b.key)}` : ''}`
       );
     } else if (b.op === 'tools' && action?.kind === 'tools')
-      return json({ tools: await listTools(action.connector) });
-    else if (b.op === 'confirm-tools' && action?.kind === 'tools') {
-      await confirmTools(action.connector);
-      await tickStep(id, b.index!);
-    } else error(400, 'That step does not take that');
+      return json({
+        tools: await listTools(action.connector).catch(async (e: unknown) => {
+          throw new Error(await connectProblem(action.connector, e));
+        })
+      });
+    else if (b.op === 'confirm-tools' && action?.kind === 'tools')
+      await tickStep(id, b.index!, await confirmTools(action.connector));
+    else error(400, 'That step does not take that');
   } catch (e) {
     if (e && typeof e === 'object' && 'status' in e) throw e;
     error(400, e instanceof Error ? e.message : String(e));

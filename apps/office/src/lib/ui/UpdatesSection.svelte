@@ -3,7 +3,7 @@
   import { call, type ApiUrl } from './api.ts';
   let { showWindow = true }: { showWindow?: boolean } = $props();
 
-  // The Setup window's Updates section: the version this is, Check now, the
+  // The Setup tab's Updates section: the version this is, Check now, the
   // window updates install in, and a ready update with Install now and
   // Install tonight. It hears the server when an update lands, so nothing polls.
   type UpdateStatus = {

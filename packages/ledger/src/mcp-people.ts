@@ -27,6 +27,7 @@ import { AGENT_NAMES } from './agents.ts';
 import { currentSystem } from './platform.ts';
 import { computerWord } from './system-words.ts';
 import { leavesLine, leavingRefused } from './leaving.ts';
+import { reportPart } from './office-report.ts';
 import { keepBugDraft } from './bug-drafts.ts';
 import { MANAGER_ROLE } from './managers.ts';
 import { clockTime, officeAt } from './time.ts';
@@ -45,7 +46,6 @@ import {
   hireFrom,
   tool,
   text,
-  json,
   refused
 } from './mcp-run.ts';
 import { raisedNote, placed } from './mcp-desk.ts';
@@ -330,16 +330,26 @@ if (has('office_report'))
   tool(
     'office_report',
     {
-      description: `Everything the office did in a window: each Odd with its remit, its level (read, draft or act), its tool and what its own tools reach, its folders, the office tools it holds beyond the ones every Odd has, its outside tools (each with what it reaches, or why a run leaves it out), and its jobs and runs, asks open and decided, and tasks for ${OWNER} open and done. For the daily report. followUps is the work owed after ${OWNER} answered: carrying out an approved ask, reworking one they sent back, hearing their answer to something an Odd raised, or picking up after a task they finished, each with its outcome (done, failed, waiting on ${OWNER}, or null while still to do). Each run has a trigger: 'schedule' means its timer started it, 'manual' means ${OWNER} pressed Run now. For shared files, lastVerified records the timed file operations the office checked. A run summary alone never verifies a file, its claims, or delivery. Judge a job's timing by its schedule runs only; a manual run at any hour is expected. Every time is ${ZONE}, like the schedules.`,
-      inputSchema: { hours: z.number().int().min(1).max(168).default(24) }
+      description: `Everything the office did in a window: each Odd with its remit, its level (read, draft or act), its tool and what its own tools reach, its folders, the office tools it holds beyond the ones every Odd has, its outside tools (each with what it reaches, or why a run leaves it out), and its jobs and runs, asks open and decided, and tasks for ${OWNER} open and done. For the daily report. followUps is the work owed after ${OWNER} answered: carrying out an approved ask, reworking one they sent back, hearing their answer to something an Odd raised, or picking up after a task they finished, each with its outcome (done, failed, waiting on ${OWNER}, or null while still to do). Each run has a trigger: 'schedule' means its timer started it, 'manual' means ${OWNER} pressed Run now. For shared files, lastVerified records the timed file operations the office checked. A run summary alone never verifies a file, its claims, or delivery. Judge a job's timing by its schedule runs only; a manual run at any hour is expected. Every time is ${ZONE}, like the schedules. A report too big for one call comes in parts: first each Odd in brief, then one Odd in full when you call again with odd set to its id, its runs in pages when they fill more than one.`,
+      inputSchema: {
+        hours: z.number().int().min(1).max(168).default(24),
+        odd: z.string().optional().describe("One Odd's id: just its part of the report, in full."),
+        page: z
+          .number()
+          .int()
+          .min(1)
+          .default(1)
+          .describe("The page of that Odd's runs, when they fill more than one.")
+      }
     },
-    async ({ hours }) => {
+    async ({ hours, odd, page }) => {
       const activity = await officeActivity(new Date(Date.now() - hours * 3_600_000));
       const people = new Map((await roster()).map((p) => [p.id, p]));
       const staff = await Promise.all(
         activity.staff.map(async (s) => {
           const who = people.get(s.id);
-          if (!who) return s;
+          // Another Odd's access is left out of a part that is not about it.
+          if (!who || (odd && s.id !== odd)) return s;
           const caps = await capabilities(who);
           return {
             ...s,
@@ -357,6 +367,8 @@ if (has('office_report'))
           };
         })
       );
-      return json({ ...activity, staff });
+      // Compact, since every character is read by the run.
+      const part = reportPart({ ...activity, staff }, { odd, page });
+      return typeof part === 'string' ? text(part) : text(JSON.stringify(part));
     }
   );

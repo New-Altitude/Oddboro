@@ -267,6 +267,41 @@
       "when": 1794977665055,
       "tag": "0037_usage_session",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1794982250482,
+      "tag": "0038_chat_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1794985580493,
+      "tag": "0039_job_removed",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1794991181109,
+      "tag": "0040_layout_undo",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1794992892489,
+      "tag": "0041_usage_label",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1795010923998,
+      "tag": "0042_owner_items",
+      "breakpoints": true
     }
   ]
 }

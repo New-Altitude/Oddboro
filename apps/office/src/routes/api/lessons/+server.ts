@@ -1,4 +1,4 @@
-// Everything the office knows about the owner, for the Lessons window: every
+// Everything the office knows about the owner, for the Lessons section: every
 // open lesson, for one Odd or every Odd, guesses waiting for the owner's Keep
 // first, each with the name of the Odd that heard it and its uses per Odd and
 // in all. The window filters and searches it on the page.

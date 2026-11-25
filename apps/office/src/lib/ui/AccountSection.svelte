@@ -5,7 +5,7 @@
   import PersonaOffer from './PersonaOffer.svelte';
   import { PersonaOffers } from './persona-offers.svelte.ts';
 
-  // The Setup window's Account section, the one place the owner signs in to
+  // The Setup tab's Account section, the one place the owner signs in to
   // New Altitude: the sign-in block (with its Switch account), and Sign out
   // while a sign-in is kept, ran out or not. Under it, the New Altitude
   // personas offered while signed in. The offers stay mounted when signed

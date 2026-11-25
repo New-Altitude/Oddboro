@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Candidate, HeldBack } from '@oddboro/ledger';
+  import type { Candidate, GoogleProduct, HeldBack } from '@oddboro/ledger';
   import {
     POSTAL_ID,
     GRANT_LABEL,
@@ -43,8 +43,8 @@
     /** Every tool its runs reach, those that change something first. */
     tools: { name: string; changes: boolean; note: string }[];
   };
-  /** A Google connector: one account of Gmail or Google Drive. */
-  type Google = { product: 'gmail' | 'drive'; name: string; account?: string };
+  /** A Google connector: one account of Gmail, Google Drive or Google Calendar. */
+  type Google = { product: GoogleProduct; name: string; account?: string };
   type Own = {
     id: string;
     name: string;
@@ -87,7 +87,7 @@
     useKey = !!p.keyHeader;
     keyHeader = p.keyHeader ?? 'Authorization';
   }
-  /** Gmail or Google Drive, picked once one account of it is connected: the connected accounts, to pick one or add another. */
+  /** Gmail, Google Drive or Google Calendar, picked once one account of it is connected: the connected accounts, to pick one or add another. */
   const accounts = $derived(
     pick?.google
       ? found.catalog.filter((c) => c.ready && c.google?.product === pick?.google?.product)

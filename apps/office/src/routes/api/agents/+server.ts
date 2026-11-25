@@ -51,6 +51,8 @@ export type AgentTool = {
   commandsHow: CommandsHow;
   /** The model an Odd with none of its own runs on this tool, for the Office default card. */
   officeModel?: string;
+  /** Claude Code only: staff run on an API key, so it is ready with no sign-in. */
+  keyInUse?: boolean;
 } & VersionState;
 /** A tool this system does not offer yet, with why, for setup's greyed row. */
 export type LaterTool = { id: Agent; name: string; why: string };
@@ -84,6 +86,7 @@ export const GET: RequestHandler = async () => {
           signIn: await stateOf(id),
           commandsHow: commandsHow(id, platform),
           officeModel: shownOfficeModel(id),
+          ...(id === 'claude' && claudeSettings().auth === 'key' ? { keyInUse: true } : {}),
           ...(installed ? await versionState(id) : {})
         };
       })

@@ -208,11 +208,16 @@
   let saving = $state(false);
   let problem = $state('');
   /**
-   * What an imported Claude Code agent file brought: the settings it left in
+   * What an imported Claude Code or Grok Build agent file brought: the settings it left in
    * the file, in plain words, and its MCP servers, sorted into the ones that
    * become access asks once hired and the ones only listed (`sortServers`).
    */
-  let imported = $state<{ skipped: string; servers: ImportedServer[]; sorted: SortedServers }>();
+  let imported = $state<{
+    skipped: string;
+    skills: boolean;
+    servers: ImportedServer[];
+    sorted: SortedServers;
+  }>();
   /** The hidden file box the Import button opens. */
   let picker = $state<HTMLInputElement>();
 
@@ -248,10 +253,11 @@
       role = draft.role;
       remit = draft.remit;
       desk = draft.desk;
-      pickAgent('claude');
+      pickAgent(draft.agent);
       pickedModel = draft.model;
       imported = {
-        skipped: skippedSaid(draft.skipped),
+        skipped: skippedSaid(draft.skipped, draft.skills),
+        skills: draft.skills.length > 0,
         servers: draft.servers,
         sorted: sortServers(draft.servers, known)
       };
@@ -259,12 +265,9 @@
       step = 0;
       path = matches.length ? 'matches' : 'odd';
     } catch (e) {
-      // In a roster the way on is Skip, not choosing the file again.
-      problem = file
-        ? 'This file could not be read. Skip it to go on.'
-        : e instanceof Error
-          ? e.message
-          : 'Could not read that agent file.';
+      // In a roster, say why, then point at Skip as the way on.
+      const reason = e instanceof Error ? e.message : 'Could not read that agent file.';
+      problem = file ? `${reason} Or skip this file to go on.` : reason;
     } finally {
       busy = false;
     }
@@ -450,8 +453,8 @@
       () => choose('persona')
     )}
     {@render choice(
-      'Import a Claude Code agent',
-      'Start from one or more of its Markdown files. You check each job and its access before you hire.',
+      'Import an agent',
+      'Start from one or more Claude Code or Grok Build agent files. You check each job and its access before you hire.',
       'Import',
       () => picker?.click()
     )}
@@ -461,7 +464,7 @@
       type="file"
       accept=".md"
       multiple
-      aria-label="Claude Code agent files"
+      aria-label="Agent files"
       onchange={(e) => {
         const picked = Array.from(e.currentTarget.files ?? []);
         e.currentTarget.value = '';
@@ -674,7 +677,8 @@
         <AgentFileServers
           sorted={imported.sorted}
           once="hired"
-          note={imported.skipped && `Not brought over: ${imported.skipped}.`}
+          note={imported.skipped &&
+            `Not brought over: ${imported.skipped}.${imported.skills ? ' Add each skill on its Skills tab after the hire.' : ''}`}
         />
       </div>
     {/if}

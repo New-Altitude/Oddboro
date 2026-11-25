@@ -52,3 +52,17 @@ test("Claude Code's and Codex's usage names the session it totals, and Grok's do
     ['t1']
   );
 });
+
+test("Claude Code's model call says how many tokens it read, its session's size then", () => {
+  const events = claudeReader('claude')({
+    type: 'assistant',
+    message: {
+      content: [],
+      usage: { input_tokens: 2, cache_read_input_tokens: 81_000, cache_creation_input_tokens: 500 }
+    }
+  });
+  assert.deepEqual(
+    events.filter((e) => e.type === 'context'),
+    [{ type: 'context', tokens: 81_502 }]
+  );
+});

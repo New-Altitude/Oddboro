@@ -31,7 +31,6 @@
     onschedule: () => void;
     onchatstart: () => void;
     onchatend: () => void;
-    oncollapse: () => void;
     onclose: () => void;
   };
 
@@ -53,7 +52,6 @@
     onschedule,
     onchatstart,
     onchatend,
-    oncollapse,
     onclose,
     onitem
   }: Props = $props();
@@ -67,7 +65,7 @@
     return [...new Set(others.map((h) => h!.name))].join(' and ');
   }
   // The chat comes first: the info page is a click away, on the name.
-  type Tab = 'card' | 'send' | 'chat' | 'skills' | 'lessons' | 'storage' | 'access';
+  type Tab = 'card' | 'send' | 'chat' | 'items' | 'skills' | 'lessons' | 'storage' | 'access';
   let tab = $state<Tab>('chat');
   /** Bumped to open the info page at In progress. */
   let toWork = $state(0);
@@ -89,12 +87,17 @@
   $effect(() => {
     if (chatRequest.focus?.staff === id) tab = 'chat';
   });
+  // And so does one picked to talk to, from the ⌘K finder.
+  $effect(() => {
+    if (chatRequest.typing === id) tab = 'chat';
+  });
   /**
-   * Three groups, each an icon and a word (the icon alone when the bar is
-   * narrow), and under Knowledge a row of its own tabs: Skills, Lessons and
-   * Storage. Chat is the chat alone, and Settings holds its own four tabs.
-   * The info page, opened from the name, sits in no group: it holds In
-   * progress, Jobs and the job description.
+   * Four groups, each an icon and a word (the icon alone when the bar is
+   * narrow), and under Brain a row of its own tabs: Skills, Lessons and
+   * Storage. Chat is the chat alone, Items everything the Odd put in front of
+   * the owner without the chat, and Settings holds its own four tabs. The
+   * info page, opened from the name, sits in no group: it holds In progress,
+   * Jobs and the job description.
    */
   const GROUPS = [
     {
@@ -104,10 +107,17 @@
       tabs: [{ id: 'chat', label: 'Chat' }]
     },
     {
+      id: 'items',
+      label: 'Items',
+      // A list with ticks.
+      icon: 'M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2',
+      tabs: [{ id: 'items', label: 'Items' }]
+    },
+    {
       id: 'knowledge',
-      label: 'Knowledge',
-      // An open book.
-      icon: 'M12 6.5C10.5 5 8 4.5 3 4.5v14c5 0 7.5.5 9 2 1.5-1.5 4-2 9-2v-14c-5 0-7.5.5-9 2zM12 6.5v14',
+      label: 'Brain',
+      // A brain: two halves, a fold in each.
+      icon: 'M12 5C10.5 3.5 7.5 3.8 7 6C4.8 6.2 3.6 8.5 4.5 10.5C2.8 11.8 3.2 15 5.2 15.6C5 18 7.5 19.8 9.5 19C10.3 20.2 11.4 20.4 12 20ZM12 5C13.5 3.5 16.5 3.8 17 6C19.2 6.2 20.4 8.5 19.5 10.5C21.2 11.8 20.8 15 18.8 15.6C19 18 16.5 19.8 14.5 19C13.7 20.2 12.6 20.4 12 20ZM8 10c1.5 0 2.5 1 2.5 2.5M16 10c-1.5 0-2.5 1-2.5 2.5M7.5 15.5c1-.3 2 .2 2.5 1M16.5 15.5c-1-.3-2 .2-2.5 1',
       tabs: [
         { id: 'skills', label: 'Skills' },
         { id: 'lessons', label: 'Lessons' },
@@ -146,13 +156,13 @@
    * Work in progress shows by the name.
    */
   const counts: Partial<Record<Tab, number>> = $derived({ lessons: profile.guesses });
-
-  function onkey(e: KeyboardEvent) {
-    if (e.key === 'Escape') onclose();
-  }
+  /** How many of its items wait on the owner, shown on the Items group. */
+  const waitingHere = $derived(
+    desk.asks.filter((a) => a.staffId === profile.id).length +
+      desk.tasks.filter((t) => t.staffId === profile.id).length +
+      desk.reports.filter((r) => r.staffId === profile.id).length
+  );
 </script>
-
-<svelte:window onkeydown={onkey} />
 
 <div class="flex h-full min-h-0 flex-col">
   <header class="flex items-center gap-3 border-b border-hairline p-3">
@@ -212,12 +222,6 @@
     </div>
     <button
       class="rounded-full px-2 py-1 text-muted hover:text-ink"
-      aria-label="Collapse the panel"
-      title="Collapse"
-      onclick={oncollapse}>»</button
-    >
-    <button
-      class="rounded-full px-2 py-1 text-muted hover:text-ink"
       aria-label="Close"
       onclick={onclose}>✕</button
     >
@@ -245,7 +249,9 @@
           stroke-linejoin="round"
           aria-hidden="true"><path d={g.icon} /></svg
         >
-        <span class="word">{g.label}</span>
+        <span class="word">{g.label}</span>{#if g.id === 'items' && waitingHere}<span
+            class="text-ember">{waitingHere}</span
+          >{/if}
       </button>
     {/each}
   </nav>
@@ -316,8 +322,12 @@
           {/each}
         </div>
       </div>
+    {:else if tab === 'items'}
+      {#await import('./ItemsTab.svelte') then { default: ItemsTab }}
+        <ItemsTab {profile} {version} {onitem} />
+      {/await}
     {:else if tab === 'skills'}
-      <!-- The Knowledge tabs load when opened, so they stay out of the first page. -->
+      <!-- The Brain tabs load when opened, so they stay out of the first page. -->
       {#await import('./StaffSkills.svelte') then { default: StaffSkills }}
         <StaffSkills staff={id} name={profile.name} />
       {/await}

@@ -503,8 +503,10 @@ async function smokeStage(): Promise<void> {
           throw new Error(
             `it exited ${server.exitCode}: ${readFileSync(r.log, 'utf8').slice(-800)}`
           );
-        const r = await office.send('GET', '/api/update', {}, undefined, 2).catch(() => undefined);
-        return r?.status === 200 ? true : undefined;
+        const res = await office
+          .send('GET', '/api/update', {}, undefined, 2)
+          .catch(() => undefined);
+        return res?.status === 200 ? true : undefined;
       },
       90
     );

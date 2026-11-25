@@ -2,13 +2,13 @@
 
 use std::env;
 use std::path::PathBuf;
-#[cfg(unix)]
-use std::time::Duration;
+use std::process::Child;
+use std::thread::sleep;
+use std::time::{Duration, Instant};
 
 /// The office's port when `ODDBORO_PORT` is not set.
 const DEFAULT_PORT: u16 = 4500;
-/// How long the login shell gets to print its PATH.
-#[cfg(unix)]
+/// How long the login shell, or PowerShell on Windows, gets to give its PATH.
 const LOGIN_SHELL_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// `ODDBORO_PORT` from the shell's own environment, or 4500.
@@ -66,19 +66,42 @@ fn default_log_file() -> PathBuf {
 /// The PATH the owner's Terminal would have. An app opened from the Finder or
 /// a Linux launcher starts with a short system PATH, and the server spawns
 /// `claude`, `git` and `uvx`, so ask the login shell once and then add the
-/// usual install folders it may have missed. Windows has no login shell: an
-/// app gets the owner's own PATH, plus the same kind of folders.
+/// usual install folders it may have missed. Windows asks PowerShell the
+/// same way. Each folder appears once.
 pub fn login_path() -> String {
     let base = read_login_path().unwrap_or_else(|| env::var("PATH").unwrap_or_default());
-    let mut dirs: Vec<PathBuf> = env::split_paths(&base)
-        .filter(|d| !d.as_os_str().is_empty())
-        .collect();
-    for dir in install_folders(&home()) {
-        if !dirs.contains(&dir) {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    for dir in env::split_paths(&base).chain(install_folders(&home())) {
+        if !dir.as_os_str().is_empty() && !dirs.iter().any(|d| same_folder(d, &dir)) {
             dirs.push(dir);
         }
     }
     env::join_paths(dirs).map_or(base, |p| p.to_string_lossy().into_owned())
+}
+
+/// Windows folder names ignore case; a Mac's and Linux's are compared as written.
+fn same_folder(a: &std::path::Path, b: &std::path::Path) -> bool {
+    if cfg!(windows) {
+        a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
+    } else {
+        a == b
+    }
+}
+
+/// Waits for `child` until `deadline`, and stops it then. True when it
+/// finished on its own and succeeded.
+fn finished(child: &mut Child, deadline: Instant) -> bool {
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) if Instant::now() < deadline => sleep(Duration::from_millis(50)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
 }
 
 /// Where `claude`, `git` and `uvx` usually install.
@@ -109,9 +132,56 @@ fn install_folders(home: &std::path::Path) -> Vec<PathBuf> {
     ]
 }
 
+/// The PATH the owner's PowerShell has, after their profile runs, then the
+/// user and system PATH as Windows has them saved now. A folder added in a
+/// profile, or to PATH since the owner signed in, was missing, so a tool their
+/// terminal ran was "not installed" here (#343). PowerShell 7 (`pwsh`) and
+/// Windows PowerShell each read their own profile, so both run, side by side.
+/// Each writes to a file, since PowerShell writes its output in the console's
+/// code page and a PATH can hold any name.
 #[cfg(windows)]
 fn read_login_path() -> Option<String> {
-    None
+    use std::os::windows::process::CommandExt;
+    use std::process::{Command, Stdio};
+
+    /// Starts the program with no console window.
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    const SCRIPT: &str = "[IO.File]::WriteAllText($env:ODDBORO_PATH_FILE, \
+        (@($env:Path, [Environment]::GetEnvironmentVariable('Path', 'User'), \
+        [Environment]::GetEnvironmentVariable('Path', 'Machine')) -join ';'))";
+    let system =
+        env::var_os("SystemRoot").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
+    let shells = [
+        PathBuf::from("pwsh.exe"),
+        system.join(r"System32\WindowsPowerShell\v1.0\powershell.exe"),
+    ];
+    let asks: Vec<(Child, PathBuf)> = shells
+        .iter()
+        .enumerate()
+        .filter_map(|(i, shell)| {
+            let file = env::temp_dir().join(format!("oddboro-path-{}-{i}.txt", std::process::id()));
+            Command::new(shell)
+                .args(["-NoLogo", "-NonInteractive", "-Command", SCRIPT])
+                .env("ODDBORO_PATH_FILE", &file)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn()
+                .ok()
+                .map(|child| (child, file))
+        })
+        .collect();
+    let deadline = Instant::now() + LOGIN_SHELL_TIMEOUT;
+    let mut paths = Vec::new();
+    for (mut child, file) in asks {
+        if finished(&mut child, deadline) {
+            paths.extend(std::fs::read_to_string(&file).ok());
+        }
+        let _ = std::fs::remove_file(&file);
+    }
+    let path = paths.join(";");
+    (!path.trim_matches(';').is_empty()).then_some(path)
 }
 
 /// The PATH from `$SHELL -l -i`, so `~/.zshrc` runs: nvm, fnm, Volta, asdf
@@ -134,8 +204,6 @@ fn read_login_path() -> Option<String> {
 fn ask_shell(shell: &str, flags: &[&str]) -> Option<String> {
     use std::io::Read;
     use std::process::{Command, Stdio};
-    use std::thread::sleep;
-    use std::time::Instant;
 
     const MARK: &str = "ODDBORO_PATH=";
     let mut child = Command::new(shell)
@@ -146,18 +214,8 @@ fn ask_shell(shell: &str, flags: &[&str]) -> Option<String> {
         .stderr(Stdio::null())
         .spawn()
         .ok()?;
-    let deadline = Instant::now() + LOGIN_SHELL_TIMEOUT;
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) if status.success() => break,
-            Ok(None) if Instant::now() < deadline => sleep(Duration::from_millis(50)),
-            Ok(Some(_)) => return None,
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-        }
+    if !finished(&mut child, Instant::now() + LOGIN_SHELL_TIMEOUT) {
+        return None;
     }
     let mut out = String::new();
     child.stdout.take()?.read_to_string(&mut out).ok()?;

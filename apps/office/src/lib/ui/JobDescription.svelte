@@ -164,7 +164,7 @@
       {:else}
         {#if !profile.persona && !profile.manager && !proposal}
           <label class="mb-2 block text-xs text-muted">
-            Review job instructions from a Claude agent file
+            Review job instructions from an agent file
             <input
               type="file"
               accept=".md,.markdown"

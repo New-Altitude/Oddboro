@@ -46,6 +46,7 @@ test('a missing receiver fails visibly, and the owner retries the same assignmen
   const project = join(folder, 'delivery');
   mkdirSync(project);
   const s = await c.connect('claude', project);
+  t.after(() => c.disconnect(s.id));
   await L.shareProject(s.id, 'paige');
   const r = await L.requestProject({
     id: randomUUID(),
@@ -105,10 +106,9 @@ test('a missing receiver fails visibly, and the owner retries the same assignmen
   assert.equal(reports.length, 1);
   assert.match(reports[0].body, /chestnut/);
   assert.equal(existsSync(join(box, 'offer.json')), false);
-  await c.disconnect(s.id);
 });
 
-test('an offered request survives a restart as uncertain and cannot be retried before inspection', async () => {
+test('an offered request survives a restart as uncertain and cannot be retried before inspection', async (t) => {
   const project = join(folder, 'restart');
   mkdirSync(project);
   const s = await L.connectProject('claude', randomUUID(), realpathSync(project), 'Restart');
@@ -117,13 +117,13 @@ test('an offered request survives a restart as uncertain and cannot be retried b
   const { box } = claude.prepareClaude(s);
   claude.postClaude(s, r);
   await c.connect('claude', project, s.nativeId);
+  t.after(() => c.disconnect(s.id));
   assert.equal((await state(s.id)).state, 'uncertain');
   await assert.rejects(action({ action: 'decide', id: s.id, key: r.id, approve: true }));
   assert.equal(JSON.parse(readFileSync(join(box, 'offer.json'), 'utf8')).id, r.id);
   await action({ action: 'resolve', id: s.id, key: r.id });
   assert.equal((await state(s.id)).state, 'stopped');
   assert.equal(existsSync(join(box, 'offer.json')), false);
-  await c.disconnect(s.id);
 });
 
 test('a live session that never takes its offered work becomes uncertain, and a late reply still finishes it once', async (t) => {
@@ -143,16 +143,19 @@ test('a live session that never takes its offered work becomes uncertain, and a 
     running = [];
   });
   await c.connect('claude', project, s.nativeId);
+  t.after(() => c.disconnect(s.id));
   t.mock.timers.tick(60_000);
   await until(async () => (await state(s.id)).state === 'uncertain');
   assert.match((await state(s.id)).answer!, /has not acknowledged/);
   assert.equal(JSON.parse(readFileSync(join(box, 'offer.json'), 'utf8')).id, r.id);
   t.mock.timers.reset();
+  // The mocked minute took no real time. A reply this late comes long after
+  // the folder watch has started, so let a real second pass first.
+  await new Promise((resolve) => setTimeout(resolve, 1000));
   writeFileSync(join(box, r.id + '.reply'), JSON.stringify({ answer: 'The late answer.' }));
   await until(async () => (await state(s.id)).state === 'done');
   assert.equal((await state(s.id)).answer, 'The late answer.');
   assert.equal((await L.projectWork(s.id)).length, 1);
-  await c.disconnect(s.id);
 });
 
 test('a readiness check that ends with nothing claimed puts the earlier note back', async (t) => {

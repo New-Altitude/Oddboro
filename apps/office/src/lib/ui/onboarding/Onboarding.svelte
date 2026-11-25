@@ -37,6 +37,7 @@
   import ManagerCard, { type Custom, type Preset } from './ManagerCard.svelte';
   import type { Built } from '../OddParts.svelte';
   import SpaceCard from './SpaceCard.svelte';
+  import TeamCard, { type StarterOffer } from './TeamCard.svelte';
   import { STEPS, TITLE, type Step } from './steps.ts';
   import { selectOnFocus } from '../select-on-focus.ts';
 
@@ -72,6 +73,9 @@
 
   // Your office manager
   let presets = $state<Preset[]>([]);
+  /** The starter team on offer, and the ones the owner keeps: ticked ones to start. */
+  let starters = $state<StarterOffer[]>([]);
+  let team = $state<string[]>([]);
   let pick = $state('marshall');
   /** Claude's Sonnet cannot design an office, so that card offers only what is ready. */
   let canDraw = $state(true);
@@ -100,7 +104,11 @@
   }>();
   let drawingLook: Promise<void> | undefined;
   $effect(() => {
-    void call<Preset[]>('/api/onboarding').then((p) => (presets = p));
+    void call<{ managers: Preset[]; starters: StarterOffer[] }>('/api/onboarding').then((p) => {
+      presets = p.managers;
+      starters = p.starters;
+      team = p.starters.filter((s) => s.ticked).map((s) => s.id);
+    });
   });
 
   function drawManager() {
@@ -295,7 +303,8 @@
       const r = await call<{ manager: StaffProfile }>('/api/onboarding', {
         name: name.trim(),
         zone,
-        manager
+        manager,
+        team
       });
       setZone(zone);
       stage.zone(zone);
@@ -352,7 +361,7 @@
         plan = sample ?? null;
         officeName = 'Main Street';
         caption =
-          'The design did not come out. You are on Main Street for now. Open the Office window to try again.';
+          'The design did not come out. You are on Main Street for now. Open Layout, on the Office tab, to try again.';
         await wait(3000);
       }
       if (plan) {
@@ -468,6 +477,8 @@
                 next();
               }}
             />
+          {:else if step === 'team'}
+            <TeamCard {starters} bind:team onback={back} onnext={next} />
           {:else if step === 'space'}
             <SpaceCard
               bind:description
@@ -489,6 +500,15 @@
                 {managerName}, Office Manager{pick === 'custom' && look?.drawing
                   ? ' (still drawing)'
                   : ''}
+              </dd>
+              <dt class="text-muted">Team</dt>
+              <dd>
+                {team.length
+                  ? starters
+                      .filter((s) => team.includes(s.id))
+                      .map((s) => `${s.proposal.name}, ${s.proposal.role}`)
+                      .join('; ')
+                  : 'Just your manager for now'}
               </dd>
               <dt class="text-muted">Office</dt>
               <dd>

@@ -158,8 +158,7 @@
 <section class="flex h-full min-h-0 flex-col" aria-label="Your goals">
   <header class="flex items-center gap-2 border-b border-hairline p-3">
     <div class="min-w-0 flex-1">
-      <div class="font-pixel text-lg leading-none">Goals</div>
-      <div class="mt-1 text-xs text-muted">
+      <div class="text-xs text-muted">
         What you want more of. {manager ? `${manager.name} plans` : 'The office plans'} each one.
       </div>
     </div>

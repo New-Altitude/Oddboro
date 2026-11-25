@@ -5,7 +5,7 @@ import { workAbout } from './run-state.ts';
 import { isUtf8 } from 'node:buffer';
 import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { home, OFFICE_FILES, staffer } from '@oddboro/ledger';
+import { home, keepChatLine, OFFICE_FILES, staffer } from '@oddboro/ledger';
 import { attachableType, FILES_MAX, refusal, type ChatFile } from '#lib/attachments.ts';
 import { CHAT_BYTES, CHAT_ID, type OwnerInput } from '#lib/staff/chat-input.ts';
 import type { ChatEntry, ChatRef } from '#lib/staff/chat.ts';
@@ -20,6 +20,10 @@ export const chatFile = (id: string) => home('staff', id, OFFICE_FILES.chat);
 export function addToChat(id: string, line: ChatEntry): void {
   mkdirSync(home('staff', id), { recursive: true });
   appendFileSync(chatFile(id), JSON.stringify(line) + '\n');
+  // The searchable copy (`search_chats`). The file is the chat; a miss here costs a search, not a line.
+  void keepChatLine(id, line).catch((e: unknown) =>
+    console.error(`Could not keep a line of ${id}'s chat for search:`, e)
+  );
 }
 
 export function history(id: string): ChatEntry[] {

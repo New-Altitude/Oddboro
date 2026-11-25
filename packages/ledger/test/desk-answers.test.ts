@@ -729,7 +729,7 @@ test("a yes to a hire raised on no work wakes the Odd that proposed it, once, wi
 
 test("a plan yes's hire asks, job changes and owner task commit with its answer, so one that fails leaves the plan open and wakes nobody", async () => {
   const goalId = await aGoal('Sell flour');
-  // Two jobs of one name, as an Odd can have until the owner renames one, so changing it fails.
+  // Two jobs of one name, as an Odd could have before names had to differ, so changing one by its name fails.
   const weigh = {
     staffId: 'ivy',
     name: 'Weigh flour',
@@ -767,7 +767,7 @@ test("a plan yes's hire asks, job changes and owner task commit with its answer,
     }
   });
   const mark = await markNow();
-  await assert.rejects(approvePlan(ask.id, [0, 1], null), /Two jobs have that name/);
+  await assert.rejects(approvePlan(ask.id, [0, 1], null), /are named "Weigh flour"/);
   assert.equal((await askRow(ask.id))?.status, 'open');
   assert.deepEqual(await reached(mark), []);
   const hires = await db.select().from(asks).where(eq(asks.kind, 'hire'));

@@ -24,6 +24,8 @@ export type DesignRequest = {
   note?: string;
   previous?: OfficeSpec;
   art?: DrawnArt[];
+  /** Move into another layout rather than over the one the owner is in. */
+  new?: boolean;
 };
 
 type Job = {
@@ -33,6 +35,8 @@ type Job = {
   finished: boolean;
   /** Move in when the drawing is done, without asking. */
   moveIn: boolean;
+  /** The move in adds another layout. */
+  new: boolean;
   result?: DrawnOffice;
   moved: boolean;
   feed: EventEmitter;
@@ -52,6 +56,7 @@ export function startDesign(req: DesignRequest, moveIn = false): Job {
     lines: [],
     finished: false,
     moveIn,
+    new: req.new === true,
     moved: false,
     feed: new EventEmitter().setMaxListeners(20)
   };
@@ -123,7 +128,7 @@ async function move(job: Job, send: (line: DesignLine) => void): Promise<void> {
   if (!job.result || job.moved) return;
   job.moved = true;
   try {
-    await moveInto(job.result.spec, job.result.art, job.description);
+    await moveInto(job.result.spec, job.result.art, job.description, job.new ? 'new' : undefined);
     send({ step: 'moved', name: job.result.spec.name });
   } catch (e) {
     job.moved = false;

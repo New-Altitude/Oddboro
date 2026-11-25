@@ -258,6 +258,11 @@ jobs:
             target: aarch64-pc-windows-msvc
     runs-on: ${{ matrix.runner }}
     environment: release
+    # id-token: GitHub's OIDC token, which Azure Artifact Signing trusts in
+    # place of a stored secret (apps/desktop/scripts/sign-windows.ts).
+    permissions:
+      contents: read
+      id-token: write
     timeout-minutes: 90
     defaults:
       run:
@@ -314,8 +319,41 @@ jobs:
             fi
           fi
 
+      # The signing client is x64 only, so both machines use the SDK's x64
+      # signtool and an x64 .NET 10 for it (the client needs 10 or newer since
+      # 1.0.147); on arm64 Windows they run under
+      # its x64 emulation. metadata.json names the account and its profile.
+      - name: Get the signing tools
+        shell: pwsh
+        env:
+          CLIENT: '1.0.151'
+          ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          PROFILE: ${{ vars.AZURE_CERTIFICATE_PROFILE }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $env:RUNNER_TEMP 'signing'
+          $pkg = "https://api.nuget.org/v3-flatcontainer/microsoft.artifactsigning.client/$env:CLIENT/microsoft.artifactsigning.client.$env:CLIENT.nupkg"
+          Invoke-WebRequest $pkg -OutFile "$dir.zip"
+          Expand-Archive "$dir.zip" -DestinationPath $dir
+          $dotnet = Join-Path $env:RUNNER_TEMP 'dotnet-x64'
+          & ([scriptblock]::Create((Invoke-RestMethod https://dot.net/v1/dotnet-install.ps1))) `
+            -Runtime dotnet -Channel 10.0 -Architecture x64 -InstallDir $dotnet -NoPath
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.Directory.Name -eq 'x64' } | Sort-Object FullName | Select-Object -Last 1
+          if (-not $signtool) { throw 'No x64 signtool.exe in the Windows SDK' }
+          @{ Endpoint = $env:ENDPOINT; CodeSigningAccountName = $env:ACCOUNT; CertificateProfileName = $env:PROFILE } |
+            ConvertTo-Json | Set-Content (Join-Path $dir 'metadata.json')
+          "ODDBORO_SIGNTOOL=$($signtool.FullName)" >> $env:GITHUB_ENV
+          "ODDBORO_SIGN_DLIB=$(Join-Path $dir 'bin\x64\Azure.CodeSigning.Dlib.dll')" >> $env:GITHUB_ENV
+          "ODDBORO_SIGN_METADATA=$(Join-Path $dir 'metadata.json')" >> $env:GITHUB_ENV
+          "DOTNET_ROOT=$dotnet" >> $env:GITHUB_ENV
+          "DOTNET_ROOT_X64=$dotnet" >> $env:GITHUB_ENV
+
       - name: Build the installer
         env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
           VERSION: ${{ needs.version.outputs.version }}
           NOTES: ${{ needs.version.outputs.notes }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}

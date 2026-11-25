@@ -6,6 +6,7 @@ import {
   AWS_READ_ID,
   AWS_SECRETS_ID,
   connector,
+  GOOGLE,
   reconfigureConnector,
   type ConnectorRow
 } from './office.ts';
@@ -144,6 +145,7 @@ const AWS_PICK =
   'If it is not clear what the owner wants in AWS, ask them before asking for any: use their secrets (AWS Secrets Manager), read their data (AWS, read only), or build in their account (AWS, builder).';
 
 export const BUILT_IN: (typeof connectors.$inferInsert)[] = [
+  { ...GOOGLE.calendar, kind: 'builtin', config: { oauth: 'google', google: 'calendar' } },
   {
     id: POSTAL_ID,
     name: POSTAL_NAME,
@@ -205,6 +207,39 @@ export type WayIn = { keyHeader?: string };
 const byAddress = (url: string, way: WayIn): ConnectorConfig =>
   way.keyHeader ? { url, headers: [way.keyHeader], oauth: false } : { url, oauth: true };
 
+/**
+ * Whether an address carries anything after `?` or `#`, like `?key=...`. The
+ * office keeps keys in the password store, never in an address, and a
+ * server's id leaves the query out, so such an address once lost its key
+ * without a word (issue #305). It is refused instead.
+ */
+export const carriesQuery = (url: URL): boolean => !!url.search || !!url.hash;
+
+const QUERY_PROBLEM =
+  'This address has a key or setting after "?". The office keeps keys in this computer\'s password store, never in an address. Use the address without the "?" part, and send the key in a header. Most servers that take ?key= also take a header, named in their setup guide.';
+
+const badHeader = (header: string) =>
+  `"${header}" is not a header name. Use letters, digits and dashes, like x-api-key.`;
+
+/**
+ * A hosted server named by its address takes its key in `header` from now on,
+ * even once connected: the owner pastes the key on the reconnect task. Its
+ * open connect tasks name the old way, so they drop (`reconfigureConnector`).
+ * `changed` says whether it took a key some other way before.
+ */
+export async function takeKeyIn(
+  c: ConnectorRow,
+  header: string
+): Promise<{ problem: string } | { changed: boolean }> {
+  if (!HEADER_NAME.test(header)) return { problem: badHeader(header) };
+  if (c.id === POSTAL_ID || c.kind !== 'http' || c.registry || c.config.google || !c.config.url)
+    return { problem: `${c.name} has its own way in, so it takes no key_header.` };
+  const config = byAddress(c.config.url, { keyHeader: header });
+  if (JSON.stringify(config) === JSON.stringify(c.config)) return { changed: false };
+  await reconfigureConnector(c.id, config);
+  return { changed: true };
+}
+
 /** The catalog id `ensureConnector` finds or gives `wanted`: an id as it is, or a hosted server's by its https address. */
 export function connectorIdFor(wanted: string): string {
   const url = /^https:\/\/\S+$/.test(wanted) ? new URL(wanted) : undefined;
@@ -223,15 +258,22 @@ export async function ensureConnector(
   way?: WayIn
 ): Promise<{ connector?: ConnectorRow; problem?: string }> {
   if (way?.keyHeader !== undefined && !HEADER_NAME.test(way.keyHeader))
-    return {
-      problem: `"${way.keyHeader}" is not a header name. Use letters, digits and dashes, like x-api-key.`
-    };
+    return { problem: badHeader(way.keyHeader) };
   const url = /^https:\/\/\S+$/.test(wanted) ? new URL(wanted) : undefined;
+  if (url && carriesQuery(url)) return { problem: QUERY_PROBLEM };
   const id = connectorIdFor(wanted);
   const own = await connector(id);
   if (own) {
-    // One named by its address and not connected yet takes the way in asked for now.
-    if (id !== POSTAL_ID && way && own.kind === 'http' && !own.registry && !own.readyAt) {
+    // One named by its address and not connected yet takes the way in asked
+    // for now. One that connected with no tools never really connected: a
+    // server that turned down its key could answer with none (issue #305).
+    if (
+      id !== POSTAL_ID &&
+      way &&
+      own.kind === 'http' &&
+      !own.registry &&
+      (!own.readyAt || !own.tools.length)
+    ) {
       const config = byAddress(own.config.url!, way);
       if (JSON.stringify(config) !== JSON.stringify(own.config)) {
         await reconfigureConnector(own.id, config);

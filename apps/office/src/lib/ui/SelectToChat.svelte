@@ -70,7 +70,10 @@
   }
 
   function keys(e: KeyboardEvent) {
-    if (e.key === 'Escape' && picked) close();
+    if (e.key === 'Escape' && picked) {
+      e.preventDefault();
+      close();
+    }
   }
 </script>
 

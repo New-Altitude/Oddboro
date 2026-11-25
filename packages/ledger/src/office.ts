@@ -83,6 +83,7 @@ export {
   checkFolder
 } from './office-folders.ts';
 export { record, searchLedger, precedent, reindexLedger } from './office-ledger.ts';
+export { keepChatLine, loadChats, searchChats, type ChatLine } from './chat-history.ts';
 export {
   AlreadyOnDesk,
   raiseAsk,
@@ -190,6 +191,18 @@ export {
   report
 } from './office-desk.ts';
 export {
+  type ItemRef,
+  type Waiting,
+  RESTORE_DAYS,
+  itemKey,
+  clearItem,
+  deleteItem,
+  restoreItem,
+  openNeeds,
+  orderItems,
+  nextItem
+} from './items.ts';
+export {
   jobsFor,
   addJob,
   type FileJob,
@@ -231,7 +244,11 @@ export {
   plan,
   type UsageTotals,
   type UsageBucket,
-  usageFor
+  usageFor,
+  type RunUsage,
+  recentRuns,
+  type OddUsage,
+  officeUsage
 } from './office-usage.ts';
 export {
   schedulePoke,

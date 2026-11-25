@@ -22,7 +22,7 @@ import {
   utimesSync,
   writeFileSync
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { afterEach, test } from 'node:test';
 import {
   L,
@@ -48,7 +48,7 @@ import type { AgentTool, LaterTool } from '../../routes/api/agents/+server.ts';
 const route = await import('../../routes/api/agents/[tool]/+server.ts');
 const claudeRoute = await import('../../routes/api/setup/claude/+server.ts');
 const { geminiKeyMissing, clearGeminiKey, setGeminiKey } = await import('./gemini.ts');
-const { SLOTS, claudeSignIn } = await import('./agent-sign-in.ts');
+const { SLOTS, claudeSignIn, npmMissing } = await import('./agent-sign-in.ts');
 const { vendorEnv } = await import('./launch.ts');
 
 // A test that fails or runs out of time leaves its install or sign-in running,
@@ -56,6 +56,13 @@ const { vendorEnv } = await import('./launch.ts');
 afterEach(() => {
   for (const slot of Object.values(SLOTS)) slot.stop('The test ended.');
 });
+
+/** What is left in `dir` once it empties, or after two seconds: an office run removes its folder after it replies. */
+async function emptied(dir: string): Promise<string[]> {
+  for (let i = 0; i < 100 && readdirSync(dir).length; i++)
+    await new Promise((r) => setTimeout(r, 20));
+  return readdirSync(dir);
+}
 
 const GROK_HOME = join(folder, 'accounts', 'grok', 'office');
 const CODEX_HOME = join(folder, 'accounts', 'codex', 'office');
@@ -754,7 +761,7 @@ test("an install that fails says the installer's last line and leaves the tool o
   }
 });
 
-test('Install with no npm on PATH says to install Node.js, never a spawn error, and runs nothing', async () => {
+test('Install with no npm on PATH says to install Node.js, never a spawn error, and runs nothing, on Windows too', async () => {
   const path = process.env.PATH;
   // Node alone, the way the app runs on a Mac whose npm comes from nvm set up in ~/.zshrc.
   process.env.PATH = nodeBin;
@@ -772,6 +779,20 @@ test('Install with no npm on PATH says to install Node.js, never a spawn error, 
       const t = await toolIn('codex');
       assert.equal(t?.signIn?.installing, false);
       assert.equal(toolAction(t), 'install');
+      // Windows looks for npm.cmd, its npm, and says the same when none is on PATH.
+      await assert.rejects(
+        onPlatform('win32', () => send('POST', 'codex', { action: 'install' })),
+        refused(
+          400,
+          'Codex installs with npm, which comes with Node.js, and the office cannot find npm on this computer. Install Node.js from nodejs.org, then quit and reopen Oddboro.'
+        )
+      );
+      const windowsNpm = join(folder, 'windows-npm');
+      mkdirSync(windowsNpm, { recursive: true });
+      writeFileSync(join(windowsNpm, 'npm.cmd'), '');
+      await withEnv({ PATH: `${windowsNpm}${delimiter}${nodeBin}` }, () =>
+        onPlatform('win32', () => assert.equal(npmMissing('Codex'), undefined))
+      );
       // Claude Code's install in Setup takes npm too, off Windows.
       await assert.rejects(
         onPlatform('linux', () =>
@@ -903,7 +924,7 @@ test("an office run on Codex or Grok goes through the tool's own sandboxed launc
   assert.equal(c.permissions.network.enabled, false);
   assert.ok(!c.message.includes('{owner}') && c.message.startsWith('Draw a desk for '));
   assert.ok(!c.system.includes('{owner}'));
-  assert.deepEqual(readdirSync(runs), []);
+  assert.deepEqual(await emptied(runs), []);
 
   const signedIn = { expires_at: new Date(Date.now() + 86_400_000).toISOString() };
   writeFileSync(
@@ -932,7 +953,7 @@ test("an office run on Codex or Grok goes through the tool's own sandboxed launc
     assert.deepEqual(g.prompt[0], { type: 'image', data: picture.data, mimeType: 'image/png' });
     assert.match(String(g.prompt[1].text), /^Draw a desk for /);
     assert.equal(g.env, undefined);
-    assert.deepEqual(readdirSync(runs), []);
+    assert.deepEqual(await emptied(runs), []);
   } finally {
     rmSync(join(GROK_HOME, 'auth.json'), { force: true });
   }
@@ -944,7 +965,7 @@ test("an office run on Codex or Grok goes through the tool's own sandboxed launc
     const refused = await withEnv({ OFFICE_AGENT: 'grok' }, ask);
     assert.equal(refused.ok, false);
     assert.match(refused.text, /in Setup, under Your AI/);
-    assert.deepEqual(readdirSync(runs), []);
+    assert.deepEqual(await emptied(runs), []);
   } finally {
     for (const f of ['auth.json', 'models.log', 'models-args.json'])
       rmSync(join(GROK_HOME, f), { force: true });
@@ -1157,7 +1178,31 @@ test('an office run stops when its signal does, as a drawing left for parts', as
     })
   );
   assert.deepEqual(run, { ok: false, text: 'Stopped.' });
-  assert.deepEqual(existsSync(runs) ? readdirSync(runs) : [], []);
+  assert.deepEqual(existsSync(runs) ? await emptied(runs) : [], []);
+});
+
+test('an office run on Codex removes its folder once Codex exits, not as it replies, since Windows will not remove a folder a process runs in (#349)', async () => {
+  const { runAsOffice } = await import('./office-run.ts');
+  const runs = join(folder, 'office', 'runs');
+  const go = join(folder, 'codex-may-exit');
+  try {
+    const run = await withEnv({ OFFICE_AGENT: 'codex' }, () =>
+      runAsOffice(`Draw a desk.\nStay until ${go} exists.`, {
+        system: 'You draw.',
+        kind: 'look',
+        timeoutMs: 60_000
+      })
+    );
+    assert.ok(run.ok, run.text);
+    // The reply is in, and Codex still runs in the run's folder, so it stays.
+    assert.equal(readdirSync(runs).length, 1);
+    writeFileSync(go, '');
+    assert.deepEqual(await emptied(runs), []);
+  } finally {
+    writeFileSync(go, '');
+    await emptied(runs);
+    rmSync(go, { force: true });
+  }
 });
 
 test('an office run on a tool that is not installed says so, not that it is not signed in', async () => {
@@ -1197,5 +1242,20 @@ test("in the Linux app, a sign-in starts with the computer's own libraries, so i
     for (const k of names)
       if (before[k] === undefined) delete process.env[k];
       else process.env[k] = before[k];
+  }
+});
+
+test("Claude Code's tile knows it is ready on a key, whichever tool is picked", async () => {
+  const was = process.env.OFFICE_AUTH;
+  try {
+    delete process.env.OFFICE_AUTH;
+    assert.equal((await listed()).find((t) => t.id === 'claude')?.keyInUse, undefined);
+    process.env.OFFICE_AUTH = 'key';
+    await pickOffice('codex');
+    assert.equal((await listed()).find((t) => t.id === 'claude')?.keyInUse, true);
+  } finally {
+    if (was === undefined) delete process.env.OFFICE_AUTH;
+    else process.env.OFFICE_AUTH = was;
+    await pickOffice('claude');
   }
 });

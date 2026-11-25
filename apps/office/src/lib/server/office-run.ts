@@ -9,11 +9,12 @@
 // go in the message itself, from memory, and Claude Code keeps no
 // transcript, so a headshot never lands on disk. On Grok or Codex it runs
 // with that tool's sandbox, in a folder of its own that reads nothing else,
-// writes only itself, has no MCP, no web and no network, and is removed when
-// the run ends, pictures and all. Neither has a shell or a tool that reads
+// writes only itself, has no MCP, no web and no network, and is removed once
+// the tool exits, pictures and all. Neither has a shell or a tool that reads
 // files: the pictures go in with the message.
-import { spawn } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   AGENT_NAMES,
@@ -102,7 +103,11 @@ const SIGN_IN_HERE = 'in Setup, under Your AI';
  * Where an office run works, and how its pictures reach its tool. Claude Code
  * takes them in its message, from memory, so a headshot never lands on disk,
  * and works in the office's folder. Grok and Codex open them as files, in a
- * folder of the run's own, removed when the run ends (`clear`).
+ * folder of the run's own, removed once the run's tool has exited (`clear`).
+ * A run ends on the tool's result, before the tool exits, and Windows will
+ * not remove a folder a process still runs in: every office run on Codex
+ * failed there with EPERM, and in 0.0.11 the office stopped (#349). A
+ * removal that still fails is logged, and never fails the run.
  */
 async function workspace(
   agent: Agent,
@@ -110,7 +115,7 @@ async function workspace(
   opts: OfficeRunOpts
 ): Promise<{
   dir: string;
-  clear: () => void;
+  clear: (tool?: ChildProcess) => void;
   run: Pick<ClaudeRun, 'system' | 'images' | 'pictures' | 'model' | 'toolDir'>;
 }> {
   if (agent === 'claude') {
@@ -135,9 +140,17 @@ async function workspace(
     writeFileSync(path, Buffer.from(img.data, 'base64'), { mode: 0o600 });
     return { path, mediaType: img.mediaType };
   });
+  const remove = () =>
+    void rm(dir, { recursive: true, force: true, maxRetries: 3 }).catch((e: unknown) =>
+      console.error(`Could not remove an office run's folder, ${dir}:`, e)
+    );
   return {
     dir,
-    clear: () => rmSync(dir, { recursive: true, force: true }),
+    clear: (tool) => {
+      // exitCode is set once the tool exits, and when it never started.
+      if (tool && tool.exitCode === null && tool.signalCode === null) tool.once('exit', remove);
+      else remove();
+    },
     run: { system: `${opts.system}\n\n${ONE_REPLY}`, images }
   };
 }
@@ -149,6 +162,8 @@ async function runOn(
   opts: OfficeRunOpts & { runId: string; signal: AbortSignal }
 ): Promise<OfficeRun> {
   const place = await workspace(agent, opts.runId, opts);
+  // Held in an object: TypeScript reads a variable set only in a callback as never set.
+  const started: { tool?: ChildProcess } = {};
   try {
     const launch = await LAUNCHES[agent]({
       key: opts.runId,
@@ -189,6 +204,7 @@ async function runOn(
           case 'tool':
           case 'message':
           case 'delta':
+          case 'context':
             break;
           default: {
             // The type check fails here until a new kind of event has its case.
@@ -200,19 +216,19 @@ async function runOn(
     };
     const end = await drive(
       () =>
-        spawn(cmd, [...before, ...launch.args], {
+        (started.tool = spawn(cmd, [...before, ...launch.args], {
           cwd: place.dir,
           env: launch.env,
           detached: ownsGroup(launch),
           windowsHide: true
-        }),
+        })),
       launch,
       sink,
       { deadline: Date.now() + opts.timeoutMs, signal: opts.signal }
     );
     return officeEnded(agent, end, opts.timeoutMs);
   } finally {
-    place.clear();
+    place.clear(started.tool);
   }
 }
 
