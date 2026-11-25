@@ -359,6 +359,8 @@ Every update is required. `src-tauri/src/update.rs` runs them with
   Windows's own `tar`). `scripts/smoke.ts --stage` then checks the stage.
 - `scripts/smoke.ts` and `scripts/driver.ts`. The smoke test, and what
   drives the installed app for it. See "Smoke tests".
+- `scripts/last-release.ts`. Downloads, for this machine, the release the
+  updater's `latest.json` names, for the smoke test's upgrade run.
 - `scripts/sign-windows.ts`. Signs one Windows file through Azure Artifact
   Signing, for Tauri's `signCommand` in a release.
 - `installer/`. The window the Mac `.dmg` opens to: the app and
@@ -428,8 +430,8 @@ lockfile-only update, so run it by hand for one that should ship. Six jobs:
    Before it signs, `release.ts` checks the build's own version: the Windows
    app and installer's file version, and the Mac app's `Info.plist`.
 5. `smoke` installs each build and runs it on its own kind of machine, plus
-   the x86_64 AppImage on Ubuntu 24.04 (see "Smoke tests"). No secrets. One
-   failure, and no draft.
+   the x86_64 AppImage on Ubuntu 24.04, then installs it again over the last
+   release (see "Smoke tests"). No secrets. One failure, and no draft.
 6. `draft` tests and runs `scripts/check-release.ts` on what the five builds
    uploaded, and creates nothing unless every build passes: exactly the files
    this version should have, each site copy byte for byte the versioned file,
@@ -525,6 +527,8 @@ with its pid, and the run leaves it running.
 node apps/desktop/scripts/smoke.ts --stage                       # the staged server, after stage.ts, with Sentry on (port 9 takes nothing)
 node apps/desktop/scripts/smoke.ts --installed                    # the app on this computer, on its own port, home and log
 node apps/desktop/scripts/smoke.ts --from <folder> --version 0.0.9   # a build job's output, as release.yml runs it
+node apps/desktop/scripts/last-release.ts <prev>                  # the release owners have now, for this machine
+node apps/desktop/scripts/smoke.ts --from <folder> --version 0.0.9 --previous-from <prev> --previous-version 0.0.8   # installed over it
 ```
 
 `--artifact <file>` takes one installer, AppImage or `.dmg`. On Windows it
@@ -534,12 +538,43 @@ Windows keep to one at a time. Results go to `--out`: `results.json`,
 `summary.md`, `office.log`, `shell.log` and a screenshot. The run's home
 goes when it ends, pass or fail; `--keep` keeps it for a look.
 
+#### The upgrade run
+
+`--previous-from` checks the path every owner who has Oddboro takes: the next
+version installed over theirs. #40 broke it, when the 0.0.6 Windows installer
+held 0.0.5 and every Windows app updated forever. `last-release.ts` downloads
+the release installed apps have now, the one the updater's `latest.json`
+names, for this machine. The run installs it and starts it on a new home, then
+installs the build over it, in the same place (the same Windows install, the
+same `Oddboro.app` folder on a Mac, the same home for the AppImage), and
+requires:
+
+- the build's version: in the log, the Windows uninstall entry and
+  `oddboro.exe`, and the Mac's `Info.plist`;
+- the office's `first start of <build> after <last release>, backed up to …`
+  line, with the database in that backup;
+- the same database: the system identifier in `db/global/pg_control`, which
+  Postgres makes with a database, matches what the last release made, in the
+  home and in the backup;
+- its database setup check passing, and its page booting with no errors;
+- no second update: after two more starts, one `first start` line, one
+  backup, and the build's version at each start;
+- each quit of the build closing the database (NEW-1776).
+
+On Linux it also onboards the last release from inside its page, and the
+build must still be onboarded. On a Mac and Windows the app keeps its key to
+itself, so the database's identifier stands in for that. A last release from
+before `oddboro --quit` cannot be quit on Windows, which has no signal a
+script can send, so the run stops it, as a crash would, and says so.
+
 Where it runs: `--stage` in Checks (`ci.yml`) on every pull request, on all
 three systems. `--from` on an unsigned 9.9.9 build in `app-smoke.yml`, on
 every pull request that changes the app (Windows, macOS 15, Ubuntu 22.04)
 and by hand (Run workflow) on all six release machines, then in `release.yml` on
-the signed builds before each draft. A failed row's words are in the job's
-summary table; the results, logs and screenshot are its `smoke-*` artifact.
+the signed builds before each draft. The upgrade run follows it in both,
+whether or not the fresh install passed. A failed row's words are in the
+job's summary table; the results, logs and screenshot are its `smoke-*`
+artifact, in `smoke/` and `upgrade/`.
 
 ### Secrets
 

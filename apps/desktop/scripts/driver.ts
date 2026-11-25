@@ -18,6 +18,7 @@ import {
   openSync,
   readFileSync,
   realpathSync,
+  rmSync,
   writeFileSync
 } from 'node:fs';
 import { connect } from 'node:net';
@@ -384,13 +385,16 @@ export function fileVersion(file: string): string {
 }
 
 /**
- * Mac: the app copied out of the .dmg. The folder is resolved first: under a
- * symlink (/var is one) the app does not start (plan, finding 2).
+ * Mac: the app copied out of the .dmg, into `over` in place of the app there
+ * when given. The folder is resolved first: under a symlink (/var is one) the
+ * app does not start (plan, finding 2).
  */
-export function installMac(file: string): Installed {
+export function installMac(file: string, over?: string): Installed {
   const mount = mkdtempSync(join(tmpdir(), 'oddboro-dmg-'));
   run('hdiutil', ['attach', '-nobrowse', '-readonly', '-mountpoint', mount, file]);
-  const dir = join(realpathSync(mkdtempSync(join(tmpdir(), 'oddboro-app-'))), 'Oddboro.app');
+  const dir =
+    over ?? join(realpathSync(mkdtempSync(join(tmpdir(), 'oddboro-app-'))), 'Oddboro.app');
+  if (over) rmSync(over, { recursive: true, force: true });
   try {
     run('ditto', [join(mount, 'Oddboro.app'), dir]);
   } finally {
@@ -406,6 +410,32 @@ export function plist(app: string, key: string): string {
 export function installLinux(file: string): Installed {
   chmodSync(file, 0o755);
   return { exe: file, dir: file };
+}
+
+/**
+ * The office database's system identifier, from `<home>/db/global/pg_control`.
+ * Postgres makes it when it makes the database, so the same identifier means
+ * the same database, not a new one.
+ */
+export function databaseId(home: string): string {
+  const file = join(home, 'db', 'global', 'pg_control');
+  if (!existsSync(file)) throw new Error(`no database in ${home}`);
+  return readFileSync(file).subarray(0, 8).toString('hex');
+}
+
+export type FirstStart = { version: string; after?: string; backup?: string };
+
+/** The office's `first start of X[ after Y][, backed up to Z]` lines (`packages/ledger/src/backup.ts`). */
+export function firstStarts(log: string): FirstStart[] {
+  return [
+    ...log.matchAll(
+      /^(?:\S+Z )?office: first start of ([^\s,]+)(?: after ([^\s,]+))?(?:, backed up to (.+?))?\r?$/gm
+    )
+  ].map((m) => ({
+    version: m[1],
+    ...(m[2] ? { after: m[2] } : {}),
+    ...(m[3] ? { backup: m[3] } : {})
+  }));
 }
 
 /** One run's own corner: home, log and WebView2 profile, beside its other output. */

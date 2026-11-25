@@ -1,8 +1,13 @@
 import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import {
   BASE,
+  databaseId,
   descendantsIn,
+  firstStarts,
   loggedPids,
   pageHeaders,
   parseTasklist,
@@ -65,4 +70,39 @@ test('a shell counts by its program name too, as `ps -o comm` gives it', () => {
 test('a page-shaped write carries the Origin, and Sec-Fetch-Site when asked', () => {
   assert.deepEqual(pageHeaders(false), { origin: BASE, 'content-type': 'application/json' });
   assert.equal(pageHeaders(true)['sec-fetch-site'], 'same-origin');
+});
+
+test('a first start names its version, the one before and the backup, each only when there is one', () => {
+  const log = [
+    'office: first start of 0.0.15',
+    '2026-11-25T06:00:00.000Z office: 9.9.9 on darwin 24.6.0 arm64, Node v24.11.1',
+    '2026-11-25T06:00:00.100Z office: first start of 9.9.9 after 0.0.15, backed up to /tmp/h/backups/pre-9.9.9-20261125T060000Z\r',
+    'office: first start of 9.9.10 after 9.9.9',
+    'page: error office: first start of 1.0.0'
+  ].join('\n');
+  assert.deepEqual(firstStarts(log), [
+    { version: '0.0.15' },
+    {
+      version: '9.9.9',
+      after: '0.0.15',
+      backup: '/tmp/h/backups/pre-9.9.9-20261125T060000Z'
+    },
+    { version: '9.9.10', after: '9.9.9' }
+  ]);
+  assert.deepEqual(firstStarts('office: ready 812 ms after Node started'), []);
+});
+
+test("a database's identifier is the first 8 bytes of its pg_control, and a home without one throws", () => {
+  const home = mkdtempSync(join(tmpdir(), 'driver-test-'));
+  try {
+    assert.throws(() => databaseId(home), /no database in/);
+    mkdirSync(join(home, 'db', 'global'), { recursive: true });
+    writeFileSync(
+      join(home, 'db', 'global', 'pg_control'),
+      Buffer.from('2a803bbcfd83066b0807000033', 'hex')
+    );
+    assert.equal(databaseId(home), '2a803bbcfd83066b');
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });
