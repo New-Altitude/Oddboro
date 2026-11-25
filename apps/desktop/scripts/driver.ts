@@ -535,15 +535,25 @@ export const leftRunning = async (r: Run): Promise<string> =>
   `port ${PORT} open: ${await tcp(PORT)}, port ${DB_PORT} open: ${await tcp(DB_PORT)}, this run's processes: ${runPids(r).join(', ') || 'none'}`;
 
 /**
- * Fails when an Oddboro this run did not start is running: the next launch
- * would hand off to it. The run names it and leaves it alone.
+ * Fails when an Oddboro this run did not start is still running after 10 s:
+ * the next launch would hand off to it. One that goes by itself in that time
+ * was winding down: on Ubuntu 22.04 a process named for the AppImage
+ * outlived a quit by a moment, under no parent the run knew (proof run
+ * 45564406687). The run names what stays, and leaves it alone.
  */
-function noStrays(r: Run): void {
-  const found = strays(r);
-  if (found.length)
-    throw new Error(
-      `an Oddboro this run did not start is running (pid ${found.join(', ')}). The run left it alone. Quit it, then run again`
-    );
+async function noStrays(r: Run): Promise<void> {
+  let found = strays(r);
+  for (let waited = 0; found.length && waited < 10; waited++) {
+    await sleep(1000);
+    found = strays(r);
+  }
+  if (!found.length) return;
+  const named = WIN
+    ? found.join(', ')
+    : found.map((pid) => `${pid} ${sh('ps', ['-o', 'args=', '-p', String(pid)]).out.trim()}`);
+  throw new Error(
+    `an Oddboro this run did not start is running (pid ${named}). The run left it alone. Quit it, then run again`
+  );
 }
 
 /**
@@ -555,7 +565,7 @@ export async function stopRun(r: Run, what: string): Promise<string> {
   killRun(r);
   if (!(await goneWithin(r, 10)))
     throw new Error(`still running after ${what} and a kill: ${await leftRunning(r)}`);
-  noStrays(r);
+  await noStrays(r);
   return left;
 }
 
@@ -589,7 +599,7 @@ export async function quit(app: ChildProcess, r: Run, exe?: string): Promise<num
   if (await goneWithin(r, 15)) {
     // Timed before the look for strays, which takes seconds on Windows.
     const ms = Date.now() - started;
-    noStrays(r);
+    await noStrays(r);
     return ms;
   }
   const left = await stopRun(r, 'the quit');
@@ -734,7 +744,7 @@ export async function webdriverStart(exe: string, r: Run): Promise<Driven> {
     driver.kill();
     try {
       if (await goneWithin(r, 10)) {
-        noStrays(r);
+        await noStrays(r);
         return 'closed with the WebDriver session';
       }
       return `killed: the session left it running (${await stopRun(r, 'the session')})`;

@@ -520,8 +520,9 @@ Accessibility through System Events on a Mac (a path through a symlink stops
 the app), the AppImage under Xvfb with a GNOME keyring and WebDriver through
 `tauri-driver` on Linux. A dialog fails the run with its words. A run stops
 only what it started: the processes it spawned, the shells and Nodes its own
-log names, and everything under them. Another Oddboro it finds fails the row
-with its pid, and the run leaves it running.
+log names, and everything under them. Another Oddboro still there 10 s after
+a quit fails the row with its pid and command line, and the run leaves it
+running.
 
 ```sh
 node apps/desktop/scripts/smoke.ts --stage                       # the staged server, after stage.ts, with Sentry on (port 9 takes nothing)
