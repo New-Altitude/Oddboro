@@ -116,6 +116,7 @@
     const key = `${custom.name.trim()}|${custom.description.trim()}`;
     if (look?.for === key && !look.problem) return;
     look = { for: key, drawing: true };
+    problem = '';
     drawingLook = call<Drawn & { portrait: string }>('/api/looks', {
       description: custom.description.trim() || custom.name.trim(),
       name: custom.name.trim(),
