@@ -1,9 +1,12 @@
 // The app's updates, from the office's side. The shell (apps/desktop) finds a
 // new version, downloads and checks it, then tells this server
 // (`POST /api/update`) and asks every 30 seconds whether to install it. This
-// file decides: at the start of the owner's window, or now when they press
-// Install now, and only once the Odds are held and no run is active. When
-// the rules are in `@oddboro/ledger/update-window`.
+// file decides, and never without the owner: now when they press Install now,
+// at the start of their window when they press Install tonight, and not at
+// all while they have said nothing or pressed Wait. Either way only once the
+// Odds are held and no run is active. When the rules are in
+// `@oddboro/ledger/update-window`. The owner's switch for the checks the shell
+// makes on its own is `OFFICE_UPDATE_CHECKS` in `.env`, which the shell reads.
 import {
   holding,
   markDown,
@@ -17,6 +20,7 @@ import {
   chatUpdateStatus,
   type UpdateRow
 } from '@oddboro/ledger';
+import { writeEnv } from '@oddboro/ledger/env';
 import { fixedError } from '@oddboro/ledger/errors';
 import { currentDesign } from './design-job.ts';
 import { emit } from './events.ts';
@@ -31,7 +35,7 @@ export const MANAGED = process.env.ODDBORO_UPDATES === '1';
 export type Checked = { at: string; result: 'none' | 'ready' | 'failed'; problem?: string };
 
 const g = globalThis as unknown as {
-  appUpdate?: { row?: UpdateRow; checked?: Checked; asked?: string };
+  appUpdate?: { row?: UpdateRow; checked?: Checked; asked?: string; waited?: string };
 };
 const state = (g.appUpdate ??= {});
 
@@ -58,11 +62,10 @@ export function downtime(): { from: Date | null; to: Date | null } {
   return { from: row()?.downAt ?? null, to: row()?.upAt ?? null };
 }
 
-/** The shell has a version ready. It installs in the owner's next window, unless they already said now. */
+/** The shell has a version ready. It waits for the owner, unless they already said when for this one. */
 export async function ready(version: string, notes: string): Promise<void> {
   const r = row() ?? (await updateRow());
-  const keep = r.readyVersion === version && r.installAt;
-  const installAt = keep || nextWindowStart(new Date(), r.windowStart, r.windowEnd);
+  const installAt = r.readyVersion === version ? r.installAt : null;
   state.checked = { at: new Date().toISOString(), result: 'ready' };
   state.asked = undefined;
   state.row = await setReadyUpdate(version, notes, installAt);
@@ -79,17 +82,33 @@ export function checked(problem?: string): void {
   emit({ type: 'change', table: 'app_update' });
 }
 
-/** The owner pressed Install now, or Install tonight. */
-export async function installWhen(when: 'now' | 'tonight'): Promise<void> {
+/**
+ * The owner pressed Install now, Install tonight or Wait. Wait takes back a
+ * time they gave, and hides the floor's notice until the app next opens.
+ */
+export async function installWhen(when: 'now' | 'tonight' | 'wait'): Promise<void> {
   const r = row() ?? (await updateRow());
   if (!r.readyVersion) throw fixedError('No update is ready');
   const now = new Date();
+  state.waited = when === 'wait' ? r.readyVersion : undefined;
   state.row = await setInstallAt(
-    when === 'now' ? now : nextWindowStart(now, r.windowStart, r.windowEnd)
+    when === 'wait' ? null : when === 'now' ? now : nextWindowStart(now, r.windowStart, r.windowEnd)
   );
 }
 
-/** The owner's window. A ready update that waits for it moves with it. */
+/** True unless the owner turned off the checks the shell makes on its own. */
+export const checksOn = (): boolean => process.env.OFFICE_UPDATE_CHECKS !== 'off';
+
+/** The owner's switch. The shell reads it before each check it makes on its own. */
+export function setChecks(on: boolean): void {
+  if (!MANAGED) throw fixedError('Only the desktop app checks for updates');
+  const value = on ? 'on' : 'off';
+  writeEnv({ OFFICE_UPDATE_CHECKS: value });
+  process.env.OFFICE_UPDATE_CHECKS = value;
+  emit({ type: 'change', table: 'app_update' });
+}
+
+/** The owner's window. A ready update the owner set for tonight moves with it. */
 export async function setWindow(start: string, end: string): Promise<void> {
   state.row = await setUpdateWindow(start, end);
   const r = state.row;
@@ -133,7 +152,9 @@ export async function status(shell = false) {
     managed: MANAGED,
     window: { start: r.windowStart, end: r.windowEnd },
     checked: state.checked ?? null,
-    checking: !!state.asked
+    checking: !!state.asked,
+    checks: checksOn(),
+    waited: !!r.readyVersion && state.waited === r.readyVersion
   };
 }
 

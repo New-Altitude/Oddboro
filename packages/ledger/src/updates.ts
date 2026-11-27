@@ -33,16 +33,20 @@ export function setUpdateWindow(start: string, end: string): Promise<UpdateRow> 
   return change({ windowStart: start, windowEnd: end });
 }
 
-/** The shell has a version downloaded and checked. It installs at `installAt`. */
+/**
+ * The shell has a version downloaded and checked. It installs at `installAt`,
+ * or, while that is null, waits for the owner to say when.
+ */
 export function setReadyUpdate(
   version: string,
   notes: string,
-  installAt: Date
+  installAt: Date | null
 ): Promise<UpdateRow> {
   return change({ readyVersion: version, readyNotes: notes, readyAt: new Date(), installAt });
 }
 
-export function setInstallAt(installAt: Date): Promise<UpdateRow> {
+/** When the owner said to install, or null when they said wait. */
+export function setInstallAt(installAt: Date | null): Promise<UpdateRow> {
   return change({ installAt });
 }
 

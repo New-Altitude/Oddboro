@@ -25,7 +25,8 @@ const CLEARED = [
   'OFFICE_MODEL',
   'OFFICE_AUTH',
   'OFFICE_AGENT',
-  'OFFICE_DIAGNOSTICS'
+  'OFFICE_DIAGNOSTICS',
+  'OFFICE_UPDATE_CHECKS'
 ].filter((k) => k in readEnv());
 const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 const BACKUP = join(HOME, 'backups', stamp);

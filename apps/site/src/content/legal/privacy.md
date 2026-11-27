@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Effective date: November 15, 2026
+Effective date: November 26, 2026
 
 > **The short version.** Oddboro is open source software that runs on your own computer: a Mac, Windows or Linux. Its database lives on that computer. New Altitude, Inc. operates no server that stores your office's data. Signing in to a New Altitude account is optional. If you sign in and turn on error reports in Setup, the software sends reports of what broke through our relay to Sentry, without your account. If you also add a New Altitude persona as an Odd, your conversations with it go to New Altitude. When you connect the software to Anthropic or another service, your data goes to that service under your own account and its own terms, never through us. This website asks before it counts your visit. If you click Allow, PostHog sets a cookie and records the pages you view and what you click on oddboro.com. It covers this website only: the Oddboro app sends it nothing. Cloudflare, which hosts the site, also counts page views, without cookies. The only personal data we can hold about you is what PostHog recorded on this site if you allowed it, the approximate location in error reports you turned on, and New Altitude's records of your sign-in and of your conversations with any persona you add. If that ever changes, we will update this policy, say so in the repository and on this site, and change the effective date above.
 
@@ -111,6 +111,16 @@ To stop: open Setup and turn off "Send error and tracing reports to New Altitude
 
 If you click Download on the ledger search line in Setup, the office downloads a search model (Nomic Embed Text v1.5, about 140 MB) from Oddboro's own releases on GitHub, once, and keeps it in the office's folder on your computer. The office then turns ledger text into vectors itself, so Odds can search decisions by meaning. That text, and what an Odd searches for, never leaves your computer. Without the model, search works by words only and nothing changes about where data lives.
 
+### Update checks
+
+The Oddboro app checks Oddboro's own releases on GitHub for a newer version of itself as it opens and every 4 hours. GitHub sees your IP address, the app's version and your system, and nothing else of yours. A check installs nothing. When a new version is ready, the office shows it with a link to what changed, and it installs only when you click Install now or Install tonight. Wait leaves it for later.
+
+To stop the checks, open Setup and turn off "Check for updates on its own". Check now still checks when you click it. A copy you run from source never checks.
+
+### AI tool versions
+
+When the office shows your AI tools (in Setup, when you hire an Odd, or on an Odd's settings), it asks the npm registry for the newest version of Claude Code, Codex and Gemini CLI, at most once every 6 hours, and runs Grok's own update check for Grok. That is how it knows to offer you an Update button. Each request names only the tool. The registry, or Grok's maker for Grok, sees your IP address. Nothing installs unless you click Update.
+
 ### System features the software uses
 
 - **Notifications.** An Odd can ping you with a system notification. The software asks macOS, Windows, or your Linux desktop's notification service, to show it. Nothing leaves your computer.
@@ -160,7 +170,7 @@ If New Altitude offers your account a persona, such as Nate, you can add it as a
 
 ### GitHub
 
-You clone the software from GitHub. The search model also comes from Oddboro's own GitHub releases, once, when you turn on ledger search by clicking Download in Setup. GitHub sees that download request as it sees the app's update checks: your IP address and the files asked for, and nothing of yours. The office checks each file against a checksum fixed in the software before it uses it. See section 4.
+You clone the software from GitHub. The search model also comes from Oddboro's own GitHub releases, once, when you turn on ledger search by clicking Download in Setup. GitHub sees that download request as it sees the app's update checks: your IP address and the files asked for, and nothing of yours. The office checks each file against a checksum fixed in the software before it uses it. See "Ledger search" and "Update checks" in section 4.
 
 If you choose the `https://local.oddboro.com` address during setup and your computer has no [Caddy](https://caddyserver.com), the office downloads the official Caddy release from GitHub (`api.github.com` and GitHub's release files) and checks it against the published checksum. GitHub sees those download requests.
 
@@ -173,7 +183,7 @@ An Odd may also ask for your GitHub, through GitHub's own MCP server. You approv
 
 ### npm and PyPI
 
-Setup installs the software's dependencies from the npm registry. When an Odd asks for a new tool and you approve it, the office runs that tool from npm (`npx`) or PyPI (`uvx`). Each registry sees the download request.
+Setup installs the software's dependencies from the npm registry. When an Odd asks for a new tool and you approve it, the office runs that tool from npm (`npx`) or PyPI (`uvx`). Each registry sees the download request. The office also asks npm for the newest version of your AI tools, as "AI tool versions" in section 4 describes.
 
 ### The MCP Registry
 
@@ -313,6 +323,7 @@ The version at oddboro.com is the current one. Earlier versions stay in the repo
 
 ### Changes
 
+- **November 26, 2026.** Section 4 now describes the app's update checks and the AI tool version checks, which the software already made. The app now asks before it installs an update, and you can turn the checks off in Setup.
 - **November 13, 2026.** The website now counts visits: PostHog, only after you click Allow, and Cloudflare Web Analytics, without cookies. Section 3 describes both. Nothing changed in the software.
 
 ## 13. Contact

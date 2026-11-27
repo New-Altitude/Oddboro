@@ -1,8 +1,8 @@
-// When a new version of the app installs. The owner picks a window in office
-// time, 02:00 to 04:00 unless they change it. A ready update installs at the
-// start of the next window, or now when the owner presses Install now. From 15
-// minutes before then the office holds the Odds: the job clock and follow-ups
-// start nothing new. The app installs once that time has come and no run is
+// When a new version of the app installs: only when the owner says. Install
+// now installs it now; Install tonight installs it at the start of the next
+// window, which the owner picks in office time, 02:00 to 04:00 unless they
+// change it. From 15 minutes before then the office holds the Odds: the job
+// clock and follow-ups start nothing new. The app installs once that time has come and no run is
 // active, or 20 minutes after it whatever is still running. No database here,
 // so the page and the tests can import it.
 import { instant, wallClock } from './time.ts';

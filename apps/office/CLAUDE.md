@@ -1510,10 +1510,13 @@ pieces under 3,900 bytes a line, so no value is on a command line.
     (`src/lib/server/update.ts`). Only the shell may report one: from this
     computer (rule 1 of "Who the office answers") with the app's key in its
     header (`fromShell` in `src/lib/server/app-key.ts`). A release build
-    passes `ODDBORO_UPDATES=1`, which shows Check now. The office picks
-    `installAt`: the start of the owner's next window (02:00 to 04:00 office
-    time by default, `app_update` in the ledger), or now when the owner presses
-    Install now. The rules are in `@oddboro/ledger/update-window`. From 15
+    passes `ODDBORO_UPDATES=1`, which shows Check now and the switch. Nothing
+    installs without the owner: a ready update has no `installAt` until they
+    press Install now (now) or Install tonight (the start of their next
+    window, 02:00 to 04:00 office time by default, `app_update` in the
+    ledger). Wait sets it back to none and hides the floor's notice until the
+    server next starts (`waited`, kept in memory). The rules are in
+    `@oddboro/ledger/update-window`. From 15
     minutes before `installAt` the Odds are held (`held()`): the job clock and
     follow-ups start nothing new, and every run's "How the office works" says
     when Oddboro updates, to start nothing that runs past it and to write where
@@ -1524,8 +1527,15 @@ pieces under 3,900 bytes a line, so no value is on a command line.
     forgets the ready update (`loadUpdate`). The Setup tab's Updates section
     (`src/lib/ui/UpdatesSection.svelte`) shows the version (`ODDBORO_VERSION`,
     or "development"), Check now (the server writes `oddboro:update-check` on
-    its stdout), the window, and a ready update with Install now and Install
-    tonight. It hears `app_update` changes on `/api/events`.
+    its stdout), the switch "Check for updates on its own" (`OFFICE_UPDATE_CHECKS`
+    in `.env`, on unless `off`, which the shell reads before each check it
+    makes itself; Check now always checks), the window, and a ready update.
+    The floor shows the same ready update under the office's name
+    (`src/lib/ui/UpdateNote.svelte`), driven by the page's own `/api/events`
+    line. Both use `src/lib/ui/UpdateReady.svelte`: the version, What's new
+    (its entry on oddboro.com/releases, which links its code), and Install
+    now, Install tonight and Wait. Setup hears `app_update` changes on
+    `/api/events`.
 18. **Installing and signing other tools in.** The owner installs the
     office's Grok, Codex and Gemini, signs Grok and Codex in, and gives Gemini
     its API key, from the page, never Terminal

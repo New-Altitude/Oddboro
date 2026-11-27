@@ -31,8 +31,8 @@ export const PORT = 4590;
 /** The office's database port, which only Windows uses: a Mac and Linux reach it through a socket in the home. */
 export const DB_PORT = 54590;
 export const BASE = `http://127.0.0.1:${PORT}`;
-// A release build installs any newer version before its server starts. An
-// update address that refuses at once keeps a run on the build it tests.
+// A release build checks for a newer version as it opens. An update address
+// that refuses at once keeps a run's log free of a real release.
 const NO_UPDATES = 'https://127.0.0.1:9/latest.json';
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

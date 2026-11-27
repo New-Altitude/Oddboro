@@ -34,6 +34,7 @@
   import { diagnostics } from '#lib/ui/diagnostics.svelte.ts';
   import { serviceNames } from '#lib/ui/service-names.svelte.ts';
   import RestoredNote from '#lib/ui/RestoredNote.svelte';
+  import UpdateNote from '#lib/ui/UpdateNote.svelte';
   import { actCheck } from '#lib/ui/act-check.svelte.ts';
   import {
     advanced,
@@ -192,6 +193,8 @@
   let ledgerVersion = $state(0);
   /** Bumped when the owner removes a layout, so an open Layout section reads its list again. */
   let layoutsVersion = $state(0);
+  /** Goes up each time the app's update row changes, for the floor's update notice. */
+  let updateChanged = $state(0);
   /** What the page does when each table changes, by the name the event carries. */
   const ON_CHANGE = new Map<string, LiveTable['page']>(
     Object.entries(LIVE_TABLES).map(([table, live]) => [table, live.page])
@@ -785,6 +788,7 @@
       // Only the persona offers hear this: the floor meets a persona Odd, or
       // sees it go quiet, through the staff table's change, as any hire.
       if (e.type === 'persona') return void personaNews(e);
+      if (e.type === 'change' && e.table === 'app_update') return void updateChanged++;
       const page = e.table === 'chat' ? ['version'] : (ON_CHANGE.get(e.table) ?? []);
       // A move into another layout rebuilds the whole floor.
       // During the first run, and until its last drawn pieces land, the floor
@@ -1292,6 +1296,9 @@
         </div>
         {#if data.restored && !firstRun}
           <RestoredNote restored={data.restored} />
+        {/if}
+        {#if !firstRun}
+          <UpdateNote changed={updateChanged} />
         {/if}
       </div>
       {#if !firstRun}

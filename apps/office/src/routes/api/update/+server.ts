@@ -2,10 +2,11 @@
 // it has a new version downloaded and checked, `{ checked: true }` when it
 // found none, or `{ failed }` when it could not look, and GETs every 30
 // seconds until `install` is true. Only the shell may do those: from this
-// computer, with the app's key in its header (`fromShell`). The Setup tab
-// GETs the same answer and POSTs `{ action }`: `check`, `install-now` or
-// `install-tonight`. PUT sets the owner's window, `{ start, end }` as HH:MM
-// in office time.
+// computer, with the app's key in its header (`fromShell`). The Setup tab and
+// the floor's notice GET the same answer and POST `{ action }`: `check`,
+// `install-now`, `install-tonight`, `wait`, or `checks-on` and `checks-off`
+// for the owner's switch. PUT sets the owner's window, `{ start, end }` as
+// HH:MM in office time.
 import { error, json } from '@sveltejs/kit';
 import { isClock } from '@oddboro/ledger';
 import { fromShell } from '#lib/server/app-key.ts';
@@ -14,12 +15,23 @@ import {
   checked,
   installWhen,
   ready,
+  setChecks,
   setWindow,
   status
 } from '#lib/server/update.ts';
 import type { RequestHandler } from './$types';
 
 const VERSION = /^\d+\.\d+\.\d+$/;
+
+/** What the owner can ask for, by the name the page sends. */
+const ACTIONS: Record<string, () => unknown> = {
+  check: askShellToCheck,
+  'install-now': () => installWhen('now'),
+  'install-tonight': () => installWhen('tonight'),
+  wait: () => installWhen('wait'),
+  'checks-on': () => setChecks(true),
+  'checks-off': () => setChecks(false)
+};
 
 export const GET: RequestHandler = async ({ request }) => json(await status(fromShell(request)));
 
@@ -41,11 +53,11 @@ export const POST: RequestHandler = async ({ request }) => {
     } else checked(typeof b.failed === 'string' ? b.failed || 'The check failed' : undefined);
     return json(await status(true));
   }
-  if (!['check', 'install-now', 'install-tonight'].includes(b.action as string))
-    error(400, 'Say check, install-now or install-tonight');
+  const action = b.action;
+  if (typeof action !== 'string' || !Object.hasOwn(ACTIONS, action))
+    error(400, 'Say check, install-now, install-tonight, wait, checks-on or checks-off');
   try {
-    if (b.action === 'check') askShellToCheck();
-    else await installWhen(b.action === 'install-now' ? 'now' : 'tonight');
+    await ACTIONS[action]();
   } catch (e) {
     error(409, e instanceof Error ? e.message : String(e));
   }
