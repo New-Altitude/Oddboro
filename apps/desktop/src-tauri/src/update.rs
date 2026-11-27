@@ -1,9 +1,11 @@
-//! Updates. Every one is required. As the app opens, before the server
-//! starts, the shell checks for a newer version (5 second timeout) and
-//! installs it at once. While the office runs it checks every 4 hours, and
-//! whenever the server asks (`oddboro:update-check` on its stdout, from
-//! Check now). A new version downloads in the background, the server picks
-//! when it installs (`/api/update`, asked every 30 seconds), and the shell
+//! Updates. None installs without the owner's yes. As the app opens, and
+//! every 4 hours while it runs, the shell checks for a newer version (5 second
+//! timeout), unless the owner turned checks off (`OFFICE_UPDATE_CHECKS=off`
+//! in the office's settings). Check now always checks: the server asks with
+//! `oddboro:update-check` on its stdout. A new version downloads in the
+//! background, the shell tells the server (`/api/update`) and asks every 30
+//! seconds whether to install it, and the server says yes only once the owner
+//! pressed Install now, or Install tonight and the window came. Then the shell
 //! stops the server, installs it and opens the new version. Offline, or any
 //! error: it logs the problem and carries on. Release builds only.
 //!
@@ -43,44 +45,12 @@ static CHECK_NOW: OnceLock<Sender<()>> = OnceLock::new();
 /// Shows the owner that Oddboro is updating, with the version it updates to.
 pub type ShowUpdating = fn(&AppHandle, &str);
 
-/// As the app opens: install a newer version before the server starts.
-/// Returns true when it installed one and the new version is opening, so the
-/// caller must stop.
-pub fn on_launch(app: &AppHandle, log: &Path, show: ShowUpdating) -> bool {
-    if !ENABLED {
-        return false;
-    }
-    let update = match check(app) {
-        Ok(Some(update)) => update,
-        Ok(None) => {
-            server::note(log, "update check: this is the newest version");
-            return false;
-        }
-        Err(e) => {
-            server::note(log, &format!("update check failed, starting anyway: {e}"));
-            return false;
-        }
-    };
-    let (from, to) = (&update.current_version, &update.version);
-    server::note(
-        log,
-        &format!("updating from {from} to {to} before the office starts"),
-    );
-    show(app, &update.version);
-    match download(&update).and_then(|bytes| install(&update, &bytes)) {
-        Ok(()) => {
-            server::note(log, &installed(&update));
-            relaunch(app);
-            true
-        }
-        Err(e) => {
-            server::note(
-                log,
-                &format!("update to {} failed, starting anyway: {e}", update.version),
-            );
-            false
-        }
-    }
+/// The owner's switch in the office's settings. Only `off` stops the checks
+/// the shell makes on its own; Check now still checks.
+const CHECKS_KEY: &str = "OFFICE_UPDATE_CHECKS";
+
+fn checks_on(settings: &Path) -> bool {
+    crate::env::setting(settings, CHECKS_KEY).as_deref() != Some("off")
 }
 
 /// What the watcher needs: the app, the server's port, the log, and how to
@@ -92,8 +62,9 @@ pub struct Watch {
     pub show: ShowUpdating,
 }
 
-/// While the office runs: check every 4 hours and on Check now, download a
-/// new version, and install it when the server says so.
+/// As the app opens and every 4 hours, unless the owner turned checks off,
+/// and on Check now: look for a new version, download it, and hand it to the
+/// server, which installs it only on the owner's yes.
 pub fn watch(w: Watch) {
     if !ENABLED {
         return;
@@ -102,33 +73,46 @@ pub fn watch(w: Watch) {
     if CHECK_NOW.set(tx).is_err() {
         return;
     }
-    thread::spawn(move || loop {
-        match rx.recv_timeout(EVERY) {
-            Ok(()) | Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => return,
-        }
-        let found = check(&w.app).and_then(|found| match found {
-            Some(update) => {
-                server::note(&w.log, &format!("downloading {}", update.version));
-                download(&update).map(|bytes| Some((update, bytes)))
+    thread::spawn(move || {
+        // The first check is the one as the app opens.
+        let mut asked = false;
+        loop {
+            if asked || checks_on(&crate::env::settings_file()) {
+                check_and_hand_over(&w, &rx);
+            } else {
+                server::note(&w.log, "update check skipped: the owner turned checks off");
             }
-            None => Ok(None),
-        });
-        match found {
-            Ok(Some((update, bytes))) => {
-                server::note(&w.log, &format!("{} is ready to install", update.version));
-                hand_over(&w, &update, &bytes, &rx);
-            }
-            Ok(None) => {
-                server::note(&w.log, "update check: this is the newest version");
-                ask(w.port, "POST", Some(&json!({ "checked": true })));
-            }
-            Err(e) => {
-                server::note(&w.log, &format!("update check failed: {e}"));
-                ask(w.port, "POST", Some(&json!({ "failed": e })));
-            }
+            asked = match rx.recv_timeout(EVERY) {
+                Ok(()) => true,
+                Err(RecvTimeoutError::Timeout) => false,
+                Err(RecvTimeoutError::Disconnected) => return,
+            };
         }
     });
+}
+
+fn check_and_hand_over(w: &Watch, checks: &Receiver<()>) {
+    let found = check(&w.app).and_then(|found| match found {
+        Some(update) => {
+            server::note(&w.log, &format!("downloading {}", update.version));
+            download(&update).map(|bytes| Some((update, bytes)))
+        }
+        None => Ok(None),
+    });
+    match found {
+        Ok(Some((update, bytes))) => {
+            server::note(&w.log, &format!("{} is ready to install", update.version));
+            hand_over(w, &update, &bytes, checks);
+        }
+        Ok(None) => {
+            server::note(&w.log, "update check: this is the newest version");
+            ask(w.port, "POST", Some(&json!({ "checked": true })));
+        }
+        Err(e) => {
+            server::note(&w.log, &format!("update check failed: {e}"));
+            ask(w.port, "POST", Some(&json!({ "failed": e })));
+        }
+    }
 }
 
 /// The server asked for a check (Check now).
@@ -139,8 +123,9 @@ pub fn check_now() {
 }
 
 /// Tell the server a version is ready, then ask it every 30 seconds until it
-/// says to install. A server that restarted forgets the update, so the shell
-/// tells it again.
+/// says to install, which it does only on the owner's yes. A server that
+/// restarted forgets the update, so the shell tells it again. Before the
+/// server is up there is no key and nothing to ask, so the first tell waits.
 fn hand_over(w: &Watch, update: &Update, bytes: &[u8], checks: &Receiver<()>) {
     let (app, port, log) = (&w.app, w.port, w.log.as_path());
     let ready =
@@ -305,4 +290,36 @@ fn running(pid: u32) -> bool {
 fn ask(port: u16, method: &str, body: Option<&Value>) -> Option<Value> {
     let key = crate::key::current()?;
     server::call(port, &key, method, "/api/update", body)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn only_off_stops_the_checks_the_shell_makes_itself() {
+        let dir = std::env::temp_dir().join(format!("oddboro-update-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let on = |name: &str, text: Option<&str>| {
+            let file = dir.join(name);
+            if let Some(text) = text {
+                fs::write(&file, text).unwrap();
+            }
+            checks_on(&file)
+        };
+        assert!(!on(
+            "off.env",
+            Some("PORT=4500\nOFFICE_UPDATE_CHECKS=off\n")
+        ));
+        assert!(on("on.env", Some("OFFICE_UPDATE_CHECKS=on\n")));
+        assert!(on("unset.env", Some("PORT=4500\n")));
+        assert!(on("missing.env", None));
+        // The last line wins, as the office's own reader has it.
+        assert!(on(
+            "later.env",
+            Some("OFFICE_UPDATE_CHECKS=off\nOFFICE_UPDATE_CHECKS=on\n")
+        ));
+        fs::remove_dir_all(&dir).unwrap();
+    }
 }

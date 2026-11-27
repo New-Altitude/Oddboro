@@ -1348,9 +1348,10 @@ export const switchedOff = pgTable(
 
 /**
  * The app's updates. One row. The owner's window, in office time, is when a
- * new version may install. The shell reports the version it has downloaded
- * (`readyVersion`), and the office picks `installAt`: the next window's start,
- * or now when the owner presses Install now. `downAt` and `upAt` are when the
+ * new version installs if they press Install tonight. The shell reports the
+ * version it has downloaded (`readyVersion`), and `installAt` stays null until
+ * the owner says when: the next window's start for Install tonight, or now
+ * for Install now. Wait sets it back to null. `downAt` and `upAt` are when the
  * app last went down for an update and came back, so a poke due between them
  * still lands. See `update-window.ts`.
  */

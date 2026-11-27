@@ -24,8 +24,9 @@ would rather not be named.
 
 ## Supported versions
 
-Only the newest release. Every update is required and installs itself, so a
-fix reaches every copy of Oddboro and older versions are not patched.
+Only the newest release. The app checks for updates and asks before it
+installs each one, so install an update to get its fix. Older versions are
+not patched.
 
 ## Scope
 

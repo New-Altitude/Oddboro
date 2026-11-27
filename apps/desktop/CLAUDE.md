@@ -20,11 +20,10 @@ an update (`update.rs`).
 
 ## What the shell does
 
-1. Checks for a newer version before anything else (`update::on_launch`,
-   5 second timeout). If there is one, the loading window says "Updating
-   Oddboro to X.Y.Z", and the shell downloads it, checks its signature,
-   installs it and opens the new version. Offline or any error, it logs the
-   problem and starts as it is. See "Updates" below.
+1. Starts the update watcher (`update::watch`, just before Node). Its first
+   check runs at once, beside the steps below, unless the owner turned
+   checks off. It never installs before the owner says yes. See "Updates"
+   below.
 2. Checks the port. If anything answers on it, shows "another office is
    already running" and quits. It never attaches to that office.
 3. Reads the owner's login-shell PATH once (`$SHELL -l -i -c`, so
@@ -55,7 +54,8 @@ digits>`, answered with HMAC-SHA256 under the key of `oddboro-proof:` and
    wins when set) and `%LOCALAPPDATA%\Oddboro\Logs\office.log` on Windows,
    or wherever `ODDBORO_LOG` says. Its own lines start `oddboro: ` and the
    time in UTC: first `Oddboro <version> (<target>) opening` with the pid,
-   port, home and webview version, then the update check, `started node`,
+   port, home and webview version, then `started node` and the update check
+   (in either order, since the check runs beside the start),
    `office page loaded: <url>` once the window has the page, and the words
    of every dialog it shows (`dialog: ...`), written before the dialog waits
    for OK. The office adds `office:` lines (each startup step's time,
@@ -240,25 +240,29 @@ Saving a report works with online diagnostics off.
 
 ## Updates
 
-Every update is required. `src-tauri/src/update.rs` runs them with
-`tauri-plugin-updater`, in release builds only.
+No update installs without the owner's yes. `src-tauri/src/update.rs` runs
+them with `tauri-plugin-updater`, in release builds only.
 
 1. The app checks
    `https://github.com/New-Altitude/Oddboro/releases/latest/download/latest.json`.
    A draft release is invisible there, so nothing updates until the owner
    publishes one. `ODDBORO_UPDATE_URL` replaces the address, for testing on
    this Mac only.
-2. On launch it installs a newer version before the server starts (step 1
-   above).
-3. While the office runs it checks every 4 hours, and when the server writes
-   `oddboro:update-check` (Check now in Setup). It downloads a new version in
+2. It checks as the app opens and every 4 hours, unless the owner turned
+   checks off: it reads `OFFICE_UPDATE_CHECKS` from the office's settings
+   file (`env::settings_file`) before each, and skips on `off`. It always
+   checks when the server writes `oddboro:update-check` (Check now in Setup,
+   or an Odd asked to in the owner's chat).
+3. It downloads a new version in
    the background and checks its signature against the public key in
    `tauri.conf.json`, then `POST`s `{ version, notes }` to
    `http://127.0.0.1:<port>/api/update` with the app's key in the header
    `X-Oddboro-Key`. A check that finds nothing posts
    `{ checked: true }`; one that fails posts `{ failed }`.
-4. Then it asks `GET /api/update` every 30 seconds. When the answer has
-   `install: true` (the server decides, see `apps/office/CLAUDE.md`), it stops
+4. Then it asks `GET /api/update` every 30 seconds. Before Node is up there
+   is no key, so it waits. When the answer has `install: true` (only after
+   the owner pressed Install now or Install tonight, see
+   `apps/office/CLAUDE.md`), it stops
    Node the usual way (`server::stop`), installs, and opens the new version.
 5. On a Mac it reopens itself with `open -n` and passes every `ODDBORO_*`
    variable on with `--env`, since launchd drops the old process's

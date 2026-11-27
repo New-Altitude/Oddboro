@@ -30,6 +30,23 @@ pub fn office_home() -> PathBuf {
     env::var_os("ODDBORO_HOME").map_or_else(|| home().join(".oddboro"), PathBuf::from)
 }
 
+/// The office's settings file: `ODDBORO_ENV`, or `.env` in the office's home.
+/// The rule `ENV_FILE` follows in `packages/ledger/src/env.ts`, for the app.
+pub fn settings_file() -> PathBuf {
+    env::var_os("ODDBORO_ENV").map_or_else(|| office_home().join(".env"), PathBuf::from)
+}
+
+/// A key's value in a settings file, read as `readEnv` in
+/// `packages/ledger/src/env.ts` reads it: the last `KEY=value` line wins.
+pub fn setting(file: &std::path::Path, key: &str) -> Option<String> {
+    let text = std::fs::read_to_string(file).ok()?;
+    text.lines()
+        .rev()
+        .filter_map(|line| line.trim().split_once('='))
+        .find(|(k, _)| *k == key)
+        .map(|(_, value)| value.to_string())
+}
+
 /// `ODDBORO_LOG` from the shell's own environment, so a test's run never
 /// writes to the owner's log, or else where Node's output goes:
 /// `~/Library/Logs/Oddboro` on a Mac, and on Linux and Windows the folder the

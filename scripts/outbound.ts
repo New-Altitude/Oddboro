@@ -236,7 +236,7 @@ export const OUTBOUND: readonly Outbound[] = [
     calls: 1,
     to: "The desktop app's update feed on GitHub (tauri.conf.json's updater endpoints).",
     sends: "The app's version and system, as the updater asks for its feed.",
-    yes: 'The owner installing the desktop app, which checks for updates.'
+    yes: "The owner's switch in Setup, Check for updates on its own, which is on unless they turn it off, or their Check now. An update installs only after their Install now or Install tonight."
   },
   {
     file: 'apps/desktop/src-tauri/src/diagnostics.rs',

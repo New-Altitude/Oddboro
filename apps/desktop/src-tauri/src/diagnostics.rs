@@ -5,7 +5,6 @@
 //! office is signed in to a New Altitude account, each with its access token.
 
 use std::borrow::Cow;
-use std::fs;
 use std::panic;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -93,10 +92,7 @@ impl Diagnostics {
     /// None when no report address is set or it is not a DSN: then the
     /// shell reports nothing and installs no panic hook.
     pub fn find() -> Option<Self> {
-        // The rule `ENV_FILE` follows in `packages/ledger/src/env.ts`, for
-        // the app, where the office's settings live in its home.
-        let settings = std::env::var_os("ODDBORO_ENV")
-            .map_or_else(|| env::office_home().join(".env"), PathBuf::from);
+        let settings = env::settings_file();
         Self::from_settings(
             |key| std::env::var(key).ok(),
             option_env!("ODDBORO_DIAGNOSTICS_DSN"),
@@ -137,7 +133,7 @@ impl Diagnostics {
     /// Read at send time, so the owner's latest answer holds. A missing or
     /// unreadable file means no.
     fn allowed(&self) -> bool {
-        setting(&self.settings, ANSWER_KEY).as_deref() == Some("yes")
+        env::setting(&self.settings, ANSWER_KEY).as_deref() == Some("yes")
     }
 
     /// Reports a panic, then hands it on to the hook that was there before.
@@ -260,7 +256,7 @@ fn find_setting(
     environment
         .filter(|v| !v.is_empty())
         .or_else(|| built.filter(|v| !v.is_empty()).map(str::to_string))
-        .or_else(|| setting(settings, key).filter(|v| !v.is_empty()))
+        .or_else(|| env::setting(settings, key).filter(|v| !v.is_empty()))
 }
 
 /// Whether reports sent to this address need a New Altitude sign-in: New
@@ -366,17 +362,6 @@ impl TransportFactory for SignedIn {
                 .build(),
         )
     }
-}
-
-/// A key's value in a settings file, read as `readEnv` in
-/// `packages/ledger/src/env.ts` reads it: the last `KEY=value` line wins.
-fn setting(file: &Path, key: &str) -> Option<String> {
-    let text = fs::read_to_string(file).ok()?;
-    text.lines()
-        .rev()
-        .filter_map(|line| line.trim().split_once('='))
-        .find(|(k, _)| *k == key)
-        .map(|(_, value)| value.to_string())
 }
 
 /// The one rule every shell report passes on its way out, an allow-list: an
@@ -549,6 +534,7 @@ fn report_path(path: &str, home: &str) -> String {
 mod tests {
     use super::*;
     use crate::server::Server;
+    use std::fs;
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::TcpListener;
     use std::process::Command;

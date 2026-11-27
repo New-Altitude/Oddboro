@@ -1,22 +1,13 @@
 <script lang="ts">
   import { clockTime } from '@oddboro/ledger/time';
   import { call, type ApiUrl } from './api.ts';
+  import UpdateReady, { type UpdateStatus } from './UpdateReady.svelte';
   let { showWindow = true }: { showWindow?: boolean } = $props();
 
   // The Setup tab's Updates section: the version this is, Check now, the
-  // window updates install in, and a ready update with Install now and
-  // Install tonight. It hears the server when an update lands, so nothing polls.
-  type UpdateStatus = {
-    ready: boolean;
-    version: string | null;
-    installAt: string | null;
-    holding: boolean;
-    current: string;
-    managed: boolean;
-    window: { start: string; end: string };
-    checked: { at: string; result: 'none' | 'ready' | 'failed'; problem?: string } | null;
-    checking: boolean;
-  };
+  // owner's switch for the checks the app makes on its own, a ready update
+  // with Install now, Install tonight and Wait, and the window Install
+  // tonight uses. It hears the server when an update lands, so nothing polls.
   let update = $state<UpdateStatus | undefined>();
   let start = $state('02:00');
   let end = $state('04:00');
@@ -60,7 +51,6 @@
       void act({ start, end }, 'PUT');
   };
 
-  const when = $derived(update?.installAt ? clockTime(new Date(update.installAt)) : '');
   const lastCheck = $derived.by(() => {
     const c = update?.checked;
     if (!c || c.result === 'ready') return '';
@@ -70,8 +60,6 @@
       : `The check at ${at} failed: ${c.problem}`;
   });
   const field = 'rounded-lg bg-raise px-2 py-1.5 text-xs outline-none';
-  const button =
-    'rounded-lg bg-raise px-3 py-2 text-xs font-medium hover:bg-sea/20 disabled:opacity-40';
 </script>
 
 <section class="flex flex-col gap-2" aria-label="Updates">
@@ -92,36 +80,42 @@
     <p class="text-xs text-muted">
       {update.current === 'development'
         ? 'This is a development build. Only the Oddboro app updates itself.'
-        : `This is Oddboro ${update.current}. Every update installs in your chosen window.`}
+        : `This is Oddboro ${update.current}. An update installs only when you say.`}
     </p>
     {#if update.ready}
-      <div class="flex flex-col gap-2 rounded-lg bg-sea/15 px-3 py-2 text-xs">
-        <p class="font-medium text-ink">Update ready: {update.version}</p>
-        <p class="text-muted">
-          {#if update.holding}
-            Your Odds start nothing new and finish what they have. Oddboro then installs it and
-            opens again.
-          {:else}
-            It installs at {when}. Your Odds stop starting new work 15 minutes before.
-          {/if}
-        </p>
-        <div class="flex gap-2">
-          <button
-            class="rounded-lg bg-sea px-3 py-2 text-xs font-medium text-night disabled:opacity-40"
-            disabled={busy || update.holding}
-            onclick={() => act({ action: 'install-now' })}>Install now</button
-          >
-          <button class={button} disabled={busy} onclick={() => act({ action: 'install-tonight' })}
-            >Install tonight</button
-          >
-        </div>
-      </div>
+      <UpdateReady {update} {busy} act={(action) => act({ action })} />
     {:else if lastCheck}
       <p class="text-xs text-faint">{lastCheck}</p>
     {/if}
+    {#if update.managed && showWindow}
+      <button
+        class="flex items-center gap-3 rounded-lg bg-raise px-3 py-2 text-start text-xs disabled:opacity-40"
+        role="switch"
+        aria-checked={update.checks}
+        aria-describedby="update-checks"
+        disabled={busy}
+        onclick={() => act({ action: update?.checks ? 'checks-off' : 'checks-on' })}
+      >
+        <span class="min-w-0 flex-1 text-ink">Check for updates on its own</span>
+        <span
+          class="flex h-5 w-9 shrink-0 items-center rounded-full p-0.5 {update.checks
+            ? 'justify-end bg-sea'
+            : 'justify-start bg-night/60'}"
+          aria-hidden="true"
+        >
+          <span class="size-4 rounded-full {update.checks ? 'bg-night' : 'bg-muted'}"></span>
+        </span>
+      </button>
+      <p id="update-checks" class="text-xs leading-relaxed text-muted">
+        {update.checks
+          ? 'Oddboro asks GitHub for a newer version when it opens and every 4 hours.'
+          : 'Oddboro looks for a newer version only when you press Check now.'}
+        A check tells GitHub this app's version and system, and installs nothing.
+      </p>
+    {/if}
     {#if showWindow}
       <div class="flex flex-wrap items-center gap-2 text-xs text-muted">
-        <span>Installs between</span>
+        <span>Install tonight installs between</span>
         <input
           class={field}
           type="time"

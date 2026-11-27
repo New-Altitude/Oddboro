@@ -300,7 +300,8 @@ export const OWNER_ACTIONS = {
     none: 'Saves the one LegalZoom mailbox the office reads, marks the tool ready, and ticks the step.'
   },
   // The app's shell reporting an update, and the owner picking when it
-  // installs: both write the `app_update` row.
+  // installs or saying wait: both write the `app_update` row. The owner's
+  // switch for update checks writes `.env`.
   'POST /api/update': { none: NO_ROW },
   // The owner's update window, in the `app_update` row.
   'PUT /api/update': { none: NO_ROW },

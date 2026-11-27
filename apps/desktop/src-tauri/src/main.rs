@@ -153,12 +153,6 @@ fn start(app: &AppHandle, diagnostics: Option<&Diagnostics>) {
         return;
     }
 
-    // A newer version installs before the server starts, so an update never
-    // swaps the server out from under a running office.
-    if update::on_launch(app, &env::log_file(), show_updating) {
-        return;
-    }
-
     if server::port_taken(port) {
         fail(
             app,
