@@ -20,7 +20,7 @@
   import Lesson from './Lesson.svelte';
   import PersonaQuiet from './PersonaQuiet.svelte';
   import { newTurnId } from '#lib/staff/chat-input.ts';
-  import { call, sendFile, failure, type ApiUrl } from './api.ts';
+  import { call, sendFile, failure, post, type ApiUrl } from './api.ts';
   import ChatFiles from './ChatFiles.svelte';
   import { advanced, openProject } from './windows.svelte.ts';
   import { hideChoiceLines } from '#lib/choices.ts';
@@ -727,21 +727,18 @@
     scrollDown();
     onstart();
     try {
-      const res = await fetch(`/api/staff/${profile.id}/chat` satisfies ApiUrl, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(
-          retry?.inputHash
-            ? { turnId }
-            : {
-                turnId,
-                message,
-                about: context.about?.key ?? retry?.about?.key,
-                re: re && { kind: re.kind, id: re.id },
-                ...(files.length ? { files: files.map(({ tag, name }) => ({ tag, name })) } : {})
-              }
-        )
-      });
+      const res = await post(
+        `/api/staff/${profile.id}/chat`,
+        retry?.inputHash
+          ? { turnId }
+          : {
+              turnId,
+              message,
+              about: context.about?.key ?? retry?.about?.key,
+              re: re && { kind: re.kind, id: re.id },
+              ...(files.length ? { files: files.map(({ tag, name }) => ({ tag, name })) } : {})
+            }
+      );
       if (!res.ok || !res.body) throw await failure(res);
       const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
       let buffer = '';

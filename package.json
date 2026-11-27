@@ -12,7 +12,7 @@
     "db:migrate": "npm run migrate -w @oddboro/ledger",
     "db:generate": "npm run generate -w @oddboro/ledger",
     "lint": "npm run lint:guards && npm run format:check && turbo run lint",
-    "lint:guards": "node scripts/check-voice.ts && node scripts/check-stack.ts && node scripts/check-directions.ts && node scripts/check-context-index.ts && node scripts/check-ledger.ts && node scripts/check-private.ts && node scripts/check-secrets.ts && node scripts/check-platform.ts && node scripts/check-outbound.ts",
+    "lint:guards": "node scripts/check-voice.ts && node scripts/check-stack.ts && node scripts/check-directions.ts && node scripts/check-context-index.ts && node scripts/check-ledger.ts && node scripts/check-private.ts && node scripts/check-secrets.ts && node scripts/check-platform.ts && node scripts/check-page-writes.ts && node scripts/check-outbound.ts",
     "check-types": "turbo run check-types",
     "test": "turbo run test",
     "format": "prettier --write .",

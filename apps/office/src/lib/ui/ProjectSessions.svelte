@@ -8,6 +8,7 @@
   } from '@oddboro/ledger';
   import type { StaffProfile } from '../staff/roster.ts';
   import Pixel from './Pixel.svelte';
+  import { post } from './api.ts';
   import { projectApi } from './project-api.ts';
   import ProjectTerminal from './ProjectTerminal.svelte';
   import { LOGOS } from './tool-logos.ts';
@@ -193,11 +194,7 @@
     found = true;
   }
   async function pick() {
-    const r = await fetch('/api/folders/pick', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ for: 'your project session' })
-    });
+    const r = await post('/api/folders/pick', { for: 'your project session' });
     const b = await r.json();
     if (b.path) folder = b.path;
     else if (b.unavailable) throw new Error(b.unavailable);

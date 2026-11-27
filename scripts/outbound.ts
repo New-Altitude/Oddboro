@@ -42,10 +42,10 @@ export const OUTBOUND: readonly Outbound[] = [
   },
   {
     file: 'apps/office/src/lib/ui/ProjectSessions.svelte',
-    calls: 2,
+    calls: 1,
     to: 'The office on this computer.',
-    sends: 'The selected session ID for updates and a request for the system folder picker.',
-    yes: 'The owner opening Projects and choosing a project folder.'
+    sends: 'The selected session ID for updates.',
+    yes: 'The owner opening Projects.'
   },
   {
     file: 'apps/office/src/lib/ui/ProjectTerminal.svelte',
@@ -53,13 +53,6 @@ export const OUTBOUND: readonly Outbound[] = [
     to: 'The office on this computer.',
     sends: 'The selected session and terminal view IDs for its output stream.',
     yes: 'The owner opening that native terminal.'
-  },
-  {
-    file: 'apps/office/src/lib/ui/project-api.ts',
-    calls: 1,
-    to: 'The office on this computer.',
-    sends: 'The selected project action, instruction, file reference or native terminal input.',
-    yes: 'The owner taking that action in Projects. Native tool approval remains in the native conversation.'
   },
   {
     file: 'apps/office/src/lib/server/access.ts',
@@ -101,10 +94,10 @@ export const OUTBOUND: readonly Outbound[] = [
   },
   {
     file: 'apps/office/src/lib/ui/ChatPanel.svelte',
-    calls: 2,
+    calls: 1,
     to: 'The office, on this computer: the chat route.',
-    sends: "The owner's chat messages, to the office that runs the Odd.",
-    yes: 'The owner sending the message; nothing leaves this computer here.'
+    sends: "A request for the chat so far. The owner's messages go through `api.ts`.",
+    yes: 'The owner opening the chat; nothing leaves this computer here.'
   },
   {
     file: 'apps/office/src/lib/ui/UpdatesSection.svelte',
@@ -118,7 +111,7 @@ export const OUTBOUND: readonly Outbound[] = [
     calls: 4,
     to: "The office, on this computer: the page's routes.",
     sends:
-      "The owner's actions on the page, to the office, and each file the owner attaches in a chat (`sendFile`).",
+      "Every write the page makes (check-page-writes.ts holds it to these): the owner's actions, chat messages, each file the owner attaches in a chat (`sendFile`), the Projects actions and folder picker, and the page's boot and error lines for the log on this computer.",
     yes: 'The owner acting on the page; nothing leaves this computer here.'
   },
   {
@@ -183,11 +176,11 @@ export const OUTBOUND: readonly Outbound[] = [
   },
   {
     file: 'apps/office/src/hooks.client.ts',
-    calls: 2,
+    calls: 1,
     to: 'The office itself: the page sends through it and never to the relay.',
     sends:
-      'Error and trace reports from the page, each through the same filter, which the office then forwards as `instrumentation.server.ts` says. Also, to /api/client-log, that the page booted and each error it hit, at most 20 a page load, which the office writes to the log on this computer and sends nowhere.',
-    yes: "The owner's Diagnostics switch in Setup for the reports. With no answer, the office drops what it gets. The log lines stay on this computer, so they need none."
+      'Error and trace reports from the page, each through the same filter, which the office then forwards as `instrumentation.server.ts` says. Its boot and error lines for the log go through `api.ts`.',
+    yes: "The owner's Diagnostics switch in Setup for the reports. With no answer, the office drops what it gets."
   },
   {
     file: 'apps/office/src/lib/server/versions.ts',

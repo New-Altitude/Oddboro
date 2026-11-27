@@ -63,14 +63,22 @@ export async function failure(res: Response): Promise<Error> {
   return new Error(message || `HTTP ${res.status}`);
 }
 
-/** A POST whose answer streams a line of JSON at a time. Each line goes to `on` as it lands. */
-export async function stream<T>(url: ApiUrl, body: unknown, on: (line: T) => void): Promise<void> {
-  const res = await fetch(url, {
+/**
+ * A JSON POST whose answer the caller reads itself, such as the chat's event
+ * stream. `keepalive` lets one sent as the page closes still arrive.
+ */
+export function post(url: ApiUrl, body: unknown, keepalive = false): Promise<Response> {
+  return fetch(url, {
     method: 'POST',
+    keepalive,
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body)
   });
-  await lines(res, on);
+}
+
+/** A POST whose answer streams a line of JSON at a time. Each line goes to `on` as it lands. */
+export async function stream<T>(url: ApiUrl, body: unknown, on: (line: T) => void): Promise<void> {
+  await lines(await post(url, body), on);
 }
 
 /** Follow a GET that streams a line of JSON at a time, until it ends. */
