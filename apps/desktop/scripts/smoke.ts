@@ -74,12 +74,14 @@ import {
   PORT,
   ps,
   quit,
+  quitCommand,
   ready,
   run,
   screenshot,
   send,
   shellPids,
   sleep,
+  stopRun,
   stubClaude,
   tcp,
   uninstallEntry,
@@ -624,11 +626,17 @@ async function smokeApp(): Promise<void> {
       });
     }
   }
-  const claude = CI && !args.installed;
-  if (claude) await step('a stand-in Claude Code where an install puts it', true, stubClaude);
+  // Not for --installed: a build from before ODDBORO_EXTRA_PATH would not look there.
+  const claude = !args.installed;
+  const standIn = claude
+    ? await step('a stand-in Claude Code in a folder of its own', true, () =>
+        stubClaude(mkdtempSync(join(tmpdir(), 'oddboro-smoke-bin-')))
+      )
+    : undefined;
 
   const r = makeRun(OUT);
   currentRun = r;
+  if (standIn) r.env.ODDBORO_EXTRA_PATH = dirname(standIn.program);
   // Linux and Windows: the office then has no secret store. The Mac's shell
   // sets its own, which --my-keychain accepted above.
   if (!CI) r.env.ODDBORO_SECRETS = 'office';
@@ -674,6 +682,12 @@ async function smokeApp(): Promise<void> {
     () => logText(r),
     false
   );
+  if (standIn)
+    await step('the office found Claude Code in ODDBORO_EXTRA_PATH first', true, () => {
+      const calls = existsSync(standIn.ran) ? readFileSync(standIn.ran, 'utf8').trim() : '';
+      if (!calls) throw new Error(`the stand-in in ${dirname(standIn.program)} never ran`);
+      return `it ran: ${[...new Set(calls.split('\n'))].join('; ')}`;
+    });
   await step('the log has the window loading the page, and the page booting', health, async () => {
     const text = await until(
       'both lines',
@@ -722,11 +736,24 @@ async function smokeApp(): Promise<void> {
     }
   );
   await step('a screenshot', false, () => screenshot(join(OUT, 'screen.png')));
+  // What the office said of its database at each quit (NEW-1776). Not for the
+  // first quit on Linux: ending the WebDriver session can end the shell
+  // before Node's last line reaches the log.
+  const closing: string[] = [];
+  const databaseSaid = (from: number) =>
+    logText(r)
+      .slice(from)
+      .match(/office: database ([^\n]*)/)?.[1] ?? 'no "office: database" line';
   await step('quits with Node and both ports gone', true, async () => {
     if (stopDriven) return `${await stopDriven()}; the relaunches quit with SIGTERM`;
-    return `${await quit(app!, r)} ms`;
+    const from = logText(r).length;
+    const ms = await quit(app!, r, WIN ? exe : undefined);
+    closing.push(databaseSaid(from));
+    return `${ms} ms${WIN ? ', by `oddboro --quit`' : ''}`;
   });
 
+  // Windows quits by `oddboro --quit` each time; the Mac and Linux by SIGTERM,
+  // and by `oddboro --quit` the last time, so every system's --quit is tried.
   const relaunches = Number(args.relaunches);
   await step(`starts again ${relaunches} times, with its data`, true, async () => {
     const times: number[] = [];
@@ -734,10 +761,30 @@ async function smokeApp(): Promise<void> {
       const again = launch(exe, r);
       times.push(await ready(again, r));
       // Its data is checked on the staged server (--stage), which this run can give a key.
-      await quit(again, r);
+      const from = logText(r).length;
+      await quit(again, r, WIN || i === relaunches ? exe : undefined);
+      closing.push(databaseSaid(from));
     }
-    return `starts (ms): ${times.join(', ')}`;
+    return `starts (ms): ${times.join(', ')}; the last quit by \`oddboro --quit\``;
   });
+  // A build from before NEW-1776 says nothing of its database, so not for --installed.
+  if (!args.installed)
+    await step('each quit closes the office database first (NEW-1776)', true, () => {
+      if (!closing.length || closing.some((c) => c !== 'closed'))
+        throw new Error(`the office said, quit by quit: ${closing.join('; ') || 'nothing'}`);
+      return `closed at all ${closing.length} quits`;
+    });
+  // A build from before --quit would start instead, so not for --installed.
+  if (!args.installed)
+    await step('`oddboro --quit` with nothing running starts nothing', true, async () => {
+      const code = await quitCommand(exe, r);
+      if (code !== 0) throw new Error(`it exited ${code}`);
+      if (await tcp(PORT)) {
+        const left = await stopRun(r, '--quit with nothing running');
+        throw new Error(`something answers on ${PORT} after it (${left})`);
+      }
+      return 'it exited 0, and nothing answers on the port';
+    });
   if (installed.uninstall) await step('uninstalls silently', true, installed.uninstall);
 }
 

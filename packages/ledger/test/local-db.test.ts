@@ -123,3 +123,47 @@ test(
     );
   }
 );
+
+test('stopLocalDatabase closes the database before an exit, and its files open again whole (NEW-1776)', async () => {
+  const home = join(folder, 'closing');
+  mkdirSync(home);
+  const port = await free();
+  const run = (body: string) => {
+    const script = `
+      const m = await import(${JSON.stringify(new URL('../src/local-db.ts', import.meta.url).href)});
+      ${body}
+    `;
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      ODDBORO_HOME: home,
+      ODDBORO_DB_PORT: String(port),
+      ODDBORO_ENV: join(home, 'none.env'),
+      ODDBORO_LOCAL_DB: '1'
+    };
+    delete env.DATABASE_URL;
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+      env,
+      encoding: 'utf8'
+    });
+    assert.equal(r.status, 0, r.stderr);
+    return r.stdout.trim().split('\n');
+  };
+  assert.deepEqual(
+    run(`
+      console.log(await m.stopLocalDatabase());
+      await m.startLocalDatabase();
+      await globalThis.localDatabase.db.exec("create table kept (n int); insert into kept values (7)");
+      console.log(await m.stopLocalDatabase());
+    `),
+    ['not open', 'closed']
+  );
+  assert.deepEqual(
+    run(`
+      await m.startLocalDatabase();
+      const r = await globalThis.localDatabase.db.query("select n from kept");
+      console.log(r.rows[0].n);
+      console.log(await m.stopLocalDatabase());
+    `),
+    ['7', 'closed']
+  );
+});

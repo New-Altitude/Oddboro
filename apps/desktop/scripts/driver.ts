@@ -520,7 +520,7 @@ function noStrays(r: Run): void {
  * After a quit that did not finish in time: stops what this run started, and
  * says what it found. Anything else is named, never stopped.
  */
-async function stopRun(r: Run, what: string): Promise<string> {
+export async function stopRun(r: Run, what: string): Promise<string> {
   const left = await leftRunning(r);
   killRun(r);
   if (!(await goneWithin(r, 10)))
@@ -530,14 +530,31 @@ async function stopRun(r: Run, what: string): Promise<string> {
 }
 
 /**
- * Mac and Linux: SIGTERM, the shell's normal quit. Windows has no signal a
- * script can send, so a kill, which closes Node's stdin and so stops it.
+ * Runs `oddboro --quit` and waits for it to end: it asks the Oddboro already
+ * running to quit as its menu does, and starts nothing itself.
  */
-export async function quit(app: ChildProcess, r: Run): Promise<number> {
+export async function quitCommand(exe: string, r: Run, secs = 30): Promise<number | null> {
+  const asking = spawn(exe, ['--quit'], { env: { ...process.env, ...r.env }, stdio: 'ignore' });
+  return until(
+    '`oddboro --quit` to end',
+    async () => (asking.exitCode !== null ? { code: asking.exitCode } : undefined),
+    secs
+  ).then((e) => e.code);
+}
+
+/**
+ * Quits as the menu does. Mac and Linux: SIGTERM, unless `exe` is given.
+ * With `exe`, and always on Windows, which has no signal a script can send:
+ * `oddboro --quit`. A build without --quit then fails here, by the log's
+ * missing "quit asked" line, rather than being killed.
+ */
+export async function quit(app: ChildProcess, r: Run, exe?: string): Promise<number> {
   const started = Date.now();
   // Everything under the shell, noted while it still has its parent.
   runPids(r);
-  if (WIN) app.kill();
+  const logged = logText(r).length;
+  if (exe) await quitCommand(exe, r);
+  else if (WIN) throw new Error('on Windows a quit needs the app, for `oddboro --quit`');
   else app.kill('SIGTERM');
   if (await goneWithin(r, 15)) {
     // Timed before the look for strays, which takes seconds on Windows.
@@ -546,6 +563,10 @@ export async function quit(app: ChildProcess, r: Run): Promise<number> {
     return ms;
   }
   const left = await stopRun(r, 'the quit');
+  if (exe && !logText(r).slice(logged).includes('quit asked by'))
+    throw new Error(
+      `\`oddboro --quit\` did not reach it: no "quit asked" line (${left}). Stopped what this run started`
+    );
   throw new Error(`still running 15 s after the quit (${left}); stopped what this run started`);
 }
 
@@ -755,14 +776,17 @@ export function screenshot(file: string): string {
 }
 
 /**
- * A stand-in Claude Code where an installed one would be: in npm's layout on
- * Windows (a .cmd shim beside node_modules, PR #18's case), a script in
- * ~/.local/bin elsewhere. It answers --version and auth status, nothing more.
- * Only on a CI runner: on a developer's computer it would shadow their own.
+ * A stand-in Claude Code in a folder of its own, which the run puts first on
+ * the office's PATH through ODDBORO_EXTRA_PATH, so nothing goes into the
+ * owner's own folders. In npm's layout on Windows (a .cmd shim beside
+ * node_modules, PR #18's case), a script elsewhere. It answers --version and
+ * auth status, nothing more, and adds each call to `ran.txt` beside it, which
+ * is how a run sees that the office found it there.
  */
-export function stubClaude(): string {
-  const bin = join(homedir(), '.local', 'bin');
+export function stubClaude(bin: string): { program: string; ran: string } {
+  const ran = join(bin, 'ran.txt');
   const answers = `const a = process.argv.slice(2).join(' ');
+require('node:fs').appendFileSync(${JSON.stringify(ran)}, a + '\\n');
 if (a === '--version') console.log('9.9.9 (Claude Code)');
 else if (a === 'auth status') console.log(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai' }));
 else { console.error('smoke stand-in: ' + a); process.exit(1); }
@@ -773,7 +797,7 @@ else { console.error('smoke stand-in: ' + a); process.exit(1); }
     writeFileSync(join(pkg, 'package.json'), JSON.stringify({ bin: { claude: 'cli.js' } }));
     writeFileSync(join(pkg, 'cli.js'), answers);
     writeFileSync(join(bin, 'claude.cmd'), '@echo off\r\n');
-    return join(bin, 'claude.cmd');
+    return { program: join(bin, 'claude.cmd'), ran };
   }
   // This script's own Node, by its full path: the app's PATH comes from the
   // login shell, which may not hold the runner's.
@@ -784,5 +808,5 @@ else { console.error('smoke stand-in: ' + a); process.exit(1); }
   const sq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
   writeFileSync(file, `#!/bin/sh\nexec ${sq(process.execPath)} ${sq(js)} "$@"\n`);
   chmodSync(file, 0o755);
-  return file;
+  return { program: file, ran };
 }

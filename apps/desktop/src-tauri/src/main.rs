@@ -52,6 +52,11 @@ mod exit {
 }
 
 fn main() {
+    // A Mac has no single-instance plugin to carry the ask, so a signal does.
+    #[cfg(target_os = "macos")]
+    if quit_asked(std::env::args()) {
+        return quit_running();
+    }
     // A version the updater just installed waits for the one it replaced.
     update::wait_for_old();
     let diagnostics = Diagnostics::find().map(Arc::new);
@@ -60,10 +65,17 @@ fn main() {
     }
     let builder = tauri::Builder::default();
     // Linux and Windows have no Dock to bring a hidden window back, so
-    // opening Oddboro again shows the one that runs. It goes first, before
-    // anything starts.
+    // opening Oddboro again shows the one that runs, and `oddboro --quit`
+    // quits it as its menu does. It goes first, before anything starts.
     #[cfg(not(target_os = "macos"))]
-    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| show(app)));
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _| {
+        if quit_asked(args) {
+            server::note(&env::log_file(), "quit asked by a second launch (--quit)");
+            app.exit(0);
+        } else {
+            show(app);
+        }
+    }));
     let app = builder
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
@@ -72,9 +84,17 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
+            // `--quit` with no Oddboro running: nothing to quit, so nothing starts.
+            #[cfg(not(target_os = "macos"))]
+            if quit_asked(std::env::args()) {
+                std::process::exit(0);
+            }
             let handle = app.handle().clone();
             let quitting = handle.clone();
-            server::on_quit_signal(move || quitting.exit(0));
+            server::on_quit_signal(move || {
+                server::note(&env::log_file(), "quit asked by a signal");
+                quitting.exit(0);
+            });
             // A Linux desktop may have no tray (GNOME without an extension).
             // The office runs without it, and opening Oddboro again shows it.
             if let Err(e) = tray(&handle) {
@@ -653,9 +673,39 @@ fn opening(server_url: Option<&str>, port: u16) -> String {
     }
 }
 
+/// `oddboro --quit`: quit the Oddboro already running, as its menu does, so
+/// Node gets its time to stop. Windows has no signal a script or an
+/// uninstaller can send. The first argument is the program itself.
+fn quit_asked(args: impl IntoIterator<Item = String>) -> bool {
+    args.into_iter().skip(1).any(|a| a == "--quit")
+}
+
+/// The Mac's `--quit`: SIGTERM to each other Oddboro of this user, which quits
+/// as the menu does (`server::on_quit_signal`).
+#[cfg(target_os = "macos")]
+fn quit_running() {
+    let me = std::process::id().to_string();
+    // SAFETY: getuid has no preconditions and cannot fail.
+    let uid = unsafe { libc::getuid() }.to_string();
+    let Ok(out) = std::process::Command::new("pgrep")
+        .args(["-x", "-U", &uid, "oddboro"])
+        .output()
+    else {
+        return;
+    };
+    for pid in String::from_utf8_lossy(&out.stdout)
+        .split_whitespace()
+        .filter(|p| *p != me)
+    {
+        let _ = std::process::Command::new("kill")
+            .args(["-TERM", pid])
+            .status();
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::opening;
+    use super::{opening, quit_asked};
 
     #[test]
     fn the_launch_line_names_what_the_shell_opens() {
@@ -664,5 +714,14 @@ mod tests {
             "server http://127.0.0.1:4650"
         );
         assert_eq!(opening(None, 4590), "port 4590");
+    }
+
+    #[test]
+    fn only_a_quit_argument_asks_to_quit() {
+        let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(quit_asked(args(&["oddboro", "--quit"])));
+        assert!(!quit_asked(args(&["oddboro"])));
+        assert!(!quit_asked(args(&["--quit"])));
+        assert!(!quit_asked(args(&["oddboro", "--quit-later"])));
     }
 }

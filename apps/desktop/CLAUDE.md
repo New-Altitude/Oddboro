@@ -33,6 +33,9 @@ an update (`update.rs`).
    `/usr/local/bin`, `~/.local/bin` and `~/.claude/local` if missing. Windows has no login shell: the app's
    own PATH, plus `%USERPROFILE%\.local\bin` (Claude Code's and uv's
    installers), WinGet's `Links` folder and `C:\Program Files\Git\cmd`.
+   `ODDBORO_EXTRA_PATH`'s folders go before all of these, so a test's
+   stand-in programs reach the office without going into the owner's own
+   folders.
 4. Starts Node with a fresh key (`key.rs`): 32 bytes from the system's
    random source, made anew for every start of Node and held only in the
    shell's memory. It writes the key as the first line on Node's stdin and
@@ -92,13 +95,23 @@ digits>`, answered with HMAC-SHA256 under the key of `oddboro-proof:` and
    coloured icon, and Open at login is a Run entry in the registry. Opening
    Oddboro again while it runs shows its window
    (`tauri-plugin-single-instance`, Linux and Windows; the Mac does this
-   itself).
+   itself). `oddboro --quit` quits the Oddboro already running as Quit
+   Oddboro does, and starts nothing when none runs: on Linux and Windows
+   the second launch hands the plugin its arguments, on a Mac it sends each
+   of the owner's other `oddboro` processes SIGTERM. The shell logs
+   `quit asked by a second launch (--quit)` or `quit asked by a signal`.
+   Windows has no signal a script or an uninstaller can send, so this is its
+   only graceful quit from outside.
 9. On quit, sends Node SIGTERM, waits up to 10 seconds, then SIGKILL. A
    SIGTERM, SIGINT or SIGHUP to the shell itself quits the same way. A second
    one kills the shell at once. Windows has no SIGTERM: the shell closes
    Node's stdin, which the server takes as "quit", waits the same 10 seconds,
    then ends it with `TerminateProcess`. Node runs with `CREATE_NO_WINDOW`,
-   so neither it nor anything it starts opens a console window.
+   so neither it nor anything it starts opens a console window. The office
+   closes its own database before it exits (NEW-1776) and says so
+   (`office: database closed`); once Node is gone the shell waits up to 2
+   seconds for the threads that copy Node's output, so those last lines reach
+   the log.
 10. Keeps links to the office's own origin in the window. Links to any other
     origin, `mailto:` and `tel:`, and every `target="_blank"` or
     `window.open`, open in the default browser. The browser has no key, so a
@@ -476,8 +489,17 @@ the page's built files under `/_app/` load; the log has the window loading
 the page and the page booting, with no page errors; the shell's launch line
 and the office's own `office: port <n>, home <folder>` line name the port and
 home the run set (NEW-1694: each side works them out, and the shell hands them
-over); it quits with Node and both ports gone; it starts twice more; on
-Windows it uninstalls.
+over); it quits with Node and both ports gone, by `oddboro --quit` on
+Windows and SIGTERM elsewhere; it starts twice more, the last quit by
+`oddboro --quit` on every system; each of those quits closes the office's
+database first, by the log's `office: database closed` (NEW-1776; not the
+first quit on Linux, whose WebDriver session can end the shell before that
+line); `oddboro --quit` with nothing running starts nothing; on Windows it
+uninstalls. Its stand-in Claude Code sits in a folder
+of its own, first on the office's PATH through `ODDBORO_EXTRA_PATH`, and a
+row requires the office to have run it from there (the stand-in notes each
+call in `ran.txt`). Nothing goes into the owner's own folders, so it runs off
+CI too. Not for `--installed`, whose build may predate both flags.
 
 The real app's shell keeps its key to itself, so the rows that need the
 office's answers run where a key can come along. `--stage` starts the staged
@@ -485,8 +507,8 @@ server itself and writes a fresh key on its stdin, as the shell does, then
 checks with it: a write with the key but no `Origin` gets 403 and the page's
 own shape 404 (#25), the setup checks pass, it onboards, and it starts again
 with its data. On Linux the app's run asks the same from inside the real
-page, which carries the window's key: the setup checks, with a stand-in
-Claude Code found where an install puts it (PR #18, CI only), and the
+page, which carries the window's key: the setup checks, with the stand-in
+Claude Code found (in npm's layout on Windows, PR #18's case), and the
 onboarding. On a Mac and Windows the setup checks row reads the log: in the
 app the office writes `office: setup <id> ok` or `fail` for each check when
 the window's welcome asks for them, the id and the result alone. That row is
