@@ -18,6 +18,7 @@ import {
   openSync,
   readFileSync,
   realpathSync,
+  rmSync,
   writeFileSync
 } from 'node:fs';
 import { connect } from 'node:net';
@@ -384,13 +385,16 @@ export function fileVersion(file: string): string {
 }
 
 /**
- * Mac: the app copied out of the .dmg. The folder is resolved first: under a
- * symlink (/var is one) the app does not start (plan, finding 2).
+ * Mac: the app copied out of the .dmg, into `over` in place of the app there
+ * when given. The folder is resolved first: under a symlink (/var is one) the
+ * app does not start (plan, finding 2).
  */
-export function installMac(file: string): Installed {
+export function installMac(file: string, over?: string): Installed {
   const mount = mkdtempSync(join(tmpdir(), 'oddboro-dmg-'));
   run('hdiutil', ['attach', '-nobrowse', '-readonly', '-mountpoint', mount, file]);
-  const dir = join(realpathSync(mkdtempSync(join(tmpdir(), 'oddboro-app-'))), 'Oddboro.app');
+  const dir =
+    over ?? join(realpathSync(mkdtempSync(join(tmpdir(), 'oddboro-app-'))), 'Oddboro.app');
+  if (over) rmSync(over, { recursive: true, force: true });
   try {
     run('ditto', [join(mount, 'Oddboro.app'), dir]);
   } finally {
@@ -406,6 +410,32 @@ export function plist(app: string, key: string): string {
 export function installLinux(file: string): Installed {
   chmodSync(file, 0o755);
   return { exe: file, dir: file };
+}
+
+/**
+ * The office database's system identifier, from `<home>/db/global/pg_control`.
+ * Postgres makes it when it makes the database, so the same identifier means
+ * the same database, not a new one.
+ */
+export function databaseId(home: string): string {
+  const file = join(home, 'db', 'global', 'pg_control');
+  if (!existsSync(file)) throw new Error(`no database in ${home}`);
+  return readFileSync(file).subarray(0, 8).toString('hex');
+}
+
+export type FirstStart = { version: string; after?: string; backup?: string };
+
+/** The office's `first start of X[ after Y][, backed up to Z]` lines (`packages/ledger/src/backup.ts`). */
+export function firstStarts(log: string): FirstStart[] {
+  return [
+    ...log.matchAll(
+      /^(?:\S+Z )?office: first start of ([^\s,]+)(?: after ([^\s,]+))?(?:, backed up to (.+?))?\r?$/gm
+    )
+  ].map((m) => ({
+    version: m[1],
+    ...(m[2] ? { after: m[2] } : {}),
+    ...(m[3] ? { backup: m[3] } : {})
+  }));
 }
 
 /** One run's own corner: home, log and WebView2 profile, beside its other output. */
@@ -505,47 +535,78 @@ export const leftRunning = async (r: Run): Promise<string> =>
   `port ${PORT} open: ${await tcp(PORT)}, port ${DB_PORT} open: ${await tcp(DB_PORT)}, this run's processes: ${runPids(r).join(', ') || 'none'}`;
 
 /**
- * Fails when an Oddboro this run did not start is running: the next launch
- * would hand off to it. The run names it and leaves it alone.
+ * Fails when an Oddboro this run did not start is still running after 10 s:
+ * the next launch would hand off to it. One that goes by itself in that time
+ * was winding down: on Ubuntu 22.04 a process named for the AppImage
+ * outlived a quit by a moment, under no parent the run knew (proof run
+ * 45564406687). The run names what stays, and leaves it alone.
  */
-function noStrays(r: Run): void {
-  const found = strays(r);
-  if (found.length)
-    throw new Error(
-      `an Oddboro this run did not start is running (pid ${found.join(', ')}). The run left it alone. Quit it, then run again`
-    );
+async function noStrays(r: Run): Promise<void> {
+  let found = strays(r);
+  for (let waited = 0; found.length && waited < 10; waited++) {
+    await sleep(1000);
+    found = strays(r);
+  }
+  if (!found.length) return;
+  const named = WIN
+    ? found.join(', ')
+    : found.map((pid) => `${pid} ${sh('ps', ['-o', 'args=', '-p', String(pid)]).out.trim()}`);
+  throw new Error(
+    `an Oddboro this run did not start is running (pid ${named}). The run left it alone. Quit it, then run again`
+  );
 }
 
 /**
  * After a quit that did not finish in time: stops what this run started, and
  * says what it found. Anything else is named, never stopped.
  */
-async function stopRun(r: Run, what: string): Promise<string> {
+export async function stopRun(r: Run, what: string): Promise<string> {
   const left = await leftRunning(r);
   killRun(r);
   if (!(await goneWithin(r, 10)))
     throw new Error(`still running after ${what} and a kill: ${await leftRunning(r)}`);
-  noStrays(r);
+  await noStrays(r);
   return left;
 }
 
 /**
- * Mac and Linux: SIGTERM, the shell's normal quit. Windows has no signal a
- * script can send, so a kill, which closes Node's stdin and so stops it.
+ * Runs `oddboro --quit` and waits for it to end: it asks the Oddboro already
+ * running to quit as its menu does, and starts nothing itself.
  */
-export async function quit(app: ChildProcess, r: Run): Promise<number> {
+export async function quitCommand(exe: string, r: Run, secs = 30): Promise<number | null> {
+  const asking = spawn(exe, ['--quit'], { env: { ...process.env, ...r.env }, stdio: 'ignore' });
+  return until(
+    '`oddboro --quit` to end',
+    async () => (asking.exitCode !== null ? { code: asking.exitCode } : undefined),
+    secs
+  ).then((e) => e.code);
+}
+
+/**
+ * Quits as the menu does. Mac and Linux: SIGTERM, unless `exe` is given.
+ * With `exe`, and always on Windows, which has no signal a script can send:
+ * `oddboro --quit`. A build without --quit then fails here, by the log's
+ * missing "quit asked" line, rather than being killed.
+ */
+export async function quit(app: ChildProcess, r: Run, exe?: string): Promise<number> {
   const started = Date.now();
   // Everything under the shell, noted while it still has its parent.
   runPids(r);
-  if (WIN) app.kill();
+  const logged = logText(r).length;
+  if (exe) await quitCommand(exe, r);
+  else if (WIN) throw new Error('on Windows a quit needs the app, for `oddboro --quit`');
   else app.kill('SIGTERM');
   if (await goneWithin(r, 15)) {
     // Timed before the look for strays, which takes seconds on Windows.
     const ms = Date.now() - started;
-    noStrays(r);
+    await noStrays(r);
     return ms;
   }
   const left = await stopRun(r, 'the quit');
+  if (exe && !logText(r).slice(logged).includes('quit asked by'))
+    throw new Error(
+      `\`oddboro --quit\` did not reach it: no "quit asked" line (${left}). Stopped what this run started`
+    );
   throw new Error(`still running 15 s after the quit (${left}); stopped what this run started`);
 }
 
@@ -683,7 +744,7 @@ export async function webdriverStart(exe: string, r: Run): Promise<Driven> {
     driver.kill();
     try {
       if (await goneWithin(r, 10)) {
-        noStrays(r);
+        await noStrays(r);
         return 'closed with the WebDriver session';
       }
       return `killed: the session left it running (${await stopRun(r, 'the session')})`;
@@ -755,14 +816,17 @@ export function screenshot(file: string): string {
 }
 
 /**
- * A stand-in Claude Code where an installed one would be: in npm's layout on
- * Windows (a .cmd shim beside node_modules, PR #18's case), a script in
- * ~/.local/bin elsewhere. It answers --version and auth status, nothing more.
- * Only on a CI runner: on a developer's computer it would shadow their own.
+ * A stand-in Claude Code in a folder of its own, which the run puts first on
+ * the office's PATH through ODDBORO_EXTRA_PATH, so nothing goes into the
+ * owner's own folders. In npm's layout on Windows (a .cmd shim beside
+ * node_modules, PR #18's case), a script elsewhere. It answers --version and
+ * auth status, nothing more, and adds each call to `ran.txt` beside it, which
+ * is how a run sees that the office found it there.
  */
-export function stubClaude(): string {
-  const bin = join(homedir(), '.local', 'bin');
+export function stubClaude(bin: string): { program: string; ran: string } {
+  const ran = join(bin, 'ran.txt');
   const answers = `const a = process.argv.slice(2).join(' ');
+require('node:fs').appendFileSync(${JSON.stringify(ran)}, a + '\\n');
 if (a === '--version') console.log('9.9.9 (Claude Code)');
 else if (a === 'auth status') console.log(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai' }));
 else { console.error('smoke stand-in: ' + a); process.exit(1); }
@@ -773,7 +837,7 @@ else { console.error('smoke stand-in: ' + a); process.exit(1); }
     writeFileSync(join(pkg, 'package.json'), JSON.stringify({ bin: { claude: 'cli.js' } }));
     writeFileSync(join(pkg, 'cli.js'), answers);
     writeFileSync(join(bin, 'claude.cmd'), '@echo off\r\n');
-    return join(bin, 'claude.cmd');
+    return { program: join(bin, 'claude.cmd'), ran };
   }
   // This script's own Node, by its full path: the app's PATH comes from the
   // login shell, which may not hold the runner's.
@@ -784,5 +848,5 @@ else { console.error('smoke stand-in: ' + a); process.exit(1); }
   const sq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
   writeFileSync(file, `#!/bin/sh\nexec ${sq(process.execPath)} ${sq(js)} "$@"\n`);
   chmodSync(file, 0o755);
-  return file;
+  return { program: file, ran };
 }

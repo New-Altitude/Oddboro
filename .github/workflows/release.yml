@@ -402,7 +402,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
 
@@ -446,11 +446,42 @@ jobs:
             xvfb-run -a -s "-screen 0 1440x900x24" node apps/desktop/scripts/smoke.ts \
               --from "$RUNNER_TEMP/built" --version "$VERSION" --out "$RUNNER_TEMP/smoke"'
 
+      # The build installed over the release owners have now, as they get it
+      # (#40). It runs whether or not the fresh install passed, so both show.
+      - name: Download the last release
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: node apps/desktop/scripts/last-release.ts "$RUNNER_TEMP/previous"
+
+      - name: Install the build over the last release
+        if: ${{ !cancelled() && runner.os != 'Linux' && env.PREVIOUS_VERSION }}
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: >
+          node apps/desktop/scripts/smoke.ts --from "$RUNNER_TEMP/built" --version "$VERSION"
+          --previous-from "$RUNNER_TEMP/previous" --previous-version "$PREVIOUS_VERSION"
+          --out "$RUNNER_TEMP/upgrade"
+
+      - name: Install the build over the last release
+        if: ${{ !cancelled() && runner.os == 'Linux' && env.PREVIOUS_VERSION }}
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          dbus-run-session -- bash -c '
+            echo -n smoke | gnome-keyring-daemon --unlock --components=secrets > /dev/null
+            xvfb-run -a -s "-screen 0 1440x900x24" node apps/desktop/scripts/smoke.ts \
+              --from "$RUNNER_TEMP/built" --version "$VERSION" \
+              --previous-from "$RUNNER_TEMP/previous" --previous-version "$PREVIOUS_VERSION" \
+              --out "$RUNNER_TEMP/upgrade"'
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: smoke-${{ matrix.build }}-${{ matrix.runner }}
-          path: ${{ runner.temp }}/smoke
+          path: |
+            ${{ runner.temp }}/smoke
+            ${{ runner.temp }}/upgrade
           if-no-files-found: warn
 
   draft:

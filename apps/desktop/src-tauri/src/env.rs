@@ -85,15 +85,27 @@ fn default_log_file() -> PathBuf {
 /// `claude`, `git` and `uvx`, so ask the login shell once and then add the
 /// usual install folders it may have missed. Windows asks PowerShell the
 /// same way. Each folder appears once.
+///
+/// `ODDBORO_EXTRA_PATH`'s folders go first, so a test's stand-in programs
+/// reach the office without being written into the owner's own folders.
 pub fn login_path() -> String {
     let base = read_login_path().unwrap_or_else(|| env::var("PATH").unwrap_or_default());
+    let extra = env::var_os("ODDBORO_EXTRA_PATH").unwrap_or_default();
+    let dirs = path_folders(&extra, &base, install_folders(&home()));
+    env::join_paths(dirs).map_or(base, |p| p.to_string_lossy().into_owned())
+}
+
+fn path_folders(extra: &std::ffi::OsStr, base: &str, installs: Vec<PathBuf>) -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = Vec::new();
-    for dir in env::split_paths(&base).chain(install_folders(&home())) {
+    for dir in env::split_paths(extra)
+        .chain(env::split_paths(base))
+        .chain(installs)
+    {
         if !dir.as_os_str().is_empty() && !dirs.iter().any(|d| same_folder(d, &dir)) {
             dirs.push(dir);
         }
     }
-    env::join_paths(dirs).map_or(base, |p| p.to_string_lossy().into_owned())
+    dirs
 }
 
 /// Windows folder names ignore case; a Mac's and Linux's are compared as written.
@@ -238,4 +250,39 @@ fn ask_shell(shell: &str, flags: &[&str]) -> Option<String> {
     child.stdout.take()?.read_to_string(&mut out).ok()?;
     let path = out.lines().rev().find_map(|l| l.strip_prefix(MARK))?.trim();
     (!path.is_empty()).then(|| path.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::path_folders;
+    use std::env;
+    use std::path::PathBuf;
+
+    fn joined(dirs: &[&str]) -> String {
+        env::join_paths(dirs)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    #[test]
+    fn extra_path_folders_come_first_and_each_folder_once() {
+        let extra = env::join_paths(["stand-ins", "more"]).unwrap();
+        let dirs = path_folders(
+            &extra,
+            &joined(&["bin", "stand-ins", ""]),
+            vec![PathBuf::from("local"), PathBuf::from("bin")],
+        );
+        let names: Vec<_> = dirs
+            .iter()
+            .map(|d| d.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["stand-ins", "more", "bin", "local"]);
+    }
+
+    #[test]
+    fn no_extra_path_leaves_the_login_path_as_it_was() {
+        let dirs = path_folders("".as_ref(), &joined(&["bin", "sbin"]), vec![]);
+        assert_eq!(dirs, [PathBuf::from("bin"), PathBuf::from("sbin")]);
+    }
 }

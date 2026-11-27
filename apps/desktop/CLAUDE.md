@@ -33,6 +33,9 @@ an update (`update.rs`).
    `/usr/local/bin`, `~/.local/bin` and `~/.claude/local` if missing. Windows has no login shell: the app's
    own PATH, plus `%USERPROFILE%\.local\bin` (Claude Code's and uv's
    installers), WinGet's `Links` folder and `C:\Program Files\Git\cmd`.
+   `ODDBORO_EXTRA_PATH`'s folders go before all of these, so a test's
+   stand-in programs reach the office without going into the owner's own
+   folders.
 4. Starts Node with a fresh key (`key.rs`): 32 bytes from the system's
    random source, made anew for every start of Node and held only in the
    shell's memory. It writes the key as the first line on Node's stdin and
@@ -92,13 +95,23 @@ digits>`, answered with HMAC-SHA256 under the key of `oddboro-proof:` and
    coloured icon, and Open at login is a Run entry in the registry. Opening
    Oddboro again while it runs shows its window
    (`tauri-plugin-single-instance`, Linux and Windows; the Mac does this
-   itself).
+   itself). `oddboro --quit` quits the Oddboro already running as Quit
+   Oddboro does, and starts nothing when none runs: on Linux and Windows
+   the second launch hands the plugin its arguments, on a Mac it sends each
+   of the owner's other `oddboro` processes SIGTERM. The shell logs
+   `quit asked by a second launch (--quit)` or `quit asked by a signal`.
+   Windows has no signal a script or an uninstaller can send, so this is its
+   only graceful quit from outside.
 9. On quit, sends Node SIGTERM, waits up to 10 seconds, then SIGKILL. A
    SIGTERM, SIGINT or SIGHUP to the shell itself quits the same way. A second
    one kills the shell at once. Windows has no SIGTERM: the shell closes
    Node's stdin, which the server takes as "quit", waits the same 10 seconds,
    then ends it with `TerminateProcess`. Node runs with `CREATE_NO_WINDOW`,
-   so neither it nor anything it starts opens a console window.
+   so neither it nor anything it starts opens a console window. The office
+   closes its own database before it exits (NEW-1776) and says so
+   (`office: database closed`); once Node is gone the shell waits up to 2
+   seconds for the threads that copy Node's output, so those last lines reach
+   the log.
 10. Keeps links to the office's own origin in the window. Links to any other
     origin, `mailto:` and `tel:`, and every `target="_blank"` or
     `window.open`, open in the default browser. The browser has no key, so a
@@ -350,6 +363,8 @@ them with `tauri-plugin-updater`, in release builds only.
   Windows's own `tar`). `scripts/smoke.ts --stage` then checks the stage.
 - `scripts/smoke.ts` and `scripts/driver.ts`. The smoke test, and what
   drives the installed app for it. See "Smoke tests".
+- `scripts/last-release.ts`. Downloads, for this machine, the release the
+  updater's `latest.json` names, for the smoke test's upgrade run.
 - `scripts/sign-windows.ts`. Signs one Windows file through Azure Artifact
   Signing, for Tauri's `signCommand` in a release.
 - `installer/`. The window the Mac `.dmg` opens to: the app and
@@ -419,8 +434,8 @@ lockfile-only update, so run it by hand for one that should ship. Six jobs:
    Before it signs, `release.ts` checks the build's own version: the Windows
    app and installer's file version, and the Mac app's `Info.plist`.
 5. `smoke` installs each build and runs it on its own kind of machine, plus
-   the x86_64 AppImage on Ubuntu 24.04 (see "Smoke tests"). No secrets. One
-   failure, and no draft.
+   the x86_64 AppImage on Ubuntu 24.04, then installs it again over the last
+   release (see "Smoke tests"). No secrets. One failure, and no draft.
 6. `draft` tests and runs `scripts/check-release.ts` on what the five builds
    uploaded, and creates nothing unless every build passes: exactly the files
    this version should have, each site copy byte for byte the versioned file,
@@ -476,8 +491,17 @@ the page's built files under `/_app/` load; the log has the window loading
 the page and the page booting, with no page errors; the shell's launch line
 and the office's own `office: port <n>, home <folder>` line name the port and
 home the run set (NEW-1694: each side works them out, and the shell hands them
-over); it quits with Node and both ports gone; it starts twice more; on
-Windows it uninstalls.
+over); it quits with Node and both ports gone, by `oddboro --quit` on
+Windows and SIGTERM elsewhere; it starts twice more, the last quit by
+`oddboro --quit` on every system; each of those quits closes the office's
+database first, by the log's `office: database closed` (NEW-1776; not the
+first quit on Linux, whose WebDriver session can end the shell before that
+line); `oddboro --quit` with nothing running starts nothing; on Windows it
+uninstalls. Its stand-in Claude Code sits in a folder
+of its own, first on the office's PATH through `ODDBORO_EXTRA_PATH`, and a
+row requires the office to have run it from there (the stand-in notes each
+call in `ran.txt`). Nothing goes into the owner's own folders, so it runs off
+CI too. Not for `--installed`, whose build may predate both flags.
 
 The real app's shell keeps its key to itself, so the rows that need the
 office's answers run where a key can come along. `--stage` starts the staged
@@ -485,8 +509,8 @@ server itself and writes a fresh key on its stdin, as the shell does, then
 checks with it: a write with the key but no `Origin` gets 403 and the page's
 own shape 404 (#25), the setup checks pass, it onboards, and it starts again
 with its data. On Linux the app's run asks the same from inside the real
-page, which carries the window's key: the setup checks, with a stand-in
-Claude Code found where an install puts it (PR #18, CI only), and the
+page, which carries the window's key: the setup checks, with the stand-in
+Claude Code found (in npm's layout on Windows, PR #18's case), and the
 onboarding. On a Mac and Windows the setup checks row reads the log: in the
 app the office writes `office: setup <id> ok` or `fail` for each check when
 the window's welcome asks for them, the id and the result alone. That row is
@@ -500,13 +524,16 @@ Accessibility through System Events on a Mac (a path through a symlink stops
 the app), the AppImage under Xvfb with a GNOME keyring and WebDriver through
 `tauri-driver` on Linux. A dialog fails the run with its words. A run stops
 only what it started: the processes it spawned, the shells and Nodes its own
-log names, and everything under them. Another Oddboro it finds fails the row
-with its pid, and the run leaves it running.
+log names, and everything under them. Another Oddboro still there 10 s after
+a quit fails the row with its pid and command line, and the run leaves it
+running.
 
 ```sh
 node apps/desktop/scripts/smoke.ts --stage                       # the staged server, after stage.ts, with Sentry on (port 9 takes nothing)
 node apps/desktop/scripts/smoke.ts --installed                    # the app on this computer, on its own port, home and log
 node apps/desktop/scripts/smoke.ts --from <folder> --version 0.0.9   # a build job's output, as release.yml runs it
+node apps/desktop/scripts/last-release.ts <prev>                  # the release owners have now, for this machine
+node apps/desktop/scripts/smoke.ts --from <folder> --version 0.0.9 --previous-from <prev> --previous-version 0.0.8   # installed over it
 ```
 
 `--artifact <file>` takes one installer, AppImage or `.dmg`. On Windows it
@@ -516,12 +543,43 @@ Windows keep to one at a time. Results go to `--out`: `results.json`,
 `summary.md`, `office.log`, `shell.log` and a screenshot. The run's home
 goes when it ends, pass or fail; `--keep` keeps it for a look.
 
+#### The upgrade run
+
+`--previous-from` checks the path every owner who has Oddboro takes: the next
+version installed over theirs. #40 broke it, when the 0.0.6 Windows installer
+held 0.0.5 and every Windows app updated forever. `last-release.ts` downloads
+the release installed apps have now, the one the updater's `latest.json`
+names, for this machine. The run installs it and starts it on a new home, then
+installs the build over it, in the same place (the same Windows install, the
+same `Oddboro.app` folder on a Mac, the same home for the AppImage), and
+requires:
+
+- the build's version: in the log, the Windows uninstall entry and
+  `oddboro.exe`, and the Mac's `Info.plist`;
+- the office's `first start of <build> after <last release>, backed up to …`
+  line, with the database in that backup;
+- the same database: the system identifier in `db/global/pg_control`, which
+  Postgres makes with a database, matches what the last release made, in the
+  home and in the backup;
+- its database setup check passing, and its page booting with no errors;
+- no second update: after two more starts, one `first start` line, one
+  backup, and the build's version at each start;
+- each quit of the build closing the database (NEW-1776).
+
+On Linux it also onboards the last release from inside its page, and the
+build must still be onboarded. On a Mac and Windows the app keeps its key to
+itself, so the database's identifier stands in for that. A last release from
+before `oddboro --quit` cannot be quit on Windows, which has no signal a
+script can send, so the run stops it, as a crash would, and says so.
+
 Where it runs: `--stage` in Checks (`ci.yml`) on every pull request, on all
 three systems. `--from` on an unsigned 9.9.9 build in `app-smoke.yml`, on
 every pull request that changes the app (Windows, macOS 15, Ubuntu 22.04)
 and by hand (Run workflow) on all six release machines, then in `release.yml` on
-the signed builds before each draft. A failed row's words are in the job's
-summary table; the results, logs and screenshot are its `smoke-*` artifact.
+the signed builds before each draft. The upgrade run follows it in both,
+whether or not the fresh install passed. A failed row's words are in the
+job's summary table; the results, logs and screenshot are its `smoke-*`
+artifact, in `smoke/` and `upgrade/`.
 
 ### Secrets
 

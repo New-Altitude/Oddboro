@@ -48,6 +48,12 @@ static GONE: (Mutex<()>, Condvar) = (Mutex::new(()), Condvar::new());
 /// Node's stdin while it runs. The server quits when it closes, so closing it
 /// is how the shell asks Node to go on Windows, which has no SIGTERM.
 static NODE_STDIN: Mutex<Option<ChildStdin>> = Mutex::new(None);
+/// The threads that copy Node's stdout and stderr into the log. A quit waits
+/// for them, so Node's last lines (`office: database closed`) reach the log
+/// before the shell exits.
+static RELAYS: Mutex<Vec<thread::JoinHandle<()>>> = Mutex::new(Vec::new());
+/// How long a quit waits for those last lines once Node is gone.
+const RELAY_DRAIN: Duration = Duration::from_secs(2);
 /// The write end of the pipe a quit signal wakes. -1 until it exists.
 #[cfg(unix)]
 static SIGNAL_PIPE: AtomicI32 = AtomicI32::new(-1);
@@ -231,13 +237,16 @@ impl Server {
         // it, before any answer: the office reads it before it asks anything.
         *NODE_STDIN.lock().unwrap_or_else(|e| e.into_inner()) = child.stdin.take();
         to_node(&key.line());
+        let mut relays = RELAYS.lock().unwrap_or_else(|e| e.into_inner());
+        relays.retain(|r| !r.is_finished());
         if let Some(err) = child.stderr.take() {
             let log = log.try_clone()?;
-            thread::spawn(move || stamped(err, log));
+            relays.push(thread::spawn(move || stamped(err, log)));
         }
         if let Some(out) = child.stdout.take() {
-            thread::spawn(move || relay(out, log));
+            relays.push(thread::spawn(move || relay(out, log)));
         }
+        drop(relays);
         NODE_PID.store(child.id() as i32, SeqCst);
         keep_awake(child.id());
         Ok((child, key))
@@ -293,6 +302,11 @@ pub fn stop() {
     if !wait_gone(STOP_TIMEOUT) {
         kill_now(pid);
         wait_gone(Duration::from_secs(2));
+    }
+    let deadline = Instant::now() + RELAY_DRAIN;
+    let relays = std::mem::take(&mut *RELAYS.lock().unwrap_or_else(|e| e.into_inner()));
+    while relays.iter().any(|r| !r.is_finished()) && Instant::now() < deadline {
+        sleep(Duration::from_millis(20));
     }
 }
 

@@ -21,10 +21,13 @@
 //   node apps/desktop/scripts/smoke.ts --from <folder> --version 0.0.9
 //   node apps/desktop/scripts/smoke.ts --installed [--app <path>] [--version 0.0.9]
 //   node apps/desktop/scripts/smoke.ts --stage
+//   node apps/desktop/scripts/smoke.ts --from <folder> --version 0.0.9 --previous-from <folder> --previous-version 0.0.8
 //
 // --from takes the one build of that version in a folder (a build job's
 // output). --installed runs the app already on this computer, on its own
 // port, home and log. --stage runs the staged server, after stage.ts.
+// --previous-from installs that release first and this build over it, as an
+// owner who has it gets the next version.
 // --signed adds Gatekeeper's checks on a Mac. --out sets where results go.
 // --annotate writes every result as a GitHub annotation. --keep keeps the
 // run's home for a look after; otherwise it goes when the run ends.
@@ -53,8 +56,11 @@ import {
   accessibilityPage,
   automationPage,
   BASE,
+  databaseId,
   DB_PORT,
+  type Driven,
   fileVersion,
+  firstStarts,
   getJson,
   inPage,
   installLinux,
@@ -74,12 +80,15 @@ import {
   PORT,
   ps,
   quit,
+  quitCommand,
   ready,
   run,
+  type Run,
   screenshot,
   send,
   shellPids,
   sleep,
+  stopRun,
   stubClaude,
   tcp,
   uninstallEntry,
@@ -100,6 +109,8 @@ const { values: args } = parseArgs({
     app: { type: 'string' },
     stage: { type: 'boolean', default: false },
     version: { type: 'string' },
+    'previous-from': { type: 'string' },
+    'previous-version': { type: 'string' },
     signed: { type: 'boolean', default: false },
     out: { type: 'string' },
     annotate: { type: 'boolean', default: false },
@@ -175,10 +186,15 @@ function loggedVersion(log: string): { version: string; health: boolean } {
 const OPEN_FROM_APP = 'This office opens only in the Oddboro app. Open Oddboro to see it.';
 
 /** A row that needs the app's key, which only the real app's shell holds. */
-const keptInTheApp = (name: string) =>
+const keptInTheApp = (name: string, instead = '--stage checks it') =>
   step(name, false, () => {
-    throw new Error('not checked here: the app keeps its key to itself. --stage checks it');
+    throw new Error(`not checked here: the app keeps its key to itself. ${instead}`);
   });
+
+const ONBOARDING = { name: 'Smoke', zone: 'America/Los_Angeles', manager: { preset: 'marshall' } };
+
+const UPGRADE = !!args['previous-from'];
+const TITLE = UPGRADE ? 'Upgrade' : 'Smoke';
 
 /** Each setup check's last state in the log (`office: setup <id> ok|fail`), by id. */
 function setupFromLog(log: string): Map<string, string> {
@@ -270,13 +286,7 @@ async function officeChecks(
   // the first one loads it, well under a second on an M-series Mac.
   await step(onboardName, true, async () =>
     expectStatus(
-      await office.send(
-        'POST',
-        '/api/onboarding',
-        pageHeaders(true),
-        { name: 'Smoke', zone: 'America/Los_Angeles', manager: { preset: 'marshall' } },
-        90
-      ),
+      await office.send('POST', '/api/onboarding', pageHeaders(true), ONBOARDING, 90),
       200
     )
   );
@@ -349,9 +359,9 @@ function report(): never {
   );
   const cell = (s: string) => s.replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
   const summary = [
-    `### Smoke: ${failed.length ? `${failed.length} required step(s) failed` : 'every required step passed'}`,
+    `### ${TITLE}: ${failed.length ? `${failed.length} required step(s) failed` : 'every required step passed'}`,
     '',
-    `${env}${args.version ? `, Oddboro ${args.version}` : ''}`,
+    `${env}${args.version ? `, Oddboro ${args.version}` : ''}${UPGRADE ? ` over ${args['previous-version']}` : ''}`,
     '',
     '| Step | Result | Time | Detail |',
     '| --- | --- | --- | --- |',
@@ -368,7 +378,7 @@ function report(): never {
       t.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
     const title = (t: string) => escape(t).replace(/:/g, '%3A').replace(/,/g, '%2C');
     for (const r of failed)
-      console.log(`::error title=${title(`Smoke - ${r.step}`)}::${escape(r.detail)}`);
+      console.log(`::error title=${title(`${TITLE} - ${r.step}`)}::${escape(r.detail)}`);
     // The fork reads results through GitHub's public API, which serves
     // annotations without a login. GitHub keeps 10 notices a step.
     if (args.annotate) {
@@ -376,7 +386,7 @@ function report(): never {
         (r) =>
           `${r.ok ? 'ok' : r.required ? 'FAIL' : 'no'} | ${r.step} | ${r.ms} ms | ${r.detail.slice(0, 300)}`
       );
-      console.log(`::notice title=Smoke results::${escape([env, ...lines].join('\n'))}`);
+      console.log(`::notice title=${TITLE} results::${escape([env, ...lines].join('\n'))}`);
       for (const r of results.filter((r) => r.detail.length > 300).slice(0, 9))
         console.log(`::notice title=${title(`Detail - ${r.step}`)}::${escape(r.detail)}`);
     }
@@ -522,8 +532,8 @@ async function smokeStage(): Promise<void> {
   await stop(server).catch(() => undefined);
 }
 
-/** The built app: installed, started, driven through its real window. */
-async function smokeApp(): Promise<void> {
+/** Off CI, what a run would do to the owner's own Oddboro, refused unless they said so. */
+function refuseOwnersApp(installs: boolean): void {
   if (MAC && !CI && !args['my-keychain'])
     throw new Error(
       'On a Mac the app reads the Keychain your Oddboro uses, so this run would have your sign-ins. Pass --my-keychain to go on, or run it on CI.'
@@ -533,6 +543,166 @@ async function smokeApp(): Promise<void> {
     throw new Error(
       'Oddboro is already running here. Quit it first: Linux and Windows keep to one Oddboro at a time.'
     );
+  // The Windows installer replaces the Oddboro installed for this user, and
+  // the run uninstalls it after. Fine on a runner, not on someone's computer.
+  if (installs && WIN && !CI && !args['replace-installed'])
+    throw new Error(
+      'On Windows this replaces, then uninstalls, your Oddboro. Pass --replace-installed to go on, or use --installed.'
+    );
+}
+
+/** Installs a build, in place of `over` when given, with the Windows installer's own rows. */
+async function installBuild(
+  file: string,
+  version: string | undefined,
+  over?: { installed: Installed; version: string }
+): Promise<Installed | undefined> {
+  const name = file.split(/[\\/]/).pop();
+  const installed = await step(
+    over ? `installs ${name} over ${over.version}` : `installs ${name}`,
+    true,
+    () =>
+      WIN ? installWindows(file) : MAC ? installMac(file, over?.installed.dir) : installLinux(file)
+  );
+  if (!installed || !WIN) return installed;
+  await step('the uninstall entry names the version', true, () => {
+    const got = uninstallEntry();
+    if (version && got !== version) throw new Error(`${got || 'no entry'}, not ${version}`);
+    return got;
+  });
+  await step('the Start menu has its shortcut (notifications need it)', true, () => {
+    const lnk = join(
+      process.env.APPDATA ?? '',
+      'Microsoft',
+      'Windows',
+      'Start Menu',
+      'Programs',
+      'Oddboro.lnk'
+    );
+    if (existsSync(lnk)) return lnk;
+    const found = ps(
+      `@(@($env:APPDATA, $env:ProgramData, [Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('CommonDesktopDirectory')) | Where-Object { $_ } | ForEach-Object { Get-ChildItem -LiteralPath $_ -Recurse -Filter '*.lnk' -ErrorAction SilentlyContinue | Where-Object { $_.Name -like '*ddboro*' } } | ForEach-Object { $_.FullName }) -join ', '`
+    );
+    throw new Error(`${lnk} is missing. Oddboro shortcuts anywhere: ${found || 'none'}`);
+  });
+  return installed;
+}
+
+/** The version the app's own files carry: `oddboro.exe` on Windows, `Info.plist` on a Mac. */
+async function versionOnDisk({ exe, dir }: Installed, version: string | undefined): Promise<void> {
+  if (WIN)
+    await step('oddboro.exe carries the version', !!version, () => {
+      const got = fileVersion(exe);
+      if (version && got !== version && got !== `${version}.0`)
+        throw new Error(`${got}, not ${version}`);
+      return got;
+    });
+  if (MAC)
+    await step('Info.plist names the version', !!version, () => {
+      const got = plist(dir, 'CFBundleShortVersionString');
+      if (version && got !== version) throw new Error(`${got}, not ${version}`);
+      return got;
+    });
+}
+
+/** A start with its window, and how to drive and end it. */
+type Started = {
+  page: Page;
+  app?: ChildProcess;
+  /** Linux: a script in the real page, which carries the window's key. */
+  script?: Driven['script'];
+  /** Linux: ends the WebDriver session and the app with it. */
+  stop?: Driven['stop'];
+};
+
+/**
+ * A start that comes with its window: Linux through tauri-driver, which starts
+ * the app itself, Windows and the Mac by reading the window as is.
+ */
+async function startWithWindow(exe: string, r: Run): Promise<{ started: Started; detail: string }> {
+  const t = Date.now();
+  if (LINUX) {
+    const { page, script, stop } = await webdriverStart(exe, r);
+    return {
+      started: { page, script, stop },
+      detail: `${Date.now() - t} ms, through tauri-driver`
+    };
+  }
+  const app = launch(exe, r);
+  const ms = await ready(app, r);
+  return {
+    started: { app, page: WIN ? automationPage(app.pid ?? 0) : accessibilityPage(app.pid ?? 0) },
+    detail: `${ms} ms`
+  };
+}
+
+/** A row for a start with its window: the start, or undefined when the row failed. */
+async function startRow(name: string, exe: string, r: Run): Promise<Started | undefined> {
+  let started: Started | undefined;
+  await step(name, true, async () => {
+    const s = await startWithWindow(exe, r);
+    started = s.started;
+    return s.detail;
+  });
+  return started;
+}
+
+/** The version the office says: from inside the page on Linux, from the log elsewhere. */
+async function saysVersion(started: Started, r: Run, version: string): Promise<string> {
+  const said = started.script
+    ? await runningVersion(inPage(started.script))
+    : loggedVersion(logText(r));
+  if (said.version !== version) throw new Error(`${said.version}, not ${version}`);
+  return said.version;
+}
+
+/** What the office said of its database in the log after `from` (NEW-1776). */
+const databaseSaid = (r: Run, from: number) =>
+  logText(r)
+    .slice(from)
+    .match(/office: database ([^\n]*)/)?.[1] ?? 'no "office: database" line';
+
+/** Quits a start made by `startWithWindow`, noting what the office said of its database. */
+async function quitStarted(
+  started: Started,
+  r: Run,
+  exe: string,
+  closing: string[]
+): Promise<string> {
+  if (started.stop) return `${await started.stop()}; the relaunches quit with SIGTERM`;
+  const from = logText(r).length;
+  const ms = await quit(started.app!, r, WIN ? exe : undefined);
+  closing.push(databaseSaid(r, from));
+  return `${ms} ms${WIN ? ', by `oddboro --quit`' : ''}`;
+}
+
+/**
+ * Starts the app `times` times more. Windows quits by `oddboro --quit` each
+ * time; the Mac and Linux by SIGTERM, and by `oddboro --quit` the last time,
+ * so every system's --quit is tried.
+ */
+async function relaunch(exe: string, r: Run, times: number, closing: string[]): Promise<string> {
+  const ms: number[] = [];
+  for (let i = 1; i <= times; i++) {
+    const again = launch(exe, r);
+    ms.push(await ready(again, r));
+    const from = logText(r).length;
+    await quit(again, r, WIN || i === times ? exe : undefined);
+    closing.push(databaseSaid(r, from));
+  }
+  return `starts (ms): ${ms.join(', ')}; the last quit by \`oddboro --quit\``;
+}
+
+/** Each quit closed the office's database first, by its `office: database closed` line. */
+function closedEachTime(closing: string[]): string {
+  if (!closing.length || closing.some((c) => c !== 'closed'))
+    throw new Error(`the office said, quit by quit: ${closing.join('; ') || 'nothing'}`);
+  return `closed at all ${closing.length} quits`;
+}
+
+/** The built app: installed, started, driven through its real window. */
+async function smokeApp(): Promise<void> {
+  refuseOwnersApp(!args.installed);
   let installed: Installed | undefined;
   if (args.installed) {
     installed = await step('the app on this computer', true, () => {
@@ -550,57 +720,16 @@ async function smokeApp(): Promise<void> {
         throw new Error(`no app at ${exe || '(Linux needs --app <AppImage>)'}`);
       return { exe, dir: exe };
     });
-  } else {
-    const file = args.artifact ?? findBuild(args.from!, args.version!);
-    // The Windows installer replaces the Oddboro installed for this user, and
-    // the run uninstalls it after. Fine on a runner, not on someone's computer.
-    if (WIN && !CI && !args['replace-installed'])
-      throw new Error(
-        'On Windows this replaces, then uninstalls, your Oddboro. Pass --replace-installed to go on, or use --installed.'
-      );
-    installed = await step(`installs ${file.split(/[\\/]/).pop()}`, true, () =>
-      WIN ? installWindows(file) : MAC ? installMac(file) : installLinux(file)
+  } else
+    installed = await installBuild(
+      args.artifact ?? findBuild(args.from!, args.version!),
+      args.version
     );
-  }
   if (!installed) return;
   const { exe, dir } = installed;
 
-  if (WIN && !args.installed) {
-    await step('the uninstall entry names the version', true, () => {
-      const got = uninstallEntry();
-      if (args.version && got !== args.version)
-        throw new Error(`${got || 'no entry'}, not ${args.version}`);
-      return got;
-    });
-    await step('the Start menu has its shortcut (notifications need it)', true, () => {
-      const lnk = join(
-        process.env.APPDATA ?? '',
-        'Microsoft',
-        'Windows',
-        'Start Menu',
-        'Programs',
-        'Oddboro.lnk'
-      );
-      if (existsSync(lnk)) return lnk;
-      const found = ps(
-        `@(@($env:APPDATA, $env:ProgramData, [Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('CommonDesktopDirectory')) | Where-Object { $_ } | ForEach-Object { Get-ChildItem -LiteralPath $_ -Recurse -Filter '*.lnk' -ErrorAction SilentlyContinue | Where-Object { $_.Name -like '*ddboro*' } } | ForEach-Object { $_.FullName }) -join ', '`
-      );
-      throw new Error(`${lnk} is missing. Oddboro shortcuts anywhere: ${found || 'none'}`);
-    });
-  }
-  if (WIN)
-    await step('oddboro.exe carries the version', !!args.version, () => {
-      const got = fileVersion(exe);
-      if (args.version && got !== args.version && got !== `${args.version}.0`)
-        throw new Error(`${got}, not ${args.version}`);
-      return got;
-    });
+  await versionOnDisk(installed, args.version);
   if (MAC) {
-    await step('Info.plist names the version', !!args.version, () => {
-      const got = plist(dir, 'CFBundleShortVersionString');
-      if (args.version && got !== args.version) throw new Error(`${got}, not ${args.version}`);
-      return got;
-    });
     if (args.signed) {
       await step('the signature holds (codesign)', true, () =>
         run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', dir])
@@ -624,44 +753,33 @@ async function smokeApp(): Promise<void> {
       });
     }
   }
-  const claude = CI && !args.installed;
-  if (claude) await step('a stand-in Claude Code where an install puts it', true, stubClaude);
+  // Not for --installed: a build from before ODDBORO_EXTRA_PATH would not look there.
+  const claude = !args.installed;
+  const standIn = claude
+    ? await step('a stand-in Claude Code in a folder of its own', true, () =>
+        stubClaude(mkdtempSync(join(tmpdir(), 'oddboro-smoke-bin-')))
+      )
+    : undefined;
 
   const r = makeRun(OUT);
   currentRun = r;
+  if (standIn) r.env.ODDBORO_EXTRA_PATH = dirname(standIn.program);
   // Linux and Windows: the office then has no secret store. The Mac's shell
   // sets its own, which --my-keychain accepted above.
   if (!CI) r.env.ODDBORO_SECRETS = 'office';
   if ((await tcp(PORT)) || (await tcp(DB_PORT)))
     throw new Error(`Port ${PORT} or ${DB_PORT} is taken`);
 
-  // The first start comes with its window: Linux through tauri-driver, which
-  // starts the app itself, Windows and the Mac by reading the window as is.
-  let app: ChildProcess | undefined;
-  let page: Page | undefined;
-  let stopDriven: (() => Promise<string>) | undefined;
-  let script: ((body: string) => Promise<unknown>) | undefined;
-  const started = await step('the first start answers', true, async () => {
-    if (LINUX) {
-      const t = Date.now();
-      const driven = await webdriverStart(exe, r);
-      ({ page, script } = driven);
-      stopDriven = driven.stop;
-      return `${Date.now() - t} ms, through tauri-driver`;
-    }
-    app = launch(exe, r);
-    const ms = await ready(app, r);
-    page = WIN ? automationPage(app.pid ?? 0) : accessibilityPage(app.pid ?? 0);
-    return `${ms} ms`;
-  });
-  if (!started || !page) return;
+  const first = await startRow('the first start answers', exe, r);
+  if (!first) return;
+  const { page, script } = first;
 
   await step('the real window shows the welcome, and Next moves it to the name step', true, () =>
-    windowCheck(page!)
+    windowCheck(page)
   );
   if (script)
     await step('a write from inside the real page reaches its route', true, async () => {
-      const status = await script!(
+      const status = await script(
         "return (await fetch('/api/pokes/999999', { method: 'DELETE', headers: { 'content-type': 'application/json' } })).status;"
       );
       if (status !== 404) throw new Error(`got ${status}`);
@@ -674,6 +792,12 @@ async function smokeApp(): Promise<void> {
     () => logText(r),
     false
   );
+  if (standIn)
+    await step('the office found Claude Code in ODDBORO_EXTRA_PATH first', true, () => {
+      const calls = existsSync(standIn.ran) ? readFileSync(standIn.ran, 'utf8').trim() : '';
+      if (!calls) throw new Error(`the stand-in in ${dirname(standIn.program)} never ran`);
+      return `it ran: ${[...new Set(calls.split('\n'))].join('; ')}`;
+    });
   await step('the log has the window loading the page, and the page booting', health, async () => {
     const text = await until(
       'both lines',
@@ -722,22 +846,196 @@ async function smokeApp(): Promise<void> {
     }
   );
   await step('a screenshot', false, () => screenshot(join(OUT, 'screen.png')));
-  await step('quits with Node and both ports gone', true, async () => {
-    if (stopDriven) return `${await stopDriven()}; the relaunches quit with SIGTERM`;
-    return `${await quit(app!, r)} ms`;
-  });
-
+  // What the office said of its database at each quit (NEW-1776). Not for the
+  // first quit on Linux: ending the WebDriver session can end the shell
+  // before Node's last line reaches the log.
+  const closing: string[] = [];
+  await step('quits with Node and both ports gone', true, () =>
+    quitStarted(first, r, exe, closing)
+  );
+  // Its data is checked on the staged server (--stage), which this run can give a key.
   const relaunches = Number(args.relaunches);
-  await step(`starts again ${relaunches} times, with its data`, true, async () => {
-    const times: number[] = [];
-    for (let i = 1; i <= relaunches; i++) {
-      const again = launch(exe, r);
-      times.push(await ready(again, r));
-      // Its data is checked on the staged server (--stage), which this run can give a key.
-      await quit(again, r);
-    }
-    return `starts (ms): ${times.join(', ')}`;
+  await step(`starts again ${relaunches} times, with its data`, true, () =>
+    relaunch(exe, r, relaunches, closing)
+  );
+  // A build from before NEW-1776 says nothing of its database, so not for --installed.
+  if (!args.installed)
+    await step('each quit closes the office database first (NEW-1776)', true, () =>
+      closedEachTime(closing)
+    );
+  // A build from before --quit would start instead, so not for --installed.
+  if (!args.installed)
+    await step('`oddboro --quit` with nothing running starts nothing', true, async () => {
+      const code = await quitCommand(exe, r);
+      if (code !== 0) throw new Error(`it exited ${code}`);
+      if (await tcp(PORT)) {
+        const left = await stopRun(r, '--quit with nothing running');
+        throw new Error(`something answers on ${PORT} after it (${left})`);
+      }
+      return 'it exited 0, and nothing answers on the port';
+    });
+  if (installed.uninstall) await step('uninstalls silently', true, installed.uninstall);
+}
+
+/**
+ * The last release installed and started on a new home, then this build
+ * installed over it, in the same place and on the same home: how every owner
+ * who has Oddboro gets the next version. #40 broke this path, when the 0.0.6
+ * Windows installer held 0.0.5 and every Windows app updated forever.
+ */
+async function smokeUpgrade(): Promise<void> {
+  const last = args['previous-version'];
+  const version = args.version;
+  if (!last || !version)
+    throw new Error('--previous-from needs --previous-version, and --version for this build');
+  refuseOwnersApp(true);
+  const lastFile = findBuild(args['previous-from']!, last);
+  const file = args.artifact ?? findBuild(args.from!, version);
+
+  const r = makeRun(OUT);
+  currentRun = r;
+  if (!CI) r.env.ODDBORO_SECRETS = 'office';
+  if ((await tcp(PORT)) || (await tcp(DB_PORT)))
+    throw new Error(`Port ${PORT} or ${DB_PORT} is taken`);
+
+  const before = await step(
+    `installs the last release, ${lastFile.split(/[\\/]/).pop()}`,
+    true,
+    () => (WIN ? installWindows(lastFile) : MAC ? installMac(lastFile) : installLinux(lastFile))
+  );
+  if (!before) return;
+  const was = await startRow(`${last} starts on a new home`, before.exe, r);
+  if (!was) return;
+  await step(`it says it is ${last}`, true, () => saysVersion(was, r, last));
+  if (was.script) {
+    const office = inPage(was.script);
+    await step(`onboards ${last}, from inside its page`, true, async () => {
+      await office.getJson('/api/setup', 90);
+      return expectStatus(
+        await office.send('POST', '/api/onboarding', pageHeaders(true), ONBOARDING, 90),
+        200
+      );
+    });
+  } else await keptInTheApp(`onboards ${last}`, 'Its database stands in, below');
+  const id = await step(`${last} makes its database`, true, async () => {
+    await until(
+      'office: ready in the log',
+      async () => (/office: ready/.test(logText(r)) ? true : undefined),
+      90
+    );
+    return databaseId(r.home);
   });
+  await step(`${last} quits`, true, async () => {
+    try {
+      return await quitStarted(was, r, before.exe, []);
+    } catch (e) {
+      // Windows has no signal a script can send, and a build from before
+      // `oddboro --quit` ignores it, so quit() stopped it instead.
+      if (WIN && String(e).includes('did not reach it'))
+        return `stopped: ${last} has no \`oddboro --quit\``;
+      throw e;
+    }
+  });
+  if (!id) return;
+
+  const installed = await installBuild(file, version, { installed: before, version: last });
+  if (!installed) return;
+  await versionOnDisk(installed, version);
+  const from = logText(r).length;
+  const now = await startRow(`${version} starts on the home ${last} left`, installed.exe, r);
+  if (!now) return;
+  await step(`it says it is ${version}`, true, () => saysVersion(now, r, version));
+  const first = await step(
+    `it logs its first start after ${last}, with the database backed up first`,
+    true,
+    async () => {
+      const line = await until(
+        'a first start line',
+        async () => firstStarts(logText(r).slice(from))[0],
+        60
+      );
+      if (line.version !== version || line.after !== last)
+        throw new Error(
+          `first start of ${line.version} after ${line.after ?? 'nothing'}, not ${version} after ${last}`
+        );
+      if (!line.backup) throw new Error('it made no backup');
+      return line;
+    }
+  );
+  await step(`it opens the database ${last} made, not a new one`, true, () => {
+    const opened = databaseId(r.home);
+    if (opened !== id) throw new Error(`system identifier ${opened}, not ${last}'s ${id}`);
+    if (!first?.backup) return `system identifier ${id}`;
+    const copy = databaseId(first.backup);
+    if (copy !== id) throw new Error(`the backup holds ${copy}, not ${id}`);
+    return `system identifier ${id}, in the database and its backup`;
+  });
+  if (now.script) {
+    const office = inPage(now.script);
+    await step(`its database passes the setup check, and it is still onboarded`, true, async () => {
+      const setup = await office.getJson<{
+        welcomed?: boolean;
+        checks: { id: string; state: string }[];
+      }>('/api/setup', 90);
+      const database = setup.checks.find((c) => c.id === 'database')?.state;
+      if (database !== 'ok') throw new Error(`the database check: ${database ?? 'missing'}`);
+      if (!setup.welcomed) throw new Error(`it forgot the onboarding ${last} took`);
+      return 'database ok, still onboarded';
+    });
+  } else
+    await step('its database passes the setup check', true, async () => {
+      const states = await until(
+        'the setup checks in the log',
+        async () => {
+          const seen = setupFromLog(logText(r).slice(from));
+          return seen.has('database') ? seen : undefined;
+        },
+        90
+      );
+      if (states.get('database') !== 'ok') throw new Error(`database: ${states.get('database')}`);
+      return 'database: ok';
+    });
+  await step('its page boots, with no errors', true, async () => {
+    const text = await until(
+      'page: boot in the log',
+      async () => {
+        const t = logText(r).slice(from);
+        return t.includes('page: boot') ? t : undefined;
+      },
+      60
+    );
+    const errors = text.split('\n').filter((l) => l.includes('page: error'));
+    if (errors.length) throw new Error(`${errors.length} page error(s): ${errors.join(' / ')}`);
+    return 'page: boot, and no page: error line';
+  });
+  const closing: string[] = [];
+  await step(`${version} quits`, true, () => quitStarted(now, r, installed.exe, closing));
+  const relaunches = Number(args.relaunches);
+  await step(`starts again ${relaunches} times`, true, () =>
+    relaunch(installed.exe, r, relaunches, closing)
+  );
+  await step(
+    'no second update: one first start, one backup, the same version each start',
+    true,
+    () => {
+      const log = logText(r).slice(from);
+      const starts = firstStarts(log);
+      const backups = readdirSync(join(r.home, 'backups')).filter((n) =>
+        n.startsWith(`pre-${version}-`)
+      );
+      if (starts.length !== 1 || backups.length !== 1)
+        throw new Error(
+          `${starts.length} first start line(s) and ${backups.length} backup(s) of ${version}`
+        );
+      const versions = [...log.matchAll(/^(?:\S+Z )?office: (\S+) on /gm)].map((m) => m[1]);
+      if (versions.some((v) => v !== version))
+        throw new Error(`the office said, start by start: ${versions.join(', ')}`);
+      return `one first start of ${version} and one backup (${backups[0]}); ${versions.length} starts, each ${version}`;
+    }
+  );
+  await step(`each quit of ${version} closes the office database first (NEW-1776)`, true, () =>
+    closedEachTime(closing)
+  );
   if (installed.uninstall) await step('uninstalls silently', true, installed.uninstall);
 }
 
@@ -755,6 +1053,7 @@ function findBuild(folder: string, version: string): string {
 
 try {
   if (args.stage) await smokeStage();
+  else if (UPGRADE) await smokeUpgrade();
   else if (args.artifact || args.from || args.installed) await smokeApp();
   else throw new Error('Say what to test: --artifact, --from, --installed or --stage');
 } catch (e) {
